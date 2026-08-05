@@ -3,21 +3,23 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Frame;
 
+use crate::common::view::theme::Theme;
+
 use super::state::IwState;
 use super::connections::view as connections_view;
 use super::overview::view as overview_view;
 
-/// Render the instance workspace feature: the overview panel on top and the
+/// Render the instance workspace: the overview panel on top and the
 /// connections panel below.
-pub fn render(frame: &mut Frame, area: Rect, state: &IwState) {
+pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &IwState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(50), // overview
-            Constraint::Percentage(50), // connections
+            Constraint::Length(8), // overview
+            Constraint::Min(0),    // connections
         ])
         .split(area);
 
-    overview_view::render(frame, chunks[0], &state.overview);
-    connections_view::render(frame, chunks[1], &state.connections);
+    overview_view::render(frame, theme, chunks[0], &state.overview);
+    connections_view::render(frame, theme, chunks[1], &state.connections);
 }

@@ -50,7 +50,14 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
 
     header_view::render(frame, &state.theme, chunks[0], &state.header);
     explorer_view::render(frame, &state.theme, body[0], &state.explorer);
-    sql_view::render(frame, workspace[0], &state.sql);
+    // The main workspace region shows the instance workspace when an instance
+    // is open, otherwise the SQL workspace. A future tab mechanism will make
+    // this explicit.
+    if state.iw.instance_name.is_empty() {
+        sql_view::render(frame, workspace[0], &state.sql);
+    } else {
+        iw_view::render(frame, &state.theme, workspace[0], &state.iw);
+    }
     // perf_monitor adopts the theme-as-rendering-context convention (footer and
     // it are the migrated features with the `theme` parameter).
     perf_view::render(frame, &state.theme, workspace[1], &state.perf);
@@ -65,11 +72,6 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
         }
         None => {}
     }
-
-    // The iw feature is wired into the message router but its rendering is
-    // currently disabled (no dedicated screen region yet).
-    let _ = &state.iw;
-    let _ = iw_view::render as fn(&mut ratatui::Frame, ratatui::layout::Rect, &crate::features::instance_workspace::state::IwState);
 }
 
 /// Render a modal as a centered, bordered popup over `base`.

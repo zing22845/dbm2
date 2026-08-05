@@ -18,12 +18,10 @@ pub enum IwIntent {
 impl Intent for IwIntent {
     type Message = IwMsg;
 
-    // Skeleton state: the child feature messages are currently uninhabited
-    // because their leaf messages are empty enums. Remove this allow when real
-    // business messages are introduced.
-    #[allow(unreachable_code)]
     fn into_message(self) -> Self::Message {
         match self {
+            // Child intents route back to this feature; their message mappings
+            // are placeholders until the receiving features are wired.
             IwIntent::Overview(i) => i.into_message().into(),
             IwIntent::Connections(i) => i.into_message().into(),
         }

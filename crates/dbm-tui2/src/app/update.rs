@@ -15,6 +15,7 @@ use crate::app_shell::focus::FocusZone;
 use crate::app_shell::intent::RoutableIntent;
 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
 use crate::features::discover::update::update as discover_update;
+use crate::features::explorer::intent::ExplorerIntent;
 use crate::features::explorer::msg::ExplorerMsg;
 use crate::features::explorer::update::update as explorer_update;
 use crate::features::global_footer::msg::FooterMsg;
@@ -157,6 +158,36 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             let explorer = std::mem::take(&mut state.explorer);
             let (s, intents, effects) = explorer_update(inner, explorer);
             state.explorer = s;
+            // Cross-feature: selecting an instance in the explorer opens the
+            // instance workspace for it. This is shell-level orchestration that
+            // dispatches an iw message based on the explorer's intent.
+            for intent in &intents {
+                if let ExplorerIntent::Instances(
+                    crate::features::explorer::instances::intent::InstancesIntent::OpenInstanceWorkspace { instance_idx },
+                ) = intent
+                {
+                    let instance_name = state
+                        .explorer
+                        .instances
+                        .nodes
+                        .get(*instance_idx)
+                        .and_then(|n| n.instance.as_ref())
+                        .map(|i| i.name.clone())
+                        .unwrap_or_default();
+                    if !instance_name.is_empty() {
+                        let iw = std::mem::take(&mut state.iw);
+                        let (iw2, i, e) = iw_update(
+                            crate::features::instance_workspace::msg::IwMessage::OpenInstance {
+                                instance_name,
+                            },
+                            iw,
+                        );
+                        state.iw = iw2;
+                        result.intents.extend(i.into_iter().map(box_intent));
+                        result.effects.extend(e.into_iter().map(box_effect));
+                    }
+                }
+            }
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }

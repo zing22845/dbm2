@@ -17,6 +17,10 @@ use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
 use crate::features::explorer::state::{ExplorerPane, ExplorerState};
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
+use crate::features::instance_workspace::connections::msg::{ConnectionsMessage, ConnectionsMsg};
+use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+use crate::features::instance_workspace::state::{IwState};
+use crate::features::instance_workspace::connections::state::FormField;
 
 use super::msg::AppMsg;
 use super::state::ModalKind;
@@ -32,9 +36,10 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
         None => match state.focus {
             FocusZone::Header => header_key(key),
             FocusZone::Explorer => explorer_key(key, &state.explorer),
+            FocusZone::InstanceWorkspace => iw_key(key, &state.iw),
             // Features not yet migrated keep no key bindings; add arms here as
             // their interaction logic is ported.
-            FocusZone::SQLWorkspace | FocusZone::InstanceWorkspace => None,
+            FocusZone::SQLWorkspace => None,
         },
     }
 }
@@ -184,4 +189,40 @@ fn instances_key(key: KeyEvent) -> Option<AppMsg> {
 
 fn explorer(msg: ExplorerMessage) -> AppMsg {
     AppMsg::Explorer(ExplorerMsg::Message(msg))
+}
+
+/// Instance workspace key bindings: navigate/edit connections, or edit the
+/// form when one is open.
+fn iw_key(key: KeyEvent, state: &IwState) -> Option<AppMsg> {
+    if state.connections.form.is_some() {
+        return iw_form_key(key);
+    }
+    let msg = match key.code {
+        KeyCode::Up | KeyCode::Char('k') => ConnectionsMessage::MoveUp,
+        KeyCode::Down | KeyCode::Char('j') => ConnectionsMessage::MoveDown,
+        KeyCode::Char('a') => ConnectionsMessage::BeginAdd,
+        KeyCode::Char('e') | KeyCode::Enter => ConnectionsMessage::BeginEdit,
+        KeyCode::Char('d') | KeyCode::Delete => ConnectionsMessage::Delete,
+        _ => return None,
+    };
+    Some(iw(IwMessage::Connections(ConnectionsMsg::Message(msg))))
+}
+
+/// Form keys when a connection form is open.
+fn iw_form_key(key: KeyEvent) -> Option<AppMsg> {
+    let msg = match key.code {
+        KeyCode::Esc => ConnectionsMessage::CancelForm,
+        KeyCode::Enter => ConnectionsMessage::CommitForm,
+        KeyCode::Up => ConnectionsMessage::FormField(FormField::Name),
+        KeyCode::Down => ConnectionsMessage::FormField(FormField::Password),
+        KeyCode::Tab => ConnectionsMessage::FormField(FormField::Database),
+        KeyCode::Char(c) if !c.is_control() => ConnectionsMessage::FormChar(c),
+        KeyCode::Backspace => ConnectionsMessage::FormBackspace,
+        _ => return None,
+    };
+    Some(iw(IwMessage::Connections(ConnectionsMsg::Message(msg))))
+}
+
+fn iw(msg: IwMessage) -> AppMsg {
+    AppMsg::Iw(IwMsg::Message(msg))
 }

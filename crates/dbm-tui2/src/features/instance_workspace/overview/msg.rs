@@ -1,9 +1,18 @@
 //! Instance overview feature messages.
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OverviewMessage {}
+/// The actual overview panel messages.
+#[derive(Debug, Clone)]
+pub enum OverviewMessage {
+    /// Load the instance overview for `instance_name`.
+    Load { instance_name: String },
+    /// Re-load the current instance's overview.
+    Reload,
+    /// The store returned the instance.
+    Loaded { instance: dbm_store::ManagedInstance },
+}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Feature message envelope (central-router compatible).
+#[derive(Debug, Clone)]
 pub enum OverviewMsg {
     Message(OverviewMessage),
 }

@@ -250,11 +250,16 @@ fn drain_async_actions(
                     ),
                 ));
             }
+            // The instance workspace's load/save/delete actions feed back.
+            Ok(Action::Iw(action)) => {
+                pending.push_back(AppMsg::Iw(crate::features::instance_workspace::msg::IwMsg::Message(
+                    iw_action_to_msg(action),
+                )));
+            }
             // Feature-specific actions are not yet handled; they are dropped
             // rather than panicking so the loop stays resilient. `Shell` has a
             // single `Quit` variant and is already covered above.
             Ok(Action::Header(_))
-            | Ok(Action::Iw(_))
             | Ok(Action::Sql(_))
             | Ok(Action::Footer(_))
             | Ok(Action::Perf(_)) => {}
@@ -274,6 +279,41 @@ fn discover_action_to_msg(action: crate::features::discover::effect::DiscoverAct
         A::ScanError { error } => M::ScanError { error },
         A::RegisterComplete { count } => M::RegisterComplete { count },
         A::RegisterError { error } => M::RegisterError { error },
+    }
+}
+
+/// Convert an instance workspace action into the corresponding iw message.
+fn iw_action_to_msg(action: crate::features::instance_workspace::effect::IwAction) -> crate::features::instance_workspace::msg::IwMessage {
+    use crate::features::instance_workspace::connections::effect::ConnectionsAction as CA;
+    use crate::features::instance_workspace::connections::msg::{ConnectionsMessage, ConnectionsMsg};
+    use crate::features::instance_workspace::effect::IwAction as IA;
+    use crate::features::instance_workspace::msg::IwMessage as IM;
+    use crate::features::instance_workspace::overview::effect::OverviewAction as OA;
+    use crate::features::instance_workspace::overview::msg::{OverviewMessage, OverviewMsg};
+    match action {
+        IA::Overview(action) => match action {
+            OA::Loaded { instance } => IM::Overview(OverviewMsg::Message(OverviewMessage::Loaded {
+                instance,
+            })),
+            OA::Error { error } => {
+                tracing::warn!("iw overview load failed: {error}");
+                IM::Overview(OverviewMsg::Message(OverviewMessage::Reload))
+            }
+        },
+        IA::Connections(action) => match action {
+            CA::Loaded { connections } => {
+                IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::Loaded { connections }))
+            }
+            CA::Saved | CA::Deleted => {
+                // Reload the connections after a mutation (the connections
+                // update fills in the current instance name).
+                IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::Reload))
+            }
+            CA::Error { error } => {
+                tracing::warn!("iw connections op failed: {error}");
+                IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::MoveUp))
+            }
+        },
     }
 }
 

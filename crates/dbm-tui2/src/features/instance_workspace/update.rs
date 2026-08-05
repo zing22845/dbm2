@@ -7,9 +7,9 @@ use super::effect::IwEffect;
 use super::connections;
 use super::overview;
 
-/// Update the instance workspace state by delegating to its child sub-modules.
-/// Pure by-value transition: only the touched child state is moved out and
-/// back, so no deep clone happens per message.
+/// Update the instance workspace state. Pure by-value transition: opening an
+/// instance triggers the overview + connections loads; child messages are
+/// forwarded to the matching sub-module (moved out, updated, moved back).
 pub fn update(
     msg: IwMessage,
     mut state: IwState,
@@ -17,18 +17,39 @@ pub fn update(
     let mut intents = Vec::new();
     let mut effects = Vec::new();
     match msg {
+        IwMessage::OpenInstance { instance_name } => {
+            state.instance_name = instance_name.clone();
+            // Load the overview and connections for the freshly opened instance
+            // by dispatching child Load messages.
+            let (ov, _oi, oe) = overview::update::update(
+                overview::msg::OverviewMessage::Load {
+                    instance_name: instance_name.clone(),
+                },
+                std::mem::take(&mut state.overview),
+            );
+            state.overview = ov;
+            effects.extend(oe.into_iter().map(IwEffect::Overview));
+            let (cn, _ci, ce) = connections::update::update(
+                connections::msg::ConnectionsMessage::Load {
+                    instance_name: instance_name.clone(),
+                },
+                std::mem::take(&mut state.connections),
+            );
+            state.connections = cn;
+            effects.extend(ce.into_iter().map(IwEffect::Connections));
+        }
         IwMessage::Overview(m) => {
             let overview::msg::OverviewMsg::Message(inner) = m;
-            let overview_state = std::mem::take(&mut state.overview);
-            let (s, i, e) = overview::update::update(inner, overview_state);
+            let s = std::mem::take(&mut state.overview);
+            let (s, i, e) = overview::update::update(inner, s);
             state.overview = s;
             intents.extend(i.into_iter().map(IwIntent::Overview));
             effects.extend(e.into_iter().map(IwEffect::Overview));
         }
         IwMessage::Connections(m) => {
             let connections::msg::ConnectionsMsg::Message(inner) = m;
-            let connections_state = std::mem::take(&mut state.connections);
-            let (s, i, e) = connections::update::update(inner, connections_state);
+            let s = std::mem::take(&mut state.connections);
+            let (s, i, e) = connections::update::update(inner, s);
             state.connections = s;
             intents.extend(i.into_iter().map(IwIntent::Connections));
             effects.extend(e.into_iter().map(IwEffect::Connections));
