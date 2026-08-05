@@ -1,0 +1,80 @@
+//! Centralized display-width helpers (CJK / wide-character aware).
+//!
+//! Any place that turns text into terminal cells must measure with these
+//! helpers so manual layout and wrapping agree with what `ratatui` renders.
+//! `ratatui` measures text with the same `unicode-width` crate, keeping our
+//! computations consistent with the on-screen result.
+//!
+//! Never use `str::len()` (bytes) or `str::chars().count()` (code points) as a
+//! proxy for display width: a CJK char is 3 bytes but 2 cells, and a combining
+//! mark is 1 code point but 0 cells.
+
+use unicode_width::UnicodeWidthChar;
+
+/// Display width of a single char in terminal cells.
+///
+/// Control / zero-width combining marks would otherwise read as 0; we floor
+/// unknowns at 1 so every cell is at least one column wide.
+pub fn char_width(ch: char) -> usize {
+    UnicodeWidthChar::width(ch).unwrap_or(0).max(1)
+}
+
+/// Display width of `s` in terminal cells (CJK = 2, combining marks = 0).
+pub fn width(s: &str) -> usize {
+    s.chars().map(char_width).sum()
+}
+
+/// Estimated number of wrapped lines for `text` constrained to `cols` cells.
+///
+/// Display-width aware, so CJK footers reserve the right height. For pure
+/// ASCII this matches the previous `line.len().div_ceil(width)` estimate.
+pub fn wrapped_line_count(text: &str, cols: u16) -> u16 {
+    if text.is_empty() {
+        return 1;
+    }
+    let w = cols.max(1) as usize;
+    text.lines()
+        .map(|line| {
+            let line_w = width(line);
+            if line_w == 0 {
+                1
+            } else {
+                line_w.div_ceil(w)
+            }
+        })
+        .sum::<usize>()
+        .max(1) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ascii_width_equals_len() {
+        assert_eq!(width("hello"), 5);
+    }
+
+    #[test]
+    fn cjk_counts_double_width() {
+        assert_eq!(width("科学研究"), 8);
+    }
+
+    #[test]
+    fn wrapped_ascii_matches_byte_estimate() {
+        assert_eq!(wrapped_line_count("abcdefgh", 4), 2);
+    }
+
+    #[test]
+    fn wrapped_cjk_uses_display_width() {
+        // 4 CJK chars = 8 cells; at width 4 that is 2 lines.
+        assert_eq!(wrapped_line_count("科学研究", 4), 2);
+        // 6 CJK chars = 12 cells; at width 4 that is 3 lines.
+        assert_eq!(wrapped_line_count("科学研究管理", 4), 3);
+    }
+
+    #[test]
+    fn empty_text_is_one_line() {
+        assert_eq!(wrapped_line_count("", 4), 1);
+    }
+}

@@ -3499,31 +3499,65 @@ fn main() {
   Feature A → Feature B  ❌ (跨 Feature 直接依赖被禁止)
 ```
 
-#### 文件清单
+#### 子目录结构
 
-| 文件                   | 类型   | 说明                                                       | 决策依据                                 |
-| -------------------- | ---- | -------------------------------------------------------- | ------------------------------------ |
-| `editor.rs`          | 系统绑定 | 通用编辑器封装（edtui 绑定）                                        | 纯基础设施，被 sql\_workspace 和 discover 共用 |
-| `theme.rs`           | 系统绑定 | 主题/亮度检测                                                  | 系统级绑定，跨所有 feature                    |
-| `shortcuts.rs`       | 全局配置 | 全局快捷键定义                                                  | 跨所有 feature 共用                       |
-| `text_width.rs`      | 纯函数  | 文本宽度计算                                                   | 纯函数，被所有 view 共用                      |
-| `splitter.rs`        | 数据结构 | 分割器逻辑                                                    | 通用数据结构，被所有 splitter 共用               |
-| `clipboard.rs`       | 系统绑定 | 剪贴板操作                                                    | 系统级绑定，跨 feature 通用                   |
-| `pane_scrollbar.rs`  | 数据结构 | 通用滚动条                                                    | 通用组件，跨 feature 通用                    |
-| `scrollable_list.rs` | 数据结构 | 通用滚动列表                                                   | 通用组件，跨 feature 通用                    |
-| `overlay_clear.rs`   | 纯函数  | 通用覆盖层清除                                                  | 纯计算，跨 feature 通用                     |
-| `format.rs` → 通用部分   | 纯函数  | `cell_display_width`、`truncate_cell_display`、`FIELD_SEP` | 纯函数，跨 feature 通用                     |
+`common` 按技术职责分层，防止退化为"什么都往里扔"的杂物堆。当前已建 6 个子目录骨架，内容随迁移按职责归入对应层。
+
+```
+common/
+├── model/       # 通用领域类型（ID、错误、配置结构体）
+├── view/        # 纯绘制工具、布局计算、样式函数
+├── controller/  # 控制器抽象（trait、状态机、防抖/节流）
+├── service/     # 外部交互抽象（db 连接池、文件 IO、网络客户端）
+├── components/  # 可复用 TEA UI 组件（列表、输入框、标签页）
+└── utils/       # 纯函数工具（格式化、哈希、字符串处理）
+```
+
+| 子目录      | 存放内容                                 | 不分层会怎样                         |
+| --------- | ------------------------------------ | ------------------------------ |
+| `model/`  | 通用领域类型、ID、错误类型、配置结构体                 | 类型定义散落，难以发现和复用                 |
+| `view/`   | 纯绘制工具、布局计算、样式函数                     | 渲染工具与业务混杂，难以测试和换肤              |
+| `controller/` | 控制器抽象（trait）、通用状态机、防抖/节流             | 抽象与具体 feature 耦合，无法复用           |
+| `service/` | 外部交互抽象（db 连接池、文件 IO、网络客户端）          | 服务实现嵌入 feature，无法替换/mock        |
+| `components/` | 遵循 TEA 的通用 UI 组件（列表、输入框、标签页）         | 组件与 feature 混合，重复实现              |
+| `utils/`   | 纯函数工具（格式化、哈希、字符串处理）                 | 工具函数散落，难以查找和维护                 |
+
+各层遵循**与项目一致的分层哲学**：`common` 不依赖任何 feature，feature 依赖 `common`。空层目前以 `mod.rs`（职责文档注释）占位，迁移带入对应内容时再填充。
+
+#### 文件清单（按层归属）
+
+当前已落位的工具文件：
+
+| 文件                                    | 所属层     | 类型   | 说明       |
+| ------------------------------------- | ------- | ---- | -------- |
+| `common/utils/shortcuts.rs`            | utils   | 纯函数  | 快捷键标签格式化（`hint_ctrl` 等） |
+| `common/utils/text_width.rs`           | utils   | 纯函数  | CJK 感知文本宽度 / 换行计数 |
+
+规划迁移的目标位置（迁移业务逻辑时按职责归入）：
+
+| 文件                   | 目标归属                                  | 类型   |
+| -------------------- | ------------------------------------- | ---- |
+| `editor.rs`          | `common/`（系统绑定/组件，edtui 封装）           | 系统绑定 |
+| `theme.rs`           | `common/view/`                         | 样式   |
+| `shortcuts.rs`       | `common/utils/shortcuts.rs`（已迁移）       | 纯函数  |
+| `text_width.rs`      | `common/utils/text_width.rs`（已迁移）       | 纯函数  |
+| `splitter.rs`        | `common/view/`（布局计算）                   | 数据结构 |
+| `clipboard.rs`       | `common/service/`（系统交互）                | 系统绑定 |
+| `pane_scrollbar.rs`  | `common/components/`（通用组件）              | 组件   |
+| `scrollable_list.rs` | `common/components/`（通用组件）              | 组件   |
+| `overlay_clear.rs`   | `common/view/`（绘制工具）                   | 纯函数  |
+| `format.rs` → 通用部分   | `common/utils/`（`cell_display_width` 等）   | 纯函数  |
 
 #### 与 Feature 的边界示例
 
-| 场景                  | 归属                             | 原因                 |
-| ------------------- | ------------------------------ | ------------------ |
-| 文本宽度计算              | `common/text_width.rs`         | 纯函数，所有 view 都需要    |
-| SQL 格式化（Results 专属） | `sql_workspace/view.rs`        | 只有 Results 使用      |
-| 滚动条绘制               | `common/pane_scrollbar.rs`     | 通用组件，多个 Feature 使用 |
-| SQL 编辑器行号           | `sql_workspace/sql_tab/editor/view.rs` | 只有编辑器使用            |
-| 分割器状态               | `common/splitter.rs`           | 通用数据结构             |
-| 树操作快捷键              | `explorer/msg.rs`              | 只有 Explorer 使用     |
+| 场景                  | 归属                                        | 原因                 |
+| ------------------- | ---------------------------------------- | ------------------ |
+| 文本宽度计算              | `common/utils/text_width.rs`              | 纯函数，所有 view 都需要    |
+| SQL 格式化（Results 专属） | `sql_workspace/view.rs`                   | 只有 Results 使用      |
+| 滚动条绘制               | `common/components/pane_scrollbar.rs`     | 通用组件，多个 Feature 使用 |
+| SQL 编辑器行号           | `sql_workspace/sql_tab/editor/view.rs`    | 只有编辑器使用            |
+| 分割器状态               | `common/view/splitter.rs`                 | 通用数据结构             |
+| 树操作快捷键              | `explorer/msg.rs`                         | 只有 Explorer 使用     |
 
 **需从 common 移出的文件**（业务语义过重，应归属具体 Feature）:
 

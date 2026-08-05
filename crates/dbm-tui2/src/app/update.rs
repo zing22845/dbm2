@@ -161,8 +161,15 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
         }
         AppMsg::Footer(m) => {
             let FooterMsg::Message(inner) = m;
-            let (s, intents, effects) = footer_update(inner, &mut state.footer);
+            // The footer feature's update is a pure by-value transition: move
+            // the state out, update it, move the result back. No deep clone.
+            let footer = std::mem::take(&mut state.footer);
+            let (s, intents, effects) = footer_update(inner, footer);
             state.footer = s;
+            // Keep the shell-level `global_status` mirror in sync with the
+            // footer's authoritative status, so other code reading
+            // `AppState::global_status` sees the latest value.
+            state.global_status = state.footer.status.clone();
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }

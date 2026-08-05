@@ -5,9 +5,14 @@ use super::state::FooterState;
 use super::intent::FooterIntent;
 use super::effect::FooterEffect;
 
+/// Update the global footer state. Pure by-value transition.
 pub fn update(
-    _msg: FooterMessage,
-    _state: &mut FooterState,
+    msg: FooterMessage,
+    mut state: FooterState,
 ) -> (FooterState, Vec<FooterIntent>, Vec<FooterEffect>) {
-    match _msg {}
+    match msg {
+        FooterMessage::SetStatus(status) => state.status = status,
+        FooterMessage::ClearStatus => state.status.clear(),
+    }
+    (state, Vec::new(), Vec::new())
 }

@@ -17,12 +17,15 @@ use crate::features::sql_workspace::view as sql_view;
 /// Top-level render: lays out the shell regions and delegates to each
 /// feature's `view::render`.
 pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
+    // The footer height is dynamic: one line of hints plus the (wrapped) status
+    // line when present.
+    let footer_h = footer_view::footer_height(&state.footer, frame.area().width);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // header
-            Constraint::Min(0),    // body (explorer + workspace)
-            Constraint::Length(1), // footer
+            Constraint::Length(1),  // header
+            Constraint::Min(0),     // body (explorer + workspace)
+            Constraint::Length(footer_h), // footer
         ])
         .split(frame.area());
 
