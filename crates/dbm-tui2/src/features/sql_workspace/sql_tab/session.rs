@@ -16,8 +16,9 @@
 pub struct TabSession {
     /// Stable identity across app restarts (used for persistence and routing).
     pub id: usize,
-    /// Identifier of the database connection this tab is bound to, if any.
-    pub connection_id: Option<usize>,
+    /// Identifier of the database connection this tab is bound to, if any
+    /// (the store's string id).
+    pub connection_id: Option<String>,
     /// The instance the connection belongs to (display name), if any.
     pub instance: Option<String>,
     /// The connection name (display name), if any.

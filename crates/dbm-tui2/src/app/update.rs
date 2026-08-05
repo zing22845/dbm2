@@ -26,7 +26,8 @@ use crate::features::instance_workspace::msg::IwMsg;
 use crate::features::instance_workspace::update::update as iw_update;
 use crate::features::perf_monitor::msg::PerfMsg;
 use crate::features::perf_monitor::update::update as perf_update;
-use crate::features::sql_workspace::msg::SqlMsg;
+use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
 use crate::features::sql_workspace::update::update as sql_workspace_update;
 
 /// Result of a single update pass: side-channel intents and effects.
@@ -36,6 +37,8 @@ pub struct UpdateResult {
     pub intents: Vec<Box<dyn RoutableIntent<AppMsg>>>,
     /// Effects to be executed by the effect runner.
     pub effects: Vec<Box<dyn ErasedEffect<Action>>>,
+    /// Messages to be enqueued for a later pass (shell-level orchestration).
+    pub pending: std::collections::VecDeque<AppMsg>,
 }
 
 impl UpdateResult {
@@ -185,6 +188,34 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         state.iw = iw2;
                         result.intents.extend(i.into_iter().map(box_intent));
                         result.effects.extend(e.into_iter().map(box_effect));
+                    }
+                }
+                if let ExplorerIntent::Instances(
+                    crate::features::explorer::instances::intent::InstancesIntent::OpenConnectionWorkspace {
+                        instance_idx,
+                        connection_idx,
+                    },
+                ) = intent
+                {
+                    let node = state.explorer.instances.nodes.get(*instance_idx);
+                    if let Some(node) = node {
+                        let instance_name = node
+                            .instance
+                            .as_ref()
+                            .map(|i| i.name.clone())
+                            .unwrap_or_default();
+                        if let Some(conn) = node.connections.get(*connection_idx) {
+                            let sql_msg = SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                                SqlTabMessage::OpenConnectionTab {
+                                    instance: instance_name,
+                                    connection: conn.name.clone(),
+                                    connection_id: conn.id.clone(),
+                                    database: None,
+                                    schema: None,
+                                },
+                            )));
+                            result.pending.push_back(AppMsg::Sql(sql_msg));
+                        }
                     }
                 }
             }

@@ -29,6 +29,15 @@ pub fn update(
         }
         SqlTabMessage::OpenTab => state.open_tab(),
         SqlTabMessage::CloseTab(idx) => state.close_tab(idx),
+        SqlTabMessage::OpenConnectionTab {
+            instance,
+            connection,
+            connection_id,
+            database,
+            schema,
+        } => {
+            state.open_connection_tab(instance, connection, connection_id, database, schema);
+        }
         SqlTabMessage::ApplyContext { tab_id, database, schema } => {
             if let Some(idx) = state.index_of(tab_id) {
                 let tab = &mut state.tabs[idx];
@@ -57,7 +66,7 @@ pub fn update(
                 let connection = session
                     .connection
                     .clone()
-                    .or_else(|| session.connection_id.map(|id| id.to_string()))
+                    .or_else(|| session.connection_id.clone())
                     .unwrap_or_default();
                 let database = session.database.clone();
                 let schema = session
@@ -168,11 +177,7 @@ fn session_key(session: &super::session::TabSession) -> (String, String) {
     let connection = session
         .connection
         .clone()
-        .or_else(|| {
-            session
-                .connection_id
-                .map(|id| id.to_string())
-        })
+        .or_else(|| session.connection_id.clone())
         .unwrap_or_default();
     (instance, connection)
 }

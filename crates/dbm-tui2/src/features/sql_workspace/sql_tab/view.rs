@@ -64,9 +64,11 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState)
 /// Derive the `(instance, connection)` history key for rendering (mirrors the
 /// update path's `session_key`).
 fn session_view_key(session: &super::session::TabSession) -> (String, String) {
+    let instance = session.instance.clone().unwrap_or_default();
     let connection = session
-        .connection_id
-        .map(|id| id.to_string())
+        .connection
+        .clone()
+        .or_else(|| session.connection_id.clone())
         .unwrap_or_default();
-    (String::new(), connection)
+    (instance, connection)
 }

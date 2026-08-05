@@ -61,6 +61,34 @@ impl SqlTabState {
         self.active_tab = self.tabs.len() - 1;
     }
 
+    /// Open a new tab bound to a connection, carrying its display identity so
+    /// history keys and query execution use real names.
+    pub fn open_connection_tab(
+        &mut self,
+        instance: String,
+        connection: String,
+        connection_id: String,
+        database: Option<String>,
+        schema: Option<String>,
+    ) {
+        let id = self.next_tab_id;
+        self.next_tab_id += 1;
+        self.tabs.push(SqlTab {
+            session: TabSession {
+                id,
+                connection_id: Some(connection_id),
+                instance: Some(instance),
+                connection: Some(connection),
+                database,
+                schema,
+            },
+            editor: EditorState::default(),
+            results: ResultsState::default(),
+            history: HistoryState::default(),
+        });
+        self.active_tab = self.tabs.len() - 1;
+    }
+
     /// Close the tab at `idx`. The active index is repaired; closing the last
     /// remaining tab leaves an empty tab list.
     pub fn close_tab(&mut self, idx: usize) {
@@ -79,5 +107,50 @@ impl SqlTabState {
     /// or `None` if no such tab exists.
     pub fn index_of(&self, tab_id: usize) -> Option<usize> {
         self.tabs.iter().position(|tab| tab.session.id == tab_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_connection_tab_binds_session_identity() {
+        let mut state = SqlTabState::default();
+        let first_id = state.active_tab_id();
+        state.open_connection_tab(
+            "local".into(),
+            "app-db".into(),
+            "conn-42".into(),
+            Some("mydb".into()),
+            Some("public".into()),
+        );
+        let active = state.active_tab_id();
+        assert_ne!(active, first_id);
+        let session = &state.tabs[state.active_tab].session;
+        assert_eq!(session.instance.as_deref(), Some("local"));
+        assert_eq!(session.connection.as_deref(), Some("app-db"));
+        assert_eq!(session.connection_id.as_deref(), Some("conn-42"));
+        assert_eq!(session.database.as_deref(), Some("mydb"));
+        assert_eq!(session.schema.as_deref(), Some("public"));
+    }
+
+    #[test]
+    fn index_of_finds_tab_by_session_id() {
+        let state = SqlTabState::default();
+        let id = state.tabs[state.active_tab].session.id;
+        assert_eq!(state.index_of(id), Some(state.active_tab));
+        assert_eq!(state.index_of(999_999), None);
+    }
+}
+
+impl SqlTabState {
+    /// Stable session id of the active tab (test helper).
+    #[allow(dead_code)]
+    fn active_tab_id(&self) -> usize {
+        self.tabs
+            .get(self.active_tab)
+            .map(|t| t.session.id)
+            .unwrap_or(0)
     }
 }

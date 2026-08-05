@@ -218,6 +218,7 @@ fn queue_result(
         let nested = IntentRouter::route::<AppMsg>(intent);
         pending.push_back(nested);
     }
+    pending.extend(result.pending);
 }
 
 /// Move any already-available async actions out of the channel and into the

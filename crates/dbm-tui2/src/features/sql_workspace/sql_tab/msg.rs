@@ -21,6 +21,14 @@ pub enum SqlTabMessage {
     RecallHistory { tab_id: usize, sql: String },
     /// Run `sql` from the tab's editor (dispatched to results with session context).
     RunQueryFromEditor { tab_id: usize, sql: String },
+    /// Open a new tab bound to a connection with its display identity.
+    OpenConnectionTab {
+        instance: String,
+        connection: String,
+        connection_id: String,
+        database: Option<String>,
+        schema: Option<String>,
+    },
     /// Forwarded editor message, targeted at the tab with `tab_id`.
     Editor { tab_id: usize, msg: EditorMsg },
     /// Forwarded results message, targeted at the tab with `tab_id`.
