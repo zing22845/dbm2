@@ -673,6 +673,7 @@ dependencies = [
  "crossterm",
  "futures",
  "ratatui",
+ "ratatui-themes",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2127,6 +2128,16 @@ checksum = "faf03e0380b7744054d6cb74224fe3adf062a029754933f575ca1e3b4c2ce977"
 dependencies = [
  "ratatui-core",
  "termwiz",
+]
+
+[[package]]
+name = "ratatui-themes"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5f0e39dd81d72b4dc154604beea0153be73096b32333e08152f3a44c57816f8"
+dependencies = [
+ "ratatui",
+ "serde",
 ]
 
 [[package]]

@@ -69,16 +69,27 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         // action (from an effect).
         tokio::select! {
             maybe_event = reader.next() => {
-                // Route quit through the standard message flow so the
-                // `ShellMsg::Quit` handler sets the quit flag and any future
-                // pre-shutdown cleanup is triggered.
-                if let Some(Ok(CEvent::Key(key))) = maybe_event
-                    && key.code == KeyCode::Char('q')
-                {
-                    let msg = AppMsg::Shell(crate::app_shell::msg::ShellMsg::Quit);
-                    process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                if let Some(Ok(CEvent::Key(key))) = maybe_event {
+                    use crate::app_shell::msg::ShellMsg;
+                    use crossterm::event::KeyModifiers as KM;
+                    let ctrl = key.modifiers.contains(KM::CONTROL);
+                    match (ctrl, key.code) {
+                        // `q` or `CTRL+D` quits through the standard message
+                        // flow so the handler sets the quit flag.
+                        (_, KeyCode::Char('q')) | (true, KeyCode::Char('d')) => {
+                            let msg = AppMsg::Shell(ShellMsg::Quit);
+                            process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                        }
+                        // `CTRL+T` toggles the active theme (dark/light).
+                        (true, KeyCode::Char('t')) => {
+                            let msg = AppMsg::Shell(ShellMsg::ToggleTheme);
+                            process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                        }
+                        // Unrecognized keys are ignored: no-op requires no
+                        // message.
+                        _ => {}
+                    }
                 }
-                // Unrecognized keys are ignored: no-op requires no message.
             }
             _ = tick.tick() => {
                 let msg = AppMsg::Shell(crate::app_shell::msg::ShellMsg::Tick);

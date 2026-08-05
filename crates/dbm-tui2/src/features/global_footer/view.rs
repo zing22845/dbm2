@@ -1,12 +1,13 @@
 //! Global footer feature rendering.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
 use crate::common::utils::shortcuts::{copy_shortcut_label, hint_ctrl, quit_shortcut_label};
 use crate::common::utils::text_width;
+use crate::common::view::theme::Theme;
 
 use super::state::FooterState;
 
@@ -51,13 +52,14 @@ pub fn footer_height(state: &FooterState, cols: u16) -> u16 {
 /// Render the global footer bar: shortcut hints on the first line, followed by
 /// the optional status line (muted). The status is the only dynamically
 /// changing content; the hints are static.
-pub fn render(frame: &mut Frame, area: Rect, state: &FooterState) {
-    // The hints line is static; the status line (if any) is muted.
+pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &FooterState) {
+    // The hints line is static; the status line (if any) is muted via the
+    // current palette's muted slot.
     let mut lines: Vec<Line<'_>> = vec![Line::from(hints_line())];
     if !state.status.is_empty() {
         lines.push(Line::from(Span::styled(
             state.status.clone(),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.palette().muted),
         )));
     }
     frame.render_widget(ratatui::text::Text::from(lines), area);

@@ -13,4 +13,6 @@ pub enum ShellMsg {
     Tick,
     /// The active focus zone changed.
     FocusChanged { zone: FocusZone },
+    /// Toggle the active theme between its dark and light palettes.
+    ToggleTheme,
 }

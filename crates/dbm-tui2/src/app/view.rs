@@ -43,7 +43,10 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     // tab-switching mechanism will render `iw` / `perf` here instead based on
     // their visibility.
     sql_view::render(frame, body[1], &state.sql);
-    footer_view::render(frame, chunks[2], &state.footer);
+    // The footer is the first feature adopting the theme-as-rendering-context
+    // convention; the remaining features gain the `theme` parameter as they are
+    // migrated.
+    footer_view::render(frame, &state.theme, chunks[2], &state.footer);
 
     // The discover / iw / perf features are wired into the message router but
     // their rendering is currently disabled (no dedicated screen region yet).

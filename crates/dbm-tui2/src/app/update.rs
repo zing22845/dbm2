@@ -110,6 +110,11 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             crate::app_shell::msg::ShellMsg::FocusChanged { zone } => {
                 state.focus = zone;
             }
+            crate::app_shell::msg::ShellMsg::ToggleTheme => {
+                // Flip between the theme's dark and light palettes; the next
+                // frame is drawn with the new palette automatically.
+                state.theme.toggle();
+            }
         },
         AppMsg::Header(m) => {
             let HeaderMsg::Message(inner) = m;

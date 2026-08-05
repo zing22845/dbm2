@@ -2,6 +2,7 @@
 //! plus shell-level metadata (focus, quit flag, status, modal).
 
 use crate::app_shell::focus::FocusZone;
+use crate::common::view::theme::Theme;
 use crate::features::discover::state::DiscoverState;
 use crate::features::explorer::state::ExplorerState;
 use crate::features::global_footer::state::FooterState;
@@ -21,6 +22,8 @@ pub struct AppState {
     pub global_status: String,
     /// Currently active modal, if any. `None` means no modal is shown.
     pub modal: Option<ModalKind>,
+    /// The active theme, injected into every view as a rendering context.
+    pub theme: Theme,
 
     // --- Feature states ---
     pub header: HeaderState,
@@ -44,6 +47,7 @@ impl Default for AppState {
             should_quit: false,
             global_status: String::new(),
             modal: None,
+            theme: crate::common::view::theme::dracula(),
             header: HeaderState::default(),
             explorer: ExplorerState::default(),
             discover: DiscoverState::default(),
