@@ -2,6 +2,7 @@
 //! central update dispatcher and the run loop.
 
 pub mod action;
+pub mod input;
 pub mod loop_mod;
 pub mod msg;
 pub mod state;

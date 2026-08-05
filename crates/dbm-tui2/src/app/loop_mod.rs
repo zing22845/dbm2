@@ -81,22 +81,26 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     use crate::app_shell::msg::ShellMsg;
                     use crossterm::event::KeyModifiers as KM;
                     let ctrl = key.modifiers.contains(KM::CONTROL);
-                    match (ctrl, key.code) {
+                    let global = match (ctrl, key.code) {
                         // `q` or `CTRL+D` quits through the standard message
                         // flow so the handler sets the quit flag.
                         (_, KeyCode::Char('q')) | (true, KeyCode::Char('d')) => {
-                            let msg = AppMsg::Shell(ShellMsg::Quit);
-                            process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                            Some(AppMsg::Shell(ShellMsg::Quit))
                         }
                         // `CTRL+T` toggles the active theme (dark/light).
                         (true, KeyCode::Char('t')) => {
-                            let msg = AppMsg::Shell(ShellMsg::ToggleTheme);
-                            process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                            Some(AppMsg::Shell(ShellMsg::ToggleTheme))
                         }
-                        // Unrecognized keys are ignored: no-op requires no
-                        // message.
-                        _ => {}
+                        // Not a global shortcut: let the focused feature handle
+                        // the key below.
+                        _ => None,
+                    };
+                    let msg = global.or_else(|| crate::app::input::key_to_msg(key, state.focus));
+                    if let Some(msg) = msg {
+                        process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                     }
+                    // Neither a global shortcut nor a focused-feature key is a
+                    // no-op: nothing to dispatch.
                 }
             }
             _ = tick.tick() => {
