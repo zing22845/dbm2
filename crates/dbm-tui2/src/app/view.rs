@@ -54,7 +54,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     // is open, otherwise the SQL workspace. A future tab mechanism will make
     // this explicit.
     if state.iw.instance_name.is_empty() {
-        sql_view::render(frame, workspace[0], &state.sql);
+        sql_view::render(frame, &state.theme, workspace[0], &state.sql);
     } else {
         iw_view::render(frame, &state.theme, workspace[0], &state.iw);
     }

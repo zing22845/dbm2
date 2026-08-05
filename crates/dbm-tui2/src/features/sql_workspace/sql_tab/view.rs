@@ -4,13 +4,15 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Frame;
 use ratatui::widgets::{Block, Paragraph};
 
+use crate::common::view::theme::Theme;
+
 use super::state::SqlTabState;
 use super::editor::view as editor_view;
 use super::history::view as history_view;
 use super::results::view as results_view;
 
 /// Render the `sql_tab` feature: a tab bar plus the active tab's child panes.
-pub fn render(frame: &mut Frame, area: Rect, state: &SqlTabState) {
+pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -44,7 +46,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &SqlTabState) {
         ])
         .split(chunks[1]);
 
-    editor_view::render(frame, body[0], &tab.editor);
+    editor_view::render(frame, theme, body[0], &tab.editor);
 
     let right = Layout::default()
         .direction(Direction::Vertical)
@@ -54,6 +56,6 @@ pub fn render(frame: &mut Frame, area: Rect, state: &SqlTabState) {
         ])
         .split(body[1]);
 
-    results_view::render(frame, right[0], &tab.results);
-    history_view::render(frame, right[1], &tab.history);
+    results_view::render(frame, theme, right[0], &tab.results);
+    history_view::render(frame, theme, right[1], &tab.history);
 }

@@ -1,33 +1,61 @@
 //! Editor feature effects and actions.
 
-use crate::app::action::Action;
-use crate::app_shell::effect::Effect;
-use super::context_picker::effect::ContextPickerEffect;
+use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
+use crate::common::service::services::Services;
+use super::context_picker::effect::{ContextPickerAction, ContextPickerEffect};
 use super::sql_completion::effect::SqlCompletionEffect;
 
-#[derive(Debug, Clone)]
-pub enum EditorAction {}
+/// Actions produced by editor effects (from its child sub-modules).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditorAction {
+    /// An action from the context picker sub-module.
+    ContextPicker(ContextPickerAction),
+}
 
-impl From<EditorAction> for Action {
-    fn from(_a: EditorAction) -> Self {
+impl From<ContextPickerAction> for EditorAction {
+    fn from(a: ContextPickerAction) -> Self {
+        EditorAction::ContextPicker(a)
+    }
+}
+
+impl From<super::sql_completion::effect::SqlCompletionAction> for EditorAction {
+    fn from(_a: super::sql_completion::effect::SqlCompletionAction) -> Self {
         match _a {}
     }
 }
 
+/// Effects emitted by the editor feature, delegating to its child sub-modules.
 #[derive(Debug, Clone)]
 pub enum EditorEffect {
+    /// An effect from the context picker sub-module.
     ContextPicker(ContextPickerEffect),
+    /// An effect from the sql completion sub-module.
     SqlCompletion(SqlCompletionEffect),
 }
 
 impl Effect for EditorEffect {
     type Action = EditorAction;
 
-    fn run(self, _emit: crate::app_shell::effect::effect_trait::Emitter<Self::Action>, _services: std::sync::Arc<crate::common::service::services::Services>) -> crate::app_shell::effect::effect_trait::BoxFuture<Vec<Self::Action>> {
+    fn run(self, emit: Emitter<Self::Action>, services: std::sync::Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             match self {
-            EditorEffect::ContextPicker(_) | EditorEffect::SqlCompletion(_) => Vec::new(),
-    }
-    })
+                EditorEffect::ContextPicker(e) => {
+                    let emit = emit.map::<ContextPickerAction>();
+                    e.run(emit, services)
+                        .await
+                        .into_iter()
+                        .map(Into::into)
+                        .collect()
+                }
+                EditorEffect::SqlCompletion(e) => {
+                    let emit = emit.map::<super::sql_completion::effect::SqlCompletionAction>();
+                    e.run(emit, services)
+                        .await
+                        .into_iter()
+                        .map(Into::into)
+                        .collect()
+                }
+            }
+        })
     }
 }

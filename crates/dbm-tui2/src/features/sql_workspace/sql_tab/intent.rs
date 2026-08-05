@@ -3,6 +3,7 @@
 use crate::app_shell::intent::Intent;
 use super::msg::{SqlTabMessage, SqlTabMsg};
 use super::editor::intent::EditorIntent;
+use super::editor::context_picker::intent::ContextPickerIntent;
 use super::history::intent::HistoryIntent;
 use super::results::intent::ResultsIntent;
 
@@ -22,13 +23,16 @@ pub enum SqlTabIntent {
 impl Intent for SqlTabIntent {
     type Message = SqlTabMsg;
 
-    // Skeleton state: the child feature messages (`EditorMsg`, `ResultsMsg`,
-    // `HistoryMsg`) are currently uninhabited because their leaf messages are
-    // empty enums. The expressions below are thus unreachable until real
-    // business messages are introduced; remove this allow then.
-    #[allow(unreachable_code)]
     fn into_message(self) -> Self::Message {
         match self {
+            // The context picker's `ApplyContext` intent must land on the tab's
+            // session (a sibling of the editor), so it is resolved here into a
+            // dedicated `SqlTabMessage::ApplyContext` rather than being
+            // re-dispatched into the editor.
+            SqlTabIntent::Editor {
+                tab_id,
+                intent: EditorIntent::ContextPicker(ContextPickerIntent::ApplyContext { database, schema }),
+            } => SqlTabMsg::Message(SqlTabMessage::ApplyContext { tab_id, database, schema }),
             SqlTabIntent::Editor { tab_id, intent } => SqlTabMsg::Message(
                 SqlTabMessage::Editor {
                     tab_id,

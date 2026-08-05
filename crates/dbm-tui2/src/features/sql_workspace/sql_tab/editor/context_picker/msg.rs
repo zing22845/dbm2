@@ -1,8 +1,39 @@
 //! Context picker sub-module messages.
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ContextPickerMessage {}
+use crossterm::event::KeyEvent;
 
+use super::state::PickerColumn;
+
+/// The actual context picker messages: open/close, column/cursor navigation,
+/// `/` search input, apply, and the async catalog results from its effects.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContextPickerMessage {
+    /// Open the picker focused on `column`, seeded with the current connection
+    /// context (`instance`/`connection`) and active `database`.
+    Open { column: PickerColumn, instance: String, connection: String, database: String },
+    /// Close the picker without applying.
+    Close,
+    /// Move the cursor in the active column by `delta` (`-1`/`+1`).
+    MoveCursor { delta: i32 },
+    /// Switch the focused column.
+    MoveColumn(PickerColumn),
+    /// Begin `/` search input on the active column.
+    BeginSearch,
+    /// Forward a key event while a column's search input is active.
+    SearchKey(KeyEvent),
+    /// Commit the currently selected database/schema.
+    Apply,
+    /// The databases list for the connection was loaded.
+    DatabasesLoaded { items: Vec<String> },
+    /// Loading databases failed.
+    DatabasesError { error: String },
+    /// The schemas list for the previewed database was loaded.
+    SchemasLoaded { items: Vec<String> },
+    /// Loading schemas failed.
+    SchemasError { error: String },
+}
+
+/// Feature message envelope (central-router compatible).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextPickerMsg {
     Message(ContextPickerMessage),

@@ -256,11 +256,17 @@ fn drain_async_actions(
                     iw_action_to_msg(action),
                 )));
             }
+            // The SQL workspace's catalog-load actions feed back into the
+            // targeted tab's editor (the context picker).
+            Ok(Action::Sql(action)) => {
+                pending.push_back(AppMsg::Sql(crate::features::sql_workspace::msg::SqlMsg::Message(
+                    sql_action_to_msg(action),
+                )));
+            }
             // Feature-specific actions are not yet handled; they are dropped
             // rather than panicking so the loop stays resilient. `Shell` has a
             // single `Quit` variant and is already covered above.
             Ok(Action::Header(_))
-            | Ok(Action::Sql(_))
             | Ok(Action::Footer(_))
             | Ok(Action::Perf(_)) => {}
             Err(mpsc::error::TryRecvError::Empty) => break,
@@ -314,6 +320,41 @@ fn iw_action_to_msg(action: crate::features::instance_workspace::effect::IwActio
                 IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::MoveUp))
             }
         },
+    }
+}
+
+/// Convert a SQL workspace action into the corresponding workspace message,
+/// routing editor actions back to the originating tab's editor (the context
+/// picker's catalog results).
+fn sql_action_to_msg(action: crate::features::sql_workspace::effect::SqlAction) -> crate::features::sql_workspace::msg::SqlMessage {
+    use crate::features::sql_workspace::effect::SqlAction as SA;
+    use crate::features::sql_workspace::sql_tab::effect::SqlTabAction as STA;
+    use crate::features::sql_workspace::sql_tab::editor::effect::EditorAction as EA;
+    use crate::features::sql_workspace::sql_tab::editor::context_picker::msg::ContextPickerMsg;
+    use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
+    use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+    use crate::features::sql_workspace::msg::SqlMessage;
+    match action {
+        SA::SqlTab(STA::Editor { tab_id, action }) => {
+            let msg = match action {
+                EA::ContextPicker(cp) => EditorMsg::Message(EditorMessage::ContextPicker(
+                    ContextPickerMsg::Message(cp_action_to_msg(cp)),
+                )),
+            };
+            SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Editor { tab_id, msg }))
+        }
+    }
+}
+
+/// Convert a context picker action into the corresponding picker message.
+fn cp_action_to_msg(action: crate::features::sql_workspace::sql_tab::editor::context_picker::effect::ContextPickerAction) -> crate::features::sql_workspace::sql_tab::editor::context_picker::msg::ContextPickerMessage {
+    use crate::features::sql_workspace::sql_tab::editor::context_picker::effect::ContextPickerAction as CPA;
+    use crate::features::sql_workspace::sql_tab::editor::context_picker::msg::ContextPickerMessage as M;
+    match action {
+        CPA::DatabasesLoaded { items } => M::DatabasesLoaded { items },
+        CPA::DatabasesError { error } => M::DatabasesError { error },
+        CPA::SchemasLoaded { items } => M::SchemasLoaded { items },
+        CPA::SchemasError { error } => M::SchemasError { error },
     }
 }
 

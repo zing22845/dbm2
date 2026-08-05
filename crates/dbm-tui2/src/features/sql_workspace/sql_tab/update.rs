@@ -29,6 +29,15 @@ pub fn update(
         }
         SqlTabMessage::OpenTab => state.open_tab(),
         SqlTabMessage::CloseTab(idx) => state.close_tab(idx),
+        SqlTabMessage::ApplyContext { tab_id, database, schema } => {
+            if let Some(idx) = state.index_of(tab_id) {
+                let tab = &mut state.tabs[idx];
+                tab.session.database = Some(database);
+                tab.session.schema = Some(schema);
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
         SqlTabMessage::Editor { tab_id, msg } => {
             let editor::msg::EditorMsg::Message(inner) = msg;
             if let Some(idx) = state.index_of(tab_id) {

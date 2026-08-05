@@ -15,6 +15,8 @@ pub enum SqlTabMessage {
     OpenTab,
     /// Close the tab at `idx`.
     CloseTab(usize),
+    /// Apply a chosen database/schema context to the tab's session.
+    ApplyContext { tab_id: usize, database: String, schema: String },
     /// Forwarded editor message, targeted at the tab with `tab_id`.
     Editor { tab_id: usize, msg: EditorMsg },
     /// Forwarded results message, targeted at the tab with `tab_id`.

@@ -673,6 +673,7 @@ dependencies = [
  "crossterm",
  "dbm-core",
  "dbm-discovery",
+ "dbm-driver-pg",
  "dbm-store",
  "futures",
  "ratatui",
