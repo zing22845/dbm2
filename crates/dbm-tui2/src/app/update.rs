@@ -118,7 +118,10 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
         },
         AppMsg::Header(m) => {
             let HeaderMsg::Message(inner) = m;
-            let (s, intents, effects) = header_update(inner, &mut state.header);
+            // The header feature's update is a pure by-value transition: move
+            // the state out, update it, move the result back. No deep clone.
+            let header = std::mem::take(&mut state.header);
+            let (s, intents, effects) = header_update(inner, header);
             state.header = s;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));

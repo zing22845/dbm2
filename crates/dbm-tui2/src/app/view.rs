@@ -48,7 +48,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
         ])
         .split(body[1]);
 
-    header_view::render(frame, chunks[0], &state.header);
+    header_view::render(frame, &state.theme, chunks[0], &state.header);
     explorer_view::render(frame, body[0], &state.explorer);
     sql_view::render(frame, workspace[0], &state.sql);
     // perf_monitor adopts the theme-as-rendering-context convention (footer and
