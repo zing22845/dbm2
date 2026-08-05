@@ -5,3 +5,6 @@
 
 /// Unified in-pane `/` search (state, input, matching, title suffix).
 pub mod search;
+
+/// Absolute line-number gutter helpers (edtui-aligned width formula).
+pub mod line_numbers;

@@ -45,12 +45,11 @@ impl Intent for SqlTabIntent {
                     msg: intent.into_message(),
                 },
             ),
-            SqlTabIntent::History { tab_id, intent } => SqlTabMsg::Message(
-                SqlTabMessage::History {
-                    tab_id,
-                    msg: intent.into_message(),
-                },
-            ),
+            // History Recall is resolved by `sql_tab` (it owns the editor).
+            SqlTabIntent::History {
+                tab_id,
+                intent: HistoryIntent::Recall { sql },
+            } => SqlTabMsg::Message(SqlTabMessage::RecallHistory { tab_id, sql }),
         }
     }
 }

@@ -57,5 +57,16 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState)
         .split(body[1]);
 
     results_view::render(frame, theme, right[0], &tab.results);
-    history_view::render(frame, theme, right[1], &tab.history);
+    let (instance, connection) = session_view_key(&tab.session);
+    history_view::render(frame, theme, right[1], &tab.history, &instance, &connection);
+}
+
+/// Derive the `(instance, connection)` history key for rendering (mirrors the
+/// update path's `session_key`).
+fn session_view_key(session: &super::session::TabSession) -> (String, String) {
+    let connection = session
+        .connection_id
+        .map(|id| id.to_string())
+        .unwrap_or_default();
+    (String::new(), connection)
 }

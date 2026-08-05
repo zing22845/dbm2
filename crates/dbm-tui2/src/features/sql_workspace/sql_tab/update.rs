@@ -38,6 +38,18 @@ pub fn update(
                 warn_tab_missing(tab_id);
             }
         }
+        SqlTabMessage::RecallHistory { tab_id, sql } => {
+            if let Some(idx) = state.index_of(tab_id) {
+                let editor_state = std::mem::take(&mut state.tabs[idx].editor);
+                let (s, _i, _e) = editor::update::update(
+                    editor::msg::EditorMessage::SetSql { sql },
+                    editor_state,
+                );
+                state.tabs[idx].editor = s;
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
         SqlTabMessage::Editor { tab_id, msg } => {
             let editor::msg::EditorMsg::Message(inner) = msg;
             if let Some(idx) = state.index_of(tab_id) {
@@ -77,8 +89,18 @@ pub fn update(
         SqlTabMessage::History { tab_id, msg } => {
             let history::msg::HistoryMsg::Message(inner) = msg;
             if let Some(idx) = state.index_of(tab_id) {
+                let (instance, connection) = session_key(&state.tabs[idx].session);
                 let history_state = std::mem::take(&mut state.tabs[idx].history);
-                let (s, i, e) = history::update::update(inner, history_state);
+                let selected_sql = history_state.selected_entry(&instance, &connection);
+                let (s, i, e) = history::update::update(
+                    inner,
+                    history_state,
+                    &instance,
+                    &connection,
+                    selected_sql,
+                    super::history::detail::detail_text_width(40),
+                    8,
+                );
                 state.tabs[idx].history = s;
                 intents.extend(
                     i.into_iter()
@@ -94,6 +116,19 @@ pub fn update(
         }
     }
     (state, intents, effects)
+}
+
+/// Derive the `(instance, connection)` history key from a tab's session.
+///
+/// The session has no instance/connection display names yet, so the connection
+/// key is derived from `connection_id`; this keeps history scoped per
+/// connection while real identity strings are wired in.
+fn session_key(session: &super::session::TabSession) -> (String, String) {
+    let connection = session
+        .connection_id
+        .map(|id| id.to_string())
+        .unwrap_or_default();
+    (String::new(), connection)
 }
 
 /// Log when a routed child message targets a `tab_id` that no longer exists

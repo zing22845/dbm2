@@ -24,6 +24,58 @@ pub fn width(s: &str) -> usize {
     s.chars().map(char_width).sum()
 }
 
+/// Truncate `s` to fit `max_width` display cells, appending `…` when cut.
+/// Returns an empty string for a zero-width budget.
+pub fn truncate(s: &str, max_width: usize) -> String {
+    truncate_from(s, 0, max_width)
+}
+
+/// Skip the leading `skip` display cells of `s`, then truncate to `max_width`
+/// cells (appending `…` when cut mid-text; not appended when the visible window
+/// reaches the true end of `s`). Used for horizontally scrollable panes.
+pub fn truncate_from(s: &str, skip: usize, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if skip >= width(s) {
+        return String::new();
+    }
+
+    // First pass: collect chars starting after `skip`, tracking cell width.
+    let chars: Vec<char> = s.chars().collect();
+    let widths: Vec<usize> = chars.iter().map(|c| char_width(*c)).collect();
+
+    let mut start_idx = 0usize;
+    let mut acc = 0usize;
+    while start_idx < chars.len() && acc < skip {
+        acc += widths[start_idx];
+        if acc > skip {
+            // Straddles the skip boundary; keep the overflow tail of this char.
+            break;
+        }
+        start_idx += 1;
+    }
+
+    let mut out: Vec<char> = Vec::new();
+    let mut used = 0usize;
+    let mut idx = start_idx;
+    while idx < chars.len() {
+        let cw = widths[idx];
+        if used + cw > max_width {
+            // Truncated mid-text: reserve the last cell for the ellipsis.
+            if !out.is_empty() {
+                out.pop();
+            }
+            out.push('…');
+            return out.into_iter().collect();
+        }
+        out.push(chars[idx]);
+        used += cw;
+        idx += 1;
+    }
+    out.into_iter().collect()
+}
+
 /// Estimated number of wrapped lines for `text` constrained to `cols` cells.
 ///
 /// Display-width aware, so CJK footers reserve the right height. For pure
