@@ -68,6 +68,20 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     let mut reader = EventStream::new();
     let mut tick = tokio::time::interval(TICK_RATE);
 
+    // Populate the explorer tree on startup.
+    process_message_round(
+        &effect_runner,
+        &mut action_rx,
+        AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
+            crate::features::explorer::msg::ExplorerMessage::Instances(
+                crate::features::explorer::instances::msg::InstancesMsg::Message(
+                    crate::features::explorer::instances::msg::InstancesMessage::Load,
+                ),
+            ),
+        )),
+        &mut state,
+    );
+
     loop {
         // Draw the current frame. The perf_monitor feature is passive: the run
         // loop samples each frame here and feeds the smoothed FPS and
@@ -228,11 +242,18 @@ fn drain_async_actions(
                     ),
                 ));
             }
+            // The explorer's load actions feed back into the explorer.
+            Ok(Action::Explorer(action)) => {
+                pending.push_back(AppMsg::Explorer(
+                    crate::features::explorer::msg::ExplorerMsg::Message(
+                        explorer_action_to_msg(action),
+                    ),
+                ));
+            }
             // Feature-specific actions are not yet handled; they are dropped
             // rather than panicking so the loop stays resilient. `Shell` has a
             // single `Quit` variant and is already covered above.
             Ok(Action::Header(_))
-            | Ok(Action::Explorer(_))
             | Ok(Action::Iw(_))
             | Ok(Action::Sql(_))
             | Ok(Action::Footer(_))
@@ -253,5 +274,30 @@ fn discover_action_to_msg(action: crate::features::discover::effect::DiscoverAct
         A::ScanError { error } => M::ScanError { error },
         A::RegisterComplete { count } => M::RegisterComplete { count },
         A::RegisterError { error } => M::RegisterError { error },
+    }
+}
+
+/// Convert an explorer action into the corresponding explorer message.
+fn explorer_action_to_msg(action: crate::features::explorer::effect::ExplorerAction) -> crate::features::explorer::msg::ExplorerMessage {
+    use crate::features::explorer::effect::ExplorerAction as EA;
+    use crate::features::explorer::instances::effect::InstancesAction as IA;
+    use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
+    use crate::features::explorer::msg::ExplorerMessage as EM;
+    match action {
+        EA::Instances(action) => match action {
+            IA::InstancesLoaded { instances } => EM::Instances(InstancesMsg::Message(
+                InstancesMessage::Loaded { instances },
+            )),
+            IA::ConnectionsLoaded { instance_idx, connections } => {
+                EM::Instances(InstancesMsg::Message(InstancesMessage::ConnectionsLoaded {
+                    instance_idx,
+                    connections,
+                }))
+            }
+            IA::LoadError { error } => {
+                tracing::warn!("explorer load failed: {error}");
+                EM::Instances(InstancesMsg::Message(InstancesMessage::Load))
+            }
+        },
     }
 }

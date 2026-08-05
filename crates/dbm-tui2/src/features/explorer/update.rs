@@ -7,9 +7,9 @@ use super::effect::ExplorerEffect;
 use super::instances;
 use super::objects;
 
-/// Update the explorer state by delegating to its child sub-modules. Pure
-/// by-value transition: only the touched child state is moved out and back,
-/// so no deep clone happens per message.
+/// Update the explorer state. Pure by-value transition: pane navigation is
+/// handled here; child messages are forwarded to the matching sub-module
+/// (moved out, updated, moved back).
 pub fn update(
     msg: ExplorerMessage,
     mut state: ExplorerState,
@@ -17,18 +17,19 @@ pub fn update(
     let mut intents = Vec::new();
     let mut effects = Vec::new();
     match msg {
+        ExplorerMessage::SetPane(pane) => state.pane = pane,
         ExplorerMessage::Instances(m) => {
             let instances::msg::InstancesMsg::Message(inner) = m;
-            let instances_state = std::mem::take(&mut state.instances);
-            let (s, i, e) = instances::update::update(inner, instances_state);
+            let s = std::mem::take(&mut state.instances);
+            let (s, i, e) = instances::update::update(inner, s);
             state.instances = s;
             intents.extend(i.into_iter().map(ExplorerIntent::Instances));
             effects.extend(e.into_iter().map(ExplorerEffect::Instances));
         }
         ExplorerMessage::Objects(m) => {
             let objects::msg::ObjectsMsg::Message(inner) = m;
-            let objects_state = std::mem::take(&mut state.objects);
-            let (s, i, e) = objects::update::update(inner, objects_state);
+            let s = std::mem::take(&mut state.objects);
+            let (s, i, e) = objects::update::update(inner, s);
             state.objects = s;
             intents.extend(i.into_iter().map(ExplorerIntent::Objects));
             effects.extend(e.into_iter().map(ExplorerEffect::Objects));

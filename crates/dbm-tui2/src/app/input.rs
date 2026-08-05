@@ -13,6 +13,9 @@ use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
 use crate::features::discover::results::msg::{ResultsMessage, ResultsMsg};
 use crate::features::discover::state::{DiscoverFocus, DiscoverState};
 use crate::features::discover::targets::msg::{TargetsMessage, TargetsMsg};
+use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
+use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+use crate::features::explorer::state::{ExplorerPane, ExplorerState};
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 
 use super::msg::AppMsg;
@@ -28,11 +31,10 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
         Some(ModalKind::Discover) => discover_key(key, &state.discover),
         None => match state.focus {
             FocusZone::Header => header_key(key),
+            FocusZone::Explorer => explorer_key(key, &state.explorer),
             // Features not yet migrated keep no key bindings; add arms here as
             // their interaction logic is ported.
-            FocusZone::Explorer
-            | FocusZone::SQLWorkspace
-            | FocusZone::InstanceWorkspace => None,
+            FocusZone::SQLWorkspace | FocusZone::InstanceWorkspace => None,
         },
     }
 }
@@ -157,4 +159,29 @@ fn results(msg: ResultsMessage) -> AppMsg {
     AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Results(
         ResultsMsg::Message(msg),
     )))
+}
+
+/// Explorer key bindings, dispatched by the active explorer pane.
+fn explorer_key(key: KeyEvent, state: &ExplorerState) -> Option<AppMsg> {
+    match state.pane {
+        ExplorerPane::Instances => instances_key(key),
+        ExplorerPane::Objects => None,
+    }
+}
+
+/// Instances pane keys: navigate the connection tree.
+fn instances_key(key: KeyEvent) -> Option<AppMsg> {
+    let msg = match key.code {
+        KeyCode::Up | KeyCode::Char('k') => InstancesMessage::MoveUp,
+        KeyCode::Down | KeyCode::Char('j') => InstancesMessage::MoveDown,
+        KeyCode::Enter => InstancesMessage::Select,
+        KeyCode::Right => InstancesMessage::ToggleExpand,
+        KeyCode::Left => InstancesMessage::ToggleExpand,
+        _ => return None,
+    };
+    Some(explorer(ExplorerMessage::Instances(InstancesMsg::Message(msg))))
+}
+
+fn explorer(msg: ExplorerMessage) -> AppMsg {
+    AppMsg::Explorer(ExplorerMsg::Message(msg))
 }

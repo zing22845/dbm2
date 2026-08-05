@@ -1,23 +1,18 @@
 //! Explorer feature rendering.
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::Frame;
 
-use super::state::ExplorerState;
+use crate::common::view::theme::Theme;
+
+use super::state::{ExplorerPane, ExplorerState};
 use super::instances::view as instances_view;
 use super::objects::view as objects_view;
 
-/// Render the explorer feature: the instances list on top and the objects tree
-/// below.
-pub fn render(frame: &mut Frame, area: Rect, state: &ExplorerState) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(40), // instances list
-            Constraint::Percentage(60), // objects tree
-        ])
-        .split(area);
-
-    instances_view::render(frame, chunks[0], &state.instances);
-    objects_view::render(frame, chunks[1], &state.objects);
+/// Render the explorer feature: the active pane (instances tree today).
+pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ExplorerState) {
+    match state.pane {
+        ExplorerPane::Instances => instances_view::render(frame, theme, area, &state.instances),
+        ExplorerPane::Objects => objects_view::render(frame, theme, area, &state.objects),
+    }
 }
