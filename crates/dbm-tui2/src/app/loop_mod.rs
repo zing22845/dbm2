@@ -30,6 +30,7 @@ use crate::app::update::{handle_action, update, UpdateResult};
 use crate::app::view::render;
 use crate::app_shell::effect::EffectRunner;
 use crate::app_shell::intent::IntentRouter;
+use crate::features::perf_monitor::backend::CountingBackend;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
 /// Upper bound on how many messages are processed in a single event round
@@ -47,7 +48,9 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         crossterm::terminal::EnterAlternateScreen,
         crossterm::event::EnableMouseCapture
     )?;
-    let backend = CrosstermBackend::new(stdout);
+    // The backend is wrapped in a `CountingBackend` so the redundancy metric
+    // can read how many cells each frame actually changed.
+    let backend = CountingBackend::new(CrosstermBackend::new(stdout));
     let mut terminal = Terminal::new(backend)?;
 
     let (action_tx, mut action_rx) = mpsc::unbounded_channel::<Action>();
@@ -62,8 +65,13 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     let mut tick = tokio::time::interval(TICK_RATE);
 
     loop {
-        // Draw the current frame.
+        // Draw the current frame. The perf_monitor feature is passive: the run
+        // loop samples each frame here and feeds the smoothed FPS and
+        // redundant-redraw ratio from the wrapped backend.
         terminal.draw(|frame| render(frame, &state))?;
+        let changed_cells = terminal.backend_mut().last_changed_cells();
+        state.perf.record_frame();
+        state.perf.record_redundancy(changed_cells);
 
         // Wait for the next input: a terminal event, a tick, or an async
         // action (from an effect).
