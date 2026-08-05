@@ -1,7 +1,10 @@
 //! Results detail sub-module messages.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DetailMessage {}
+pub enum DetailMessage {
+    /// Scroll the detail body by `delta` display rows.
+    Scroll { delta: i32 },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DetailMsg {

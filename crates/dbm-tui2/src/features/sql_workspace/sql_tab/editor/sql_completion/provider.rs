@@ -42,6 +42,17 @@ pub struct ColumnInfo {
     pub comment: Option<String>,
 }
 
+impl From<dbm_core::ColumnMeta> for ColumnInfo {
+    fn from(m: dbm_core::ColumnMeta) -> Self {
+        ColumnInfo {
+            name: m.name,
+            type_name: m.type_name,
+            type_display: m.type_display,
+            comment: m.comment,
+        }
+    }
+}
+
 pub struct CompletionInput<'a> {
     pub engine: SqlEngine,
     pub tables: &'a [String],
