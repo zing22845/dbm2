@@ -33,6 +33,12 @@ impl Intent for SqlTabIntent {
                 tab_id,
                 intent: EditorIntent::ContextPicker(ContextPickerIntent::ApplyContext { database, schema }),
             } => SqlTabMsg::Message(SqlTabMessage::ApplyContext { tab_id, database, schema }),
+            // The editor's Run intent is resolved by sql_tab (it owns the
+            // connection context), so it becomes a dedicated message.
+            SqlTabIntent::Editor {
+                tab_id,
+                intent: EditorIntent::RunQuery { sql },
+            } => SqlTabMsg::Message(SqlTabMessage::RunQueryFromEditor { tab_id, sql }),
             SqlTabIntent::Editor { tab_id, intent } => SqlTabMsg::Message(
                 SqlTabMessage::Editor {
                     tab_id,

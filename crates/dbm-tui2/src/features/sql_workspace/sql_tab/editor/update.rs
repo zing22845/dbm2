@@ -31,6 +31,10 @@ pub fn update(
             crate::common::editor::set_sql_text(&mut state.editor, &sql);
             state.sql_completion.close();
         }
+        EditorMessage::Run => {
+            let sql = crate::common::editor::editor_text(&state.editor);
+            intents.push(EditorIntent::RunQuery { sql });
+        }
         EditorMessage::ContextPicker(m) => {
             let context_picker::msg::ContextPickerMsg::Message(inner) = m;
             let cp_state = std::mem::take(&mut state.context_picker);

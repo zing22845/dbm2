@@ -292,6 +292,11 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         }
     }
 
+    // Ctrl+Enter runs the current editor SQL.
+    if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return Some(sql_editor(EditorMessage::Run, tab_id));
+    }
+
     // Otherwise forward the key to the editor buffer.
     editor_key(key, tab_id)
 }

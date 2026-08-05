@@ -98,6 +98,62 @@ impl Services {
             .await
             .map_err(|e| e.user_message().to_string())
     }
+
+    /// Execute a SQL statement against a connection.
+    ///
+    /// Resolves the connection URL (optionally overriding the database), connects
+    /// and runs the query — either plain (`execute_in_schema`) or paginated
+    /// (`execute_paginated` with a `LIMIT`/`OFFSET`). A non-`SELECT` statement
+    /// returns a result with zero columns and `rows_affected` set. Returns the
+    /// raw driver result; callers project it into `QueryResultData`.
+    pub async fn execute_sql(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: Option<&str>,
+        schema: &str,
+        sql: &str,
+        paginated: bool,
+        page: usize,
+        row_limit: usize,
+    ) -> Result<dbm_core::QueryResult, String> {
+        let url = self.connection_url(instance, connection, database).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        let result = if paginated {
+            let offset = (page.saturating_sub(1) as u64) * row_limit as u64;
+            self.driver
+                .execute_paginated(&pool, schema, sql, row_limit as u64, offset)
+                .await
+        } else {
+            self.driver.execute_in_schema(&pool, schema, sql).await
+        };
+        result.map_err(|e| e.user_message().to_string())
+    }
+
+    /// Count the rows a query would return (for pagination total).
+    pub async fn count_rows(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: Option<&str>,
+        schema: &str,
+        sql: &str,
+    ) -> Result<Option<u64>, String> {
+        let url = self.connection_url(instance, connection, database).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        self.driver
+            .count_rows(&pool, schema, sql)
+            .await
+            .map_err(|e| e.user_message().to_string())
+    }
 }
 
 impl Default for Services {

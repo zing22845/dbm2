@@ -18,6 +18,10 @@ pub struct TabSession {
     pub id: usize,
     /// Identifier of the database connection this tab is bound to, if any.
     pub connection_id: Option<usize>,
+    /// The instance the connection belongs to (display name), if any.
+    pub instance: Option<String>,
+    /// The connection name (display name), if any.
+    pub connection: Option<String>,
     /// Currently selected database, if any.
     pub database: Option<String>,
     /// Currently selected schema, if any.
@@ -29,6 +33,8 @@ impl Default for TabSession {
         TabSession {
             id: 0,
             connection_id: None,
+            instance: None,
+            connection: None,
             database: None,
             schema: None,
         }

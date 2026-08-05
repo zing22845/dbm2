@@ -19,6 +19,8 @@ pub enum SqlTabMessage {
     ApplyContext { tab_id: usize, database: String, schema: String },
     /// Recall `sql` into the tab's editor (history apply).
     RecallHistory { tab_id: usize, sql: String },
+    /// Run `sql` from the tab's editor (dispatched to results with session context).
+    RunQueryFromEditor { tab_id: usize, sql: String },
     /// Forwarded editor message, targeted at the tab with `tab_id`.
     Editor { tab_id: usize, msg: EditorMsg },
     /// Forwarded results message, targeted at the tab with `tab_id`.

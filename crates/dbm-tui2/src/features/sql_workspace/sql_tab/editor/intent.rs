@@ -9,6 +9,9 @@ use super::sql_completion::intent::SqlCompletionIntent;
 pub enum EditorIntent {
     ContextPicker(ContextPickerIntent),
     SqlCompletion(SqlCompletionIntent),
+    /// Run the editor's current SQL (resolved by `sql_tab`, which knows the
+    /// tab's connection context).
+    RunQuery { sql: String },
 }
 
 impl Intent for EditorIntent {
@@ -18,6 +21,9 @@ impl Intent for EditorIntent {
         match self {
             EditorIntent::ContextPicker(i) => i.into_message().into(),
             EditorIntent::SqlCompletion(i) => i.into_message().into(),
+            EditorIntent::RunQuery { .. } => unreachable!(
+                "EditorIntent::RunQuery is routed by sql_tab, not re-dispatched"
+            ),
         }
     }
 }

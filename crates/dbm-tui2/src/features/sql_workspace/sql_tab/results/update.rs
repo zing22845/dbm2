@@ -52,6 +52,28 @@ pub fn update(
             state.search.reset();
             state.detail.scroll = 0;
         }
+        ResultsMessage::RunQuery {
+            instance,
+            connection,
+            database,
+            schema,
+            sql,
+            paginated,
+            page,
+            row_limit,
+        } => {
+            state.detail.scroll = 0;
+            effects.push(ResultsEffect::RunQuery {
+                instance,
+                connection,
+                database,
+                schema,
+                sql,
+                paginated,
+                page,
+                row_limit,
+            });
+        }
         ResultsMessage::EnterEdit => {
             state.enter_edit();
             // Load the selected cell into the detail draft baseline.

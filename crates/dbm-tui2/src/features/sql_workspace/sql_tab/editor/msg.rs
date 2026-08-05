@@ -17,6 +17,8 @@ pub enum EditorMessage {
     Paste { text: String },
     /// Replace the whole buffer with `sql`.
     SetSql { sql: String },
+    /// Run the current editor SQL (emits a RunQuery intent resolved by sql_tab).
+    Run,
     /// Forward to the context picker sub-module.
     ContextPicker(ContextPickerMsg),
     /// Forward to the SQL completion sub-module.

@@ -19,6 +19,17 @@ pub enum ResultsMessage {
     SearchKey(KeyEvent),
     /// Reset the result selection / scroll (after a new result).
     ResetSelection,
+    /// Run a SQL query against the tab's connection (emits a RunQuery effect).
+    RunQuery {
+        instance: String,
+        connection: String,
+        database: Option<String>,
+        schema: String,
+        sql: String,
+        paginated: bool,
+        page: usize,
+        row_limit: usize,
+    },
     /// Enter / toggle edit mode.
     EnterEdit,
     /// Exit edit mode (clears the session).

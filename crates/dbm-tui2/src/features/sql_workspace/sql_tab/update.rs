@@ -50,6 +50,49 @@ pub fn update(
                 warn_tab_missing(tab_id);
             }
         }
+        SqlTabMessage::RunQueryFromEditor { tab_id, sql } => {
+            if let Some(idx) = state.index_of(tab_id) {
+                let session = &state.tabs[idx].session;
+                let instance = session.instance.clone().unwrap_or_default();
+                let connection = session
+                    .connection
+                    .clone()
+                    .or_else(|| session.connection_id.map(|id| id.to_string()))
+                    .unwrap_or_default();
+                let database = session.database.clone();
+                let schema = session
+                    .schema
+                    .clone()
+                    .unwrap_or_else(|| "public".to_string());
+                let page = state.tabs[idx].results.page.max(1);
+                let row_limit = state.tabs[idx].results.row_limit;
+                let results_state = std::mem::take(&mut state.tabs[idx].results);
+                let (s, i, e) = results::update::update(
+                    results::msg::ResultsMessage::RunQuery {
+                        instance,
+                        connection,
+                        database,
+                        schema,
+                        sql,
+                        paginated: true,
+                        page,
+                        row_limit,
+                    },
+                    results_state,
+                );
+                state.tabs[idx].results = s;
+                intents.extend(
+                    i.into_iter()
+                        .map(|intent| SqlTabIntent::Results { tab_id, intent }),
+                );
+                effects.extend(
+                    e.into_iter()
+                        .map(|effect| SqlTabEffect::Results { tab_id, effect }),
+                );
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
         SqlTabMessage::Editor { tab_id, msg } => {
             let editor::msg::EditorMsg::Message(inner) = msg;
             if let Some(idx) = state.index_of(tab_id) {
@@ -118,17 +161,20 @@ pub fn update(
     (state, intents, effects)
 }
 
-/// Derive the `(instance, connection)` history key from a tab's session.
-///
-/// The session has no instance/connection display names yet, so the connection
-/// key is derived from `connection_id`; this keeps history scoped per
-/// connection while real identity strings are wired in.
+/// Derive the `(instance, connection)` key from a tab's session, falling back
+/// to the numeric `connection_id` when the display names are not yet bound.
 fn session_key(session: &super::session::TabSession) -> (String, String) {
+    let instance = session.instance.clone().unwrap_or_default();
     let connection = session
-        .connection_id
-        .map(|id| id.to_string())
+        .connection
+        .clone()
+        .or_else(|| {
+            session
+                .connection_id
+                .map(|id| id.to_string())
+        })
         .unwrap_or_default();
-    (String::new(), connection)
+    (instance, connection)
 }
 
 /// Log when a routed child message targets a `tab_id` that no longer exists

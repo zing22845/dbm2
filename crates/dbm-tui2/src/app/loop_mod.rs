@@ -343,6 +343,32 @@ fn sql_action_to_msg(action: crate::features::sql_workspace::effect::SqlAction) 
             };
             SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Editor { tab_id, msg }))
         }
+        SA::SqlTab(STA::Results { tab_id, action }) => {
+            let results_msg = results_action_to_msg(action);
+            SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Results {
+                tab_id,
+                msg: crate::features::sql_workspace::sql_tab::results::msg::ResultsMsg::Message(
+                    results_msg,
+                ),
+            }))
+        }
+    }
+}
+
+/// Convert a results action into the corresponding results message.
+fn results_action_to_msg(action: crate::features::sql_workspace::sql_tab::results::effect::ResultsAction) -> crate::features::sql_workspace::sql_tab::results::msg::ResultsMessage {
+    use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction as RA;
+    use crate::features::sql_workspace::sql_tab::results::msg::ResultsMessage as M;
+    match action {
+        RA::ResultReady { result, paginated } => M::SetResult { result, paginated },
+        RA::QueryError { message } => {
+            tracing::warn!("query failed: {message}");
+            M::ClearResult
+        }
+        RA::CommitResult { ok, message } => {
+            tracing::info!("commit ok={ok}: {message}");
+            M::ResetSelection
+        }
     }
 }
 
@@ -380,5 +406,61 @@ fn explorer_action_to_msg(action: crate::features::explorer::effect::ExplorerAct
                 EM::Instances(InstancesMsg::Message(InstancesMessage::Load))
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::sql_workspace::effect::SqlAction;
+    use crate::features::sql_workspace::msg::SqlMessage;
+    use crate::features::sql_workspace::sql_tab::effect::SqlTabAction;
+    use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+    use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
+    use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+    use crate::features::sql_workspace::sql_tab::results::state::QueryResultData;
+
+    #[test]
+    fn sql_results_result_ready_routes_to_set_result() {
+        let action = SqlAction::SqlTab(SqlTabAction::Results {
+            tab_id: 3,
+            action: ResultsAction::ResultReady {
+                result: QueryResultData {
+                    columns: vec![],
+                    rows: vec![vec!["1".into()]],
+                    rows_affected: None,
+                    total_rows: Some(1),
+                },
+                paginated: true,
+            },
+        });
+        let SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Results { tab_id, msg })) =
+            sql_action_to_msg(action)
+        else {
+            panic!("expected Results route");
+        };
+        assert_eq!(tab_id, 3);
+        let ResultsMsg::Message(ResultsMessage::SetResult { result, paginated }) = msg else {
+            panic!("expected SetResult");
+        };
+        assert!(paginated);
+        assert_eq!(result.rows[0][0], "1");
+    }
+
+    #[test]
+    fn sql_results_query_error_clears_result() {
+        let action = SqlAction::SqlTab(SqlTabAction::Results {
+            tab_id: 1,
+            action: ResultsAction::QueryError {
+                message: "boom".into(),
+            },
+        });
+        let SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Results { tab_id, msg })) =
+            sql_action_to_msg(action)
+        else {
+            panic!("expected Results route");
+        };
+        assert_eq!(tab_id, 1);
+        assert!(matches!(msg, ResultsMsg::Message(ResultsMessage::ClearResult)));
     }
 }
