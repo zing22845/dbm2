@@ -1,4 +1,7 @@
 pub mod detail;
+pub mod detail_edit;
+pub mod edit;
+pub mod edit_sql;
 pub mod effect;
 pub mod intent;
 pub mod msg;

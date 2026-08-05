@@ -1,5 +1,13 @@
-//! Shared domain types: identifiers, error types, configuration structs.
+//! Pure-data shared model enums.
 //!
-//! Types that are used across features and are not tied to any single feature
-//! belong here. Skeleton layer — add modules as migration brings in shared
-//! domain types.
+//! Shared model types that multiple features reference but no single feature
+//! owns. Kept deliberately small and TEA-neutral.
+
+/// Row-change classification shared between results editing and theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowChangeKind {
+    NoChange,
+    Insert,
+    Delete,
+    Update,
+}

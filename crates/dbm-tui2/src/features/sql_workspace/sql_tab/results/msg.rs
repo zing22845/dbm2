@@ -19,6 +19,22 @@ pub enum ResultsMessage {
     SearchKey(KeyEvent),
     /// Reset the result selection / scroll (after a new result).
     ResetSelection,
+    /// Enter / toggle edit mode.
+    EnterEdit,
+    /// Exit edit mode (clears the session).
+    ExitEdit,
+    /// Roll back all edits.
+    Rollback,
+    /// Add a pending insert row.
+    AddRow,
+    /// Duplicate the selected row as a pending insert.
+    DupRow,
+    /// Delete the selected row.
+    DelRow,
+    /// Set the detail draft text (edited cell value).
+    SetDetailDraft { text: String },
+    /// Commit the current edits (emits a commit effect / intent).
+    Commit,
     /// Forward to the detail sub-module.
     Detail(DetailMsg),
 }

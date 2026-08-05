@@ -6,6 +6,8 @@
 use crate::common::components::search::PaneSearch;
 
 use super::detail::state::DetailState;
+use super::edit::ResultsEditState;
+use super::edit_sql::EditTarget;
 use super::pagination::{DEFAULT_RESULTS_ROW_LIMIT, can_go_next};
 
 /// An `Eq` projection of `dbm_core::QueryResult` so it can travel through the
@@ -51,6 +53,18 @@ pub struct ResultsState {
     pub h_scroll: usize,
     /// The detail sub-pane state.
     pub detail: DetailState,
+    /// The row-edit session (snapshots / dirty cells / deleted / new rows).
+    pub edit: ResultsEditState,
+    /// The resolved edit target (schema/table/primary keys) when editable.
+    pub edit_target: Option<EditTarget>,
+    /// The detail draft's baseline (cell value at load) for dirty detection.
+    pub detail_baseline: String,
+    /// The detail draft's current text (edited value).
+    pub detail_draft: String,
+    /// Whether the detail draft is dirty (differs from baseline).
+    pub detail_dirty: bool,
+    /// Whether an unsaved detail draft blocks leaving Detail.
+    pub detail_leave_warning: bool,
 }
 
 impl ResultsState {
@@ -122,6 +136,116 @@ impl ResultsState {
             };
         }
         self.row != prev_row || self.col != prev_col
+    }
+
+    // ---- Edit session (row editing / save flow) ----
+
+    /// Enter edit mode with the current result rows as snapshots.
+    pub fn enter_edit(&mut self) {
+        if !self.editable() {
+            return;
+        }
+        let rows: Vec<Vec<String>> = self
+            .result
+            .as_ref()
+            .map(|r| r.rows.clone())
+            .unwrap_or_default();
+        self.edit.enter_edit(&rows);
+    }
+
+    /// Whether the current result is editable (has an edit target).
+    pub fn editable(&self) -> bool {
+        self.edit_target.is_some()
+    }
+
+    /// Roll back all edits, restoring snapshots into the result rows.
+    pub fn rollback_edits(&mut self) {
+        self.edit.rollback();
+        if let Some(result) = self.result.as_mut() {
+            result.rows = self.edit.snapshots.clone();
+        }
+        self.detail_baseline.clear();
+        self.detail_draft.clear();
+        self.detail_dirty = false;
+        self.detail_leave_warning = false;
+    }
+
+    /// Exit edit mode (clears the session).
+    pub fn exit_edit(&mut self) {
+        self.edit.exit_edit();
+    }
+
+    /// Apply an edited cell value into the edit session (and the live result).
+    pub fn apply_cell_value(&mut self, row: usize, col: usize, value: String) {
+        self.edit.apply_cell(row, col, value.clone());
+        if let Some(result) = self.result.as_mut() {
+            if row < result.rows.len()
+                && let Some(cell) = result.rows.get_mut(row).and_then(|r| r.get_mut(col))
+            {
+                *cell = value;
+            }
+        }
+    }
+
+    /// Add an empty row at the end (pending insert).
+    pub fn edit_add_row(&mut self) {
+        if !self.edit.editing {
+            return;
+        }
+        let cols = self.result.as_ref().map(|r| r.columns.len()).unwrap_or(0);
+        self.edit.insert_row(cols);
+        self.append_row(vec![String::new(); cols]);
+    }
+
+    /// Duplicate the selected row as a pending insert.
+    pub fn edit_dup_row(&mut self) {
+        if !self.edit.editing {
+            return;
+        }
+        let Some(values) = self.result.as_ref().and_then(|r| r.rows.get(self.row)).cloned() else {
+            return;
+        };
+        if values.is_empty() {
+            return;
+        }
+        self.edit.insert_row_values(values.clone());
+        self.append_row(values);
+    }
+
+    /// Delete the selected row (toggles the delete mark; removes pending inserts).
+    pub fn edit_del_row(&mut self) {
+        if !self.edit.editing {
+            return;
+        }
+        let removed_insert = self.edit.mark_delete(self.row);
+        if removed_insert
+            && let Some(result) = self.result.as_mut()
+            && self.row < result.rows.len()
+        {
+            result.rows.remove(self.row);
+        }
+    }
+
+    /// Append a row to the live result and select it.
+    fn append_row(&mut self, values: Vec<String>) {
+        if let Some(result) = self.result.as_mut() {
+            result.rows.push(values);
+            self.row = result.rows.len().saturating_sub(1);
+            self.col = 0;
+        }
+    }
+
+    /// Build the ordered commit DML from the current edit session.
+    pub fn build_commit_statements(&self) -> Result<Vec<String>, String> {
+        let Some(target) = self.edit_target.as_ref() else {
+            return Err("not editable".into());
+        };
+        super::edit_sql::build_commit_statements(target, &self.edit)
+    }
+
+    /// Commit-row count for the current edit session.
+    pub fn commit_row_count(&self) -> usize {
+        super::edit::commit_row_count(&self.edit)
     }
 }
 
@@ -223,6 +347,97 @@ mod tests {
         assert_eq!(d.columns[0].name, "id");
         assert_eq!(d.columns[0].comment.as_deref(), Some("pk"));
         assert_eq!(d.total_rows, Some(1));
+    }
+
+    #[test]
+    fn enter_edit_snapshots_rows_and_applies_cells() {
+        let mut s = ResultsState {
+            result: Some(sample()),
+            edit_target: Some(super::super::edit_sql::EditTarget {
+                schema: "public".into(),
+                table: "users".into(),
+                primary_keys: vec!["id".into()],
+                columns: vec!["id".into(), "name".into()],
+            }),
+            ..ResultsState::default()
+        };
+        s.enter_edit();
+        assert!(s.edit.editing);
+        s.col = 1;
+        s.apply_cell_value(0, 1, "carol".into());
+        assert!(s.edit.is_dirty());
+        assert_eq!(s.selected_cell().as_deref(), Some("carol"));
+        assert_eq!(s.commit_row_count(), 1);
+    }
+
+    #[test]
+    fn edit_add_and_dup_and_del_rows() {
+        let mut s = ResultsState {
+            result: Some(sample()),
+            edit_target: Some(super::super::edit_sql::EditTarget {
+                schema: "public".into(),
+                table: "users".into(),
+                primary_keys: vec!["id".into()],
+                columns: vec!["id".into(), "name".into()],
+            }),
+            ..ResultsState::default()
+        };
+        s.enter_edit();
+        s.edit_add_row();
+        assert_eq!(s.result.as_ref().unwrap().rows.len(), 3);
+        assert_eq!(s.commit_row_count(), 1);
+        // Dup the selected row (still row 0 after add).
+        s.row = 0;
+        s.edit_dup_row();
+        assert_eq!(s.result.as_ref().unwrap().rows.len(), 4);
+        // Delete a pending insert (last row).
+        s.row = s.result.as_ref().unwrap().rows.len() - 1;
+        s.edit_del_row();
+        assert_eq!(s.result.as_ref().unwrap().rows.len(), 3);
+    }
+
+    #[test]
+    fn build_commit_statements_from_edit_session() {
+        let mut s = ResultsState {
+            result: Some(sample()),
+            edit_target: Some(super::super::edit_sql::EditTarget {
+                schema: "public".into(),
+                table: "users".into(),
+                primary_keys: vec!["id".into()],
+                columns: vec!["id".into(), "name".into()],
+            }),
+            ..ResultsState::default()
+        };
+        s.enter_edit();
+        s.apply_cell_value(0, 1, "dave".into());
+        let stmts = s.build_commit_statements().unwrap();
+        assert_eq!(stmts.len(), 1);
+        assert!(stmts[0].contains("UPDATE"));
+        assert!(stmts[0].contains("\"public\".\"users\""));
+        assert!(stmts[0].contains("'dave'"));
+    }
+
+    #[test]
+    fn rollback_edits_restores_snapshots_and_clears_draft() {
+        let mut s = ResultsState {
+            result: Some(sample()),
+            edit_target: Some(super::super::edit_sql::EditTarget {
+                schema: "public".into(),
+                table: "users".into(),
+                primary_keys: vec!["id".into()],
+                columns: vec!["id".into(), "name".into()],
+            }),
+            ..ResultsState::default()
+        };
+        s.enter_edit();
+        s.apply_cell_value(0, 1, "zoe".into());
+        assert!(s.edit.is_dirty());
+        s.detail_draft = "zoe".into();
+        s.detail_dirty = true;
+        s.rollback_edits();
+        assert!(!s.edit.is_dirty());
+        assert_eq!(s.result.as_ref().unwrap().rows[0][1], "alice");
+        assert!(!s.detail_dirty);
     }
 }
 

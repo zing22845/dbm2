@@ -52,6 +52,45 @@ pub fn update(
             state.search.reset();
             state.detail.scroll = 0;
         }
+        ResultsMessage::EnterEdit => {
+            state.enter_edit();
+            // Load the selected cell into the detail draft baseline.
+            if let Some(value) = state.selected_cell() {
+                state.detail_baseline = value.clone();
+                state.detail_draft = value;
+                state.detail_dirty = false;
+            }
+        }
+        ResultsMessage::ExitEdit => {
+            state.exit_edit();
+            state.detail_baseline.clear();
+            state.detail_draft.clear();
+            state.detail_dirty = false;
+            state.detail_leave_warning = false;
+        }
+        ResultsMessage::Rollback => {
+            state.rollback_edits();
+            // Reload the selected cell as the baseline.
+            if let Some(value) = state.selected_cell() {
+                state.detail_baseline = value.clone();
+                state.detail_draft = value;
+                state.detail_dirty = false;
+            }
+        }
+        ResultsMessage::AddRow => state.edit_add_row(),
+        ResultsMessage::DupRow => state.edit_dup_row(),
+        ResultsMessage::DelRow => state.edit_del_row(),
+        ResultsMessage::SetDetailDraft { text } => {
+            state.detail_draft = text.clone();
+            state.detail_dirty =
+                super::detail_edit::detail_draft_dirty(&text, &state.detail_baseline);
+            state.apply_cell_value(state.row, state.col, text);
+        }
+        ResultsMessage::Commit => {
+            if let Ok(statements) = state.build_commit_statements() {
+                effects.push(ResultsEffect::Commit { statements });
+            }
+        }
         ResultsMessage::Detail(m) => {
             let detail::msg::DetailMsg::Message(inner) = m;
             let detail_state = std::mem::take(&mut state.detail);
