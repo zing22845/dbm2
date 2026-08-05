@@ -15,6 +15,7 @@ use crate::features::discover::state::{DiscoverFocus, DiscoverState};
 use crate::features::discover::targets::msg::{TargetsMessage, TargetsMsg};
 use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+use crate::features::explorer::objects::msg::{ObjectsMessage, ObjectsMsg};
 use crate::features::explorer::state::{ExplorerPane, ExplorerState};
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 use crate::features::instance_workspace::connections::msg::{ConnectionsMessage, ConnectionsMsg};
@@ -168,10 +169,30 @@ fn results(msg: ResultsMessage) -> AppMsg {
 
 /// Explorer key bindings, dispatched by the active explorer pane.
 fn explorer_key(key: KeyEvent, state: &ExplorerState) -> Option<AppMsg> {
+    // `Tab` toggles between the instances and objects panes.
+    if key.code == KeyCode::Tab {
+        let next = match state.pane {
+            ExplorerPane::Instances => ExplorerPane::Objects,
+            ExplorerPane::Objects => ExplorerPane::Instances,
+        };
+        return Some(explorer(ExplorerMessage::SetPane(next)));
+    }
     match state.pane {
         ExplorerPane::Instances => instances_key(key),
-        ExplorerPane::Objects => None,
+        ExplorerPane::Objects => objects_key(key),
     }
+}
+
+/// Objects pane keys: navigate the object tree.
+fn objects_key(key: KeyEvent) -> Option<AppMsg> {
+    let msg = match key.code {
+        KeyCode::Up | KeyCode::Char('k') => ObjectsMessage::MoveUp,
+        KeyCode::Down | KeyCode::Char('j') => ObjectsMessage::MoveDown,
+        KeyCode::Enter => ObjectsMessage::Select,
+        KeyCode::Right | KeyCode::Left => ObjectsMessage::ToggleExpand,
+        _ => return None,
+    };
+    Some(explorer(ExplorerMessage::Objects(ObjectsMsg::Message(msg))))
 }
 
 /// Instances pane keys: navigate the connection tree.

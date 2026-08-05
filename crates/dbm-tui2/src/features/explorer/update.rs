@@ -23,6 +23,19 @@ pub fn update(
             let s = std::mem::take(&mut state.instances);
             let (s, i, e) = instances::update::update(inner, s);
             state.instances = s;
+            // Instances -> objects interaction: activating a connection rebinds
+            // the object tree to that connection so browsing its databases
+            // starts from the selected connection.
+            if i.iter().any(|intent| {
+                matches!(
+                    intent,
+                    instances::intent::InstancesIntent::OpenConnectionWorkspace { .. }
+                )
+            }) {
+                if let Some((instance, connection)) = state.instances.connection_at_cursor() {
+                    state.objects.rebind(instance, connection);
+                }
+            }
             intents.extend(i.into_iter().map(ExplorerIntent::Instances));
             effects.extend(e.into_iter().map(ExplorerEffect::Instances));
         }
