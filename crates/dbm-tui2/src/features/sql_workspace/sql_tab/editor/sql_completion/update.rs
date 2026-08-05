@@ -21,7 +21,7 @@ pub fn update(
     msg: SqlCompletionMessage,
     mut state: SqlCompletionState,
 ) -> (SqlCompletionState, Vec<SqlCompletionIntent>, Vec<SqlCompletionEffect>) {
-    let intents = Vec::new();
+    let mut intents = Vec::new();
     let effects = Vec::new();
 
     match msg {
@@ -40,6 +40,18 @@ pub fn update(
             if state.is_open() {
                 state.move_selection(delta);
             }
+        }
+        SqlCompletionMessage::Apply => {
+            if let Some(item) = state.selected_item().cloned() {
+                let replace_start = state.replace_start;
+                let replace_end = state.replace_end;
+                intents.push(SqlCompletionIntent::Apply {
+                    item,
+                    replace_start,
+                    replace_end,
+                });
+            }
+            state.close();
         }
     }
 

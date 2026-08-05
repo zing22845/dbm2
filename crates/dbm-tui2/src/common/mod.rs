@@ -16,6 +16,7 @@
 
 pub mod components;
 pub mod controller;
+pub mod editor;
 pub mod model;
 pub mod service;
 pub mod utils;

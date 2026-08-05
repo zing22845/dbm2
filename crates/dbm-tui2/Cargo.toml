@@ -20,6 +20,7 @@ dbm-core = { workspace = true }
 dbm-discovery = { workspace = true }
 dbm-driver-pg = { workspace = true }
 dbm-store = { workspace = true }
+edtui = { workspace = true }
 futures = "0.3"
 ratatui = { workspace = true }
 ratatui-themes = { workspace = true }

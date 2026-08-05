@@ -7,6 +7,7 @@ members = [
     "crates/dbm-store",
     "crates/dbm-cli",
     "crates/dbm-tui2",
+    "third_party/edtui",
 ]
 default-members = ["crates/dbm-cli"]
 
@@ -40,6 +41,7 @@ dbm-discovery = { path = "crates/dbm-discovery" }
 dbm-core = { path = "crates/dbm-core" }
 dbm-driver-pg = { path = "crates/dbm-driver-pg" }
 dbm-store = { path = "crates/dbm-store" }
+edtui = { path = "third_party/edtui" }
 
 [profile.release]
 lto = true

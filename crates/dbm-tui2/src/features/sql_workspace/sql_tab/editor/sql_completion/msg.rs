@@ -20,6 +20,8 @@ pub enum SqlCompletionMessage {
     Close,
     /// Move the selection by `delta`.
     MoveSelection { delta: i32 },
+    /// Apply the currently selected item (emits an `Apply` intent).
+    Apply,
 }
 
 /// Feature message envelope (central-router compatible).

@@ -22,6 +22,13 @@ use crate::features::instance_workspace::connections::msg::{ConnectionsMessage, 
 use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
 use crate::features::instance_workspace::state::{IwState};
 use crate::features::instance_workspace::connections::state::FormField;
+use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+use crate::features::sql_workspace::state::SqlState;
+use crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn;
+use crate::features::sql_workspace::sql_tab::editor::context_picker::msg::{ContextPickerMessage, ContextPickerMsg};
+use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
+use crate::features::sql_workspace::sql_tab::editor::sql_completion::msg::{SqlCompletionMessage, SqlCompletionMsg};
+use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
 
 use super::msg::AppMsg;
 use super::state::ModalKind;
@@ -38,9 +45,7 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
             FocusZone::Header => header_key(key),
             FocusZone::Explorer => explorer_key(key, &state.explorer),
             FocusZone::InstanceWorkspace => iw_key(key, &state.iw),
-            // Features not yet migrated keep no key bindings; add arms here as
-            // their interaction logic is ported.
-            FocusZone::SQLWorkspace => None,
+            FocusZone::SQLWorkspace => sql_key(key, &state.sql),
         },
     }
 }
@@ -246,4 +251,79 @@ fn iw_form_key(key: KeyEvent) -> Option<AppMsg> {
 
 fn iw(msg: IwMessage) -> AppMsg {
     AppMsg::Iw(IwMsg::Message(msg))
+}
+
+/// SQL workspace key bindings, routed to the active tab's editor and its
+/// overlays (context picker / completion popup).
+fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
+    let tab = state.sql_tab.tabs.get(state.sql_tab.active_tab)?;
+    let tab_id = tab.session.id;
+    let editor = &tab.editor;
+
+    // The context picker, when open, owns all keys.
+    if editor.context_picker.open {
+        return sql_context_picker_key(key, tab_id);
+    }
+
+    // The completion popup handles selection/apply/close when open.
+    if editor.sql_completion.is_open() {
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
+                    SqlCompletionMessage::MoveSelection { delta: -1 },
+                )), tab_id));
+            }
+            KeyCode::Down | KeyCode::Char('j') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
+                    SqlCompletionMessage::MoveSelection { delta: 1 },
+                )), tab_id));
+            }
+            KeyCode::Enter => {
+                return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
+                    SqlCompletionMessage::Apply,
+                )), tab_id));
+            }
+            KeyCode::Esc => {
+                return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
+                    SqlCompletionMessage::Close,
+                )), tab_id));
+            }
+            _ => {}
+        }
+    }
+
+    // Otherwise forward the key to the editor buffer.
+    editor_key(key, tab_id)
+}
+
+/// Keys for the context picker overlay (owns all keys while open).
+fn sql_context_picker_key(key: KeyEvent, tab_id: usize) -> Option<AppMsg> {
+    let msg = match key.code {
+        KeyCode::Esc => ContextPickerMessage::Close,
+        KeyCode::Tab => ContextPickerMessage::MoveColumn(PickerColumn::Schema),
+        KeyCode::BackTab => ContextPickerMessage::MoveColumn(PickerColumn::Database),
+        KeyCode::Enter => ContextPickerMessage::Apply,
+        KeyCode::Up | KeyCode::Char('k') => ContextPickerMessage::MoveCursor { delta: -1 },
+        KeyCode::Down | KeyCode::Char('j') => ContextPickerMessage::MoveCursor { delta: 1 },
+        KeyCode::Left | KeyCode::Char('h') => ContextPickerMessage::MoveColumn(PickerColumn::Database),
+        KeyCode::Right | KeyCode::Char('l') => ContextPickerMessage::MoveColumn(PickerColumn::Schema),
+        KeyCode::Char('/') => ContextPickerMessage::BeginSearch,
+        _ => return None,
+    };
+    Some(sql_editor(EditorMessage::ContextPicker(ContextPickerMsg::Message(msg)), tab_id))
+}
+
+/// Forward a key to the editor buffer (typing / navigation / modal commands).
+fn editor_key(key: KeyEvent, tab_id: usize) -> Option<AppMsg> {
+    Some(sql_editor(EditorMessage::KeyEvent { key, tracked_caps_lock: false }, tab_id))
+}
+
+/// Build an `AppMsg::Sql` message targeting the given tab's editor.
+fn sql_editor(msg: EditorMessage, tab_id: usize) -> AppMsg {
+    AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+        SqlTabMessage::Editor {
+            tab_id,
+            msg: EditorMsg::Message(msg),
+        },
+    ))))
 }
