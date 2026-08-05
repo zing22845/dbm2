@@ -1,0 +1,19 @@
+[package]
+name = "dbm-discovery"
+description = "Local PostgreSQL instance discovery for DBM"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+dbm-core = { workspace = true }
+regex = "1"
+serde = { workspace = true }
+sha2 = "0.10"
+thiserror = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
+
+[dev-dependencies]
+tempfile = "3"

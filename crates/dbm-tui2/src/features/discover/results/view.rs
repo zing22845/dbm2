@@ -1,0 +1,8 @@
+//! Discovery results feature rendering.
+
+use ratatui::layout::Rect;
+use ratatui::Frame;
+
+use super::state::ResultsState;
+
+pub fn render(_frame: &mut Frame, _area: Rect, _state: &ResultsState) {}

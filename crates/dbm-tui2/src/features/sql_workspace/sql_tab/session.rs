@@ -1,0 +1,36 @@
+//! Per-tab session state.
+//!
+//! Each SQL tab owns an independent `TabSession`: which database connection it
+//! is bound to, which database/schema it currently operates on, and (in the
+//! future) transaction state, prepared statements and editor position. A
+//! session is the unit of persistence — a tab's session can be serialized and
+//! restored across app restarts, so a tab keeps its context after a relaunch.
+
+/// The identity and connection context of a single SQL tab.
+///
+/// `id` is a stable identifier that survives tab reordering/removal, distinct
+/// from the tab's index in `SqlTabState::tabs`. The remaining fields are the
+/// persistence-relevant context that will be (de)serialized once real session
+/// data exists; they are placeholders today.
+#[derive(Debug, Clone)]
+pub struct TabSession {
+    /// Stable identity across app restarts (used for persistence and routing).
+    pub id: usize,
+    /// Identifier of the database connection this tab is bound to, if any.
+    pub connection_id: Option<usize>,
+    /// Currently selected database, if any.
+    pub database: Option<String>,
+    /// Currently selected schema, if any.
+    pub schema: Option<String>,
+}
+
+impl Default for TabSession {
+    fn default() -> Self {
+        TabSession {
+            id: 0,
+            connection_id: None,
+            database: None,
+            schema: None,
+        }
+    }
+}

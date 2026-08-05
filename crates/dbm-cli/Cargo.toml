@@ -1,0 +1,22 @@
+[package]
+name = "dbm-cli"
+description = "DBM command-line interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "dbm"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+dbm-core = { workspace = true }
+dbm-driver-pg = { workspace = true }
+dbm-discovery = { workspace = true }
+dbm-store = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

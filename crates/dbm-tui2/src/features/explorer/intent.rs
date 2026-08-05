@@ -1,0 +1,31 @@
+//! Explorer feature intents.
+
+use crate::app_shell::intent::Intent;
+use super::msg::ExplorerMsg;
+use super::instances::intent::InstancesIntent;
+use super::objects::intent::ObjectsIntent;
+
+/// Intents emitted by the explorer feature. Child intents are wrapped so they
+/// can be lifted into the global router via `ExplorerMsg`.
+#[derive(Debug, Clone)]
+pub enum ExplorerIntent {
+    /// An intent originating from the instances list.
+    Instances(InstancesIntent),
+    /// An intent originating from the objects tree.
+    Objects(ObjectsIntent),
+}
+
+impl Intent for ExplorerIntent {
+    type Message = ExplorerMsg;
+
+    // Skeleton state: the child feature messages are currently uninhabited
+    // because their leaf messages are empty enums. Remove this allow when real
+    // business messages are introduced.
+    #[allow(unreachable_code)]
+    fn into_message(self) -> Self::Message {
+        match self {
+            ExplorerIntent::Instances(i) => i.into_message().into(),
+            ExplorerIntent::Objects(i) => i.into_message().into(),
+        }
+    }
+}

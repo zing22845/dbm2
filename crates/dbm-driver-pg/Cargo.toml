@@ -1,0 +1,19 @@
+[package]
+name = "dbm-driver-pg"
+description = "PostgreSQL driver for DBM"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+dbm-core = { workspace = true }
+deadpool-postgres = { workspace = true }
+tokio-postgres = { workspace = true }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

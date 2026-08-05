@@ -1,0 +1,13 @@
+//! `sql_tab` parent feature: owns tab management and contains the child
+//! modules `editor`, `results` and `history`.
+
+pub mod editor;
+pub mod effect;
+pub mod history;
+pub mod intent;
+pub mod msg;
+pub mod results;
+pub mod session;
+pub mod state;
+pub mod update;
+pub mod view;
