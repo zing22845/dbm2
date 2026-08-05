@@ -4,5 +4,6 @@
 //! shortcut label formatting, and in the future hashing / string formatting).
 //! Nothing here depends on `app`, on features, or on IO.
 
+pub mod cursor;
 pub mod shortcuts;
 pub mod text_width;
