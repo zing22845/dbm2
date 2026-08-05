@@ -3,10 +3,14 @@
 //! router. The generic `A` is the application's global action type, so this
 //! infrastructure has no dependency on `app`.
 
+use std::sync::Arc;
+
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-use super::effect_trait::ErasedEffect;
+use crate::common::service::services::Services;
+
+use super::effect_trait::{Emitter, ErasedEffect};
 
 /// Handle used to submit effects. Internally wraps an mpsc sender of boxed
 /// effects that resolve to the global action type `A`.
@@ -17,14 +21,19 @@ pub struct EffectRunner<A> {
 
 impl<A> EffectRunner<A>
 where
-    A: Send + 'static,
+    A: Send + Sync + 'static,
 {
     /// Create a new runner. Effects are executed on a background task set and
-    /// their resulting actions are forwarded to `action_tx`.
-    pub fn new(action_tx: mpsc::UnboundedSender<A>) -> (Self, EffectHandle<A>) {
+    /// their resulting actions are forwarded to `action_tx`. `services` is the
+    /// shared infrastructure bundle injected into every effect as it runs.
+    pub fn new(action_tx: mpsc::UnboundedSender<A>, services: Arc<Services>) -> (Self, EffectHandle<A>) {
         let (eff_tx, eff_rx) = mpsc::unbounded_channel::<Box<dyn ErasedEffect<A>>>();
         let runner = EffectRunner { tx: eff_tx };
-        let handle = EffectHandle { eff_rx, action_tx };
+        let handle = EffectHandle {
+            eff_rx,
+            action_tx,
+            services,
+        };
         (runner, handle)
     }
 
@@ -40,11 +49,12 @@ where
 pub struct EffectHandle<A> {
     eff_rx: mpsc::UnboundedReceiver<Box<dyn ErasedEffect<A>>>,
     action_tx: mpsc::UnboundedSender<A>,
+    services: Arc<Services>,
 }
 
 impl<A> EffectHandle<A>
 where
-    A: Send + 'static,
+    A: Send + Sync + 'static,
 {
     /// Run the effect-draining loop. Spawns one task per effect and forwards
     /// every resulting action into `action_tx`.
@@ -53,8 +63,13 @@ where
         let mut rx = self.eff_rx;
         while let Some(boxed) = rx.recv().await {
             let action_tx = self.action_tx.clone();
+            let services = self.services.clone();
             set.spawn(async move {
-                let actions = boxed.run_erased().await;
+                // The emitter forwards streaming actions (e.g. progress) into
+                // `action_tx` as the effect runs; the returned actions are sent
+                // afterwards.
+                let emit = Emitter::<A>::from_sender(action_tx.clone());
+                let actions = boxed.run_erased(emit, services).await;
                 for a in actions {
                     if action_tx.send(a).is_err() {
                         // The action receiver is gone (the app is shutting

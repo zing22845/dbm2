@@ -1,8 +1,19 @@
 //! Discovery results feature messages.
 
+/// The actual results list messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResultsMessage {}
+pub enum ResultsMessage {
+    /// Move the cursor up.
+    MoveUp,
+    /// Move the cursor down.
+    MoveDown,
+    /// Toggle selection of the row under the cursor.
+    ToggleSelect,
+    /// Toggle the unregistered-only filter.
+    ToggleUnregisteredFilter,
+}
 
+/// Feature message envelope (central-router compatible).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResultsMsg {
     Message(ResultsMessage),

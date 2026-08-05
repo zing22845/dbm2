@@ -671,6 +671,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "dbm-core",
+ "dbm-discovery",
+ "dbm-store",
  "futures",
  "ratatui",
  "ratatui-themes",

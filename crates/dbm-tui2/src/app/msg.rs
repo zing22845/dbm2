@@ -13,7 +13,7 @@ use crate::features::perf_monitor::msg::PerfMsg;
 use crate::features::sql_workspace::msg::SqlMsg;
 
 /// The global message type. All updates are dispatched on this enum.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum AppMsg {
     /// Shell-owned messages (quit, tick, focus change).
     Shell(ShellMsg),

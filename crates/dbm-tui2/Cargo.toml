@@ -16,6 +16,9 @@ path = "src/main.rs"
 [dependencies]
 anyhow = { workspace = true }
 crossterm = { workspace = true, features = ["event-stream"] }
+dbm-core = { workspace = true }
+dbm-discovery = { workspace = true }
+dbm-store = { workspace = true }
 futures = "0.3"
 ratatui = { workspace = true }
 ratatui-themes = { workspace = true }

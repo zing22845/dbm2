@@ -38,7 +38,10 @@ pub struct AppState {
 /// The kind of modal currently displayed. New variants (e.g. `Alert`,
 /// `Confirm`, `Prompt`) will be added as modals are implemented.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModalKind {}
+pub enum ModalKind {
+    /// The instance discovery / registration modal.
+    Discover,
+}
 
 impl Default for AppState {
     fn default() -> Self {

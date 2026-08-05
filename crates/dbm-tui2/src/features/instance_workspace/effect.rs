@@ -21,7 +21,7 @@ pub enum IwEffect {
 impl Effect for IwEffect {
     type Action = IwAction;
 
-    fn run(self) -> crate::app_shell::effect::effect_trait::BoxFuture<Vec<Self::Action>> {
+    fn run(self, _emit: crate::app_shell::effect::effect_trait::Emitter<Self::Action>, _services: std::sync::Arc<crate::common::service::services::Services>) -> crate::app_shell::effect::effect_trait::BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             match self {
                 IwEffect::Overview(_) | IwEffect::Connections(_) => Vec::new(),

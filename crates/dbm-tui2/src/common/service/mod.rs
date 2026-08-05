@@ -1,6 +1,9 @@
-//! External interaction abstractions: db connection pools, file IO, network
-//! clients.
+//! Shared service abstractions and the composition-root service bundle.
 //!
-//! Interfaces to outside the TUI so services can be swapped or mocked without
-//! touching feature logic. Skeleton layer — add modules as migration brings in
-//! service interfaces.
+//! `Services` aggregates every infrastructure dependency (database store, and
+//! later file IO, network clients). It is created once at the composition root
+//! (`app`) and injected into the `EffectRunner`, which hands a clone to each
+//! effect as it runs. Features never construct or hold services directly —
+//! effects describe *what* to do, and `Services` supplies the *how*.
+
+pub mod services;

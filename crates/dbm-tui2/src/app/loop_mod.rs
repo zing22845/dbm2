@@ -54,8 +54,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let (action_tx, mut action_rx) = mpsc::unbounded_channel::<Action>();
+    // The composition root creates the shared service bundle once and injects
+    // it into the effect runner, which hands it to each effect as it runs.
+    let services = crate::common::service::services::Services::new()?;
     let effect_runner = {
-        let (runner, handle) = EffectRunner::new(action_tx.clone());
+        let services = std::sync::Arc::new(services);
+        let (runner, handle) = EffectRunner::new(action_tx.clone(), services.clone());
         tokio::spawn(handle.run());
         runner
     };
@@ -95,7 +99,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         // the key below.
                         _ => None,
                     };
-                    let msg = global.or_else(|| crate::app::input::key_to_msg(key, state.focus));
+                    let msg = global.or_else(|| crate::app::input::key_to_msg(key, &state));
                     if let Some(msg) = msg {
                         process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                     }
@@ -215,12 +219,20 @@ fn drain_async_actions(
             Ok(Action::Shell(crate::app_shell::action::ShellAction::Quit)) => {
                 pending.push_back(AppMsg::Shell(crate::app_shell::msg::ShellMsg::Quit));
             }
+            // The discover feature's scan/register actions feed back into the
+            // discover modal as messages.
+            Ok(Action::Discover(action)) => {
+                pending.push_back(AppMsg::Discover(
+                    crate::features::discover::msg::DiscoverMsg::Message(
+                        discover_action_to_msg(action),
+                    ),
+                ));
+            }
             // Feature-specific actions are not yet handled; they are dropped
             // rather than panicking so the loop stays resilient. `Shell` has a
             // single `Quit` variant and is already covered above.
             Ok(Action::Header(_))
             | Ok(Action::Explorer(_))
-            | Ok(Action::Discover(_))
             | Ok(Action::Iw(_))
             | Ok(Action::Sql(_))
             | Ok(Action::Footer(_))
@@ -228,5 +240,18 @@ fn drain_async_actions(
             Err(mpsc::error::TryRecvError::Empty) => break,
             Err(mpsc::error::TryRecvError::Disconnected) => break,
         }
+    }
+}
+
+/// Convert a discover action into the corresponding discover message.
+fn discover_action_to_msg(action: crate::features::discover::effect::DiscoverAction) -> crate::features::discover::msg::DiscoverMessage {
+    use crate::features::discover::effect::DiscoverAction as A;
+    use crate::features::discover::msg::DiscoverMessage as M;
+    match action {
+        A::ScanProgress { done, total } => M::ScanProgress { done, total },
+        A::ScanComplete { items } => M::ScanComplete { items },
+        A::ScanError { error } => M::ScanError { error },
+        A::RegisterComplete { count } => M::RegisterComplete { count },
+        A::RegisterError { error } => M::RegisterError { error },
     }
 }

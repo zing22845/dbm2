@@ -3,9 +3,9 @@
 //! message scheduling, intent routing or event-loop logic; those live in
 //! `crate::app::loop_mod`.
 
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-use crate::app::state::AppState;
+use crate::app::state::{AppState, ModalKind};
 use crate::features::discover::view as discover_view;
 use crate::features::explorer::view as explorer_view;
 use crate::features::global_footer::view as footer_view;
@@ -56,13 +56,42 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     perf_view::render(frame, &state.theme, workspace[1], &state.perf);
     footer_view::render(frame, &state.theme, chunks[2], &state.footer);
 
-    // The discover / iw features are wired into the message router but their
-    // rendering is currently disabled (no dedicated screen region yet). These
-    // placeholder references keep the render functions and states linked until
-    // they are integrated into the workspace area or shown on demand.
-    let _ = (&state.discover, &state.iw);
-    let _ = (
-        discover_view::render as fn(&mut ratatui::Frame, ratatui::layout::Rect, &crate::features::discover::state::DiscoverState),
-        iw_view::render as fn(&mut ratatui::Frame, ratatui::layout::Rect, &crate::features::instance_workspace::state::IwState),
-    );
+    // Render any active modal as a centered overlay.
+    match state.modal {
+        Some(ModalKind::Discover) => {
+            render_modal_popup(frame, &state.theme, workspace[1], &state.discover, |f, t, a, s| {
+                discover_view::render(f, t, a, s)
+            });
+        }
+        None => {}
+    }
+
+    // The iw feature is wired into the message router but its rendering is
+    // currently disabled (no dedicated screen region yet).
+    let _ = &state.iw;
+    let _ = iw_view::render as fn(&mut ratatui::Frame, ratatui::layout::Rect, &crate::features::instance_workspace::state::IwState);
+}
+
+/// Render a modal as a centered, bordered popup over `base`.
+fn render_modal_popup<'a, S, F>(
+    frame: &mut ratatui::Frame,
+    theme: &crate::common::view::theme::Theme,
+    base: Rect,
+    state: &'a S,
+    inner: F,
+) where
+    F: Fn(&mut ratatui::Frame, &crate::common::view::theme::Theme, Rect, &'a S),
+{
+    let w = (base.width * 3) / 4;
+    let h = (base.height * 3) / 4;
+    if w < 2 || h < 2 {
+        return;
+    }
+    let popup = Rect {
+        x: base.x + (base.width - w) / 2,
+        y: base.y + (base.height - h) / 2,
+        width: w,
+        height: h,
+    };
+    inner(frame, theme, popup, state);
 }
