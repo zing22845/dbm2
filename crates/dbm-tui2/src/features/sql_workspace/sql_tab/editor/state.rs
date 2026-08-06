@@ -3,10 +3,25 @@
 //! Owns the SQL buffer + cursor via the vendored `edtui` editor and its key
 //! handler, plus the context picker and SQL completion child sub-modules.
 
+use std::collections::HashMap;
+
 use super::context_picker::state::ContextPickerState;
 use super::sql_completion::state::SqlCompletionState;
 use super::sql_search::EditorSqlSearch;
 use crate::common::editor;
+use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+
+/// Cached catalog metadata used to power SQL completion: the schema's table
+/// names plus each table's columns. Loaded once when the tab binds to a
+/// connection (`EditorEffect::LoadCompletionCatalog`), so typing a query can
+/// offer table / column names without a DB round-trip per keystroke.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CompletionCatalog {
+    /// Every table in the tab's active schema (for `FROM` / table completion).
+    pub tables: Vec<String>,
+    /// Column metadata keyed by table name (for column completion).
+    pub columns_by_table: HashMap<String, Vec<ColumnInfo>>,
+}
 
 /// The editor feature state. Not `Default`-derived: the `edtui::EditorState`
 /// has no `Default` impl, so it is built via `editor::new_editor`. `Debug` is
@@ -24,6 +39,8 @@ pub struct EditorState {
     pub sql_completion: SqlCompletionState,
     /// In-buffer `/` search state (query + live matches).
     pub sql_search: EditorSqlSearch,
+    /// The cached SQL-completion catalog for the tab's connection/schema.
+    pub completion_catalog: CompletionCatalog,
 }
 
 impl std::fmt::Debug for EditorState {
@@ -47,6 +64,7 @@ impl Default for EditorState {
             context_picker: ContextPickerState::default(),
             sql_completion: SqlCompletionState::default(),
             sql_search: EditorSqlSearch::default(),
+            completion_catalog: CompletionCatalog::default(),
         }
     }
 }
@@ -60,6 +78,7 @@ impl EditorState {
             context_picker: ContextPickerState::default(),
             sql_completion: SqlCompletionState::default(),
             sql_search: EditorSqlSearch::default(),
+            completion_catalog: CompletionCatalog::default(),
         }
     }
 }

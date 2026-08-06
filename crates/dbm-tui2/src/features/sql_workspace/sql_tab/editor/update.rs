@@ -35,6 +35,13 @@ pub fn update(
             let sql = crate::common::editor::editor_text(&state.editor);
             intents.push(EditorIntent::RunQuery { sql });
         }
+        EditorMessage::CatalogLoaded {
+            tables,
+            columns_by_table,
+        } => {
+            state.completion_catalog.tables = tables;
+            state.completion_catalog.columns_by_table = columns_by_table;
+        }
         EditorMessage::ContextPicker(m) => {
             let context_picker::msg::ContextPickerMsg::Message(inner) = m;
             let cp_state = std::mem::take(&mut state.context_picker);
@@ -150,22 +157,49 @@ fn handle_key(state: &mut EditorState, key: KeyEvent, tracked_caps_lock: bool) {
 
 /// Recompute the completion popup for the current buffer/cursor.
 ///
-/// Metadata (tables/columns) is passed empty for now; the tab/session
-/// integration will supply cached catalog metadata once wired.
+/// Uses the tab's cached catalog: all table names are offered for `FROM`
+/// completion, and columns are scoped to the tables referenced in the buffer
+/// before the cursor (so a query on one table does not suggest another's
+/// columns). Falls back to keyword-only completion when the catalog is empty.
 fn refresh_completion(state: &mut EditorState) {
     let sql = crate::common::editor::editor_text(&state.editor);
     let cursor = editor_cursor(&state.editor);
+    let tables = state.completion_catalog.tables.clone();
+    let columns = scoped_columns(&state.completion_catalog, &sql, cursor);
     let sc_state = std::mem::take(&mut state.sql_completion);
     let (s, _i, _e) = sql_completion::update::update(
         sql_completion::msg::SqlCompletionMessage::Refresh {
             sql,
             cursor,
-            tables: Vec::new(),
-            columns: Vec::new(),
+            tables,
+            columns,
         },
         sc_state,
     );
     state.sql_completion = s;
+}
+
+/// The column metadata for the tables referenced in `sql` before `cursor`,
+/// so column completion is scoped to the tables actually in use.
+fn scoped_columns(
+    catalog: &super::state::CompletionCatalog,
+    sql: &str,
+    cursor: crate::common::utils::cursor::Cursor,
+) -> Vec<super::sql_completion::provider::ColumnInfo> {
+    let offset = super::sql_completion::context::cursor_offset(sql, cursor);
+    let refs = super::sql_completion::context::extract_referenced_tables(&sql[..offset]);
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for table_ref in refs {
+        let key = table_ref.name.to_lowercase();
+        if !seen.insert(key) {
+            continue;
+        }
+        if let Some(cols) = catalog.columns_by_table.get(&table_ref.name) {
+            out.extend(cols.iter().cloned());
+        }
+    }
+    out
 }
 
 /// Convert the edtui cursor to the completion engine's `Cursor`.
@@ -187,6 +221,39 @@ mod tests {
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
         }
+    }
+
+    #[test]
+    fn scoped_columns_only_include_referenced_tables() {
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+        use super::super::state::CompletionCatalog;
+        let mut catalog = CompletionCatalog {
+            tables: vec!["users".into(), "orders".into()],
+            columns_by_table: Default::default(),
+        };
+        catalog.columns_by_table.insert(
+            "users".into(),
+            vec![ColumnInfo {
+                name: "id".into(),
+                type_name: "integer".into(),
+                type_display: "integer".into(),
+                comment: None,
+            }],
+        );
+        catalog.columns_by_table.insert(
+            "orders".into(),
+            vec![ColumnInfo {
+                name: "amount".into(),
+                type_name: "numeric".into(),
+                type_display: "numeric".into(),
+                comment: None,
+            }],
+        );
+        let sql = "SELECT id FROM users WHERE ";
+        let cursor = crate::common::utils::cursor::Cursor::new(0, sql.chars().count());
+        let cols = scoped_columns(&catalog, sql, cursor);
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0].name, "id");
     }
 
     #[test]

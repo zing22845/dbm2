@@ -41,7 +41,32 @@ pub fn update(
             database,
             schema,
         } => {
-            state.open_connection_tab(instance, connection, connection_id, database, schema);
+            state.open_connection_tab(
+                instance.clone(),
+                connection.clone(),
+                connection_id,
+                database.clone(),
+                schema.clone(),
+            );
+            // Load the SQL-completion catalog for the newly bound tab so table
+            // and column completion is available immediately.
+            let tab_id = state
+                .tabs
+                .last()
+                .map(|t| t.session.id)
+                .unwrap_or_default();
+            let schema_name = schema
+                .clone()
+                .unwrap_or_else(|| "public".to_string());
+            effects.push(SqlTabEffect::Editor {
+                tab_id,
+                effect: editor::effect::EditorEffect::LoadCompletionCatalog {
+                    instance,
+                    connection,
+                    database,
+                    schema: schema_name,
+                },
+            });
         }
         SqlTabMessage::ApplyContext { tab_id, database, schema } => {
             if let Some(idx) = state.index_of(tab_id) {

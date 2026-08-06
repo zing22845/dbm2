@@ -127,7 +127,19 @@ where
         .query(&page_sql, &[])
         .await
         .map_err(|e| crate::dbm_error_from_postgres(&e))?;
-    let result = convert::rows_to_result(&rows);
+    let mut result = convert::rows_to_result(&rows);
+
+    // Total row count over the user query (for the "Total N rows" / "page x/N"
+    // toolbar). Runs inside the same transaction; `None` when the query is not
+    // a single count-able SELECT.
+    if let Some(count_sql) = pagination::count_select_sql(trimmed) {
+        let count_row = txn
+            .query_one(&count_sql, &[])
+            .await
+            .map_err(|e| crate::dbm_error_from_postgres(&e))?;
+        let total: i64 = count_row.get(0);
+        result.total_rows = Some(total.max(0) as u64);
+    }
 
     txn.commit()
         .await

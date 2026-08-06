@@ -574,6 +574,12 @@ fn sql_action_to_msg(action: crate::features::sql_workspace::effect::SqlAction) 
                 EA::ContextPicker(cp) => EditorMsg::Message(EditorMessage::ContextPicker(
                     ContextPickerMsg::Message(cp_action_to_msg(cp)),
                 )),
+                EA::CompletionCatalogLoaded(data) => EditorMsg::Message(
+                    EditorMessage::CatalogLoaded {
+                        tables: data.tables,
+                        columns_by_table: data.columns_by_table,
+                    },
+                ),
             };
             SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Editor { tab_id, msg }))
         }

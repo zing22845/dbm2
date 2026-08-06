@@ -186,7 +186,28 @@ impl Services {
             .map_err(|e| e.user_message().to_string())
     }
 
-    /// List the primary-key column names of a table (for row-edit gating).
+    /// List the columns of a table in a specific database/schema.
+    pub async fn list_columns(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: Option<&str>,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<dbm_core::ColumnMeta>, String> {
+        let url = self.connection_url(instance, connection, database).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        self.driver
+            .list_columns(&pool, schema, table)
+            .await
+            .map_err(|e| e.user_message().to_string())
+    }
+
+    /// List the columns of a table in a specific database/schema.
     pub async fn list_primary_keys(
         &self,
         instance: &str,
@@ -205,6 +226,40 @@ impl Services {
             .list_primary_keys(&pool, schema, table)
             .await
             .map_err(|e| e.user_message().to_string())
+    }
+
+    /// Fetch the SQL-completion catalog for a schema: every table name plus,
+    /// per table, its column metadata. Used once per tab bind to power table /
+    /// column completion without a DB round-trip on every keystroke.
+    pub async fn completion_catalog(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: Option<&str>,
+        schema: &str,
+    ) -> Result<(Vec<String>, std::collections::HashMap<String, Vec<dbm_core::ColumnMeta>>), String>
+    {
+        let url = self.connection_url(instance, connection, database).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        let tables = self
+            .driver
+            .list_tables(&pool, schema)
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        let mut columns_by_table = std::collections::HashMap::new();
+        for table in &tables {
+            let cols = self
+                .driver
+                .list_columns(&pool, schema, table)
+                .await
+                .map_err(|e| e.user_message().to_string())?;
+            columns_by_table.insert(table.clone(), cols);
+        }
+        Ok((tables, columns_by_table))
     }
 
     /// List the extensions of a specific database.
