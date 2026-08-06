@@ -9,5 +9,6 @@ pub mod msg;
 pub mod results;
 pub mod session;
 pub mod state;
+pub mod tab;
 pub mod update;
 pub mod view;

@@ -2,10 +2,11 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Frame;
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::Block;
 
 use crate::common::view::theme::Theme;
 
+use super::session::TabSession;
 use super::state::SqlTabState;
 use super::editor::view as editor_view;
 use super::history::view as history_view;
@@ -21,13 +22,9 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState)
         ])
         .split(area);
 
-    // Tab bar: show the open-tab count and the active index.
-    let tab_bar = Paragraph::new(format!(
-        "Tabs: {} (active = {})",
-        state.tabs.len(),
-        state.active_tab
-    ));
-    frame.render_widget(tab_bar, chunks[0]);
+    // Tab bar: themed tabs with session-derived titles + click rects.
+    let sessions: Vec<TabSession> = state.tabs.iter().map(|t| t.session.clone()).collect();
+    super::tab::render(frame, theme, chunks[0], &sessions, Some(state.active_tab));
 
     let Some(tab) = state.tabs.get(state.active_tab) else {
         // No tab is open: render an empty placeholder in the body.

@@ -292,6 +292,11 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         }
     }
 
+    // Tab-bar / tab management keys (only when the popups are closed).
+    if let Some(msg) = sql_tab_navigation_key(key, state) {
+        return Some(msg);
+    }
+
     // Ctrl+Enter runs the current editor SQL.
     if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
         return Some(sql_editor(EditorMessage::Run, tab_id));
@@ -299,6 +304,36 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
 
     // Otherwise forward the key to the editor buffer.
     editor_key(key, tab_id)
+}
+
+/// Tab-bar navigation keys: switch / open / close tabs.
+fn sql_tab_navigation_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
+    use crate::features::sql_workspace::sql_tab::msg::SqlTabMessage;
+    let count = state.sql_tab.tabs.len();
+    if count == 0 {
+        return None;
+    }
+    let active = state.sql_tab.active_tab;
+    let tab_msg = match key.code {
+        KeyCode::Tab if key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            SqlTabMessage::Tab((active + 1) % count)
+        }
+        KeyCode::BackTab if key.modifiers.contains(KeyModifiers::CONTROL)
+            || key.modifiers.contains(KeyModifiers::SHIFT) =>
+        {
+            SqlTabMessage::Tab((active + count - 1) % count)
+        }
+        KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            SqlTabMessage::CloseTab(active)
+        }
+        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            SqlTabMessage::OpenTab
+        }
+        _ => return None,
+    };
+    Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(tab_msg)))))
 }
 
 /// Keys for the context picker overlay (owns all keys while open).
@@ -331,4 +366,74 @@ fn sql_editor(msg: EditorMessage, tab_id: usize) -> AppMsg {
             msg: EditorMsg::Message(msg),
         },
     ))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::sql_workspace::sql_tab::state::SqlTabState;
+
+    fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, modifiers)
+    }
+
+    /// A `SqlState` with `count` tabs open. The default state already opens one
+    /// tab, so we open `count.saturating_sub(1)` more on top of it.
+    fn state_with_tabs(count: usize) -> SqlState {
+        let mut tab_state = SqlTabState::default();
+        for i in 1..count {
+            tab_state.open_connection_tab(
+                "local".into(),
+                format!("conn-{i}"),
+                format!("c{i}"),
+                None,
+                None,
+            );
+        }
+        SqlState {
+            sql_tab: tab_state,
+        }
+    }
+
+    fn extract_tab_msg(msg: AppMsg) -> SqlTabMessage {
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(m)))) => m,
+            _ => panic!("expected Sql tab message"),
+        }
+    }
+
+    #[test]
+    fn ctrl_tab_switches_to_next_tab() {
+        let state = state_with_tabs(3); // active_tab = 2 (last opened)
+        let msg = sql_tab_navigation_key(key(KeyCode::Tab, KeyModifiers::CONTROL), &state)
+            .expect("ctrl+tab should be handled");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab(0));
+    }
+
+    #[test]
+    fn ctrl_shift_tab_wraps_to_previous_tab() {
+        let state = state_with_tabs(2); // active_tab = 1
+        let msg = sql_tab_navigation_key(
+            key(KeyCode::BackTab, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+            &state,
+        )
+        .expect("ctrl+shift+tab should be handled");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab(0));
+    }
+
+    #[test]
+    fn ctrl_w_closes_active_tab() {
+        let state = state_with_tabs(2);
+        let msg = sql_tab_navigation_key(key(KeyCode::Char('w'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+w should be handled");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::CloseTab(1));
+    }
+
+    #[test]
+    fn single_tab_switching_wraps_to_itself() {
+        let state = state_with_tabs(1);
+        let msg = sql_tab_navigation_key(key(KeyCode::Tab, KeyModifiers::CONTROL), &state)
+            .expect("ctrl+tab should be handled");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab(0));
+    }
 }
