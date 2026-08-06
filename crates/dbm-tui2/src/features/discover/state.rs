@@ -1,17 +1,13 @@
 //! Discover feature state.
+//!
+//! Focus for the discover parent pane (engine / targets / results) lives on the
+//! shell's `Pane::Discover(DiscoverPane)` — discover is a parent pane whose
+//! child panes are the focused region while it is open. `DiscoverState` holds
+//! only the feature's content state.
 
 use super::engine::state::EngineState;
 use super::results::state::ResultsState;
 use super::targets::state::TargetsState;
-
-/// Which discover pane owns keyboard input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DiscoverFocus {
-    Engine,
-    #[default]
-    Targets,
-    Results,
-}
 
 /// State for the discover feature, aggregating its three child sub-modules.
 #[derive(Debug, Clone, Default)]
@@ -22,8 +18,6 @@ pub struct DiscoverState {
     pub targets: TargetsState,
     /// The discovery results list.
     pub results: ResultsState,
-    /// Which discover pane is focused.
-    pub focus: DiscoverFocus,
     /// Whether the close-confirmation dialog is shown.
     pub close_confirm: bool,
     /// Whether a scan is currently in flight.
@@ -37,7 +31,6 @@ impl DiscoverState {
     pub fn opened() -> Self {
         DiscoverState {
             targets: TargetsState::with_default_targets(),
-            focus: DiscoverFocus::Engine,
             ..DiscoverState::default()
         }
     }

@@ -23,6 +23,6 @@
 
 pub mod action;
 pub mod effect;
-pub mod focus;
 pub mod intent;
 pub mod msg;
+pub mod pane;

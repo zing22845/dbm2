@@ -1,7 +1,7 @@
 //! Global application state. `AppState` aggregates the state of every feature
 //! plus shell-level metadata (focus, quit flag, status, modal).
 
-use crate::app_shell::focus::FocusZone;
+use crate::app_shell::pane::Pane;
 use crate::common::view::theme::Theme;
 use crate::features::discover::state::DiscoverState;
 use crate::features::explorer::state::ExplorerState;
@@ -14,8 +14,8 @@ use crate::features::sql_workspace::state::SqlState;
 /// Aggregated application state.
 #[derive(Debug)]
 pub struct AppState {
-    /// Which top-level region owns keyboard input.
-    pub focus: FocusZone,
+    /// Which parent pane (and discover sub-pane, if open) owns keyboard input.
+    pub focus: Pane,
     /// Whether the application should quit.
     pub should_quit: bool,
     /// A short global status line (rendered by the footer).
@@ -41,8 +41,6 @@ pub struct AppState {
 /// popup's lifetime).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModalKind {
-    /// The instance discovery / registration modal.
-    Discover,
     /// Choose a rows-per-page limit for the current result.
     ResultsRowLimitPicker { current: usize, limits: Vec<usize> },
     /// Type a specific page number to jump to.
@@ -58,7 +56,7 @@ pub enum ModalKind {
 impl Default for AppState {
     fn default() -> Self {
         AppState {
-            focus: FocusZone::Header,
+            focus: Pane::Header,
             should_quit: false,
             global_status: String::new(),
             modal: None,

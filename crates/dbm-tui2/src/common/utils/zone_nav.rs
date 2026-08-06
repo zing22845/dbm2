@@ -94,14 +94,6 @@ impl InstancePane {
     }
 }
 
-/// Sub-focus within the Discover modal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiscoverFocus {
-    Engine,
-    Targets,
-    Results,
-}
-
 /// Resolved destination for a spatial move.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoveTarget {
@@ -134,17 +126,6 @@ pub fn pane_dir_from_key(key: &KeyEvent) -> Option<PaneDir> {
         KeyCode::Char('j') | KeyCode::Down => Some(PaneDir::Down),
         KeyCode::Char('k') | KeyCode::Up => Some(PaneDir::Up),
         KeyCode::Char('l') | KeyCode::Right => Some(PaneDir::Right),
-        _ => None,
-    }
-}
-
-/// Within-Discover adjacency only (Engine → Targets → Results).
-pub fn discover_neighbor(focus: DiscoverFocus, dir: PaneDir) -> Option<DiscoverFocus> {
-    match (focus, dir) {
-        (DiscoverFocus::Engine, PaneDir::Down) => Some(DiscoverFocus::Targets),
-        (DiscoverFocus::Targets, PaneDir::Down) => Some(DiscoverFocus::Results),
-        (DiscoverFocus::Targets, PaneDir::Up) => Some(DiscoverFocus::Engine),
-        (DiscoverFocus::Results, PaneDir::Up) => Some(DiscoverFocus::Targets),
         _ => None,
     }
 }
@@ -295,28 +276,6 @@ mod tests {
             pane_dir_from_key(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
             None
         );
-    }
-
-    #[test]
-    fn discover_adjacency() {
-        assert_eq!(
-            discover_neighbor(DiscoverFocus::Engine, PaneDir::Down),
-            Some(DiscoverFocus::Targets)
-        );
-        assert_eq!(
-            discover_neighbor(DiscoverFocus::Targets, PaneDir::Down),
-            Some(DiscoverFocus::Results)
-        );
-        assert_eq!(
-            discover_neighbor(DiscoverFocus::Targets, PaneDir::Up),
-            Some(DiscoverFocus::Engine)
-        );
-        assert_eq!(
-            discover_neighbor(DiscoverFocus::Results, PaneDir::Up),
-            Some(DiscoverFocus::Targets)
-        );
-        assert_eq!(discover_neighbor(DiscoverFocus::Engine, PaneDir::Left), None);
-        assert_eq!(discover_neighbor(DiscoverFocus::Results, PaneDir::Down), None);
     }
 
     #[test]

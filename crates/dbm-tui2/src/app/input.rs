@@ -8,12 +8,12 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app_shell::focus::FocusZone;
 use crate::app_shell::msg::ShellMsg;
-use crate::common::utils::zone_nav::pane_dir_from_key;
+use crate::app_shell::pane::{DiscoverPane, Pane};
+use crate::common::utils::zone_nav::{pane_dir_from_key, PaneDir};
 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
 use crate::features::discover::results::msg::{ResultsMessage, ResultsMsg};
-use crate::features::discover::state::{DiscoverFocus, DiscoverState};
+use crate::features::discover::state::DiscoverState;
 use crate::features::discover::targets::msg::{TargetsMessage, TargetsMsg};
 use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
@@ -48,58 +48,59 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
     // moves the focus zone regardless of the currently focused pane. Check it
     // first, before modal/focus routing, so it always works.
     if state.modal.is_none()
+        && !matches!(state.focus, Pane::Discover(_))
         && let Some(dir) = pane_dir_from_key(&key)
     {
         // Inside the SQL workspace, Ctrl+nav moves the sub-pane focus
-        // (editor / results / history) rather than the top-level zone.
-        if state.focus == FocusZone::SQLWorkspace
+        // (editor / results / history) rather than the top-level pane.
+        if state.focus == Pane::Workspace
             && let Some(msg) = switch_subpane(dir, &state.sql)
         {
             return Some(msg);
         }
         return switch_zone_by_dir(dir, state.focus);
     }
+    if let Pane::Discover(sub) = state.focus {
+        // The discover parent pane owns all input; ctrl+hjkl moves between its
+        // child panes (engine / targets / results).
+        return discover_key(key, sub, &state.discover);
+    }
     match &state.modal {
-        Some(ModalKind::Discover) => discover_key(key, &state.discover),
         // Data-carrying popups: route their keys here (esc/n close, y/enter
         // confirms and dispatches the owning feature's action).
         Some(modal) => modal_key(key, modal, state),
         None => match state.focus {
-            FocusZone::Header => header_key(key),
-            FocusZone::Explorer => explorer_key(key, &state.explorer),
-            FocusZone::InstanceWorkspace => iw_key(key, &state.iw),
-            FocusZone::SQLWorkspace => sql_key(key, &state.sql),
+            Pane::Header => header_key(key),
+            Pane::Explorer => explorer_key(key, &state.explorer),
+            Pane::InstanceWorkspace => iw_key(key, &state.iw),
+            Pane::Workspace => sql_key(key, &state.sql),
+            // Discover is handled above (owns all input while open).
+            Pane::Discover(_) => None,
         },
     }
 }
 
-/// Move the focus zone one step in `dir`, mirroring the original `zone_nav`
+/// Move the focus pane one step in `dir`, mirroring the original `zone_nav`
 /// cross-zone edges for the shell layout (header top, explorer left, workspace
 /// right): `Header ↔ Explorer` vertically, `Explorer ↔ workspace` horizontally.
-fn switch_zone_by_dir(dir: crate::common::utils::zone_nav::PaneDir, focus: FocusZone) -> Option<AppMsg> {
-    let zone = match (focus, dir) {
+fn switch_zone_by_dir(dir: crate::common::utils::zone_nav::PaneDir, focus: Pane) -> Option<AppMsg> {
+    let pane = match (focus, dir) {
         // Header moves down into the explorer; explorer moves up to the header.
-        (FocusZone::Header, crate::common::utils::zone_nav::PaneDir::Down) => {
-            FocusZone::Explorer
-        }
-        (FocusZone::Explorer, crate::common::utils::zone_nav::PaneDir::Up) => {
-            FocusZone::Header
-        }
+        (Pane::Header, crate::common::utils::zone_nav::PaneDir::Down) => Pane::Explorer,
+        (Pane::Explorer, crate::common::utils::zone_nav::PaneDir::Up) => Pane::Header,
         // Explorer moves right into the workspace; workspace moves left back
         // to the explorer (and up to the header).
-        (FocusZone::Explorer, crate::common::utils::zone_nav::PaneDir::Right) => {
-            FocusZone::SQLWorkspace
+        (Pane::Explorer, crate::common::utils::zone_nav::PaneDir::Right) => Pane::Workspace,
+        (Pane::Workspace | Pane::InstanceWorkspace, crate::common::utils::zone_nav::PaneDir::Left) => {
+            Pane::Explorer
         }
-        (FocusZone::SQLWorkspace | FocusZone::InstanceWorkspace, crate::common::utils::zone_nav::PaneDir::Left) => {
-            FocusZone::Explorer
-        }
-        (FocusZone::SQLWorkspace | FocusZone::InstanceWorkspace, crate::common::utils::zone_nav::PaneDir::Up) => {
-            FocusZone::Header
+        (Pane::Workspace | Pane::InstanceWorkspace, crate::common::utils::zone_nav::PaneDir::Up) => {
+            Pane::Header
         }
         _ => return None,
     };
-    tracing::debug!(from = ?focus, to = ?zone, "pane/zone switch via Ctrl+nav");
-    Some(AppMsg::Shell(ShellMsg::FocusChanged { zone }))
+    tracing::debug!(from = ?focus, to = ?pane, "pane switch via Ctrl+nav");
+    Some(AppMsg::Shell(ShellMsg::FocusChanged { pane }))
 }
 
 /// Move the active tab's sub-pane focus one step in `dir`, according to the
@@ -132,11 +133,9 @@ fn switch_subpane(dir: crate::common::utils::zone_nav::PaneDir, sql: &SqlState) 
 /// targets editor (TSV host:ports rows or text into the in-progress cell) and
 /// the SQL editor both accept pasted text; anything else is a no-op.
 pub fn paste_to_msg(contents: &str, state: &super::state::AppState) -> Option<AppMsg> {
-    if state.modal.is_some() {
-        // Inside the discover modal: only the targets editor accepts paste.
-        if state.modal == Some(super::state::ModalKind::Discover)
-            && state.discover.focus == crate::features::discover::state::DiscoverFocus::Targets
-        {
+    if let Pane::Discover(sub) = state.focus {
+        // Inside the discover parent pane: only the targets editor accepts paste.
+        if sub == DiscoverPane::Targets {
             return Some(AppMsg::Discover(DiscoverMsg::Message(
                 DiscoverMessage::Targets(TargetsMsg::Message(TargetsMessage::Paste(
                     contents.to_string(),
@@ -145,9 +144,12 @@ pub fn paste_to_msg(contents: &str, state: &super::state::AppState) -> Option<Ap
         }
         return None;
     }
+    if state.modal.is_some() {
+        return None;
+    }
     // SQL editor focused (no modal): paste into the active tab's buffer.
     let tab_id = state.sql.sql_tab.active_tab;
-    if state.focus == crate::app_shell::focus::FocusZone::SQLWorkspace
+    if state.focus == Pane::Workspace
         && state.sql.sql_tab.tabs.get(tab_id).is_some_and(|t| t.focus == SqlFocus::Editor)
     {
         return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
@@ -246,8 +248,8 @@ fn header_key(key: KeyEvent) -> Option<AppMsg> {
 }
 
 /// Discover key bindings, dispatched by the close-confirm flag and the active
-/// discover pane.
-fn discover_key(key: KeyEvent, state: &DiscoverState) -> Option<AppMsg> {
+/// discover child pane.
+fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Option<AppMsg> {
     let code = key.code;
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
@@ -263,15 +265,13 @@ fn discover_key(key: KeyEvent, state: &DiscoverState) -> Option<AppMsg> {
     // panes are stacked vertically (engine / targets / results), so Up/Down
     // (j/k) move between them; Left/Right (h/l) are kept as alternates.
     if ctrl {
-        let dir = crate::common::utils::zone_nav::pane_dir_from_key(&key);
+        let dir = pane_dir_from_key(&key);
         return match dir {
-            Some(crate::common::utils::zone_nav::PaneDir::Down)
-            | Some(crate::common::utils::zone_nav::PaneDir::Right) => {
-                Some(discover(DiscoverMessage::Focus(next_pane(state.focus))))
+            Some(PaneDir::Down) | Some(PaneDir::Right) => {
+                Some(discover(DiscoverMessage::Focus(sub.next())))
             }
-            Some(crate::common::utils::zone_nav::PaneDir::Up)
-            | Some(crate::common::utils::zone_nav::PaneDir::Left) => {
-                Some(discover(DiscoverMessage::Focus(prev_pane(state.focus))))
+            Some(PaneDir::Up) | Some(PaneDir::Left) => {
+                Some(discover(DiscoverMessage::Focus(sub.prev())))
             }
             _ => None,
         };
@@ -282,20 +282,16 @@ fn discover_key(key: KeyEvent, state: &DiscoverState) -> Option<AppMsg> {
         // Scan / register are discover-level actions available from any pane.
         KeyCode::Char('s') => Some(discover(DiscoverMessage::StartScan)),
         KeyCode::Char('r') => Some(discover(DiscoverMessage::RegisterSelected)),
-        _ => match state.focus {
-            DiscoverFocus::Engine => engine_pane_key(key),
-            DiscoverFocus::Targets => targets_pane_key(key, state),
-            DiscoverFocus::Results => results_pane_key(key),
+        _ => match sub {
+            DiscoverPane::Engine => match code {
+                KeyCode::Enter | KeyCode::Char('e') => {
+                    Some(discover(DiscoverMessage::Focus(DiscoverPane::Engine)))
+                }
+                _ => None,
+            },
+            DiscoverPane::Targets => targets_pane_key(key, state),
+            DiscoverPane::Results => results_pane_key(key),
         },
-    }
-}
-
-fn engine_pane_key(key: KeyEvent) -> Option<AppMsg> {
-    // Engine is the only available engine; Enter re-focuses it (a no-op). We
-    // consume it so it does not fall through to other handlers.
-    match key.code {
-        KeyCode::Enter | KeyCode::Char('e') => Some(discover(DiscoverMessage::Focus(DiscoverFocus::Engine))),
-        _ => None,
     }
 }
 
@@ -334,22 +330,6 @@ fn results_pane_key(key: KeyEvent) -> Option<AppMsg> {
         KeyCode::Char(' ') => Some(results(ResultsMessage::ToggleSelect)),
         KeyCode::Char('u') => Some(results(ResultsMessage::ToggleUnregisteredFilter)),
         _ => None,
-    }
-}
-
-fn prev_pane(focus: DiscoverFocus) -> DiscoverFocus {
-    match focus {
-        DiscoverFocus::Engine => DiscoverFocus::Results,
-        DiscoverFocus::Targets => DiscoverFocus::Engine,
-        DiscoverFocus::Results => DiscoverFocus::Targets,
-    }
-}
-
-fn next_pane(focus: DiscoverFocus) -> DiscoverFocus {
-    match focus {
-        DiscoverFocus::Engine => DiscoverFocus::Targets,
-        DiscoverFocus::Targets => DiscoverFocus::Results,
-        DiscoverFocus::Results => DiscoverFocus::Engine,
     }
 }
 
@@ -790,12 +770,12 @@ mod tests {
     #[test]
     fn ctrl_j_moves_from_header_to_explorer() {
         let state = crate::app::state::AppState::default();
-        assert_eq!(state.focus, FocusZone::Header);
+        assert_eq!(state.focus, Pane::Header);
         let msg = key_to_msg(key(KeyCode::Char('j'), KeyModifiers::CONTROL), &state)
-            .expect("ctrl+j should switch zone");
+            .expect("ctrl+j should switch pane");
         match msg {
-            AppMsg::Shell(ShellMsg::FocusChanged { zone }) => {
-                assert_eq!(zone, FocusZone::Explorer);
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::Explorer);
             }
             _ => panic!("expected focus change"),
         }
@@ -804,12 +784,12 @@ mod tests {
     #[test]
     fn ctrl_h_moves_from_workspace_back_to_explorer() {
         let mut state = crate::app::state::AppState::default();
-        state.focus = FocusZone::SQLWorkspace;
+        state.focus = Pane::Workspace;
         let msg = key_to_msg(key(KeyCode::Char('h'), KeyModifiers::CONTROL), &state)
-            .expect("ctrl+h should switch zone");
+            .expect("ctrl+h should switch pane");
         match msg {
-            AppMsg::Shell(ShellMsg::FocusChanged { zone }) => {
-                assert_eq!(zone, FocusZone::Explorer);
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::Explorer);
             }
             _ => panic!("expected focus change"),
         }
@@ -818,12 +798,12 @@ mod tests {
     #[test]
     fn ctrl_l_moves_from_explorer_to_workspace() {
         let mut state = crate::app::state::AppState::default();
-        state.focus = FocusZone::Explorer;
+        state.focus = Pane::Explorer;
         let msg = key_to_msg(key(KeyCode::Char('l'), KeyModifiers::CONTROL), &state)
-            .expect("ctrl+l should switch zone");
+            .expect("ctrl+l should switch pane");
         match msg {
-            AppMsg::Shell(ShellMsg::FocusChanged { zone }) => {
-                assert_eq!(zone, FocusZone::SQLWorkspace);
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::Workspace);
             }
             _ => panic!("expected focus change"),
         }
@@ -894,29 +874,36 @@ mod tests {
     #[test]
     fn discover_ctrl_j_k_switches_pane_vertically() {
         use crate::features::discover::state::DiscoverState;
-        let state = DiscoverState::opened(); // focus starts at Engine
+        let state = DiscoverState::opened();
         // ctrl+j (Down) moves Engine -> Targets.
-        let down = discover_key(key(KeyCode::Char('j'), KeyModifiers::CONTROL), &state)
-            .expect("ctrl+j should switch discover pane");
+        let down = discover_key(
+            key(KeyCode::Char('j'), KeyModifiers::CONTROL),
+            DiscoverPane::Engine,
+            &state,
+        )
+        .expect("ctrl+j should switch discover pane");
         assert!(matches!(
             down,
-            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverFocus::Targets)))
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverPane::Targets)))
         ));
-        // ctrl+k (Up) from Engine wraps to Results (prev_pane).
-        let up = discover_key(key(KeyCode::Char('k'), KeyModifiers::CONTROL), &state)
-            .expect("ctrl+k should switch discover pane");
+        // ctrl+k (Up) from Engine wraps to Results.
+        let up = discover_key(
+            key(KeyCode::Char('k'), KeyModifiers::CONTROL),
+            DiscoverPane::Engine,
+            &state,
+        )
+        .expect("ctrl+k should switch discover pane");
         assert!(matches!(
             up,
-            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverFocus::Results)))
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverPane::Results)))
         ));
     }
 
     #[test]
     fn paste_routes_to_discover_targets_and_sql_editor() {
-        // Discover targets focused inside the discover modal -> targets paste.
+        // Discover targets focused inside the discover parent pane -> targets paste.
         let mut state = crate::app::state::AppState::default();
-        state.modal = Some(crate::app::state::ModalKind::Discover);
-        state.discover.focus = crate::features::discover::state::DiscoverFocus::Targets;
+        state.focus = Pane::Discover(DiscoverPane::Targets);
         let msg = paste_to_msg("1.2.3.4\t5432\n", &state).expect("targets paste should route");
         assert!(matches!(
             msg,
@@ -927,7 +914,7 @@ mod tests {
 
         // SQL editor focused (no modal) -> editor paste.
         let mut state = crate::app::state::AppState::default();
-        state.focus = crate::app_shell::focus::FocusZone::SQLWorkspace;
+        state.focus = Pane::Workspace;
         state.sql.sql_tab.tabs[0].focus = SqlFocus::Editor;
         let msg = paste_to_msg("SELECT 1", &state).expect("editor paste should route");
         assert!(matches!(
@@ -942,7 +929,7 @@ mod tests {
 
         // No focused paste target -> no-op.
         let mut state = crate::app::state::AppState::default();
-        state.focus = crate::app_shell::focus::FocusZone::Header;
+        state.focus = Pane::Header;
         assert!(paste_to_msg("x", &state).is_none());
     }
 }

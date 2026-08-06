@@ -30,8 +30,8 @@ use crate::app::state::AppState;
 use crate::app::update::{handle_action, update, UpdateResult};
 use crate::app::view::render;
 use crate::app_shell::effect::EffectRunner;
-use crate::app_shell::focus::FocusZone;
 use crate::app_shell::intent::IntentRouter;
+use crate::app_shell::pane::Pane;
 use crate::features::global_footer::view as footer_view;
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 use crate::features::perf_monitor::backend::CountingBackend;
@@ -146,7 +146,9 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     );
                     let point = Position::new(mouse.column, mouse.row);
                     match mouse.kind {
-                        MouseEventKind::Down(MouseButton::Left) if state.modal.is_none() => {
+                        MouseEventKind::Down(MouseButton::Left)
+                            if state.modal.is_none() && !matches!(state.focus, Pane::Discover(_)) =>
+                        {
                             // Map the click to a focus zone by region. The layout
                             // mirrors `app/view.rs`: header (top 3 rows), explorer
                             // (left 20% of the body), workspace (right 80%).
@@ -158,26 +160,26 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
 
                             // Clicking a region moves focus there (shell-level).
-                            let target_zone = if mouse.row < body_top {
-                                Some(FocusZone::Header)
+                            let target_pane = if mouse.row < body_top {
+                                Some(Pane::Header)
                             } else if mouse.row >= body_top + body_h {
                                 None
                             } else if mouse.column < explorer_w {
-                                Some(FocusZone::Explorer)
+                                Some(Pane::Explorer)
                             } else if state.iw.instance_name.is_empty() {
-                                Some(FocusZone::SQLWorkspace)
+                                Some(Pane::Workspace)
                             } else {
-                                Some(FocusZone::InstanceWorkspace)
+                                Some(Pane::InstanceWorkspace)
                             };
                             tracing::debug!(
                                 point = ?point,
-                                target_zone = ?target_zone,
+                                target_pane = ?target_pane,
                                 current_focus = ?state.focus,
-                                "mouse click zone mapping"
+                                "mouse click pane mapping"
                             );
-                            if let Some(zone) = target_zone.filter(|z| *z != state.focus) {
+                            if let Some(pane) = target_pane.filter(|z| *z != state.focus) {
                                 let msg = AppMsg::Shell(
-                                    crate::app_shell::msg::ShellMsg::FocusChanged { zone },
+                                    crate::app_shell::msg::ShellMsg::FocusChanged { pane },
                                 );
                                 process_message_round(
                                     &effect_runner,
@@ -204,7 +206,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     &effect_runner,
                                     &mut action_rx,
                                     AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged {
-                                        zone: crate::app_shell::focus::FocusZone::Header,
+                                        pane: Pane::Header,
                                     }),
                                     &mut state,
                                 );
@@ -220,7 +222,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // Starting a drag on a SQL-tab splitter begins a
                             // resize gesture (only when the SQL workspace owns
                             // focus and it is actually rendered).
-                            if state.focus == FocusZone::SQLWorkspace
+                            if state.focus == Pane::Workspace
                                 && let Some((layout, _tab_id)) =
                                     sql_tab_layout_for_hit(terminal.size()?, &state)
                                 && let Some(splitter) = layout.splitter_at(point.x, point.y)
@@ -314,7 +316,10 @@ fn sql_tab_layout_for_hit(
 ) -> Option<(crate::features::sql_workspace::sql_tab::layout::SqlTabLayout, usize)> {
     use crate::features::sql_workspace::sql_tab::layout::sql_tab_layout;
 
-    if state.modal.is_some() || !state.iw.instance_name.is_empty() {
+    if state.modal.is_some()
+        || matches!(state.focus, Pane::Discover(_))
+        || !state.iw.instance_name.is_empty()
+    {
         return None;
     }
     let tab = state.sql.sql_tab.tabs.get(state.sql.sql_tab.active_tab)?;

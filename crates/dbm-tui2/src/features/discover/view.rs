@@ -17,7 +17,13 @@ use super::targets::view as targets_view;
 /// where targets sits above results and they are separated by a splitter row).
 /// Each pane's border highlights when it owns focus, and the discover zone gets
 /// a footer (pane nav + scan/close hints) across the bottom.
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &DiscoverState) {
+pub fn render(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    state: &DiscoverState,
+    focus: crate::app_shell::pane::DiscoverPane,
+) {
     use crate::common::view::hints::{discover_zone_footer_text, draw_pane_footer};
     let p = theme.palette();
 
@@ -37,7 +43,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &DiscoverStat
         ])
         .split(area);
 
-    engine_view::render(frame, theme, chunks[0], &state.engine, state.focus);
+    engine_view::render(frame, theme, chunks[0], &state.engine, focus);
 
     // Stacked vertically, like the original: targets (top), a 1-row splitter,
     // then results (bottom). A vertical split means both panes are the same
@@ -51,7 +57,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &DiscoverStat
         ])
         .split(chunks[1]);
 
-    targets_view::render(frame, theme, body[0], &state.targets, state.focus);
+    targets_view::render(frame, theme, body[0], &state.targets, focus);
     crate::common::view::splitter::draw(
         frame,
         body[1],
@@ -59,7 +65,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &DiscoverStat
         false,
         false,
     );
-    results_view::render(frame, theme, body[2], &state.results, state.focus);
+    results_view::render(frame, theme, body[2], &state.results, focus);
 
     // Discover zone footer: separator + hint line (or an error/status line).
     if footer_h > 0 {

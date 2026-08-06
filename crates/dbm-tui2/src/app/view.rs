@@ -8,6 +8,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::app::state::{AppState, ModalKind};
+use crate::app_shell::pane::Pane;
 use crate::features::discover::view as discover_view;
 use crate::features::explorer::view as explorer_view;
 use crate::features::global_footer::view as footer_view;
@@ -57,18 +58,18 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     // readout on the right.
     render_footer_with_perf(frame, state, chunks[2]);
 
-    // Render any active modal as a centered overlay over the workspace region.
-    match &state.modal {
-        Some(ModalKind::Discover) => {
-            render_modal_popup(frame, &state.theme, workspace, &state.discover, |f, t, a, s| {
-                discover_view::render(f, t, a, s)
-            });
-        }
-        Some(modal) => {
-            // Generic titled popup for the picker/confirm/commit-preview modals.
-            render_popup_modal(frame, &state.theme, workspace, modal);
-        }
-        None => {}
+    // The discover parent pane renders as a centered overlay over the workspace
+    // region while it is focused.
+    if let Pane::Discover(sub) = state.focus {
+        render_modal_popup(frame, &state.theme, workspace, &state.discover, |f, t, a, s| {
+            discover_view::render(f, t, a, s, sub)
+        });
+    }
+
+    // Render any active modal (data popup) as a centered overlay.
+    if let Some(modal) = &state.modal {
+        // Generic titled popup for the picker/confirm/commit-preview modals.
+        render_popup_modal(frame, &state.theme, workspace, modal);
     }
 }
 
@@ -151,7 +152,6 @@ fn render_popup_modal(
                     shown
                 }
             }
-            ModalKind::Discover => Vec::new(),
         };
         render_titled_popup(f, theme, area, &modal_title(modal), body);
     });

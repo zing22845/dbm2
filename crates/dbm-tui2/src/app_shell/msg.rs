@@ -2,7 +2,7 @@
 //! events, ticks, focus changes) and are routed through the central
 //! `AppMsg` router under the `Shell` variant.
 
-use super::focus::FocusZone;
+use super::pane::Pane;
 
 /// Messages owned by the shell (not by any feature).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,8 +11,8 @@ pub enum ShellMsg {
     Quit,
     /// Periodic redraw tick produced by the internal timer.
     Tick,
-    /// The active focus zone changed.
-    FocusChanged { zone: FocusZone },
+    /// The active parent pane changed.
+    FocusChanged { pane: Pane },
     /// Toggle the active theme between its dark and light palettes.
     ToggleTheme,
 }

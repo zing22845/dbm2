@@ -3,14 +3,13 @@
 use super::engine::msg::EngineMsg;
 use super::results::msg::ResultsMsg;
 use super::targets::msg::TargetsMsg;
-use super::state::DiscoverFocus;
 
 /// The actual discover messages: pane navigation plus forwarding to the three
 /// child sub-modules.
 #[derive(Debug, Clone)]
 pub enum DiscoverMessage {
-    /// Set the active discover pane.
-    Focus(DiscoverFocus),
+    /// Set the active discover child pane.
+    Focus(crate::app_shell::pane::DiscoverPane),
     /// Show the close-confirmation dialog.
     RequestClose,
     /// Hide the close-confirmation dialog without closing.

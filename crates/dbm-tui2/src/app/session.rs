@@ -13,7 +13,7 @@ use dbm_store::{
 };
 
 use crate::app::state::AppState;
-use crate::app_shell::focus::FocusZone;
+use crate::app_shell::pane::{Pane, pane_from_name, pane_name};
 
 /// Restore a previously persisted session into `state`. Returns `Ok(false)`
 /// when no compatible snapshot exists (fresh start).
@@ -59,7 +59,7 @@ fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
 
     TuiSessionSnapshot {
         version: TUI_SESSION_VERSION,
-        focus: focus_name(state.focus).to_string(),
+        focus: pane_name(state.focus).to_string(),
         tree_width: 20,
         tree: TuiTreeSnapshot {
             expanded_instances: Vec::new(),
@@ -111,28 +111,11 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) {
         state.sql.sql_tab.active_tab = active;
     }
 
-    state.focus = focus_from_name(&snapshot.focus);
+    state.focus = pane_from_name(&snapshot.focus).unwrap_or(Pane::Header);
 }
 
 fn non_empty(s: String) -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
-}
-
-fn focus_name(focus: FocusZone) -> &'static str {
-    match focus {
-        FocusZone::Header => "header",
-        FocusZone::Explorer => "explorer",
-        FocusZone::SQLWorkspace | FocusZone::InstanceWorkspace => "workspace",
-    }
-}
-
-fn focus_from_name(name: &str) -> FocusZone {
-    match name {
-        "header" => FocusZone::Header,
-        "workspace" => FocusZone::SQLWorkspace,
-        "explorer" | "tree" => FocusZone::Explorer,
-        _ => FocusZone::Header,
-    }
 }
 
 #[cfg(test)]
@@ -209,7 +192,7 @@ mod tests {
             state.sql.sql_tab.tabs[0].session.instance.as_deref(),
             Some("local")
         );
-        assert_eq!(state.focus, FocusZone::SQLWorkspace);
+        assert_eq!(state.focus, Pane::Workspace);
 
         // Sanity: focus round-trips through snapshot_from_app.
         let back = snapshot_from_app(&state);
@@ -239,6 +222,6 @@ mod tests {
         apply_snapshot(&mut state, &snap);
         // One empty default tab remains.
         assert_eq!(state.sql.sql_tab.tabs.len(), 1);
-        assert_eq!(state.focus, FocusZone::Explorer);
+        assert_eq!(state.focus, Pane::Explorer);
     }
 }

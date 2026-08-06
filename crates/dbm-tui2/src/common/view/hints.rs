@@ -325,8 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn modal_footer_for_discover_is_empty() {
-        assert_eq!(modal_footer_text(Some(&ModalKind::Discover)), "");
+    fn modal_footer_with_no_modal_is_empty() {
         assert_eq!(modal_footer_text(None), "");
     }
 

@@ -17,11 +17,11 @@ pub fn render(
     theme: &Theme,
     area: Rect,
     state: &ResultsState,
-    focus: crate::features::discover::state::DiscoverFocus,
+    focus: crate::app_shell::pane::DiscoverPane,
 ) {
     use crate::common::view::hints::{discover_results_footer_text, draw_pane_footer};
     let p = theme.palette();
-    let focused = focus == crate::features::discover::state::DiscoverFocus::Results;
+    let focused = focus == crate::app_shell::pane::DiscoverPane::Results;
 
     let footer_text = discover_results_footer_text();
     let footer_h = if footer_text.is_empty() { 0 } else { 1 };

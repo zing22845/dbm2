@@ -66,12 +66,10 @@ pub fn render_titled_popup(
     frame.render_widget(Paragraph::new(body), inner);
 }
 
-/// The footer hint line for a modal. Discover draws its own zone footer, so it
-/// returns empty.
+/// The footer hint line for a modal (data popup).
 pub fn modal_footer_text(modal: Option<&ModalKind>) -> String {
     match modal {
         None => String::new(),
-        Some(ModalKind::Discover) => String::new(),
         Some(ModalKind::ResultsRowLimitPicker { .. }) => {
             "Select: ENTER · Move: j/k · Custom: c · Close: ESC".to_string()
         }
@@ -99,7 +97,6 @@ pub fn is_confirm_modal(modal: &ModalKind) -> bool {
 /// Title for a confirm/picker popup, used by popup rendering.
 pub fn modal_title(modal: &ModalKind) -> String {
     match modal {
-        ModalKind::Discover => "Discover".to_string(),
         ModalKind::ResultsRowLimitPicker { .. } => "Rows per page".to_string(),
         ModalKind::ResultsPageInput { .. } => "Jump to page".to_string(),
         ModalKind::DeleteConnectionConfirm { instance, connection } => {
@@ -132,8 +129,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn discover_modal_has_empty_footer() {
-        assert_eq!(modal_footer_text(Some(&ModalKind::Discover)), "");
+    fn no_modal_has_empty_footer() {
         assert_eq!(modal_footer_text(None), "");
     }
 
@@ -166,7 +162,6 @@ mod tests {
         assert!(is_confirm_modal(&ModalKind::ResultsEditCommitPreview {
             statements: Vec::new(),
         }));
-        assert!(!is_confirm_modal(&ModalKind::Discover));
         assert!(!is_confirm_modal(&ModalKind::ResultsRowLimitPicker {
             current: 1,
             limits: vec![1],

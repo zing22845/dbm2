@@ -9,10 +9,10 @@
 
 use crate::app::action::Action;
 use crate::app::msg::AppMsg;
-use crate::app::state::{AppState, ModalKind};
+use crate::app::state::AppState;
 use crate::app_shell::effect::ErasedEffect;
-use crate::app_shell::focus::FocusZone;
 use crate::app_shell::intent::RoutableIntent;
+use crate::app_shell::pane::{DiscoverPane, Pane};
 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
 use crate::features::discover::update::update as discover_update;
 use crate::features::explorer::intent::ExplorerIntent;
@@ -57,38 +57,40 @@ fn box_effect(e: impl ErasedEffect<Action> + 'static) -> Box<dyn ErasedEffect<Ac
     Box::new(e)
 }
 
-/// Map a feature message to the `FocusZone` that must be active for its
-/// keyboard input to be accepted. Shell and footer messages are always
-/// handled, so they map to `None`.
+/// Map a feature message to the `Pane` that must be active for its keyboard
+/// input to be accepted. Shell and footer messages are always handled, so they
+/// map to `None`.
 ///
-/// Layout relationship: `Discover`, `Sql` and `Perf` all live inside the
-/// main workspace region and therefore share the `SQLWorkspace` focus zone.
-/// `Iw` (instance workspace) occupies its own `InstanceWorkspace` zone. If a
-/// future layout moves `Discover` into a popup or a separate pane, adjust its
-/// mapping here.
-fn focus_zone_of(msg: &AppMsg) -> Option<FocusZone> {
+/// Layout relationship: `Sql` and `Perf` live inside the main workspace region
+/// and therefore share the `Workspace` parent pane. `Iw` (instance workspace)
+/// occupies its own `InstanceWorkspace` pane. The `Discover` parent pane owns
+/// all input while it is open.
+fn focus_pane_of(msg: &AppMsg) -> Option<Pane> {
     match msg {
         // Shell, footer, and modal open/close messages are shell orchestration
         // and bypass the focus guard.
         AppMsg::Shell(_) | AppMsg::Footer(_) | AppMsg::OpenModal(_) | AppMsg::CloseModal => None,
-        AppMsg::Header(_) => Some(FocusZone::Header),
-        AppMsg::Explorer(_) => Some(FocusZone::Explorer),
-        AppMsg::Discover(_) => Some(FocusZone::SQLWorkspace),
-        AppMsg::Iw(_) => Some(FocusZone::InstanceWorkspace),
-        AppMsg::Sql(_) => Some(FocusZone::SQLWorkspace),
-        AppMsg::Perf(_) => Some(FocusZone::SQLWorkspace),
+        AppMsg::Header(_) => Some(Pane::Header),
+        AppMsg::Explorer(_) => Some(Pane::Explorer),
+        AppMsg::Discover(_) => Some(Pane::Discover(DiscoverPane::default())),
+        AppMsg::Iw(_) => Some(Pane::InstanceWorkspace),
+        AppMsg::Sql(_) => Some(Pane::Workspace),
+        AppMsg::Perf(_) => Some(Pane::Workspace),
     }
 }
 
-/// Open the discover modal: reset its state and show it as the active modal.
+/// Open the discover modal: reset its state and make it the active parent pane,
+/// focused on the engine child pane.
 fn open_discover(state: &mut AppState) {
-    tracing::debug!("open_discover: setting modal to Discover");
+    tracing::debug!("open_discover: setting focus to Discover parent pane");
     state.discover = crate::features::discover::state::DiscoverState::opened();
-    state.modal = Some(ModalKind::Discover);
+    state.focus = Pane::Discover(DiscoverPane::Engine);
+    state.modal = None;
 }
 
-/// Close the discover modal.
+/// Close the discover modal and restore focus to the workspace parent pane.
 fn close_discover(state: &mut AppState) {
+    state.focus = Pane::Workspace;
     state.modal = None;
 }
 
@@ -97,17 +99,19 @@ fn close_discover(state: &mut AppState) {
 /// active focus zone permits keyboard input for them; shell and footer
 /// messages always pass through.
 pub fn update(msg: AppMsg, state: &mut AppState) -> UpdateResult {
-    // When a modal is open it owns all keyboard input, so its messages bypass
-    // the focus guard.
-    if state.modal.is_some() && matches!(msg, AppMsg::Discover(_)) {
+    // When a modal (data popup) is open it owns all keyboard input, so its
+    // messages bypass the focus guard. The discover parent pane likewise owns
+    // all input while it is open.
+    let discover_open = matches!(state.focus, Pane::Discover(_));
+    if (state.modal.is_some() || discover_open) && matches!(msg, AppMsg::Discover(_)) {
         return update_unchecked(msg, state);
     }
-    if let Some(zone) = focus_zone_of(&msg)
-        && zone != state.focus
+    if let Some(pane) = focus_pane_of(&msg)
+        && pane != state.focus
     {
-        // The message targets a region that does not currently own the
-        // keyboard input, so it is dropped. This prevents unfocused
-        // features from reacting to stray input.
+        // The message targets a parent pane that does not currently own the
+        // keyboard input, so it is dropped. This prevents unfocused features
+        // from reacting to stray input.
         return UpdateResult::new();
     }
     update_unchecked(msg, state)
@@ -136,8 +140,8 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                 state.should_quit = true;
             }
             crate::app_shell::msg::ShellMsg::Tick => {}
-            crate::app_shell::msg::ShellMsg::FocusChanged { zone } => {
-                state.focus = zone;
+            crate::app_shell::msg::ShellMsg::FocusChanged { pane } => {
+                state.focus = pane;
             }
             crate::app_shell::msg::ShellMsg::ToggleTheme => {
                 // Flip between the theme's dark and light palettes; the next
@@ -258,6 +262,15 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             result.effects.extend(effects.into_iter().map(box_effect));
         }
         AppMsg::Discover(m) => {
+            // The discover parent pane's child-pane focus lives on `state.focus`,
+            // so a focus change (and moving focus to results on scan) is applied
+            // here before/with the discover feature's content update.
+            if let DiscoverMsg::Message(DiscoverMessage::Focus(sub)) = &m {
+                state.focus = Pane::Discover(*sub);
+            }
+            if let DiscoverMsg::Message(DiscoverMessage::StartScan) = &m {
+                state.focus = Pane::Discover(DiscoverPane::Results);
+            }
             // Closing the modal is shell orchestration, handled after the
             // discover feature's own update so the frame is ready for teardown.
             let should_close = matches!(&m, DiscoverMsg::Message(DiscoverMessage::Close));

@@ -17,11 +17,11 @@ pub fn render(
     theme: &Theme,
     area: Rect,
     state: &EngineState,
-    focus: crate::features::discover::state::DiscoverFocus,
+    focus: crate::app_shell::pane::DiscoverPane,
 ) {
     use crate::common::view::hints::{discover_engine_footer_text, draw_pane_footer};
     let p = theme.palette();
-    let focused = focus == crate::features::discover::state::DiscoverFocus::Engine;
+    let focused = focus == crate::app_shell::pane::DiscoverPane::Engine;
     let line = Line::from(vec![
         Span::styled(" engine: ", Style::default().fg(p.muted)),
         Span::styled(

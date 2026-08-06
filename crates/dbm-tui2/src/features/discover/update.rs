@@ -6,18 +6,21 @@ use dbm_discovery::{DiscoveryConfig, DiscoveryTarget};
 use dbm_discovery::parse_port_spec;
 
 use super::msg::DiscoverMessage;
-use super::state::{DiscoverFocus, DiscoverState};
+use super::state::DiscoverState;
 use super::intent::DiscoverIntent;
 use super::effect::DiscoverEffect;
 use super::engine;
 use super::results;
 use super::targets;
 
-/// Update the discover state. Pure by-value transition: pane navigation and
-/// close-confirmation are handled here; child messages are forwarded to the
+/// Update the discover state. Pure by-value transition: close-confirmation and
+/// scan bookkeeping are handled here; child messages are forwarded to the
 /// matching sub-module (which is moved out, updated and moved back, so only the
 /// touched sub-state is carried). Scan/register messages produce the matching
 /// side-channel effect.
+///
+/// Focus for the discover child panes lives on the shell's `Pane::Discover`, so
+/// it is updated there (in `app/update.rs`); this update only reacts to content.
 pub fn update(
     msg: DiscoverMessage,
     mut state: DiscoverState,
@@ -27,10 +30,9 @@ pub fn update(
     match msg {
         DiscoverMessage::Focus(focus) => {
             // Moving focus away from targets discards any in-progress edit.
-            if focus != DiscoverFocus::Targets {
+            if focus != crate::app_shell::pane::DiscoverPane::Targets {
                 state.targets.discard_edit();
             }
-            state.focus = focus;
         }
         DiscoverMessage::RequestClose => state.close_confirm = true,
         DiscoverMessage::CancelClose => state.close_confirm = false,
@@ -40,8 +42,6 @@ pub fn update(
         DiscoverMessage::StartScan => {
             if let Some(config) = build_scan_config(&state) {
                 effects.push(DiscoverEffect::StartScan { config });
-                // Move focus to results so progress is visible while scanning.
-                state.focus = DiscoverFocus::Results;
                 state.scanning = true;
                 state.last_error = None;
             }
