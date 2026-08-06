@@ -33,7 +33,7 @@ pub fn render(
         Span::styled(" (e to focus)", Style::default().fg(p.muted)),
     ]);
     let block = Block::default()
-        .title(" discover ")
+        .title(" Engine ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(if focused { p.border_active } else { p.border }));
     let inner = block.inner(area);

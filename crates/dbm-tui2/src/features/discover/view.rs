@@ -1,6 +1,7 @@
 //! Discover feature rendering.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
@@ -27,6 +28,18 @@ pub fn render(
     use crate::common::view::hints::{discover_zone_footer_text, draw_pane_footer};
     let p = theme.palette();
 
+    // The discover parent pane wraps the three child panes (engine, targets,
+    // results) inside a single bordered block, matching the original dbm.
+    let outer = ratatui::widgets::Block::default()
+        .title(" Discover ")
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(Style::default().fg(p.border_active));
+    let inner = outer.inner(area);
+    frame.render_widget(outer, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
     let footer_text = discover_zone_footer_text(discover_status(state));
     let footer_h = if footer_text.is_empty() {
         0
@@ -41,7 +54,7 @@ pub fn render(
             Constraint::Min(0),               // targets + results
             Constraint::Length(footer_h),     // discover zone footer
         ])
-        .split(area);
+        .split(inner);
 
     engine_view::render(frame, theme, chunks[0], &state.engine, focus);
 
@@ -70,7 +83,7 @@ pub fn render(
     // Discover zone footer: separator + hint line (or an error/status line).
     if footer_h > 0 {
         let sep = Line::from(Span::styled(
-            "-".repeat(area.width as usize),
+            "-".repeat(inner.width as usize),
             ratatui::style::Style::default().fg(p.border),
         ));
         frame.render_widget(ratatui::widgets::Paragraph::new(sep), chunks[2]);
