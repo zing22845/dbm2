@@ -35,27 +35,32 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState)
         return;
     };
 
+    // Layout mirrors the original dbm `sql_tab_layout` (ui.rs §11): a vertical
+    // split puts the editor+history row on top and results on the bottom; the
+    // top row is a horizontal split with the SQL editor on the left and the
+    // query history on the right.
     let body = Layout::default()
-        .direction(Direction::Horizontal)
+        .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(50), // editor
-            Constraint::Percentage(50), // results over history
+            Constraint::Percentage(45), // top row: editor + history
+            Constraint::Min(6),         // bottom: results
         ])
         .split(chunks[1]);
 
-    editor_view::render(frame, theme, body[0], &tab.editor);
-
-    let right = Layout::default()
-        .direction(Direction::Vertical)
+    let top = Layout::default()
+        .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(70), // results
-            Constraint::Percentage(30), // history
+            Constraint::Percentage(55), // editor
+            Constraint::Percentage(45), // history
         ])
-        .split(body[1]);
+        .split(body[0]);
 
-    results_view::render(frame, theme, right[0], &tab.results);
+    editor_view::render(frame, theme, top[0], &tab.editor);
+
     let (instance, connection) = session_view_key(&tab.session);
-    history_view::render(frame, theme, right[1], &tab.history, &instance, &connection);
+    history_view::render(frame, theme, top[1], &tab.history, &instance, &connection);
+
+    results_view::render(frame, theme, body[1], &tab.results);
 }
 
 /// Derive the `(instance, connection)` history key for rendering (mirrors the
