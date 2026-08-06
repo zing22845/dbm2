@@ -188,13 +188,12 @@ impl ResultsState {
     /// Apply an edited cell value into the edit session (and the live result).
     pub fn apply_cell_value(&mut self, row: usize, col: usize, value: String) {
         self.edit.apply_cell(row, col, value.clone());
-        if let Some(result) = self.result.as_mut() {
-            if row < result.rows.len()
+        if let Some(result) = self.result.as_mut()
+            && row < result.rows.len()
                 && let Some(cell) = result.rows.get_mut(row).and_then(|r| r.get_mut(col))
             {
                 *cell = value;
             }
-        }
     }
 
     /// Add an empty row at the end (pending insert).

@@ -27,7 +27,7 @@ pub fn update(
                 vec![OverviewEffect::LoadInstance { instance_name }],
             );
         }
-        OverviewMessage::Loaded { instance } => state.instance = Some(instance),
+        OverviewMessage::Loaded { instance } => state.instance = Some(*instance),
     }
     (state, Vec::new(), Vec::new())
 }

@@ -228,6 +228,7 @@ pub fn clamp_results_v_scroll_offset(
     offset.min(results_max_v_scroll(row_count, viewport_height))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn results_cell_at_point(
     rel_x: usize,
     rel_y: u16,

@@ -11,7 +11,9 @@ pub struct TargetRow {
 
 /// The editable column of a target row currently in focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum TargetCol {
+    #[default]
     Host,
     Ports,
 }
@@ -43,11 +45,6 @@ pub struct TargetsState {
     pub scroll: usize,
 }
 
-impl Default for TargetCol {
-    fn default() -> Self {
-        TargetCol::Host
-    }
-}
 
 impl TargetsState {
     /// A freshly opened discover modal starts with a loopback target.

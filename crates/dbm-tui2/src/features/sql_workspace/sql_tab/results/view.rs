@@ -184,12 +184,12 @@ fn render_table(
                 .enumerate()
                 .map(|(i, v)| {
                     let selected = row_idx == state.row && i == state.col;
+                    // The selected cell is highlighted; the rest of the row and
+                    // other rows share the default foreground.
                     let style = if selected {
                         Style::default()
                             .fg(p.selection)
                             .add_modifier(Modifier::BOLD)
-                    } else if row_idx == state.row {
-                        Style::default().fg(p.fg)
                     } else {
                         Style::default().fg(p.fg)
                     };

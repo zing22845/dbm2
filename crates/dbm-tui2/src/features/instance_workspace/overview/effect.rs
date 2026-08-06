@@ -8,8 +8,8 @@ use crate::common::service::services::Services;
 /// Actions produced by overview effects.
 #[derive(Debug, Clone)]
 pub enum OverviewAction {
-    /// The store returned the instance.
-    Loaded { instance: dbm_store::ManagedInstance },
+    /// The store returned the instance. Boxed to keep the enum small.
+    Loaded { instance: Box<dbm_store::ManagedInstance> },
     /// Loading failed.
     Error { error: String },
 }
@@ -37,7 +37,9 @@ impl Effect for OverviewEffect {
                     })
                     .await;
                     match result {
-                        Ok(Ok(instance)) => vec![OverviewAction::Loaded { instance }],
+                        Ok(Ok(instance)) => {
+                            vec![OverviewAction::Loaded { instance: Box::new(instance) }]
+                        }
                         Ok(Err(e)) => vec![OverviewAction::Error { error: e.to_string() }],
                         Err(e) => vec![OverviewAction::Error { error: e.to_string() }],
                     }

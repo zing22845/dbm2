@@ -305,6 +305,9 @@ fn case_separator_style(match_style: Style) -> Style {
     style
 }
 
+/// Helpers take several styles/width knobs to keep the title line flexible;
+/// the argument count is a faithful port of the reference search bar.
+#[allow(clippy::too_many_arguments)]
 fn append_search_query_spans(
     spans: &mut Vec<Span<'static>>,
     search: &PaneSearch,
@@ -375,6 +378,7 @@ pub fn filter_nav_counter(search: &PaneSearch, cursor: usize, filtered_count: us
 }
 
 /// Title line for a pane/column label plus optional in-title search and filter counter.
+#[allow(clippy::too_many_arguments)]
 pub fn pane_search_title_line(
     label: &str,
     search: &PaneSearch,

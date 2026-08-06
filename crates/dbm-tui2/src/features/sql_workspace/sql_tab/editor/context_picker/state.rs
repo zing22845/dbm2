@@ -17,17 +17,14 @@ pub enum PickerColumn {
 
 /// The state of a single catalog list fetch (databases or schemas).
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub enum CachedList {
+    #[default]
     Loading,
     Ready(Vec<String>),
     Error(String),
 }
 
-impl Default for CachedList {
-    fn default() -> Self {
-        CachedList::Loading
-    }
-}
 
 /// Interactive database/schema picker state.
 #[derive(Debug, Clone, Default)]

@@ -240,6 +240,7 @@ fn toolbar_pieces(
 }
 
 /// The pagination toolbar line. `accent` / `dim` styles come from the theme.
+#[allow(clippy::too_many_arguments)]
 pub fn pagination_toolbar_line(
     row_limit: usize,
     page: usize,

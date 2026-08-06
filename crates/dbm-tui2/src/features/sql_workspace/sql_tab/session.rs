@@ -13,6 +13,7 @@
 /// persistence-relevant context that will be (de)serialized once real session
 /// data exists; they are placeholders today.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct TabSession {
     /// Stable identity across app restarts (used for persistence and routing).
     pub id: usize,
@@ -29,15 +30,3 @@ pub struct TabSession {
     pub schema: Option<String>,
 }
 
-impl Default for TabSession {
-    fn default() -> Self {
-        TabSession {
-            id: 0,
-            connection_id: None,
-            instance: None,
-            connection: None,
-            database: None,
-            schema: None,
-        }
-    }
-}

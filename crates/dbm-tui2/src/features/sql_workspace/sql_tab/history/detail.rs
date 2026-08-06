@@ -274,6 +274,7 @@ pub(crate) fn build_detail_display_lines(
 
 /// Draw the history detail pane. Fills `out_content_rect` / `out_v_scrollbar_rect`
 /// so the caller can lay out a splitter / scrollbar.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_history_detail(
     frame: &mut Frame,
     area: Rect,
@@ -326,15 +327,14 @@ pub fn draw_history_detail(
     if let Some(bar_area) = v_bar {
         *out_v_scrollbar_rect = bar_area;
         // Minimal scrollbar: a highlight on the occupied band.
+        // `max_scroll` is guaranteed >= 1, so the division cannot divide by zero.
         let max_scroll = line_count.saturating_sub(viewport.max(1)).max(1);
-        if max_scroll > 0 {
-            let thumb = scroll * bar_area.height as usize / max_scroll;
-            let thumb = thumb.min(bar_area.height as usize);
-            let buf = frame.buffer_mut();
-            for y in 0..bar_area.height {
-                if y as usize == thumb {
-                    buf[(bar_area.x, bar_area.y + y)].set_style(Style::default().fg(p.accent));
-                }
+        let thumb = scroll.saturating_mul(bar_area.height as usize) / max_scroll;
+        let thumb = thumb.min(bar_area.height as usize);
+        let buf = frame.buffer_mut();
+        for y in 0..bar_area.height {
+            if y as usize == thumb {
+                buf[(bar_area.x, bar_area.y + y)].set_style(Style::default().fg(p.accent));
             }
         }
     }

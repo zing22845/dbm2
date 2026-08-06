@@ -102,14 +102,14 @@ fn render_popup_modal(
     render_popup(frame, base, 45, 20, |f, area| {
         let body = match modal {
             ModalKind::ResultsRowLimitPicker { current, limits } => {
-                let items = limits
+                
+                limits
                     .iter()
                     .map(|l| {
                         let marker = if *l == *current { "◄" } else { " " };
                         Line::from(Span::raw(format!("{marker} {l} rows")))
                     })
-                    .collect();
-                items
+                    .collect()
             }
             ModalKind::ResultsPageInput { current_page, total_pages } => {
                 let total = total_pages

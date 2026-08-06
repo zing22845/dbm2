@@ -106,6 +106,7 @@ impl Services {
     /// (`execute_paginated` with a `LIMIT`/`OFFSET`). A non-`SELECT` statement
     /// returns a result with zero columns and `rows_affected` set. Returns the
     /// raw driver result; callers project it into `QueryResultData`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute_sql(
         &self,
         instance: &str,

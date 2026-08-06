@@ -2,6 +2,7 @@
 //! features request from their update functions. Each effect is executed
 //! by the `EffectRunner` and produces zero or more `Action`s.
 
+#[allow(clippy::module_inception)]
 pub mod effect;
 pub mod effect_trait;
 pub mod runner;

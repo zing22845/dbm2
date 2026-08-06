@@ -7,8 +7,9 @@ pub enum OverviewMessage {
     Load { instance_name: String },
     /// Re-load the current instance's overview.
     Reload,
-    /// The store returned the instance.
-    Loaded { instance: dbm_store::ManagedInstance },
+    /// The store returned the instance. Boxed to keep the enum small (a
+    /// `ManagedInstance` is large and would otherwise bloat every message).
+    Loaded { instance: Box<dbm_store::ManagedInstance> },
 }
 
 /// Feature message envelope (central-router compatible).

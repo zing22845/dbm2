@@ -162,6 +162,7 @@ pub fn build_completion_items(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_keyword_completion_items(
     prefix: &str,
     sql: &str,

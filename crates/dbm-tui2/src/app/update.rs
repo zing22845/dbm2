@@ -140,11 +140,10 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // Opening a modal is shell orchestration, handled before the
             // header feature's own update so the modal state is ready for the
             // frame that follows.
-            if let HeaderMsg::Message(HeaderMessage::Activate) = &m {
-                if state.header.button == 0 {
+            if let HeaderMsg::Message(HeaderMessage::Activate) = &m
+                && state.header.button == 0 {
                     open_discover(state);
                 }
-            }
             let HeaderMsg::Message(inner) = m;
             // The header feature's update is a pure by-value transition: move
             // the state out, update it, move the result back. No deep clone.
