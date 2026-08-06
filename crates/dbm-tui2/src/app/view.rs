@@ -23,7 +23,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // header
+            Constraint::Length(3),  // header (title bar with borders)
             Constraint::Min(0),     // body (explorer + workspace)
             Constraint::Length(footer_h), // footer
         ])

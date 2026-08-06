@@ -55,8 +55,18 @@ pub struct ResultsState {
     pub detail: DetailState,
     /// The row-edit session (snapshots / dirty cells / deleted / new rows).
     pub edit: ResultsEditState,
+    /// The SQL text of the last run query (kept for editability analysis).
+    pub last_sql: String,
+    /// The connection context of the last run query, used to resolve
+    /// editability and to execute commits.
+    pub last_instance: String,
+    pub last_connection: String,
+    pub last_database: Option<String>,
+    pub last_schema: String,
     /// The resolved edit target (schema/table/primary keys) when editable.
     pub edit_target: Option<EditTarget>,
+    /// Why the current result cannot be edited, if it cannot (shown to the user).
+    pub edit_blocked_reason: Option<String>,
     /// The detail draft's baseline (cell value at load) for dirty detection.
     pub detail_baseline: String,
     /// The detail draft's current text (edited value).

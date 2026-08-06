@@ -370,6 +370,7 @@ fn results_action_to_msg(action: crate::features::sql_workspace::sql_tab::result
             tracing::info!("commit ok={ok}: {message}");
             M::ResetSelection
         }
+        RA::EditabilityReady { target, blocked } => M::EditabilityReady { target, blocked },
     }
 }
 

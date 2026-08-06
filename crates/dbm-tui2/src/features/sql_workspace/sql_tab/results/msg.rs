@@ -3,12 +3,16 @@
 use crossterm::event::KeyEvent;
 
 use super::detail::msg::DetailMsg;
+use super::edit_sql::EditTarget;
 use super::state::QueryResultData;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResultsMessage {
     /// Set the latest query result (replaces any previous result).
     SetResult { result: QueryResultData, paginated: bool },
+    /// The editability of the current result was resolved (edit target or the
+    /// reason it cannot be edited).
+    EditabilityReady { target: Option<EditTarget>, blocked: Option<String> },
     /// Clear the current result (e.g. after a failed query).
     ClearResult,
     /// Move the cell selection by `(dr, dc)`.
@@ -44,7 +48,8 @@ pub enum ResultsMessage {
     DelRow,
     /// Set the detail draft text (edited cell value).
     SetDetailDraft { text: String },
-    /// Commit the current edits (emits a commit effect / intent).
+    /// Commit the current edits against the tab's connection (emits a
+    /// transaction-executing `ResultsEffect::Commit`).
     Commit,
     /// Forward to the detail sub-module.
     Detail(DetailMsg),

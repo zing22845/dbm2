@@ -26,12 +26,41 @@ pub fn update(
             state.h_scroll = 0;
             state.search.reset();
             state.detail.scroll = 0;
+            // Reset the previous editability and re-resolve it against the new
+            // result's columns (the query text and connection context were
+            // stored by the preceding `RunQuery`).
+            state.edit_target = None;
+            state.edit_blocked_reason = None;
+            let result_columns: Vec<String> = state
+                .result
+                .as_ref()
+                .map(|r| r.columns.iter().map(|c| c.name.clone()).collect())
+                .unwrap_or_default();
+            if !result_columns.is_empty() && !state.last_sql.is_empty() {
+                effects.push(ResultsEffect::CheckEditability {
+                    instance: state.last_instance.clone(),
+                    connection: state.last_connection.clone(),
+                    database: state.last_database.clone(),
+                    schema: state.last_schema.clone(),
+                    sql: state.last_sql.clone(),
+                    result_columns,
+                });
+            }
+        }
+        ResultsMessage::EditabilityReady { target, blocked } => {
+            state.edit_target = target;
+            state.edit_blocked_reason = blocked;
+            if state.edit_target.is_none() {
+                state.exit_edit();
+            }
         }
         ResultsMessage::ClearResult => {
             state.result = None;
             state.row = 0;
             state.col = 0;
             state.detail.scroll = 0;
+            state.edit_target = None;
+            state.edit_blocked_reason = None;
         }
         ResultsMessage::MoveSelection { dr, dc } => {
             if state.move_selection(dr, dc) {
@@ -63,6 +92,14 @@ pub fn update(
             row_limit,
         } => {
             state.detail.scroll = 0;
+            // Remember the connection context and query text so the eventual
+            // result can resolve editability and so `Commit` can target the
+            // same connection.
+            state.last_sql = sql.clone();
+            state.last_instance = instance.clone();
+            state.last_connection = connection.clone();
+            state.last_database = database.clone();
+            state.last_schema = schema.clone();
             effects.push(ResultsEffect::RunQuery {
                 instance,
                 connection,
@@ -110,7 +147,13 @@ pub fn update(
         }
         ResultsMessage::Commit => {
             if let Ok(statements) = state.build_commit_statements() {
-                effects.push(ResultsEffect::Commit { statements });
+                effects.push(ResultsEffect::Commit {
+                    instance: state.last_instance.clone(),
+                    connection: state.last_connection.clone(),
+                    database: state.last_database.clone(),
+                    schema: state.last_schema.clone(),
+                    statements,
+                });
             }
         }
         ResultsMessage::Detail(m) => {

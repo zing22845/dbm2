@@ -3,7 +3,7 @@
 
 use super::edit::ResultsEditState;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditTarget {
     pub schema: String,
     pub table: String,
@@ -164,12 +164,9 @@ pub fn join_batch_sql(statements: &[String]) -> String {
     statements.join(";\n")
 }
 
-/// Classify a statement for conflict checks: UPDATE/DELETE must affect exactly 1 row.
-pub fn statement_requires_one_row(sql: &str) -> bool {
-    let t = sql.trim_start();
-    t.len() >= 6
-        && (t[..6].eq_ignore_ascii_case("UPDATE") || t[..6].eq_ignore_ascii_case("DELETE"))
-}
+/// Re-exported from `common::utils::sql_editability`: `UPDATE`/`DELETE` must
+/// affect exactly 1 row during commit conflict checking.
+pub use crate::common::utils::sql_editability::statement_requires_one_row;
 
 #[cfg(test)]
 mod tests {

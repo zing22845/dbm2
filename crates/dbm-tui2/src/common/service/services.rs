@@ -154,6 +154,66 @@ impl Services {
             .await
             .map_err(|e| e.user_message().to_string())
     }
+
+    /// List the primary-key column names of a table (for row-edit gating).
+    pub async fn list_primary_keys(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: Option<&str>,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<String>, String> {
+        let url = self.connection_url(instance, connection, database).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        self.driver
+            .list_primary_keys(&pool, schema, table)
+            .await
+            .map_err(|e| e.user_message().to_string())
+    }
+
+    /// Execute a batch of DML statements inside a single transaction.
+    ///
+    /// Every `UPDATE` / `DELETE` must affect exactly one row; a mismatch is
+    /// reported as a conflict and rolls the whole batch back. Returns the
+    /// number of statements that were executed.
+    pub async fn commit_batch(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: Option<&str>,
+        schema: &str,
+        statements: &[String],
+    ) -> Result<usize, String> {
+        let url = self.connection_url(instance, connection, database).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        let stmt_kinds: Vec<bool> = statements
+            .iter()
+            .map(|s| crate::common::utils::sql_editability::statement_requires_one_row(s))
+            .collect();
+        let driver = self.driver.clone();
+        driver
+            .run_in_transaction(&pool, schema, statements, move |index, affected| {
+                if stmt_kinds.get(index).copied().unwrap_or(false) && affected != 1 {
+                    return Err(dbm_core::ApplicationError::Database {
+                        message: format!("conflict: statement {} affected {affected} row(s)", index + 1),
+                        severity: dbm_core::ErrorSeverity::Error,
+                    });
+                }
+                Ok(())
+            })
+            .await
+            .map(|_| statements.len())
+            .map_err(|e| e.user_message().to_string())
+    }
 }
 
 impl Default for Services {

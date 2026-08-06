@@ -1,14 +1,18 @@
 //! Results feature effects and actions.
 //!
-//! The side effects are running a SQL query (via `Services::execute_sql`) and
-//! committing an edit batch. The commit's DB transaction execution still
-//! depends on a live pool being wired into `Services`; until then it reports a
-//! deferred status. Query execution is fully wired.
+//! The side effects are running a SQL query (via `Services::execute_sql`),
+//! resolving the result's editability (via `Services::list_primary_keys`) and
+//! committing an edit batch (via `Services::commit_batch`).
 
 use crate::app::action::Action;
 use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
 use crate::common::service::services::Services;
+use crate::common::utils::sql_editability::{
+    all_primary_keys_present, analyze_editable_query_editability, editability_reason_message,
+    EditabilityReason,
+};
 use super::detail::effect::DetailEffect;
+use super::edit_sql::EditTarget;
 use super::state::QueryResultData;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +23,8 @@ pub enum ResultsAction {
     QueryError { message: String },
     /// The edit batch commit outcome.
     CommitResult { ok: bool, message: String },
+    /// The editability of the result was resolved.
+    EditabilityReady { target: Option<EditTarget>, blocked: Option<String> },
 }
 
 impl From<ResultsAction> for Action {
@@ -30,7 +36,8 @@ impl From<ResultsAction> for Action {
         match a {
             ResultsAction::ResultReady { .. }
             | ResultsAction::QueryError { .. }
-            | ResultsAction::CommitResult { .. } => unreachable!(
+            | ResultsAction::CommitResult { .. }
+            | ResultsAction::EditabilityReady { .. } => unreachable!(
                 "ResultsAction is routed by sql_action_to_msg, not via Into<Action>"
             ),
         }
@@ -50,9 +57,27 @@ pub enum ResultsEffect {
         page: usize,
         row_limit: usize,
     },
-    /// Commit the edit batch. Executing requires a live connection pool; until
-    /// the connection plumbing is wired this reports a deferred status.
-    Commit { statements: Vec<String> },
+    /// Commit the edit batch inside a single transaction against the tab's
+    /// connection. A conflict (an `UPDATE`/`DELETE` that affects != 1 row)
+    /// rolls the batch back.
+    Commit {
+        instance: String,
+        connection: String,
+        database: Option<String>,
+        schema: String,
+        statements: Vec<String>,
+    },
+    /// Resolve whether the last result can be edited: run the pure SQL
+    /// editability analysis, then (if structurally editable) confirm the
+    /// primary keys are present via `Services::list_primary_keys`.
+    CheckEditability {
+        instance: String,
+        connection: String,
+        database: Option<String>,
+        schema: String,
+        sql: String,
+        result_columns: Vec<String>,
+    },
     Detail(DetailEffect),
 }
 
@@ -92,15 +117,121 @@ impl Effect for ResultsEffect {
                         Err(message) => vec![ResultsAction::QueryError { message }],
                     }
                 }
-                ResultsEffect::Commit { statements } => {
-                    // Deferred: no connection pool is wired yet. Replace with a
-                    // `run_in_transaction` call once `Services` exposes a pool.
-                    vec![ResultsAction::CommitResult {
-                        ok: false,
-                        message: format!(
-                            "Commit requires a live connection ({} statement(s) prepared, not yet wired)",
-                            statements.len()
-                        ),
+                ResultsEffect::Commit {
+                    instance,
+                    connection,
+                    database,
+                    schema,
+                    statements,
+                } => {
+                    let outcome = services
+                        .commit_batch(
+                            &instance,
+                            &connection,
+                            database.as_deref(),
+                            &schema,
+                            &statements,
+                        )
+                        .await;
+                    match outcome {
+                        Ok(n) => vec![ResultsAction::CommitResult {
+                            ok: true,
+                            message: format!("Committed {n} statement(s)"),
+                        }],
+                        Err(message) => vec![ResultsAction::CommitResult { ok: false, message }],
+                    }
+                }
+                ResultsEffect::CheckEditability {
+                    instance,
+                    connection,
+                    database,
+                    schema,
+                    sql,
+                    result_columns,
+                } => {
+                    let col_refs: Vec<&str> = result_columns.iter().map(|s| s.as_str()).collect();
+                    // Structural analysis first (pure, no DB round-trip).
+                    let analysis = analyze_editable_query_editability(&sql);
+                    if !analysis.editable {
+                        let reason =
+                            analysis.reason.unwrap_or(EditabilityReason::ComplexSource);
+                        return vec![ResultsAction::EditabilityReady {
+                            target: None,
+                            blocked: Some(editability_reason_message(reason)),
+                        }];
+                    }
+                    let Some(info) = analysis.analysis else {
+                        return vec![ResultsAction::EditabilityReady {
+                            target: None,
+                            blocked: Some(editability_reason_message(
+                                EditabilityReason::MetadataUnavailable,
+                            )),
+                        }];
+                    };
+                    let schema = info
+                        .schema
+                        .clone()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| schema.clone());
+                    let table = info.table_name.clone();
+                    if schema.is_empty() || table.is_empty() {
+                        return vec![ResultsAction::EditabilityReady {
+                            target: None,
+                            blocked: Some(editability_reason_message(
+                                EditabilityReason::MetadataUnavailable,
+                            )),
+                        }];
+                    }
+                    let pks = match services
+                        .list_primary_keys(
+                            &instance,
+                            &connection,
+                            database.as_deref(),
+                            &schema,
+                            &table,
+                        )
+                        .await
+                    {
+                        Ok(pks) => pks,
+                        Err(e) => {
+                            return vec![ResultsAction::EditabilityReady {
+                                target: None,
+                                blocked: Some(format!(
+                                    "{}: {e}",
+                                    editability_reason_message(EditabilityReason::MetadataUnavailable)
+                                )),
+                            }];
+                        }
+                    };
+                    if pks.is_empty() {
+                        return vec![ResultsAction::EditabilityReady {
+                            target: None,
+                            blocked: Some(editability_reason_message(EditabilityReason::NoPrimaryKey)),
+                        }];
+                    }
+                    if !all_primary_keys_present(&pks, &col_refs) {
+                        let missing: Vec<String> = pks
+                            .iter()
+                            .filter(|pk| !col_refs.iter().any(|c| c.eq_ignore_ascii_case(pk)))
+                            .cloned()
+                            .collect();
+                        return vec![ResultsAction::EditabilityReady {
+                            target: None,
+                            blocked: Some(format!(
+                                "{}: missing {}",
+                                editability_reason_message(EditabilityReason::PrimaryKeyNotReturned),
+                                missing.join(", ")
+                            )),
+                        }];
+                    }
+                    vec![ResultsAction::EditabilityReady {
+                        target: Some(EditTarget {
+                            schema,
+                            table,
+                            primary_keys: pks,
+                            columns: result_columns,
+                        }),
+                        blocked: None,
                     }]
                 }
                 ResultsEffect::Detail(_) => Vec::new(),
