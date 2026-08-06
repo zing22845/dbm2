@@ -227,11 +227,20 @@ fn discover_key(key: KeyEvent, state: &DiscoverState) -> Option<AppMsg> {
         };
     }
 
-    // Pane-move chords (Ctrl+arrows / Ctrl+h/l) take precedence.
+    // Pane-move chords (Ctrl+hjkl / Ctrl+arrows) take precedence. The discover
+    // panes are stacked vertically (engine / targets / results), so Up/Down
+    // (j/k) move between them; Left/Right (h/l) are kept as alternates.
     if ctrl {
-        return match code {
-            KeyCode::Left | KeyCode::Char('h') => Some(discover(DiscoverMessage::Focus(prev_pane(state.focus)))),
-            KeyCode::Right | KeyCode::Char('l') => Some(discover(DiscoverMessage::Focus(next_pane(state.focus)))),
+        let dir = crate::common::utils::zone_nav::pane_dir_from_key(&key);
+        return match dir {
+            Some(crate::common::utils::zone_nav::PaneDir::Down)
+            | Some(crate::common::utils::zone_nav::PaneDir::Right) => {
+                Some(discover(DiscoverMessage::Focus(next_pane(state.focus))))
+            }
+            Some(crate::common::utils::zone_nav::PaneDir::Up)
+            | Some(crate::common::utils::zone_nav::PaneDir::Left) => {
+                Some(discover(DiscoverMessage::Focus(prev_pane(state.focus))))
+            }
             _ => None,
         };
     }
@@ -848,5 +857,25 @@ mod tests {
             results_key(key(KeyCode::Char('s'), KeyModifiers::CONTROL), 0, results).is_none(),
             "ctrl+s with no edit session should be a no-op"
         );
+    }
+
+    #[test]
+    fn discover_ctrl_j_k_switches_pane_vertically() {
+        use crate::features::discover::state::DiscoverState;
+        let state = DiscoverState::opened(); // focus starts at Engine
+        // ctrl+j (Down) moves Engine -> Targets.
+        let down = discover_key(key(KeyCode::Char('j'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+j should switch discover pane");
+        assert!(matches!(
+            down,
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverFocus::Targets)))
+        ));
+        // ctrl+k (Up) from Engine wraps to Results (prev_pane).
+        let up = discover_key(key(KeyCode::Char('k'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+k should switch discover pane");
+        assert!(matches!(
+            up,
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverFocus::Results)))
+        ));
     }
 }

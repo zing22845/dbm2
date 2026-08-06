@@ -42,6 +42,8 @@ pub fn update(
                 effects.push(DiscoverEffect::StartScan { config });
                 // Move focus to results so progress is visible while scanning.
                 state.focus = DiscoverFocus::Results;
+                state.scanning = true;
+                state.last_error = None;
             }
         }
         DiscoverMessage::RegisterSelected => {
@@ -53,15 +55,21 @@ pub fn update(
         DiscoverMessage::ScanProgress { .. } => {
             // Progress is purely informational; the next ScanComplete replaces
             // the results wholesale, so there is nothing to accumulate here.
+            // Mark the scan as in-flight so the footer can show a live state.
+            state.scanning = true;
         }
         DiscoverMessage::ScanComplete { items } => {
             state.results.set_items(items);
+            state.scanning = false;
+            state.last_error = None;
         }
         DiscoverMessage::ScanError { error } => {
             // Surface the failure on the results pane (a future phase may show
             // a status line); clear the stale results.
             state.results.set_items(Vec::new());
+            state.scanning = false;
             tracing::warn!("discover scan failed: {error}");
+            state.last_error = Some(error);
         }
         DiscoverMessage::RegisterComplete { count } => {
             tracing::info!("registered {count} discovered instance(s)");

@@ -10,10 +10,38 @@ use crate::common::view::theme::Theme;
 
 use super::state::ResultsState;
 
-/// Render the results list of discovered instances.
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState) {
+/// Render the results list of discovered instances. The border highlights only
+/// when the results pane owns focus, and a footer line shows the results keys.
+pub fn render(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    state: &ResultsState,
+    focus: crate::features::discover::state::DiscoverFocus,
+) {
+    use crate::common::view::hints::{discover_results_footer_text, draw_pane_footer};
     let p = theme.palette();
+    let focused = focus == crate::features::discover::state::DiscoverFocus::Results;
 
+    let footer_text = discover_results_footer_text();
+    let footer_h = if footer_text.is_empty() { 0 } else { 1 };
+
+    let block = Block::default()
+        .title(" results ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(if focused { p.border_active } else { p.border }));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let body = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(footer_h),
+    );
     let mut lines = Vec::new();
     if state.is_empty() {
         lines.push(Line::from(Span::styled(
@@ -21,9 +49,9 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState
             Style::default().fg(p.muted),
         )));
     } else {
-        let inner_h = area.height.saturating_sub(2) as usize;
+        let body_h = body.height as usize;
         for (vis, idx) in (state.scroll..state.items.len()).enumerate() {
-            if vis >= inner_h {
+            if vis >= body_h {
                 break;
             }
             let item = &state.items[idx];
@@ -46,10 +74,10 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState
             ]));
         }
     }
+    frame.render_widget(Paragraph::new(lines), body);
 
-    let block = Block::default()
-        .title(" results ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border));
-    frame.render_widget(Paragraph::new(lines).block(block), area);
+    if footer_h > 0 {
+        let footer_area = Rect::new(inner.x, inner.y + body.height, inner.width, footer_h);
+        draw_pane_footer(frame, theme, footer_area, &footer_text);
+    }
 }

@@ -26,6 +26,10 @@ pub struct DiscoverState {
     pub focus: DiscoverFocus,
     /// Whether the close-confirmation dialog is shown.
     pub close_confirm: bool,
+    /// Whether a scan is currently in flight.
+    pub scanning: bool,
+    /// The last scan error, if any (cleared on a successful scan or new scan).
+    pub last_error: Option<String>,
 }
 
 impl DiscoverState {

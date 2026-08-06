@@ -9,6 +9,7 @@
 use crate::app::state::ModalKind;
 use crate::common::components::search::PaneSearch;
 use crate::common::utils::shortcuts::{copy_shortcut_label, hint_ctrl, quit_shortcut_label};
+use crate::common::view::theme::Theme;
 
 /// Visible field separator for hint pairs.
 pub const SEP: &str = "  ";
@@ -148,6 +149,50 @@ pub fn history_list_footer_text(
     hints
 }
 
+/// Footer for the discover zone (the whole modal): pane navigation + the
+/// discover-level actions available from any pane. `status` (e.g. scanning /
+/// last error) is appended on a second line when non-empty.
+pub fn discover_zone_footer_text(status: &str) -> String {
+    let hints = keys(&[
+        ("Pane", hint_ctrl("j/k")),
+        ("Scan", lit("s")),
+        ("Close", lit("ESC")),
+    ]);
+    if status.is_empty() {
+        hints
+    } else {
+        format!("{hints}\n{status}")
+    }
+}
+
+/// Footer for the discover engine selector pane.
+pub fn discover_engine_footer_text() -> String {
+    keys(&[("Engine", lit("e/ENTER"))])
+}
+
+/// Footer for the discover targets editor pane, switching on edit state.
+pub fn discover_targets_footer_text(editing: bool) -> String {
+    if editing {
+        return keys(&[("Commit", lit("ENTER")), ("Cancel", lit("ESC"))]);
+    }
+    keys(&[
+        ("Edit", lit("i/ENTER")),
+        ("Insert", lit("o")),
+        ("Delete", lit("d")),
+        ("Undo", lit("u")),
+        ("Redo", hint_ctrl("r")),
+    ])
+}
+
+/// Footer for the discover results list pane.
+pub fn discover_results_footer_text() -> String {
+    keys(&[
+        ("Select", lit("SPACE")),
+        ("Register", lit("r")),
+        ("Filter", lit("u")),
+    ])
+}
+
 /// Footer hints for the data-carrying modals; Discover draws its own zone
 /// footer and returns empty.
 pub fn modal_footer_text(modal: Option<&ModalKind>) -> String {
@@ -183,6 +228,23 @@ pub fn pane_search_footer_if_active(search: &PaneSearch) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Draw a pane's footer hint line into `area` (already the bottom strip of the
+/// pane's inner rect). Pure `state -> view`: reads only the theme and text.
+pub fn draw_pane_footer(frame: &mut ratatui::Frame, theme: &Theme, area: ratatui::layout::Rect, text: &str) {
+    if text.is_empty() || area.height == 0 || area.width == 0 {
+        return;
+    }
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::Paragraph;
+    let p = theme.palette();
+    let style = ratatui::style::Style::default().fg(p.muted);
+    let lines: Vec<Line> = text
+        .split('\n')
+        .map(|l| Line::from(Span::styled(l.to_string(), style)))
+        .collect();
+    frame.render_widget(Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }), area);
 }
 
 #[cfg(test)]
@@ -252,6 +314,31 @@ mod tests {
     fn modal_footer_for_discover_is_empty() {
         assert_eq!(modal_footer_text(Some(&ModalKind::Discover)), "");
         assert_eq!(modal_footer_text(None), "");
+    }
+
+    #[test]
+    fn discover_footers_switch_on_state() {
+        // Zone footer lists pane nav + scan/close; a status appends a line.
+        let zone = discover_zone_footer_text("");
+        assert!(zone.contains("Pane: "));
+        assert!(zone.contains("Scan: s"));
+        assert!(zone.contains("Close: ESC"));
+        assert!(!zone.contains('\n'));
+        let with_status = discover_zone_footer_text("scanning…");
+        assert!(with_status.contains("\nscanning…"));
+        // Targets footer shows edit keys when not editing, commit/cancel when editing.
+        let edit = discover_targets_footer_text(false);
+        assert!(edit.contains("Edit: i/ENTER"));
+        assert!(edit.contains("Insert: o"));
+        assert!(edit.contains("Delete: d"));
+        let committing = discover_targets_footer_text(true);
+        assert!(committing.contains("Commit: ENTER"));
+        assert!(committing.contains("Cancel: ESC"));
+        // Results footer lists selection/register/filter.
+        let results = discover_results_footer_text();
+        assert!(results.contains("Select: SPACE"));
+        assert!(results.contains("Register: r"));
+        assert!(results.contains("Filter: u"));
     }
 
     #[test]
