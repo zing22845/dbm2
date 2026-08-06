@@ -127,6 +127,11 @@ fn new_text_char_offset(text: &str, char_count: usize) -> usize {
 /// buffer changed.
 fn handle_key(state: &mut EditorState, key: KeyEvent, tracked_caps_lock: bool) {
     use crate::common::editor;
+    // In-buffer `/` search takes the key first (active input, `/` to start,
+    // `n`/`N` to jump). Consumed keys never reach the buffer.
+    if super::sql_search::handle_sql_pane_search_key(&mut state.sql_search, &mut state.editor, key) {
+        return;
+    }
     // Non-ASCII chars (IME commits) route through insert_text in Insert mode.
     if editor::try_insert_non_ascii_key(&mut state.handler, &mut state.editor, key, tracked_caps_lock)
     {

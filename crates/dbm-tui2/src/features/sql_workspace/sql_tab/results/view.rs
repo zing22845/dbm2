@@ -8,6 +8,9 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::common::components::search::pane_search_title_line;
+use crate::common::view::action_bar::{
+    RESULTS_ACTION_BAR_HEIGHT, ResultsToolbarModel, action_bar_width, draw_action_bar,
+};
 use crate::common::view::theme::Theme;
 
 use super::state::ResultsState;
@@ -28,17 +31,17 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState
 
     let total_rows = result.total_rows;
     let row_count = state.row_count();
-    let bar_h = RESULTS_PAGINATION_BAR_HEIGHT;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(bar_h), // pagination toolbar
-            Constraint::Min(0),        // table
-            Constraint::Length(8),     // detail
+            Constraint::Length(RESULTS_PAGINATION_BAR_HEIGHT), // pagination toolbar
+            Constraint::Length(RESULTS_ACTION_BAR_HEIGHT),     // action bar
+            Constraint::Min(0),                                // table
+            Constraint::Length(8),                             // detail
         ])
         .split(area);
 
-    // Toolbar.
+    // Pagination toolbar.
     let toolbar = pagination_toolbar_line(
         state.row_limit,
         state.page,
@@ -51,14 +54,35 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState
     );
     frame.render_widget(Paragraph::new(toolbar), chunks[0]);
 
+    // Action bar (Refresh / Edit / Inst / Dup / Del / Commit / Rollback).
+    let model = toolbar_model(state);
+    let max_bar_scroll = action_bar_width(&model).saturating_sub(chunks[1].width);
+    let bar_scroll = state.h_scroll.min(max_bar_scroll as usize) as u16;
+    draw_action_bar(frame, chunks[1], &model, bar_scroll, p);
+
     // Table.
-    render_table(frame, theme, chunks[1], state, result);
+    render_table(frame, theme, chunks[2], state, result);
 
     // Detail.
     let body = state.selected_cell().unwrap_or_default();
     let col_name = state.selected_column_name().unwrap_or("").to_string();
     let title = format!(" [{}] row {}", if col_name.is_empty() { "?" } else { &col_name }, state.row + 1);
-    detail_view::render(frame, theme, chunks[2], &state.detail, &body, title, true);
+    detail_view::render(frame, theme, chunks[3], &state.detail, &body, title, true);
+}
+
+/// Derive the toolbar enable/disable model from the current result/edit state.
+fn toolbar_model(state: &ResultsState) -> ResultsToolbarModel {
+    let has_result = state.result.is_some();
+    let commit_n = state.commit_row_count();
+    ResultsToolbarModel {
+        refresh_enabled: has_result,
+        edit_enabled: state.editable(),
+        edit_active: state.edit.editing,
+        commit_enabled: state.edit.editing && commit_n > 0,
+        rollback_enabled: state.edit.editing && state.edit.is_dirty(),
+        commit_n,
+        edit_reason: state.edit_blocked_reason.clone(),
+    }
 }
 
 fn render_empty(frame: &mut Frame, theme: &Theme, area: Rect) {

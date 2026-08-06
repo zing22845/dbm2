@@ -65,6 +65,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     };
 
     let mut state = AppState::default();
+    // Restore a previously persisted session (open tabs + focus) before the
+    // first frame so the shell comes up where the user left it.
+    if let Err(e) = crate::app::session::restore_session(&mut state) {
+        tracing::warn!("failed to restore TUI session: {e}");
+    }
     let mut reader = EventStream::new();
     let mut tick = tokio::time::interval(TICK_RATE);
 
@@ -135,6 +140,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         if state.should_quit {
             break;
         }
+    }
+
+    // Persist the session before tearing the terminal down so a relaunch
+    // restores the open tabs. Best-effort: a write failure is logged, not fatal.
+    if let Err(e) = crate::app::session::persist_session(&state) {
+        tracing::warn!("failed to save TUI session: {e}");
     }
 
     crossterm::terminal::disable_raw_mode()?;

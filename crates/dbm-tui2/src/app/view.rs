@@ -4,6 +4,8 @@
 //! `crate::app::loop_mod`.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 
 use crate::app::state::{AppState, ModalKind};
 use crate::features::discover::view as discover_view;
@@ -64,14 +66,85 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     footer_view::render(frame, &state.theme, chunks[2], &state.footer);
 
     // Render any active modal as a centered overlay.
-    match state.modal {
+    match &state.modal {
         Some(ModalKind::Discover) => {
             render_modal_popup(frame, &state.theme, workspace[1], &state.discover, |f, t, a, s| {
                 discover_view::render(f, t, a, s)
             });
         }
+        Some(modal) => {
+            // Generic titled popup for the picker/confirm/commit-preview modals.
+            render_popup_modal(frame, &state.theme, workspace[1], modal);
+        }
         None => {}
     }
+}
+
+/// Render a data-carrying modal (row-limit picker / page input / confirm /
+/// commit-preview) as a centered, titled popup with a body summarizing it.
+fn render_popup_modal(
+    frame: &mut ratatui::Frame,
+    theme: &crate::common::view::theme::Theme,
+    base: Rect,
+    modal: &ModalKind,
+) {
+    use crate::common::view::modal::{modal_title, render_popup, render_titled_popup};
+    render_popup(frame, base, 45, 20, |f, area| {
+        let body = match modal {
+            ModalKind::ResultsRowLimitPicker { current, limits } => {
+                let items = limits
+                    .iter()
+                    .map(|l| {
+                        let marker = if *l == *current { "◄" } else { " " };
+                        Line::from(Span::raw(format!("{marker} {l} rows")))
+                    })
+                    .collect();
+                items
+            }
+            ModalKind::ResultsPageInput { current_page, total_pages } => {
+                let total = total_pages
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "?".to_string());
+                vec![Line::from(Span::raw(format!(
+                    "Page {current_page} of {total} — type a page number"
+                )))]
+            }
+            ModalKind::DeleteConnectionConfirm { instance, connection } => {
+                vec![
+                    Line::from(Span::raw(format!("Connection: {connection}"))),
+                    Line::from(Span::raw(format!("Instance: {instance}"))),
+                    Line::from(Span::raw("This will remove the stored connection.")),
+                ]
+            }
+            ModalKind::UnregisterInstanceConfirm { instance } => {
+                vec![
+                    Line::from(Span::raw(format!("Instance: {instance}"))),
+                    Line::from(Span::raw(
+                        "This will remove the instance and its connections.",
+                    )),
+                ]
+            }
+            ModalKind::ResultsEditCommitPreview { statements } => {
+                let shown: Vec<Line> = statements
+                    .iter()
+                    .take(6)
+                    .map(|s| Line::from(Span::raw(s.clone())))
+                    .collect();
+                if statements.len() > 6 {
+                    let mut with_overflow = shown;
+                    with_overflow.push(Line::from(Span::styled(
+                        format!("… and {} more", statements.len() - 6),
+                        Style::default().fg(theme.palette().muted),
+                    )));
+                    with_overflow
+                } else {
+                    shown
+                }
+            }
+            ModalKind::Discover => Vec::new(),
+        };
+        render_titled_popup(f, theme, area, &modal_title(modal), body);
+    });
 }
 
 /// Render a modal as a centered, bordered popup over `base`.

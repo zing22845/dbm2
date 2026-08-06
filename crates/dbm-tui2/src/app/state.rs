@@ -35,12 +35,24 @@ pub struct AppState {
     pub perf: PerfState,
 }
 
-/// The kind of modal currently displayed. New variants (e.g. `Alert`,
-/// `Confirm`, `Prompt`) will be added as modals are implemented.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The kind of modal currently displayed. Each variant carries the minimal
+/// payload its popup needs to render (the live results/tree state that owns the
+/// values lives in the owning feature; the modal stores a snapshot for the
+/// popup's lifetime).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModalKind {
     /// The instance discovery / registration modal.
     Discover,
+    /// Choose a rows-per-page limit for the current result.
+    ResultsRowLimitPicker { current: usize, limits: Vec<usize> },
+    /// Type a specific page number to jump to.
+    ResultsPageInput { current_page: usize, total_pages: Option<usize> },
+    /// Confirm deleting a stored connection.
+    DeleteConnectionConfirm { instance: String, connection: String },
+    /// Confirm unregistering an instance.
+    UnregisterInstanceConfirm { instance: String },
+    /// Preview the edit-batch statements before committing.
+    ResultsEditCommitPreview { statements: Vec<String> },
 }
 
 impl Default for AppState {

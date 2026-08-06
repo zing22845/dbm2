@@ -5,6 +5,7 @@
 
 use super::context_picker::state::ContextPickerState;
 use super::sql_completion::state::SqlCompletionState;
+use super::sql_search::EditorSqlSearch;
 use crate::common::editor;
 
 /// The editor feature state. Not `Default`-derived: the `edtui::EditorState`
@@ -21,6 +22,8 @@ pub struct EditorState {
     pub context_picker: ContextPickerState,
     /// The SQL completion child sub-module.
     pub sql_completion: SqlCompletionState,
+    /// In-buffer `/` search state (query + live matches).
+    pub sql_search: EditorSqlSearch,
 }
 
 impl std::fmt::Debug for EditorState {
@@ -31,6 +34,7 @@ impl std::fmt::Debug for EditorState {
             .field("mode", &self.editor.mode)
             .field("context_picker", &self.context_picker)
             .field("sql_completion", &self.sql_completion)
+            .field("sql_search", &self.sql_search)
             .finish()
     }
 }
@@ -42,6 +46,7 @@ impl Default for EditorState {
             handler: editor::new_editor_handler(),
             context_picker: ContextPickerState::default(),
             sql_completion: SqlCompletionState::default(),
+            sql_search: EditorSqlSearch::default(),
         }
     }
 }
@@ -54,6 +59,7 @@ impl EditorState {
             handler: editor::new_editor_handler(),
             context_picker: ContextPickerState::default(),
             sql_completion: SqlCompletionState::default(),
+            sql_search: EditorSqlSearch::default(),
         }
     }
 }

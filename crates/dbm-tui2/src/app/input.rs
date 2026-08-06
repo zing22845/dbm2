@@ -39,8 +39,12 @@ use super::state::ModalKind;
 /// Returns `None` when nothing consumed the key (a no-op). Global shortcuts
 /// (quit, theme toggle) are handled by the run loop and not routed here.
 pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMsg> {
-    match state.modal {
+    match &state.modal {
         Some(ModalKind::Discover) => discover_key(key, &state.discover),
+        // Data-carrying popups: their key routing will be wired once each
+        // popup's owning state is connected; for now only ESC to dismiss and
+        // y/n to confirm are recognized.
+        Some(modal) => modal_key(key, modal),
         None => match state.focus {
             FocusZone::Header => header_key(key),
             FocusZone::Explorer => explorer_key(key, &state.explorer),
@@ -48,6 +52,12 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
             FocusZone::SQLWorkspace => sql_key(key, &state.sql),
         },
     }
+}
+
+/// Keys for the data-carrying popups. Returns `Some` only when the popup has
+/// an active action to take; picker/page inputs are no-ops until wired.
+fn modal_key(_key: KeyEvent, _modal: &ModalKind) -> Option<AppMsg> {
+    None
 }
 
 /// Key bindings for the Header focus zone: move the button cursor and activate.

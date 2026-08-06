@@ -4,7 +4,10 @@
 //! separate from `components/` so rendering primitives are independently
 //! testable and themeable.
 
+pub mod action_bar;
 pub mod format;
+pub mod hints;
+pub mod modal;
 pub mod overlay_clear;
 pub mod pane_scrollbar;
 pub mod splitter;
