@@ -5,7 +5,8 @@
 //!   - the central `update`        -> intents + effects
 //!   - the `EffectRunner`          -> `Action`s (fed back via a channel)
 //!   - the intent router           -> `AppMsg`s (fed back into a queue)
-//!   - a periodic tick             -> redraw
+//!   - event-driven, on-demand redraw (repaint only when state changed or a
+//!     timed refresh is actually due; idle sleeps via `pending()` -> ~0% CPU)
 //!
 //! Cascade handling is **iterative, not recursive**. An update pass may
 //! produce `Intent`s that resolve to further `AppMsg`s; those are pushed onto
@@ -15,7 +16,7 @@
 //! hot loop (a livelock), though it does not mask an infinite cascade.
 
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{Event as CEvent, EventStream, KeyCode};
 use futures::StreamExt;
@@ -76,7 +77,6 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         tracing::warn!("failed to restore TUI session: {e}");
     }
     let mut reader = EventStream::new();
-    let mut tick = tokio::time::interval(TICK_RATE);
 
     // Populate the explorer tree on startup.
     process_message_round(
@@ -98,17 +98,61 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // `update` via split-resize messages).
     let mut split_drag: Option<crate::features::sql_workspace::sql_tab::layout::SqlSplitter> = None;
 
-    loop {
-        // Draw the current frame. The perf_monitor feature is passive: the run
-        // loop samples each frame here and feeds the smoothed FPS and
-        // redundant-redraw ratio from the wrapped backend.
-        terminal.draw(|frame| render(frame, &state))?;
-        let changed_cells = terminal.backend_mut().last_changed_cells();
-        state.perf.record_frame();
-        state.perf.record_redundancy(changed_cells);
+    // Event-driven, on-demand redraw (mirrors the original dbm "Route B"): the
+    // screen is only repainted when a real event/action changed state, or when
+    // a timed refresh is actually due. With no timed work pending the app
+    // sleeps until a real event arrives (~0% CPU).
+    let mut needs_redraw = true;
 
-        // Wait for the next input: a terminal event, a tick, or an async
-        // action (from an effect).
+    loop {
+        // FPS/waste counters decay to 0 once redraws stop (idle) so they
+        // reflect live rates, not a stale peak. The footer only updates on a
+        // draw, so when stale we force one repaint — but that repaint must NOT
+        // feed the estimates below, or it would show a fake rate from the
+        // refresh gap.
+        let fps_stale = state
+            .perf
+            .last_frame_elapsed()
+            .is_some_and(|l| l > Duration::from_millis(250));
+        if fps_stale && (state.perf.fps > 0.0 || state.perf.redundancy_rate > 0.0) {
+            // Both counters live or die with redraw activity: no frames drawn
+            // means no redundancy to report, so waste goes to 0 in lockstep
+            // with fps.
+            state.perf.fps = 0.0;
+            state.perf.redundancy_rate = 0.0;
+            needs_redraw = true;
+        }
+
+        // Whether real work (an event/action) asked for a repaint, captured
+        // before we may force one below for the counter decay.
+        let real_redraw = needs_redraw;
+
+        if needs_redraw {
+            // Exclude the footer's self-updating fps/waste slot from the
+            // changed-cell count so those numbers (which change every frame)
+            // don't mark every active frame as "changed" and mask real
+            // redundancy.
+            let size = terminal.size()?;
+            let footer_h = footer_view::footer_height(&state.footer, size.width);
+            terminal.backend_mut().set_exclude_rects(perf_exclude_rects(size, footer_h));
+            // Draw the current frame. The perf_monitor feature is passive: the
+            // run loop samples each frame here and feeds the smoothed FPS and
+            // redundant-redraw ratio from the wrapped backend.
+            terminal.draw(|frame| render(frame, &state))?;
+            let changed_cells = terminal.backend_mut().last_changed_cells();
+            if real_redraw {
+                state.perf.record_frame();
+                state.perf.record_redundancy(changed_cells);
+            } else {
+                // Forced counter-refresh repaint: bump the frame timestamp so
+                // later real redraws still count, but don't record this frame.
+                state.perf.touch_frame();
+            }
+            needs_redraw = false;
+        }
+
+        // Wait for the next wake: a terminal event, an async action, or (only
+        // when a timed repaint is actually due) a timed refresh.
         tokio::select! {
             maybe_event = reader.next() => {
                 if let Some(Ok(CEvent::Key(key))) = maybe_event {
@@ -133,8 +177,9 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     if let Some(msg) = msg {
                         process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                     }
-                    // Neither a global shortcut nor a focused-feature key is a
-                    // no-op: nothing to dispatch.
+                    // Any key (handled or not) may have changed the frame; an
+                    // event-driven TUI repaints on input rather than on a timer.
+                    needs_redraw = true;
                 } else if let Some(Ok(CEvent::Mouse(mouse))) = maybe_event {
                     use crossterm::event::{MouseButton, MouseEventKind};
                     use ratatui::prelude::Position;
@@ -264,6 +309,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             );
                         }
                     }
+                    // Mouse input may move focus / start a drag, so repaint.
+                    needs_redraw = true;
                 } else if let Some(Ok(CEvent::Paste(contents))) = maybe_event {
                     // Bracketed paste: route the pasted text to the focused
                     // editor cell. The discover targets editor and the SQL
@@ -272,15 +319,20 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     if let Some(msg) = msg {
                         process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                     }
+                    needs_redraw = true;
                 }
             }
-            _ = tick.tick() => {
-                let msg = AppMsg::Shell(crate::app_shell::msg::ShellMsg::Tick);
-                process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+            // Timed refresh: only fires when a periodic repaint is actually due
+            // (discover scan progress, counter decay). With nothing timed
+            // pending, `next_wake` returns `None` and this branch sleeps
+            // forever until a real event arrives.
+            _ = sleep_until_opt(next_wake(&state)) => {
+                needs_redraw = true;
             }
             maybe_action = action_rx.recv() => {
                 if let Some(action) = maybe_action {
                     process_action_round(&effect_runner, &mut action_rx, action, &mut state);
+                    needs_redraw = true;
                 }
             }
         }
@@ -304,6 +356,49 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         crossterm::event::DisableBracketedPaste
     )?;
     Ok(())
+}
+
+/// The next instant at which a timed repaint is due, if any. Returns `None`
+/// when there is no periodic work pending, so the loop sleeps until a real
+/// event arrives (~0% CPU idle), matching the original dbm's "Route B".
+fn next_wake(state: &AppState) -> Option<Instant> {
+    let now = Instant::now();
+    // Keep repainting while a discover scan's progress is advancing.
+    let scanning = state.discover.scanning;
+    // Wake shortly after the FPS/waste counters would go stale so they decay
+    // to 0 on idle (only while they are live/non-zero).
+    let counters_live = state
+        .perf
+        .last_frame_elapsed()
+        .is_some_and(|l| l <= Duration::from_millis(250))
+        && (state.perf.fps > 0.0 || state.perf.redundancy_rate > 0.0);
+    if scanning || counters_live {
+        Some(now + TICK_RATE)
+    } else {
+        None
+    }
+}
+
+/// Sleep until `deadline`, or forever when there is none (so an idle loop has
+/// no timer and burns no CPU). Only *future* deadlines are ever passed in by
+/// [`next_wake`]; a past deadline would make this return instantly and spin.
+async fn sleep_until_opt(deadline: Option<Instant>) {
+    match deadline {
+        Some(d) => tokio::time::sleep_until(tokio::time::Instant::from_std(d)).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
+/// The rect of the footer's self-updating fps/waste slot, excluded from the
+/// changed-cell count so it doesn't mask real redundancy. The perf readout is
+/// the rightmost `perf_w` columns of the bottom `footer_h` rows.
+fn perf_exclude_rects(size: ratatui::layout::Size, footer_h: u16) -> Vec<Rect> {
+    if footer_h == 0 || size.height < footer_h {
+        return Vec::new();
+    }
+    let perf_w = 23u16.min(size.width);
+    let x = size.width.saturating_sub(perf_w);
+    vec![Rect::new(x, size.height - footer_h, size.width - x, footer_h)]
 }
 
 /// Compute the active SQL tab's body layout for mouse hit-testing, using the
@@ -757,5 +852,39 @@ mod tests {
         };
         assert_eq!(tab_id, 1);
         assert!(matches!(msg, ResultsMsg::Message(ResultsMessage::ClearResult)));
+    }
+
+    #[test]
+    fn perf_exclude_rects_covers_the_footer_stats_slot() {
+        // A 100x30 terminal with a 1-row footer excludes the rightmost 23 cols.
+        let rects = perf_exclude_rects(ratatui::layout::Size::new(100, 30), 1);
+        assert_eq!(rects.len(), 1);
+        let r = rects[0];
+        assert_eq!(r.x, 100 - 23);
+        assert_eq!(r.width, 23);
+        assert_eq!(r.y, 30 - 1);
+        assert_eq!(r.height, 1);
+        // A multi-row footer excludes the whole right strip of the footer.
+        let rects = perf_exclude_rects(ratatui::layout::Size::new(100, 30), 2);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].height, 2);
+        // A terminal narrower than the perf slot excludes the entire width.
+        let rects = perf_exclude_rects(ratatui::layout::Size::new(10, 30), 1);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].x, 0);
+        assert_eq!(rects[0].width, 10);
+        // No footer -> nothing to exclude.
+        assert!(perf_exclude_rects(ratatui::layout::Size::new(100, 30), 0).is_empty());
+    }
+
+    #[test]
+    fn next_wake_sleeps_forever_when_idle() {
+        let state = crate::app::state::AppState::default();
+        // Idle (no scan, counters zero / never drawn) -> no timed wake.
+        assert_eq!(next_wake(&state), None);
+        // Scanning forces a periodic wake.
+        let mut state = crate::app::state::AppState::default();
+        state.discover.scanning = true;
+        assert!(next_wake(&state).is_some());
     }
 }

@@ -6,7 +6,7 @@
 //! [`PerfState::record_frame`] / [`PerfState::record_redundancy`] to feed the
 //! smoothed FPS and redundant-redraw ratio.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// Smoothed performance metrics for the last render window.
 #[derive(Debug, Clone)]
@@ -56,6 +56,18 @@ impl PerfState {
             }
         }
         self.last_frame_instant = Some(now);
+    }
+
+    /// Bump the last-frame timestamp without recording a frame. Used for a
+    /// forced counter-refresh repaint (idle decay) that must not feed the FPS /
+    /// waste estimates, so later real redraws still count from this instant.
+    pub fn touch_frame(&mut self) {
+        self.last_frame_instant = Some(Instant::now());
+    }
+
+    /// How long since the last recorded frame, if any.
+    pub fn last_frame_elapsed(&self) -> Option<Duration> {
+        self.last_frame_instant.map(|l| l.elapsed())
     }
 
     /// Record whether the just-rendered frame changed anything on screen and
