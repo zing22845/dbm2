@@ -2,8 +2,7 @@
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
 use crate::common::view::theme::Theme;
@@ -25,8 +24,12 @@ pub fn render(
     let p = theme.palette();
     let focused = focus == crate::features::discover::state::DiscoverFocus::Targets;
 
-    let footer_text = discover_targets_footer_text(state.editing);
-    let footer_h = if footer_text.is_empty() { 0 } else { 1 };
+    let footer_text = discover_targets_footer_text(state.editing, state.has_loopback());
+    let footer_h = if footer_text.is_empty() {
+        0
+    } else {
+        footer_text.lines().count().clamp(1, 2) as u16
+    };
 
     let block = Block::default()
         .title(" targets ")
@@ -38,25 +41,58 @@ pub fn render(
         return;
     }
 
-    // Body is the inner area minus the footer strip.
+    // Body is the inner area minus the footer strip. Rendered as a table with
+    // `#` line-number, `Host` and `Ports` columns (matching the original dbm),
+    // so host and ports are independently editable and visible.
     let body = Rect::new(
         inner.x,
         inner.y,
         inner.width,
         inner.height.saturating_sub(footer_h),
     );
-    let mut lines = Vec::new();
-    let body_h = body.height as usize;
-    for (vis, idx) in (state.scroll..state.targets.len()).enumerate() {
-        if vis >= body_h {
-            break;
-        }
-        lines.push(row_line(theme, &state.targets[idx], idx == state.row, state.col, state.editing, &state.edit_buf));
+    if body.width > 0 && body.height > 0 {
+        let selected = focused && state.row < state.targets.len();
+        let header = ratatui::widgets::Row::new(["#", "Host", "Ports"])
+            .style(Style::default().add_modifier(Modifier::BOLD));
+        let rows = state
+            .targets
+            .iter()
+            .enumerate()
+            .skip(state.scroll)
+            .take(body.height as usize)
+            .map(|(idx, row)| {
+                let row_sel = selected && idx == state.row;
+                let host_focused = row_sel && state.col == TargetCol::Host;
+                let ports_focused = row_sel && state.col == TargetCol::Ports;
+                ratatui::widgets::Row::new(vec![
+                    ratatui::widgets::Cell::from((idx + 1).to_string())
+                        .style(if row_sel { row_style(theme) } else { Style::default().fg(p.muted) }),
+                    ratatui::widgets::Cell::from(format_cell(
+                        if host_focused && state.editing { &state.edit_buf } else { &row.host },
+                        host_focused,
+                        state.editing,
+                    ))
+                    .style(cell_style(theme, row_sel, host_focused, state.editing)),
+                    ratatui::widgets::Cell::from(format_cell(
+                        if ports_focused && state.editing { &state.edit_buf } else { &row.ports_spec },
+                        ports_focused,
+                        state.editing,
+                    ))
+                    .style(cell_style(theme, row_sel, ports_focused, state.editing)),
+                ])
+            });
+        let table = ratatui::widgets::Table::new(
+            rows,
+            [
+                ratatui::layout::Constraint::Length(3),
+                ratatui::layout::Constraint::Percentage(45),
+                ratatui::layout::Constraint::Percentage(55),
+            ],
+        )
+        .header(header)
+        .column_spacing(1);
+        frame.render_widget(table, body);
     }
-    if lines.is_empty() {
-        lines.push(Line::from(Span::styled("(no targets)", Style::default().fg(p.muted))));
-    }
-    frame.render_widget(Paragraph::new(lines), body);
 
     if footer_h > 0 {
         let footer_area = Rect::new(inner.x, inner.y + body.height, inner.width, footer_h);
@@ -64,40 +100,37 @@ pub fn render(
     }
 }
 
-/// Build a single target row line, styling the focused cell and rendering the
-/// in-progress edit in place.
-fn row_line(
-    theme: &Theme,
-    row: &super::state::TargetRow,
-    row_focused: bool,
-    col: TargetCol,
-    editing: bool,
-    edit_buf: &str,
-) -> Line<'static> {
+/// Style for the focused/selected target row (a subtle selection background).
+fn row_style(theme: &Theme) -> Style {
     let p = theme.palette();
-    let sel = if row_focused {
-        Style::default()
-            .fg(p.selection)
-            .add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(p.fg)
+        .bg(p.surface)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Style for a host/ports cell: editing cells get a distinct edit background,
+/// otherwise the focused cell gets the `▸` selection treatment.
+fn cell_style(theme: &Theme, row_sel: bool, cell_focused: bool, editing: bool) -> Style {
+    let p = theme.palette();
+    if editing && cell_focused {
+        // Inline edit: a distinct background so the live buffer stands out.
+        Style::default().fg(p.accent).bg(p.surface).add_modifier(Modifier::BOLD)
+    } else if cell_focused {
+        row_style(theme)
+    } else if row_sel {
+        Style::default().fg(p.selection)
     } else {
         Style::default().fg(p.fg)
-    };
+    }
+}
 
-    let host_display = if editing && col == TargetCol::Host && row_focused {
-        edit_buf.to_string()
+/// The focused (non-editing) host/ports cell gets a leading `▸` marker, so the
+/// user can see which column will be edited on Enter, matching the original dbm.
+fn format_cell(value: &str, cell_focused: bool, editing: bool) -> String {
+    if cell_focused && !editing {
+        format!("▸ {value}")
     } else {
-        row.host.clone()
-    };
-    let ports_display = if editing && col == TargetCol::Ports && row_focused {
-        edit_buf.to_string()
-    } else {
-        row.ports_spec.clone()
-    };
-
-    Line::from(vec![
-        Span::styled(" ", sel),
-        Span::styled(format!(" {host_display} "), sel),
-        Span::styled(":", Style::default().fg(p.muted)),
-        Span::styled(format!(" {ports_display}"), sel),
-    ])
+        value.to_string()
+    }
 }

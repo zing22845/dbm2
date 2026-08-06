@@ -8,7 +8,9 @@
 
 use crate::app::state::ModalKind;
 use crate::common::components::search::PaneSearch;
-use crate::common::utils::shortcuts::{copy_shortcut_label, hint_ctrl, quit_shortcut_label};
+use crate::common::utils::shortcuts::{
+    copy_shortcut_label, hint_ctrl, paste_shortcut_label, quit_shortcut_label,
+};
 use crate::common::view::theme::Theme;
 
 /// Visible field separator for hint pairs.
@@ -171,18 +173,30 @@ pub fn discover_engine_footer_text() -> String {
 }
 
 /// Footer for the discover targets editor pane, switching on edit state.
-pub fn discover_targets_footer_text(editing: bool) -> String {
+/// `has_loopback` appends a note that loopback also runs local discovery.
+pub fn discover_targets_footer_text(editing: bool, has_loopback: bool) -> String {
     if editing {
         return keys(&[("Commit", lit("ENTER")), ("Cancel", lit("ESC"))]);
     }
-    keys(&[
+    let mut footer = keys(&[
         ("Edit", lit("i/ENTER")),
         ("Insert", lit("o")),
         ("Delete", lit("d")),
+        ("Paste TSV/host:ports", paste_shortcut_label()),
         ("Undo", lit("u")),
         ("Redo", hint_ctrl("r")),
-    ])
+    ]);
+    if has_loopback {
+        footer.push('\n');
+        footer.push_str(DISCOVER_LOOPBACK_SCAN_NOTE);
+    }
+    footer
 }
+
+/// Note shown under Targets when any row is loopback — Ports only constrain TCP
+/// probes, not local discovery.
+pub const DISCOVER_LOOPBACK_SCAN_NOTE: &str =
+    "Loopback also runs local discovery (process/pid/socket); Ports only limit TCP probes.";
 
 /// Footer for the discover results list pane.
 pub fn discover_results_footer_text() -> String {
@@ -327,11 +341,16 @@ mod tests {
         let with_status = discover_zone_footer_text("scanning…");
         assert!(with_status.contains("\nscanning…"));
         // Targets footer shows edit keys when not editing, commit/cancel when editing.
-        let edit = discover_targets_footer_text(false);
+        let edit = discover_targets_footer_text(false, false);
         assert!(edit.contains("Edit: i/ENTER"));
         assert!(edit.contains("Insert: o"));
         assert!(edit.contains("Delete: d"));
-        let committing = discover_targets_footer_text(true);
+        assert!(edit.contains("Paste TSV/host:ports"));
+        // A loopback row appends the local-discovery note on a second line.
+        let loopback = discover_targets_footer_text(false, true);
+        assert!(loopback.contains(DISCOVER_LOOPBACK_SCAN_NOTE));
+        assert!(loopback.contains('\n'));
+        let committing = discover_targets_footer_text(true, false);
         assert!(committing.contains("Commit: ENTER"));
         assert!(committing.contains("Cancel: ESC"));
         // Results footer lists selection/register/filter.

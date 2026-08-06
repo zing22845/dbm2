@@ -79,4 +79,11 @@ impl TargetsState {
         self.edit_buf.clear();
         self.edit_cursor = 0;
     }
+
+    /// Whether any target row has a loopback host (drives the footer note).
+    pub fn has_loopback(&self) -> bool {
+        self.targets
+            .iter()
+            .any(|r| dbm_discovery::is_loopback_host(&r.host))
+    }
 }

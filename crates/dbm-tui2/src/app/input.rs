@@ -128,8 +128,40 @@ fn switch_subpane(dir: crate::common::utils::zone_nav::PaneDir, sql: &SqlState) 
     )))))
 }
 
-/// Keys for the data-carrying popups. Returns `Some` only when the popup has
-/// an active action to take; picker/page inputs are no-ops until wired.
+/// Route a bracketed-paste payload to the focused editor cell. The discover
+/// targets editor (TSV host:ports rows or text into the in-progress cell) and
+/// the SQL editor both accept pasted text; anything else is a no-op.
+pub fn paste_to_msg(contents: &str, state: &super::state::AppState) -> Option<AppMsg> {
+    if state.modal.is_some() {
+        // Inside the discover modal: only the targets editor accepts paste.
+        if state.modal == Some(super::state::ModalKind::Discover)
+            && state.discover.focus == crate::features::discover::state::DiscoverFocus::Targets
+        {
+            return Some(AppMsg::Discover(DiscoverMsg::Message(
+                DiscoverMessage::Targets(TargetsMsg::Message(TargetsMessage::Paste(
+                    contents.to_string(),
+                ))),
+            )));
+        }
+        return None;
+    }
+    // SQL editor focused (no modal): paste into the active tab's buffer.
+    let tab_id = state.sql.sql_tab.active_tab;
+    if state.focus == crate::app_shell::focus::FocusZone::SQLWorkspace
+        && state.sql.sql_tab.tabs.get(tab_id).is_some_and(|t| t.focus == SqlFocus::Editor)
+    {
+        return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+            SqlTabMessage::Editor {
+                tab_id,
+                msg: EditorMsg::Message(EditorMessage::Paste {
+                    text: contents.to_string(),
+                }),
+            },
+        )))));
+    }
+    None
+}
+
 /// Keys for the data-carrying popups (row-limit picker / page input / confirm
 /// / commit preview). `Esc` closes; `n`/`N` cancels a confirm; `y`/`Y`/`Enter`
 /// confirms and dispatches the owning feature's action (e.g. the commit preview
@@ -877,5 +909,40 @@ mod tests {
             up,
             AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverFocus::Results)))
         ));
+    }
+
+    #[test]
+    fn paste_routes_to_discover_targets_and_sql_editor() {
+        // Discover targets focused inside the discover modal -> targets paste.
+        let mut state = crate::app::state::AppState::default();
+        state.modal = Some(crate::app::state::ModalKind::Discover);
+        state.discover.focus = crate::features::discover::state::DiscoverFocus::Targets;
+        let msg = paste_to_msg("1.2.3.4\t5432\n", &state).expect("targets paste should route");
+        assert!(matches!(
+            msg,
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Targets(
+                TargetsMsg::Message(TargetsMessage::Paste(_))
+            )))
+        ));
+
+        // SQL editor focused (no modal) -> editor paste.
+        let mut state = crate::app::state::AppState::default();
+        state.focus = crate::app_shell::focus::FocusZone::SQLWorkspace;
+        state.sql.sql_tab.tabs[0].focus = SqlFocus::Editor;
+        let msg = paste_to_msg("SELECT 1", &state).expect("editor paste should route");
+        assert!(matches!(
+            msg,
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    msg: EditorMsg::Message(EditorMessage::Paste { .. }),
+                    ..
+                }
+            ))))
+        ));
+
+        // No focused paste target -> no-op.
+        let mut state = crate::app::state::AppState::default();
+        state.focus = crate::app_shell::focus::FocusZone::Header;
+        assert!(paste_to_msg("x", &state).is_none());
     }
 }

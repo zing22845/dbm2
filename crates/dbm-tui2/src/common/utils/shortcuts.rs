@@ -78,6 +78,18 @@ pub fn copy_shortcut_label() -> String {
     }
 }
 
+/// Label for the platform paste shortcut: `CMD+V` on macOS, `CTRL+V` elsewhere.
+pub fn paste_shortcut_label() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        hint_cmd("V")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        hint_ctrl("V")
+    }
+}
+
 /// Label for the platform quit shortcut: `CTRL+D`.
 pub fn quit_shortcut_label() -> String {
     hint_ctrl("D")

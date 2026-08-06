@@ -50,7 +50,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     crossterm::execute!(
         stdout,
         crossterm::terminal::EnterAlternateScreen,
-        crossterm::event::EnableMouseCapture
+        crossterm::event::EnableMouseCapture,
+        crossterm::event::EnableBracketedPaste
     )?;
     // The backend is wrapped in a `CountingBackend` so the redundancy metric
     // can read how many cells each frame actually changed.
@@ -261,6 +262,14 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             );
                         }
                     }
+                } else if let Some(Ok(CEvent::Paste(contents))) = maybe_event {
+                    // Bracketed paste: route the pasted text to the focused
+                    // editor cell. The discover targets editor and the SQL
+                    // editor both accept it (TSV host:ports rows / text).
+                    let msg = crate::app::input::paste_to_msg(&contents, &state);
+                    if let Some(msg) = msg {
+                        process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                    }
                 }
             }
             _ = tick.tick() => {
@@ -289,7 +298,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     crossterm::execute!(
         std::io::stdout(),
         crossterm::terminal::LeaveAlternateScreen,
-        crossterm::event::DisableMouseCapture
+        crossterm::event::DisableMouseCapture,
+        crossterm::event::DisableBracketedPaste
     )?;
     Ok(())
 }
