@@ -20,6 +20,7 @@ use std::time::Duration;
 use crossterm::event::{Event as CEvent, EventStream, KeyCode};
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
@@ -30,6 +31,7 @@ use crate::app::update::{handle_action, update, UpdateResult};
 use crate::app::view::render;
 use crate::app_shell::effect::EffectRunner;
 use crate::app_shell::intent::IntentRouter;
+use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 use crate::features::perf_monitor::backend::CountingBackend;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -124,6 +126,34 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     }
                     // Neither a global shortcut nor a focused-feature key is a
                     // no-op: nothing to dispatch.
+                } else if let Some(Ok(CEvent::Mouse(mouse))) = maybe_event {
+                    use crossterm::event::{MouseButton, MouseEventKind};
+                    use ratatui::prelude::Position;
+                    if matches!(
+                        mouse.kind,
+                        MouseEventKind::Down(MouseButton::Left)
+                    ) && state.modal.is_none()
+                    {
+                        // Left-click on the header `Discover` button activates it.
+                        let header_area =
+                            Rect::new(0, 0, terminal.size()?.width, 3);
+                        let clicked = crate::features::header::view::discover_button_rect(
+                            header_area,
+                        )
+                        .is_some_and(|r| r.contains(Position::new(mouse.column, mouse.row)));
+                        if clicked {
+                            state.header.button = 0;
+                            let msg = AppMsg::Header(HeaderMsg::Message(
+                                HeaderMessage::Activate,
+                            ));
+                            process_message_round(
+                                &effect_runner,
+                                &mut action_rx,
+                                msg,
+                                &mut state,
+                            );
+                        }
+                    }
                 }
             }
             _ = tick.tick() => {
