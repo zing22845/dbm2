@@ -1,5 +1,7 @@
 //! The service bundle injected into effects.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use dbm_core::{ConnectOpts, DatabaseDriver, SchemaIntrospector};
@@ -64,6 +66,34 @@ impl Services {
         })
         .await
         .map_err(|e| e.to_string())?
+    }
+
+    /// Build a connection-test callback that pings the database driver.
+    ///
+    /// The returned closure matches the store's connection precheck signature:
+    /// given a connection URL it connects and pings the server, returning the
+    /// server version (or an error string). Features receive this through the
+    /// `Services` abstraction rather than touching the concrete driver (DIP).
+    pub fn connection_test_ping(
+        &self,
+    ) -> impl FnOnce(&str) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>> + Send + use<> {
+        let driver: Arc<PostgresDriver> = Arc::clone(&self.driver);
+        move |url| {
+            // Own the URL before the async block so the returned future is
+            // `Send + 'static` (the store's ping callback requires it).
+            let url = url.to_string();
+            let driver = Arc::clone(&driver);
+            Box::pin(async move {
+                let pool = driver
+                    .connect(&ConnectOpts::new(url))
+                    .await
+                    .map_err(|e| e.user_message().to_string())?;
+                driver
+                    .ping(&pool)
+                    .await
+                    .map_err(|e| e.user_message().to_string())
+            })
+        }
     }
 
     /// List the databases of a connection.

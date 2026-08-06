@@ -1,8 +1,10 @@
 //! Discover feature rendering.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
+use crate::common::view::modal::render_popup;
 use crate::common::view::theme::Theme;
 
 use super::state::DiscoverState;
@@ -46,8 +48,35 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &DiscoverStat
     );
     results_view::render(frame, theme, body[2], &state.results);
 
-    // The close-confirmation dialog is intentionally a placeholder overlay for
-    // now; its interactive confirm/cancel is wired once the modal teardown is
-    // implemented in the shell.
-    let _ = state.close_confirm;
+    // The close-confirmation dialog: asking to close the discover modal shows a
+    // centered popup. Enter confirms (Close), Esc cancels (CancelClose); the
+    // keys are routed in the discover input layer.
+    if state.close_confirm {
+        render_close_confirm(frame, theme, area);
+    }
+}
+
+/// Render the "close discovery?" confirmation popup over the whole discover
+/// area. Pure `state -> view`: it only draws, never mutates state.
+fn render_close_confirm(frame: &mut Frame, theme: &Theme, area: Rect) {
+    let p = theme.palette();
+    render_popup(frame, area, 45, 30, |frame, popup| {
+        let block = ratatui::widgets::Block::default()
+            .title(" Close discovery? ")
+            .borders(ratatui::widgets::Borders::ALL)
+            .border_style(ratatui::style::Style::default().fg(p.border_active))
+            .style(ratatui::style::Style::default().bg(p.surface));
+        let inner = block.inner(popup);
+        frame.render_widget(block, popup);
+        let body = vec![
+            Line::from(Span::raw("This will close the discovery modal.")),
+            Line::from(Span::raw("Any unsaved scan is discarded.")),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Confirm: ENTER    Cancel: ESC",
+                ratatui::style::Style::default().fg(p.muted),
+            )),
+        ];
+        frame.render_widget(ratatui::widgets::Paragraph::new(body), inner);
+    });
 }

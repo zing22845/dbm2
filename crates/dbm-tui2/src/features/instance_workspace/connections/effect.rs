@@ -7,14 +7,6 @@ use dbm_store::{NewInstanceConnection, UpdateInstanceConnection};
 use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
 use crate::common::service::services::Services;
 
-/// A placeholder connection-test callback used until a real pg driver ping is
-/// wired in. It reports success so the store's precheck passes without
-/// contacting a database.
-fn placeholder_ping() -> impl FnOnce(&str) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send>>
-{
-    |_url| Box::pin(async { Ok(String::new()) })
-}
-
 /// Actions produced by connections effects.
 #[derive(Debug, Clone)]
 pub enum ConnectionsAction {
@@ -67,11 +59,15 @@ impl Effect for ConnectionsEffect {
                     }
                 }
                 ConnectionsEffect::AddConnection { instance_name, connection } => {
+                    // The store's precheck pings the real server via the driver
+                    // before persisting, so an unreachable database fails the
+                    // save instead of silently succeeding.
+                    let ping = services.connection_test_ping();
                     let result = tokio::task::spawn_blocking(move || {
                         store
                             .lock()
                             .expect("iw store lock")
-                            .add_instance_connection(&instance_name, connection, placeholder_ping())
+                            .add_instance_connection(&instance_name, connection, ping)
                     })
                     .await;
                     match result {
@@ -92,6 +88,7 @@ impl Effect for ConnectionsEffect {
                         ssl_mode: None,
                         env_label: None,
                     };
+                    let ping = services.connection_test_ping();
                     let result = tokio::task::spawn_blocking(move || {
                         store
                             .lock()
@@ -100,7 +97,7 @@ impl Effect for ConnectionsEffect {
                                 &instance_name,
                                 &original_name,
                                 patch,
-                                placeholder_ping(),
+                                ping,
                             )
                     })
                     .await;
