@@ -8,7 +8,7 @@
 
 use crate::app::state::ModalKind;
 use crate::common::components::search::PaneSearch;
-use crate::common::utils::shortcuts::{hint_ctrl, quit_shortcut_label};
+use crate::common::utils::shortcuts::{copy_shortcut_label, hint_ctrl, quit_shortcut_label};
 
 /// Visible field separator for hint pairs.
 pub const SEP: &str = "  ";
@@ -155,14 +155,18 @@ pub fn modal_footer_text(modal: Option<&ModalKind>) -> String {
 }
 
 /// Global footer hints (zone navigation + shortcuts).
+///
+/// Kept intentionally short (the perf readout occupies the footer's right side)
+/// so only the essential zone/pane navigation and search are shown. This is the
+/// single source of truth for the global footer; `global_footer::view` renders
+/// it instead of a hardcoded list.
 pub fn global_footer_text(global_status: &str) -> String {
     let hints = keys(&[
         ("Zone", lit("TAB")),
         ("Pane", hint_ctrl("h/j/k/l")),
         ("Search", lit("/")),
-        ("Width", lit("[/]")),
-        ("Height", lit("+/-")),
         ("H-Scroll", lit("←/→")),
+        ("Copy", copy_shortcut_label()),
         ("Quit", quit_shortcut_label()),
     ]);
     if global_status.is_empty() {

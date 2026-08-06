@@ -38,6 +38,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState
             Constraint::Length(RESULTS_ACTION_BAR_HEIGHT),     // action bar
             Constraint::Min(0),                                // table
             Constraint::Length(8),                             // detail
+            Constraint::Length(1),                             // footer hints
         ])
         .split(area);
 
@@ -68,6 +69,15 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState
     let col_name = state.selected_column_name().unwrap_or("").to_string();
     let title = format!(" [{}] row {}", if col_name.is_empty() { "?" } else { &col_name }, state.row + 1);
     detail_view::render(frame, theme, chunks[3], &state.detail, &body, title, true);
+
+    // Results footer hints from the shared builder (the detail sub-pane is
+    // always shown in this layout, so it is treated as open).
+    let search_active = state.search.text_input_active();
+    let hint = crate::common::view::hints::results_pane_footer_text(search_active, true, "");
+    frame.render_widget(
+        Paragraph::new(Line::from(hint)).style(Style::default().fg(p.muted)),
+        chunks[4],
+    );
 }
 
 /// Derive the toolbar enable/disable model from the current result/edit state.
@@ -147,10 +157,19 @@ fn render_table(
         return;
     }
 
-    let visible_rows = (inner.height as usize).min(state.row_count().max(1));
+    // Reserve a scrollbar column when rows overflow the viewport.
+    let row_count = state.row_count();
+    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        inner,
+        inner.width,
+        row_count,
+        inner.height as usize,
+    );
+    let table_area = layout.content_area;
+    let visible_rows = (table_area.height as usize).min(row_count.max(1));
     let start_row = state.row.saturating_sub(visible_rows.saturating_sub(1) / 2);
     let col_count = result.columns.len();
-    let col_w = (inner.width as usize).saturating_sub(1).div_ceil(col_count.max(1)).max(4);
+    let col_w = (table_area.width as usize).saturating_sub(1).div_ceil(col_count.max(1)).max(4);
     let _ = col_w;
 
     // Header.
@@ -168,7 +187,7 @@ fn render_table(
             Span::styled(name, style)
         })
         .collect();
-    frame.render_widget(Paragraph::new(Line::from(header)), inner);
+    frame.render_widget(Paragraph::new(Line::from(header)), table_area);
 
     // Rows (windowed).
     let row_lines: Vec<Line> = result
@@ -199,5 +218,19 @@ fn render_table(
             Line::from(spans)
         })
         .collect();
-    frame.render_widget(Paragraph::new(row_lines), inner);
+    frame.render_widget(Paragraph::new(row_lines), table_area);
+
+    // Vertical scrollbar for the table rows.
+    if let Some(bar) = layout.v_scrollbar {
+        let max_scroll = row_count.saturating_sub(visible_rows);
+        crate::common::view::pane_scrollbar::draw_vertical_pane_scrollbar(
+            frame,
+            bar,
+            start_row,
+            visible_rows,
+            max_scroll,
+            p,
+            false,
+        );
+    }
 }
