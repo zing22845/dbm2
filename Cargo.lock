@@ -677,6 +677,7 @@ dependencies = [
  "dbm-discovery",
  "dbm-driver-pg",
  "dbm-store",
+ "dbm-tui2",
  "tokio",
  "tracing",
  "tracing-subscriber",

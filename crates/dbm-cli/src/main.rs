@@ -209,15 +209,25 @@ fn main() -> ExitCode {
 fn dispatch(cli: Cli) -> anyhow::Result<()> {
     init_data_dir(cli.data_dir.clone()).map_err(anyhow::Error::from)?;
     match cli.command {
-        // The interactive TUI has not been wired to dbm-tui2 yet.
-        Commands::Interact { .. } => {
-            anyhow::bail!("interactive TUI is not available yet")
-        }
+        // The interactive TUI (dbm-tui2) blocks on its own tokio runtime.
+        Commands::Interact {
+            url,
+            instance,
+            connection,
+            discover_host: _,
+        } => run_interact(url, instance, connection),
         other => tokio_run(Cli {
             data_dir: cli.data_dir,
             command: other,
         }),
     }
+}
+
+/// Run the interactive TUI. The CLI may pass `url`/`instance`/`connection` to
+/// pre-select a session; `dbm-tui2` reads its connections from the store.
+fn run_interact(url: Option<String>, instance: Option<String>, connection: Option<String>) -> anyhow::Result<()> {
+    let _ = (url, instance, connection); // session pre-selection not yet plumbed
+    dbm_tui2::app::run()
 }
 
 #[tokio::main]

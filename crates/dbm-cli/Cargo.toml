@@ -17,6 +17,7 @@ dbm-core = { workspace = true }
 dbm-driver-pg = { workspace = true }
 dbm-discovery = { workspace = true }
 dbm-store = { workspace = true }
+dbm-tui2 = { path = "../dbm-tui2" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
