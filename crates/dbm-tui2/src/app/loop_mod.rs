@@ -20,6 +20,7 @@ use std::time::Duration;
 use crossterm::event::{Event as CEvent, EventStream, KeyCode};
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
@@ -92,7 +93,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         // Draw the current frame. The perf_monitor feature is passive: the run
         // loop samples each frame here and feeds the smoothed FPS and
         // redundant-redraw ratio from the wrapped backend.
-        terminal.draw(|frame| render(frame, &mut state))?;
+        terminal.draw(|frame| render(frame, &state))?;
         let changed_cells = terminal.backend_mut().last_changed_cells();
         state.perf.record_frame();
         state.perf.record_redundancy(changed_cells);
@@ -140,11 +141,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     ) && state.modal.is_none()
                     {
                         // Left-click on the header `Discover` button activates
-                        // it. The button rect is the one recorded on the last
-                        // render, so hit-testing uses exactly what was drawn.
-                        let button_rect = state.header.discover_button_rect;
+                        // it. The button rect is derived purely from the header
+                        // layout (the terminal's frame area), matching how the
+                        // view draws it — no state is written during render.
+                        let header_area = Rect::new(0, 0, terminal.size()?.width, 3);
+                        let button_rect =
+                            crate::features::header::view::discover_button_rect(header_area);
                         tracing::debug!(
                             button_rect = ?button_rect,
+                            header_area = ?header_area,
                             modal_open = state.modal.is_some(),
                             "header button hit-test"
                         );

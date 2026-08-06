@@ -18,11 +18,7 @@ use crate::features::sql_workspace::view as sql_view;
 
 /// Top-level render: lays out the shell regions and delegates to each
 /// feature's `view::render`.
-///
-/// Takes `&mut AppState` so each view can record layout hit-boxes (e.g. the
-/// header button rect) for mouse hit-testing, mirroring the original's
-/// `ui_layout`.
-pub fn render(frame: &mut ratatui::Frame, state: &mut AppState) {
+pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     // The footer height is dynamic: one line of hints plus the (wrapped) status
     // line when present.
     let footer_h = footer_view::footer_height(&state.footer, frame.area().width);
@@ -47,7 +43,7 @@ pub fn render(frame: &mut ratatui::Frame, state: &mut AppState) {
     // readout moved into the footer row (right-aligned) to save vertical space.
     let workspace = body[1];
 
-    header_view::render(frame, &state.theme, chunks[0], &mut state.header);
+    header_view::render(frame, &state.theme, chunks[0], &state.header);
     explorer_view::render(frame, &state.theme, body[0], &state.explorer);
     // The main workspace region shows the instance workspace when an instance
     // is open, otherwise the SQL workspace. A future tab mechanism will make

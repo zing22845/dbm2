@@ -30,18 +30,11 @@ pub fn discover_button_rect(area: Rect) -> Option<Rect> {
 /// Render the header: a bordered app title bar with an action-button row.
 ///
 /// The header currently has a single `Discover` button; when it is the focused
-/// button it is highlighted with the accent/selection slot. The button's
-/// clickable rect is recorded on `state` so mouse hit-testing uses exactly the
-/// rect that was drawn (mirrors the original `header_button_rects` in
-/// `ui_layout`).
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &mut HeaderState) {
+/// button it is highlighted with the accent/selection slot. This is a pure
+/// `state -> view` function: it never mutates state (mouse hit-testing calls
+/// the standalone [`discover_button_rect`], not a field written here).
+pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &HeaderState) {
     let p = theme.palette();
-    state.discover_button_rect = discover_button_rect(area);
-    tracing::debug!(
-        rect = ?state.discover_button_rect,
-        header_area = ?area,
-        "header button rect recorded during render"
-    );
 
     // The `Discover` button is focused when the header cursor points at it.
     let discover_focused = state.button == 0;
@@ -53,18 +46,43 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &mut HeaderSt
         Style::default().fg(p.fg)
     };
 
-    let line = Line::from(vec![
-        Span::raw(" "),
-        Span::styled(" Discover ", discover_style),
-        Span::raw("  "),
-        Span::styled("ENTER: activate", Style::default().fg(p.muted)),
-    ]);
-
+    // Draw the bordered title bar (no text: the button and hint are placed
+    // explicitly below, using the same single source of truth as hit-testing).
     let block = Block::default()
         .title(" dbm ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(p.border_active));
-    frame.render_widget(Paragraph::new(line).block(block), area);
+    frame.render_widget(block, area);
+
+    // The button glyphs come from `discover_button_rect`, the same rect used
+    // for mouse hit-testing — render and hit-test can never drift apart.
+    let button_text = " Discover ";
+    if let Some(rect) = discover_button_rect(area) {
+        let visible: String = button_text
+            .chars()
+            .take(rect.width as usize)
+            .collect();
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(visible, discover_style))),
+            rect,
+        );
+        // A short hint to the right of the button.
+        let hint_rect = Rect {
+            x: rect.right().saturating_add(1),
+            y: rect.y,
+            width: area.right().saturating_sub(rect.right().saturating_add(1)),
+            height: 1,
+        };
+        if hint_rect.width >= "ENTER: activate".len() as u16 {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "ENTER: activate",
+                    Style::default().fg(p.muted),
+                ))),
+                hint_rect,
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -98,19 +116,19 @@ mod tests {
     #[test]
     fn rendered_discover_text_matches_button_rect() {
         // Render the header and confirm the literal "Discover" glyphs land
-        // exactly inside the recorded clickable rect (so clicking the drawn
-        // button activates it).
+        // exactly inside the clickable rect (so clicking the drawn button
+        // activates it). The view stays a pure `state -> view` function.
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
         let area = Rect::new(0, 0, 40, 3);
         let mut terminal = Terminal::new(TestBackend::new(40, 3)).unwrap();
-        let mut state = HeaderState::default();
+        let state = HeaderState::default();
         let theme = crate::common::view::theme::dracula();
         terminal
-            .draw(|frame| render(frame, &theme, area, &mut state))
+            .draw(|frame| render(frame, &theme, area, &state))
             .unwrap();
         let buf = terminal.backend().buffer();
-        let r = state.discover_button_rect.expect("button drawn");
+        let r = discover_button_rect(area).expect("button drawn");
         // The whole "Discover" glyphs should be inside the rect.
         let text: String = (r.x..r.right())
             .map(|x| {
@@ -121,5 +139,13 @@ mod tests {
         // The drawn rect must be at the header's interior.
         assert_eq!(r.y, 1);
         assert_eq!(r.x, 2);
+
+        // The "ENTER: activate" hint must render just to the right of the button.
+        let hint: String = (r.right().saturating_add(1)..buf.area().right())
+            .map(|x| {
+                buf[(x, r.y)].symbol().chars().next().unwrap_or(' ')
+            })
+            .collect();
+        assert!(hint.contains("ENTER: activate"), "got: {hint:?}");
     }
 }
