@@ -21,9 +21,10 @@ pub enum DiscoverIntent {
 impl Intent for DiscoverIntent {
     type Message = DiscoverMsg;
 
-    // Skeleton state: the child feature messages are currently uninhabited
-    // because their leaf messages are empty enums. Remove this allow when real
-    // business messages are introduced.
+    // The child intent enums (`EngineIntent`/`TargetsIntent`/`ResultsIntent`)
+    // are currently uninhabited, so every arm below is unreachable and the
+    // match is an empty branch. The child `*Msg` enums already carry variants;
+    // remove this allow when real business intents are introduced.
     #[allow(unreachable_code)]
     fn into_message(self) -> Self::Message {
         match self {

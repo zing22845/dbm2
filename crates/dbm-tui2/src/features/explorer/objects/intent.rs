@@ -15,8 +15,9 @@ impl Intent for ObjectsIntent {
     type Message = ObjectsMsg;
 
     fn into_message(self) -> Self::Message {
-        // Cross-feature one-way notification to the shell; the message mapping
-        // is total but unused because the shell consumes the intent itself.
+        // Cross-feature one-way notification to the shell; the shell
+        // (`app/update.rs`) intercepts `OpenObject` and opens a SQL tab, so
+        // this mapping only satisfies the `Intent` trait and is never routed.
         match self {
             ObjectsIntent::OpenObject { .. } => {
                 ObjectsMsg::Message(ObjectsMessage::MoveUp)

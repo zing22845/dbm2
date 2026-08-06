@@ -1,7 +1,9 @@
 //! Results feature update.
 //!
 //! Pure by-value transition over the result set, cell selection, `/` search
-//! and detail sub-pane. Query execution is a deferred effect (not yet wired).
+//! and detail sub-pane. Query execution runs as a side-channel effect
+//! (`ResultsEffect::RunQuery` -> `Services::execute_sql`), emitted here on
+//! `RunQuery` and on pagination changes.
 
 use crate::common::components::search::PaneSearchInput;
 

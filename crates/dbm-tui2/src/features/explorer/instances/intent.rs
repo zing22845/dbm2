@@ -23,9 +23,9 @@ impl Intent for InstancesIntent {
     type Message = InstancesMsg;
 
     fn into_message(self) -> Self::Message {
-        // Cross-feature intents have no instances-local feedback; they are a
-        // one-way notification to the shell. The mapping is total but the
-        // message is currently unused.
+        // Cross-feature intents have no instances-local feedback; the shell
+        // (`app/update.rs`) intercepts them and opens the target workspace, so
+        // this mapping only satisfies the `Intent` trait and is never routed.
         match self {
             InstancesIntent::OpenInstanceWorkspace { .. }
             | InstancesIntent::OpenConnectionWorkspace { .. } => {
