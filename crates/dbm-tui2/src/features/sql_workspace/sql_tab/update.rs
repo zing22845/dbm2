@@ -27,6 +27,11 @@ pub fn update(
         SqlTabMessage::Tab(idx) => {
             state.active_tab = idx.min(state.tabs.len().saturating_sub(1));
         }
+        SqlTabMessage::Focus(focus) => {
+            if let Some(tab) = state.tabs.get_mut(state.active_tab) {
+                tab.focus = focus;
+            }
+        }
         SqlTabMessage::OpenTab => state.open_tab(),
         SqlTabMessage::CloseTab(idx) => state.close_tab(idx),
         SqlTabMessage::OpenConnectionTab {

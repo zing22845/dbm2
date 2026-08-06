@@ -12,11 +12,18 @@ use crate::features::instance_workspace::msg::IwMsg;
 use crate::features::perf_monitor::msg::PerfMsg;
 use crate::features::sql_workspace::msg::SqlMsg;
 
+use super::state::ModalKind;
+
 /// The global message type. All updates are dispatched on this enum.
 #[derive(Debug, Clone)]
 pub enum AppMsg {
     /// Shell-owned messages (quit, tick, focus change).
     Shell(ShellMsg),
+    /// Open a data-carrying modal (row-limit picker, page input, confirm,
+    /// commit preview). The shell sets `state.modal` in `update`.
+    OpenModal(ModalKind),
+    /// Close the currently open modal.
+    CloseModal,
     /// Header feature messages.
     Header(HeaderMsg),
     /// Explorer feature messages.

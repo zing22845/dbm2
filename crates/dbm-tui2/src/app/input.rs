@@ -30,7 +30,10 @@ use crate::features::sql_workspace::sql_tab::editor::context_picker::state::Pick
 use crate::features::sql_workspace::sql_tab::editor::context_picker::msg::{ContextPickerMessage, ContextPickerMsg};
 use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
 use crate::features::sql_workspace::sql_tab::editor::sql_completion::msg::{SqlCompletionMessage, SqlCompletionMsg};
+use crate::features::sql_workspace::sql_tab::history::msg::{HistoryMessage, HistoryMsg};
 use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage as SqlResultsMessage, ResultsMsg as SqlResultsMsg};
+use crate::features::sql_workspace::sql_tab::state::SqlFocus;
 
 use super::msg::AppMsg;
 use super::state::ModalKind;
@@ -47,14 +50,20 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
     if state.modal.is_none()
         && let Some(dir) = pane_dir_from_key(&key)
     {
+        // Inside the SQL workspace, Ctrl+nav moves the sub-pane focus
+        // (editor / results / history) rather than the top-level zone.
+        if state.focus == FocusZone::SQLWorkspace
+            && let Some(msg) = switch_subpane(dir, &state.sql)
+        {
+            return Some(msg);
+        }
         return switch_zone_by_dir(dir, state.focus);
     }
     match &state.modal {
         Some(ModalKind::Discover) => discover_key(key, &state.discover),
-        // Data-carrying popups: their key routing will be wired once each
-        // popup's owning state is connected; for now only ESC to dismiss and
-        // y/n to confirm are recognized.
-        Some(modal) => modal_key(key, modal),
+        // Data-carrying popups: route their keys here (esc/n close, y/enter
+        // confirms and dispatches the owning feature's action).
+        Some(modal) => modal_key(key, modal, state),
         None => match state.focus {
             FocusZone::Header => header_key(key),
             FocusZone::Explorer => explorer_key(key, &state.explorer),
@@ -93,10 +102,104 @@ fn switch_zone_by_dir(dir: crate::common::utils::zone_nav::PaneDir, focus: Focus
     Some(AppMsg::Shell(ShellMsg::FocusChanged { zone }))
 }
 
+/// Move the active tab's sub-pane focus one step in `dir`, according to the
+/// SQL tab's layout (editor on the left; results above history on the right):
+/// editor → results via right/down; results ↔ history via down/up; back to the
+/// editor via left/up from the right pane. Emits a `SqlTabMessage::Focus` so
+/// the change flows through `update`.
+fn switch_subpane(dir: crate::common::utils::zone_nav::PaneDir, sql: &SqlState) -> Option<AppMsg> {
+    use crate::common::utils::zone_nav::PaneDir;
+    use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+
+    let tab = sql.sql_tab.tabs.get(sql.sql_tab.active_tab)?;
+    let focus = match (tab.focus, dir) {
+        // Editor: right or down enters the results pane (right, top).
+        (SqlFocus::Editor, PaneDir::Right | PaneDir::Down) => SqlFocus::Results,
+        // Results: down to history, up back to the editor.
+        (SqlFocus::Results, PaneDir::Down) => SqlFocus::History,
+        (SqlFocus::Results, PaneDir::Up | PaneDir::Left) => SqlFocus::Editor,
+        // History: up to results, left back to the editor.
+        (SqlFocus::History, PaneDir::Up) => SqlFocus::Results,
+        (SqlFocus::History, PaneDir::Left) => SqlFocus::Editor,
+        _ => return None,
+    };
+    Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+        SqlTabMessage::Focus(focus),
+    )))))
+}
+
 /// Keys for the data-carrying popups. Returns `Some` only when the popup has
 /// an active action to take; picker/page inputs are no-ops until wired.
-fn modal_key(_key: KeyEvent, _modal: &ModalKind) -> Option<AppMsg> {
-    None
+/// Keys for the data-carrying popups (row-limit picker / page input / confirm
+/// / commit preview). `Esc` closes; `n`/`N` cancels a confirm; `y`/`Y`/`Enter`
+/// confirms and dispatches the owning feature's action (e.g. the commit preview
+/// issues a `Commit`). All changes flow through `update` messages.
+fn modal_key(key: KeyEvent, modal: &ModalKind, state: &super::state::AppState) -> Option<AppMsg> {
+    use super::state::ModalKind;
+    use crate::features::sql_workspace::sql_tab::results::msg::ResultsMessage as R;
+    let close = || AppMsg::CloseModal;
+    let active_tab_id = || {
+        state
+            .sql
+            .sql_tab
+            .tabs
+            .get(state.sql.sql_tab.active_tab)
+            .map(|t| t.session.id)
+    };
+    match key.code {
+        KeyCode::Esc => Some(close()),
+        KeyCode::Char('n') | KeyCode::Char('N') => {
+            if crate::common::view::modal::is_confirm_modal(modal) {
+                Some(close())
+            } else {
+                None
+            }
+        }
+        KeyCode::Char('y') | KeyCode::Char('Y') => match modal {
+            ModalKind::ResultsEditCommitPreview { .. } => {
+                // Confirm the commit: dispatch Commit to the active tab's
+                // results (the modal closes when the commit completes, via
+                // `CommitResult`).
+                active_tab_id().map(|id| sql_results(R::Commit, id))
+            }
+            ModalKind::DeleteConnectionConfirm { .. }
+            | ModalKind::UnregisterInstanceConfirm { .. } => Some(close()),
+            _ => None,
+        },
+        // Row-limit picker: up/down cycle the presets, enter applies.
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') | KeyCode::Enter => {
+            if let ModalKind::ResultsRowLimitPicker { current, limits } = modal {
+                if key.code == KeyCode::Enter {
+                    return active_tab_id().map(|id| sql_results(R::SetRowLimit { limit: *current }, id));
+                }
+                let delta = if matches!(key.code, KeyCode::Up | KeyCode::Char('k')) {
+                    usize::MAX // -1 wraps below
+                } else {
+                    1usize
+                };
+                let idx = limits
+                    .iter()
+                    .position(|l| *l == *current)
+                    .unwrap_or(0);
+                let len = limits.len().max(1);
+                let next = if delta == 1 {
+                    (idx + 1) % len
+                } else {
+                    (idx + len - 1) % len
+                };
+                return Some(AppMsg::OpenModal(ModalKind::ResultsRowLimitPicker {
+                    current: limits[next],
+                    limits: limits.clone(),
+                }));
+            }
+            // Page input: enter applies the shown page.
+            if let ModalKind::ResultsPageInput { current_page, .. } = modal {
+                return active_tab_id().map(|id| sql_results(R::SetPage { page: *current_page }, id));
+            }
+            None
+        }
+        _ => None,
+    }
 }
 
 /// Key bindings for the Header focus zone: move the button cursor and activate.
@@ -346,13 +449,155 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         return Some(msg);
     }
 
-    // Ctrl+Enter runs the current editor SQL.
-    if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
-        return Some(sql_editor(EditorMessage::Run, tab_id));
+    // Route the key to the focused sub-pane.
+    match tab.focus {
+        SqlFocus::Editor => {
+            // Ctrl+Enter runs the current editor SQL.
+            if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
+                return Some(sql_editor(EditorMessage::Run, tab_id));
+            }
+            // Otherwise forward the key to the editor buffer.
+            editor_key(key, tab_id)
+        }
+        SqlFocus::Results => results_key(key, tab_id, &tab.results),
+        SqlFocus::History => history_key(key, tab_id, &tab.history),
+    }
+}
+
+/// Build a `SqlTabMessage::Results` targeting the given tab.
+fn sql_results(msg: SqlResultsMessage, tab_id: usize) -> AppMsg {
+    AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+        SqlTabMessage::Results {
+            tab_id,
+            msg: SqlResultsMsg::Message(msg),
+        },
+    ))))
+}
+
+/// Results sub-pane keys: navigation, editing, and toolbar actions.
+///
+/// Runs only when the active tab's sub-pane focus is `Results`, so keys here do
+/// not collide with the editor's. Produces `ResultsMessage`s (or modal messages
+/// via the returned `AppMsg`) and never mutates state directly.
+fn results_key(key: KeyEvent, tab_id: usize, results: &crate::features::sql_workspace::sql_tab::results::state::ResultsState) -> Option<AppMsg> {
+    // Refresh re-runs the last query using the stored connection context.
+    if key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        let needs = !results.last_sql.is_empty()
+            && !results.last_instance.is_empty()
+            && !results.last_connection.is_empty();
+        return if needs {
+            Some(sql_results(
+                SqlResultsMessage::RunQuery {
+                    instance: results.last_instance.clone(),
+                    connection: results.last_connection.clone(),
+                    database: results.last_database.clone(),
+                    schema: results.last_schema.clone(),
+                    sql: results.last_sql.clone(),
+                    paginated: results.paginated,
+                    page: results.page,
+                    row_limit: results.row_limit,
+                },
+                tab_id,
+            ))
+        } else {
+            None
+        };
     }
 
-    // Otherwise forward the key to the editor buffer.
-    editor_key(key, tab_id)
+    match key.code {
+        // Toggle edit mode.
+        KeyCode::Char('i') if key.modifiers.is_empty() => Some(sql_results(
+            SqlResultsMessage::EnterEdit,
+            tab_id,
+        )),
+        // Exit edit mode / clear selection.
+        KeyCode::Esc if key.modifiers.is_empty() && results.edit.editing => {
+            Some(sql_results(SqlResultsMessage::ExitEdit, tab_id))
+        }
+        // Commit edits: open a preview modal with the built statements, then
+        // `y`/`Enter` confirms and dispatches `Commit`.
+        KeyCode::Char('s')
+            if key.modifiers.contains(KeyModifiers::CONTROL) && results.edit.editing =>
+        {
+            let statements = results.build_commit_statements().ok();
+            statements.map(|statements| {
+                AppMsg::OpenModal(super::state::ModalKind::ResultsEditCommitPreview { statements })
+            })
+        }
+        // Roll back edits.
+        KeyCode::Char('u')
+            if key.modifiers.contains(KeyModifiers::CONTROL) && results.edit.editing =>
+        {
+            Some(sql_results(SqlResultsMessage::Rollback, tab_id))
+        }
+        // Insert / duplicate / delete rows (edit mode only).
+        KeyCode::Char('i')
+            if key.modifiers.contains(KeyModifiers::ALT) && results.edit.editing =>
+        {
+            Some(sql_results(SqlResultsMessage::AddRow, tab_id))
+        }
+        KeyCode::Char('p')
+            if key.modifiers.contains(KeyModifiers::ALT) && results.edit.editing =>
+        {
+            Some(sql_results(SqlResultsMessage::DupRow, tab_id))
+        }
+        KeyCode::Char('d')
+            if key.modifiers.is_empty() && results.edit.editing =>
+        {
+            Some(sql_results(SqlResultsMessage::DelRow, tab_id))
+        }
+        // Cell selection via arrows.
+        KeyCode::Up => Some(sql_results(SqlResultsMessage::MoveSelection { dr: -1, dc: 0 }, tab_id)),
+        KeyCode::Down => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 1, dc: 0 }, tab_id)),
+        KeyCode::Left => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: -1 }, tab_id)),
+        KeyCode::Right => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: 1 }, tab_id)),
+        // Begin `/` search.
+        KeyCode::Char('/') if key.modifiers.is_empty() => {
+            Some(sql_results(SqlResultsMessage::BeginSearch, tab_id))
+        }
+        // Row-limit picker modal.
+        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::ALT) => {
+            Some(AppMsg::OpenModal(super::state::ModalKind::ResultsRowLimitPicker {
+                current: results.row_limit,
+                limits: crate::features::sql_workspace::sql_tab::results::pagination::RESULTS_ROW_LIMIT_PRESETS
+                    .to_vec(),
+            }))
+        }
+        // Page input modal.
+        KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::ALT) => {
+            let total_pages = crate::features::sql_workspace::sql_tab::results::pagination::max_page(
+                results.result.as_ref().and_then(|r| r.total_rows),
+                results.row_limit,
+            );
+            Some(AppMsg::OpenModal(super::state::ModalKind::ResultsPageInput {
+                current_page: results.page,
+                total_pages,
+            }))
+        }
+        _ => None,
+    }
+}
+
+/// History sub-pane keys: navigation and apply. Runs only when sub-pane focus
+/// is `History`. Produces `HistoryMessage`s without mutating state directly.
+fn history_key(
+    key: KeyEvent,
+    tab_id: usize,
+    _history: &crate::features::sql_workspace::sql_tab::history::state::HistoryState,
+) -> Option<AppMsg> {
+    let msg = match key.code {
+        KeyCode::Up => HistoryMessage::MoveCursor { delta: -1 },
+        KeyCode::Down => HistoryMessage::MoveCursor { delta: 1 },
+        KeyCode::Enter => HistoryMessage::Apply,
+        KeyCode::Char('/') if key.modifiers.is_empty() => HistoryMessage::BeginSearch,
+        _ => return None,
+    };
+    Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+        SqlTabMessage::History {
+            tab_id,
+            msg: HistoryMsg::Message(msg),
+        },
+    )))))
 }
 
 /// Tab-bar navigation keys: switch / open / close tabs.
@@ -534,5 +779,59 @@ mod tests {
         // Plain 'j' is not a pane-move chord (no Ctrl), so it should not switch
         // the zone; the header key handler does not consume it either.
         assert!(key_to_msg(key(KeyCode::Char('j'), KeyModifiers::NONE), &state).is_none());
+    }
+
+    #[test]
+    fn ctrl_l_in_sql_workspace_moves_subpane_editor_to_results() {
+        // Default tab focus is Editor; Ctrl+l (right) moves editor → results.
+        let sql = state_with_tabs(1);
+        let msg = switch_subpane(crate::common::utils::zone_nav::PaneDir::Right, &sql)
+            .expect("editor right should move to results");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Focus(SqlFocus::Results));
+    }
+
+    #[test]
+    fn ctrl_j_in_sql_workspace_from_editor_moves_to_results() {
+        // Editor down → results (results sits below-right of the editor).
+        let sql = state_with_tabs(1);
+        let msg = switch_subpane(crate::common::utils::zone_nav::PaneDir::Down, &sql)
+            .expect("editor down should move to results");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Focus(SqlFocus::Results));
+    }
+
+    #[test]
+    fn ctrl_j_from_results_moves_to_history() {
+        // Set focus to Results, then Down → history.
+        let mut sql = state_with_tabs(1);
+        sql.sql_tab.tabs[0].focus = SqlFocus::Results;
+        let msg = switch_subpane(crate::common::utils::zone_nav::PaneDir::Down, &sql)
+            .expect("results down should move to history");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Focus(SqlFocus::History));
+    }
+
+    #[test]
+    fn results_key_i_enters_edit_mode() {
+        let state = crate::app::state::AppState::default();
+        let results = &state.sql.sql_tab.tabs[0].results;
+        let msg = results_key(key(KeyCode::Char('i'), KeyModifiers::NONE), 0, results)
+            .expect("i should enter edit mode");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::EnterEdit),
+            }
+        );
+    }
+
+    #[test]
+    fn results_key_ctrl_s_opens_commit_preview_only_when_editing() {
+        // With no edit session, Ctrl+s yields no commit preview (no-op).
+        let state = crate::app::state::AppState::default();
+        let results = &state.sql.sql_tab.tabs[0].results;
+        assert!(
+            results_key(key(KeyCode::Char('s'), KeyModifiers::CONTROL), 0, results).is_none(),
+            "ctrl+s with no edit session should be a no-op"
+        );
     }
 }

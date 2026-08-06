@@ -68,7 +68,9 @@ fn box_effect(e: impl ErasedEffect<Action> + 'static) -> Box<dyn ErasedEffect<Ac
 /// mapping here.
 fn focus_zone_of(msg: &AppMsg) -> Option<FocusZone> {
     match msg {
-        AppMsg::Shell(_) | AppMsg::Footer(_) => None,
+        // Shell, footer, and modal open/close messages are shell orchestration
+        // and bypass the focus guard.
+        AppMsg::Shell(_) | AppMsg::Footer(_) | AppMsg::OpenModal(_) | AppMsg::CloseModal => None,
         AppMsg::Header(_) => Some(FocusZone::Header),
         AppMsg::Explorer(_) => Some(FocusZone::Explorer),
         AppMsg::Discover(_) => Some(FocusZone::SQLWorkspace),
@@ -123,6 +125,12 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
     // `let XMsg::Message(inner) = m` destructuring below is irrefutable.
     // Do NOT add variants to `XMsg`; extend `XMessage` instead.
     match msg {
+        AppMsg::OpenModal(modal) => {
+            state.modal = Some(modal);
+        }
+        AppMsg::CloseModal => {
+            state.modal = None;
+        }
         AppMsg::Shell(shell_msg) => match shell_msg {
             crate::app_shell::msg::ShellMsg::Quit => {
                 state.should_quit = true;

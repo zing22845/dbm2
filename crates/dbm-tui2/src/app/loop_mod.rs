@@ -367,8 +367,21 @@ fn drain_async_actions(
                 )));
             }
             // The SQL workspace's catalog-load actions feed back into the
-            // targeted tab's editor (the context picker).
+            // targeted tab's editor (the context picker). A commit completion
+            // also closes the commit-preview modal.
             Ok(Action::Sql(action)) => {
+                use crate::features::sql_workspace::effect::SqlAction;
+                use crate::features::sql_workspace::sql_tab::effect::SqlTabAction;
+                use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
+                if matches!(
+                    action,
+                    SqlAction::SqlTab(SqlTabAction::Results {
+                        action: ResultsAction::CommitResult { .. },
+                        ..
+                    })
+                ) {
+                    pending.push_back(AppMsg::CloseModal);
+                }
                 pending.push_back(AppMsg::Sql(crate::features::sql_workspace::msg::SqlMsg::Message(
                     sql_action_to_msg(action),
                 )));

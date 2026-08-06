@@ -6,11 +6,27 @@ use super::editor::state::EditorState;
 use super::history::state::HistoryState;
 use super::results::state::ResultsState;
 
+/// Which sub-pane of the SQL tab currently owns the keyboard focus. The editor
+/// and results/history panes share the workspace, so keys must be routed to one
+/// of them based on this focus (mirrors the original `SqlFocusPane`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SqlFocus {
+    /// The SQL editor (default).
+    #[default]
+    Editor,
+    /// The results grid / edit session.
+    Results,
+    /// The history list.
+    History,
+}
+
 /// A single SQL tab: an independent session plus the three child module states.
 #[derive(Debug, Clone)]
 pub struct SqlTab {
     /// This tab's own session (connection, database/schema, persistence unit).
     pub session: TabSession,
+    /// The sub-pane currently focused (routes keys within this tab).
+    pub focus: SqlFocus,
     /// Editor child feature state.
     pub editor: EditorState,
     /// Results child feature state.
@@ -54,6 +70,7 @@ impl SqlTabState {
                 id,
                 ..TabSession::default()
             },
+            focus: SqlFocus::default(),
             editor: EditorState::default(),
             results: ResultsState::default(),
             history: HistoryState::default(),
@@ -82,6 +99,7 @@ impl SqlTabState {
                 database,
                 schema,
             },
+            focus: SqlFocus::default(),
             editor: EditorState::default(),
             results: ResultsState::default(),
             history: HistoryState::default(),

@@ -48,6 +48,10 @@ pub enum ResultsMessage {
     DelRow,
     /// Set the detail draft text (edited cell value).
     SetDetailDraft { text: String },
+    /// Apply a new rows-per-page limit (from the row-limit picker modal).
+    SetRowLimit { limit: usize },
+    /// Jump to a page (from the page-input modal).
+    SetPage { page: usize },
     /// Commit the current edits against the tab's connection (emits a
     /// transaction-executing `ResultsEffect::Commit`).
     Commit,

@@ -3,6 +3,7 @@
 use super::editor::msg::EditorMsg;
 use super::history::msg::HistoryMsg;
 use super::results::msg::ResultsMsg;
+use super::state::SqlFocus;
 
 /// The actual `sql_tab` messages: tab management plus forwarding to the
 /// three child modules. Child messages carry a `tab_id` so they target a
@@ -19,6 +20,8 @@ pub enum SqlTabMessage {
     ApplyContext { tab_id: usize, database: String, schema: String },
     /// Recall `sql` into the tab's editor (history apply).
     RecallHistory { tab_id: usize, sql: String },
+    /// Set the active tab's sub-pane focus (editor / results / history).
+    Focus(SqlFocus),
     /// Run `sql` from the tab's editor (dispatched to results with session context).
     RunQueryFromEditor { tab_id: usize, sql: String },
     /// Open a new tab bound to a connection with its display identity.

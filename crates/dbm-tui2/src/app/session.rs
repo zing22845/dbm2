@@ -91,6 +91,7 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) {
                 database: non_empty(t.database.clone()),
                 schema: non_empty(t.schema.clone()),
             },
+            focus: crate::features::sql_workspace::sql_tab::state::SqlFocus::default(),
             editor: EditorState::with_sql(&t.sql),
             results: crate::features::sql_workspace::sql_tab::results::state::ResultsState::new(),
             history: crate::features::sql_workspace::sql_tab::history::state::HistoryState::default(),

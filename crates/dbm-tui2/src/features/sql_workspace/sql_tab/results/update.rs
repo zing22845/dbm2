@@ -145,6 +145,23 @@ pub fn update(
                 super::detail_edit::detail_draft_dirty(&text, &state.detail_baseline);
             state.apply_cell_value(state.row, state.col, text);
         }
+        ResultsMessage::SetRowLimit { limit } => {
+            state.row_limit = limit.max(1);
+            state.page = 1;
+            rerun_query(&state, &mut effects);
+        }
+        ResultsMessage::SetPage { page } => {
+            // Clamp to the available pages when known.
+            let max = super::pagination::max_page(
+                state.result.as_ref().and_then(|r| r.total_rows),
+                state.row_limit,
+            );
+            state.page = page.max(1);
+            if let Some(max) = max {
+                state.page = state.page.min(max.max(1));
+            }
+            rerun_query(&state, &mut effects);
+        }
         ResultsMessage::Commit => {
             if let Ok(statements) = state.build_commit_statements() {
                 effects.push(ResultsEffect::Commit {
@@ -166,6 +183,27 @@ pub fn update(
         }
     }
     (state, intents, effects)
+}
+
+/// Re-run the last query with the current page/row-limit (used after pagination
+/// changes). Emits a `RunQuery` effect with the stored session context.
+fn rerun_query(state: &ResultsState, effects: &mut Vec<ResultsEffect>) {
+    if state.last_sql.is_empty()
+        || state.last_instance.is_empty()
+        || state.last_connection.is_empty()
+    {
+        return;
+    }
+    effects.push(ResultsEffect::RunQuery {
+        instance: state.last_instance.clone(),
+        connection: state.last_connection.clone(),
+        database: state.last_database.clone(),
+        schema: state.last_schema.clone(),
+        sql: state.last_sql.clone(),
+        paginated: state.paginated,
+        page: state.page,
+        row_limit: state.row_limit,
+    });
 }
 
 fn handle_search_key(state: &mut ResultsState, key: crossterm::event::KeyEvent) {
