@@ -319,29 +319,21 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
     result
 }
 
-/// Apply an action produced by an effect. `Dispatch` feeds a message back
-/// into the router (bypassing the focus guard, since effect results are
-/// delivered programmatically); `Shell` handles shell commands.
+/// Apply an action produced by an effect.
+///
+/// Every action is converted into the message(s) it should dispatch back into
+/// the router via [`action_to_app_msgs`], then applied through `update_unchecked`
+/// (which bypasses the focus guard, since effect results are delivered
+/// programmatically). This mirrors the message-round drain exactly, so an
+/// async action received here as a `recv()` seed is never dropped or handled
+/// differently from one drained in bulk.
 pub fn handle_action(action: Action, state: &mut AppState) -> UpdateResult {
-    match action {
-        Action::Dispatch(msg) => update_unchecked(msg, state),
-        Action::Shell(shell) => match shell {
-            crate::app_shell::action::ShellAction::Quit => {
-                state.should_quit = true;
-                UpdateResult::new()
-            }
-        },
-        // Feature-specific actions are not yet handled: effects that emit
-        // them are absent in the skeleton. They are intentionally dropped
-        // (rather than panicking) so the loop stays resilient.
-        // TODO: implement per-feature action handling once business effects
-        // are introduced (e.g. HeaderAction::DataLoaded, SqlAction::QueryDone).
-        Action::Header(_)
-        | Action::Explorer(_)
-        | Action::Discover(_)
-        | Action::Iw(_)
-        | Action::Sql(_)
-        | Action::Footer(_)
-        | Action::Perf(_) => UpdateResult::new(),
+    let mut result = UpdateResult::new();
+    for msg in crate::app::loop_mod::action_to_app_msgs(action) {
+        let sub = update_unchecked(msg, state);
+        result.intents.extend(sub.intents);
+        result.effects.extend(sub.effects);
+        result.pending.extend(sub.pending);
     }
+    result
 }

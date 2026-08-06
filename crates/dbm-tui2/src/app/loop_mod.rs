@@ -439,6 +439,60 @@ fn queue_result(
     pending.extend(result.pending);
 }
 
+/// Convert an effect-produced action into the message(s) it should dispatch
+/// back into the router.
+///
+/// This is the single conversion used by both the message-round drain and the
+/// action-round seed (`handle_action`), so an async action is handled
+/// identically no matter how it arrives — eliminating the previous race where
+/// a feature action received as a `recv()` seed was dropped by `handle_action`
+/// and never drained.
+pub(crate) fn action_to_app_msgs(action: Action) -> Vec<AppMsg> {
+    match action {
+        Action::Dispatch(msg) => vec![msg],
+        Action::Shell(crate::app_shell::action::ShellAction::Quit) => {
+            vec![AppMsg::Shell(crate::app_shell::msg::ShellMsg::Quit)]
+        }
+        // The discover feature's scan/register actions feed back into the
+        // discover modal as messages.
+        Action::Discover(action) => vec![AppMsg::Discover(
+            crate::features::discover::msg::DiscoverMsg::Message(discover_action_to_msg(action)),
+        )],
+        // The explorer's load actions feed back into the explorer.
+        Action::Explorer(action) => vec![AppMsg::Explorer(
+            crate::features::explorer::msg::ExplorerMsg::Message(explorer_action_to_msg(action)),
+        )],
+        // The instance workspace's load/save/delete actions feed back.
+        Action::Iw(action) => vec![AppMsg::Iw(
+            crate::features::instance_workspace::msg::IwMsg::Message(iw_action_to_msg(action)),
+        )],
+        // The SQL workspace's catalog-load actions feed back into the targeted
+        // tab's editor (the context picker). A commit completion also closes
+        // the commit-preview modal.
+        Action::Sql(action) => {
+            use crate::features::sql_workspace::effect::SqlAction;
+            use crate::features::sql_workspace::sql_tab::effect::SqlTabAction;
+            use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
+            let mut msgs = Vec::new();
+            if matches!(
+                &action,
+                SqlAction::SqlTab(SqlTabAction::Results {
+                    action: ResultsAction::CommitResult { .. },
+                    ..
+                })
+            ) {
+                msgs.push(AppMsg::CloseModal);
+            }
+            msgs.push(AppMsg::Sql(
+                crate::features::sql_workspace::msg::SqlMsg::Message(sql_action_to_msg(action)),
+            ));
+            msgs
+        }
+        // Header/footer/perf effects are currently stateless; nothing to route.
+        Action::Header(_) | Action::Footer(_) | Action::Perf(_) => Vec::new(),
+    }
+}
+
 /// Move any already-available async actions out of the channel and into the
 /// queue as dispatched messages. Does not await; only drains what is ready so
 /// the event loop never blocks on effects.
@@ -448,59 +502,7 @@ fn drain_async_actions(
 ) {
     loop {
         match action_rx.try_recv() {
-            Ok(Action::Dispatch(msg)) => pending.push_back(msg),
-            Ok(Action::Shell(crate::app_shell::action::ShellAction::Quit)) => {
-                pending.push_back(AppMsg::Shell(crate::app_shell::msg::ShellMsg::Quit));
-            }
-            // The discover feature's scan/register actions feed back into the
-            // discover modal as messages.
-            Ok(Action::Discover(action)) => {
-                pending.push_back(AppMsg::Discover(
-                    crate::features::discover::msg::DiscoverMsg::Message(
-                        discover_action_to_msg(action),
-                    ),
-                ));
-            }
-            // The explorer's load actions feed back into the explorer.
-            Ok(Action::Explorer(action)) => {
-                pending.push_back(AppMsg::Explorer(
-                    crate::features::explorer::msg::ExplorerMsg::Message(
-                        explorer_action_to_msg(action),
-                    ),
-                ));
-            }
-            // The instance workspace's load/save/delete actions feed back.
-            Ok(Action::Iw(action)) => {
-                pending.push_back(AppMsg::Iw(crate::features::instance_workspace::msg::IwMsg::Message(
-                    iw_action_to_msg(action),
-                )));
-            }
-            // The SQL workspace's catalog-load actions feed back into the
-            // targeted tab's editor (the context picker). A commit completion
-            // also closes the commit-preview modal.
-            Ok(Action::Sql(action)) => {
-                use crate::features::sql_workspace::effect::SqlAction;
-                use crate::features::sql_workspace::sql_tab::effect::SqlTabAction;
-                use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
-                if matches!(
-                    action,
-                    SqlAction::SqlTab(SqlTabAction::Results {
-                        action: ResultsAction::CommitResult { .. },
-                        ..
-                    })
-                ) {
-                    pending.push_back(AppMsg::CloseModal);
-                }
-                pending.push_back(AppMsg::Sql(crate::features::sql_workspace::msg::SqlMsg::Message(
-                    sql_action_to_msg(action),
-                )));
-            }
-            // Feature-specific actions are not yet handled; they are dropped
-            // rather than panicking so the loop stays resilient. `Shell` has a
-            // single `Quit` variant and is already covered above.
-            Ok(Action::Header(_))
-            | Ok(Action::Footer(_))
-            | Ok(Action::Perf(_)) => {}
+            Ok(action) => pending.extend(action_to_app_msgs(action)),
             Err(mpsc::error::TryRecvError::Empty) => break,
             Err(mpsc::error::TryRecvError::Disconnected) => break,
         }
