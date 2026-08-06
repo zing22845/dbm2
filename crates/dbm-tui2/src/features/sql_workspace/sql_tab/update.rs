@@ -52,6 +52,33 @@ pub fn update(
                 warn_tab_missing(tab_id);
             }
         }
+        SqlTabMessage::SetSplitRatio { tab_id, ratio } => {
+            if let Some(idx) = state.index_of(tab_id) {
+                state.tabs[idx].set_split_ratio(ratio);
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
+        SqlTabMessage::SetHistoryWidth { tab_id, width } => {
+            if let Some(idx) = state.index_of(tab_id) {
+                state.tabs[idx].set_history_pane_width(width);
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
+        SqlTabMessage::NudgeHistoryWidth { tab_id, nudge } => {
+            use crate::common::view::splitter::{
+                WIDTH_NUDGE_STEP, width_delta_for_right_pane,
+            };
+            if let Some(idx) = state.index_of(tab_id) {
+                let delta = width_delta_for_right_pane(nudge, WIDTH_NUDGE_STEP);
+                let current = i32::from(state.tabs[idx].history_pane_width);
+                let next = (current + i32::from(delta)).max(0) as u16;
+                state.tabs[idx].set_history_pane_width(next);
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
         SqlTabMessage::RecallHistory { tab_id, sql } => {
             if let Some(idx) = state.index_of(tab_id) {
                 let editor_state = std::mem::take(&mut state.tabs[idx].editor);

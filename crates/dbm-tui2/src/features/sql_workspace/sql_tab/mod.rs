@@ -5,6 +5,7 @@ pub mod editor;
 pub mod effect;
 pub mod history;
 pub mod intent;
+pub mod layout;
 pub mod msg;
 pub mod results;
 pub mod session;

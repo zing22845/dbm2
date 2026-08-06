@@ -91,6 +91,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         &mut state,
     );
 
+    // Which SQL-tab splitter is being drag-resized, if any. This is transient
+    // interaction state that lives only for the lifetime of a drag gesture; it
+    // never reaches `AppState` (TEA: state mutations still flow through
+    // `update` via split-resize messages).
+    let mut split_drag: Option<crate::features::sql_workspace::sql_tab::layout::SqlSplitter> = None;
+
     loop {
         // Draw the current frame. The perf_monitor feature is passive: the run
         // loop samples each frame here and feeds the smoothed FPS and
@@ -137,90 +143,123 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         row = mouse.row,
                         "mouse event received"
                     );
-                    if matches!(
-                        mouse.kind,
-                        MouseEventKind::Down(MouseButton::Left)
-                    ) && state.modal.is_none()
-                    {
-                        // Map the click to a focus zone by region. The layout
-                        // mirrors `app/view.rs`: header (top 3 rows), explorer
-                        // (left 20% of the body), workspace (right 80%).
-                        let size = terminal.size()?;
-                        let footer_h = footer_view::footer_height(&state.footer, size.width);
-                        let body_top = 3u16;
-                        let body_h = size.height.saturating_sub(body_top).saturating_sub(footer_h);
-                        let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
-                        let point = Position::new(mouse.column, mouse.row);
+                    let point = Position::new(mouse.column, mouse.row);
+                    match mouse.kind {
+                        MouseEventKind::Down(MouseButton::Left) if state.modal.is_none() => {
+                            // Map the click to a focus zone by region. The layout
+                            // mirrors `app/view.rs`: header (top 3 rows), explorer
+                            // (left 20% of the body), workspace (right 80%).
+                            let size = terminal.size()?;
+                            let footer_h = footer_view::footer_height(&state.footer, size.width);
+                            let body_top = 3u16;
+                            let body_h =
+                                size.height.saturating_sub(body_top).saturating_sub(footer_h);
+                            let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
 
-                        // Clicking a region moves focus there (shell-level).
-                        let target_zone = if mouse.row < body_top {
-                            Some(FocusZone::Header)
-                        } else if mouse.row >= body_top + body_h {
-                            None
-                        } else if mouse.column < explorer_w {
-                            Some(FocusZone::Explorer)
-                        } else if state.iw.instance_name.is_empty() {
-                            Some(FocusZone::SQLWorkspace)
-                        } else {
-                            Some(FocusZone::InstanceWorkspace)
-                        };
-                        tracing::debug!(
-                            point = ?point,
-                            target_zone = ?target_zone,
-                            current_focus = ?state.focus,
-                            "mouse click zone mapping"
-                        );
-                        if let Some(zone) = target_zone.filter(|z| *z != state.focus) {
-                            let msg = AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged {
-                                zone,
-                            });
-                            process_message_round(
-                                &effect_runner,
-                                &mut action_rx,
-                                msg,
-                                &mut state,
+                            // Clicking a region moves focus there (shell-level).
+                            let target_zone = if mouse.row < body_top {
+                                Some(FocusZone::Header)
+                            } else if mouse.row >= body_top + body_h {
+                                None
+                            } else if mouse.column < explorer_w {
+                                Some(FocusZone::Explorer)
+                            } else if state.iw.instance_name.is_empty() {
+                                Some(FocusZone::SQLWorkspace)
+                            } else {
+                                Some(FocusZone::InstanceWorkspace)
+                            };
+                            tracing::debug!(
+                                point = ?point,
+                                target_zone = ?target_zone,
+                                current_focus = ?state.focus,
+                                "mouse click zone mapping"
+                            );
+                            if let Some(zone) = target_zone.filter(|z| *z != state.focus) {
+                                let msg = AppMsg::Shell(
+                                    crate::app_shell::msg::ShellMsg::FocusChanged { zone },
+                                );
+                                process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    msg,
+                                    &mut state,
+                                );
+                            }
+
+                            // Left-click on the header `Discover` button activates
+                            // it, in addition to moving focus to the header.
+                            let header_area = Rect::new(0, 0, size.width, 3);
+                            let button_rect =
+                                crate::features::header::view::discover_button_rect(header_area);
+                            let clicked = button_rect.is_some_and(|r| r.contains(point));
+                            tracing::debug!(clicked, "header button click resolved");
+                            if clicked {
+                                // Clicking the header button is an explicit user
+                                // intent: move focus to the Header zone (via the
+                                // shell message), then dispatch Activate. Both go
+                                // through `update` so every state change flows
+                                // through the single state-transition channel.
+                                process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged {
+                                        zone: crate::app_shell::focus::FocusZone::Header,
+                                    }),
+                                    &mut state,
+                                );
+                                process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    AppMsg::Header(HeaderMsg::Message(HeaderMessage::Activate)),
+                                    &mut state,
+                                );
+                                tracing::debug!("dispatching HeaderMessage::Activate");
+                            }
+
+                            // Starting a drag on a SQL-tab splitter begins a
+                            // resize gesture (only when the SQL workspace owns
+                            // focus and it is actually rendered).
+                            if state.focus == FocusZone::SQLWorkspace
+                                && let Some((layout, _tab_id)) =
+                                    sql_tab_layout_for_hit(terminal.size()?, &state)
+                                && let Some(splitter) = layout.splitter_at(point.x, point.y)
+                            {
+                                split_drag = Some(splitter);
+                                tracing::debug!(?splitter, "splitter drag started");
+                            }
+                        }
+                        MouseEventKind::Drag(MouseButton::Left) => {
+                            if let Some(splitter) = split_drag {
+                                let size = terminal.size()?;
+                                if let Some((layout, tab_id)) = sql_tab_layout_for_hit(size, &state) {
+                                    // Compute the new split value from the mouse
+                                    // position and dispatch a resize message (all
+                                    // state changes flow through `update`).
+                                    let msg = split_resize_msg(splitter, point, layout, tab_id);
+                                    process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                }
+                            }
+                        }
+                        MouseEventKind::Up(MouseButton::Left) => {
+                            if split_drag.take().is_some() {
+                                tracing::debug!("splitter drag finished");
+                            }
+                        }
+                        _ => {
+                            tracing::debug!(
+                                is_left_down = matches!(
+                                    mouse.kind,
+                                    MouseEventKind::Down(MouseButton::Left)
+                                ),
+                                modal_open = state.modal.is_some(),
+                                "mouse event ignored"
                             );
                         }
-
-                        // Left-click on the header `Discover` button activates
-                        // it, in addition to moving focus to the header.
-                        let header_area = Rect::new(0, 0, size.width, 3);
-                        let button_rect =
-                            crate::features::header::view::discover_button_rect(header_area);
-                        let clicked = button_rect
-                            .is_some_and(|r| r.contains(point));
-                        tracing::debug!(clicked, "header button click resolved");
-                        if clicked {
-                            // Clicking the header button is an explicit user
-                            // intent: move focus to the Header zone (via the
-                            // shell message), then dispatch Activate. Both go
-                            // through `update` so every state change flows
-                            // through the single state-transition channel.
-                            process_message_round(
-                                &effect_runner,
-                                &mut action_rx,
-                                AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged {
-                                    zone: crate::app_shell::focus::FocusZone::Header,
-                                }),
-                                &mut state,
-                            );
-                            process_message_round(
-                                &effect_runner,
-                                &mut action_rx,
-                                AppMsg::Header(HeaderMsg::Message(HeaderMessage::Activate)),
-                                &mut state,
-                            );
-                            tracing::debug!("dispatching HeaderMessage::Activate");
-                        }
-                    } else {
-                        tracing::debug!(
-                            is_left_down = matches!(
-                                mouse.kind,
-                                MouseEventKind::Down(MouseButton::Left)
-                            ),
-                            modal_open = state.modal.is_some(),
-                            "mouse click ignored"
-                        );
                     }
                 }
             }
@@ -253,6 +292,76 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         crossterm::event::DisableMouseCapture
     )?;
     Ok(())
+}
+
+/// Compute the active SQL tab's body layout for mouse hit-testing, using the
+/// tab's stored split values. Returns the layout and the tab's session id, or
+/// `None` when the SQL workspace is not currently rendered (a modal is open,
+/// the instance workspace is showing, or no tab is active).
+fn sql_tab_layout_for_hit(
+    size: ratatui::layout::Size,
+    state: &AppState,
+) -> Option<(crate::features::sql_workspace::sql_tab::layout::SqlTabLayout, usize)> {
+    use crate::features::sql_workspace::sql_tab::layout::sql_tab_layout;
+
+    if state.modal.is_some() || !state.iw.instance_name.is_empty() {
+        return None;
+    }
+    let tab = state.sql.sql_tab.tabs.get(state.sql.sql_tab.active_tab)?;
+    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let body_top = 3u16;
+    let body_h = size.height.saturating_sub(body_top).saturating_sub(footer_h);
+    if body_h < 3 {
+        return None;
+    }
+    let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+    let workspace_w = size.width.saturating_sub(explorer_w);
+    let workspace = Rect::new(explorer_w, body_top, workspace_w, body_h);
+    // The SQL tab's body sits below its 1-row tab bar within the workspace.
+    let sql_body = Rect::new(
+        workspace.x,
+        workspace.y + 1,
+        workspace.width,
+        workspace.height.saturating_sub(1),
+    );
+    let layout = sql_tab_layout(sql_body, tab.split_ratio, tab.history_pane_width);
+    if layout.editor.width == 0 {
+        return None;
+    }
+    Some((layout, tab.session.id))
+}
+
+/// Build the split-resize message for a drag gesture at `point`, using the
+/// current layout as the reference frame.
+fn split_resize_msg(
+    splitter: crate::features::sql_workspace::sql_tab::layout::SqlSplitter,
+    point: ratatui::prelude::Position,
+    layout: crate::features::sql_workspace::sql_tab::layout::SqlTabLayout,
+    tab_id: usize,
+) -> AppMsg {
+    use crate::features::sql_workspace::sql_tab::layout::SqlSplitter;
+    use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+    use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+
+    let msg = match splitter {
+        SqlSplitter::EditorResults => {
+            // The splitter's row becomes the top-pane height; express it as a
+            // percent of the body height so the ratio survives terminal resizes.
+            let body_top = layout.editor.y;
+            let body_h = layout.results.bottom().saturating_sub(body_top).max(1);
+            let top_h = point.y.saturating_sub(body_top);
+            let ratio = ((u32::from(top_h) * 100) / u32::from(body_h)).min(99) as u8;
+            SqlTabMessage::SetSplitRatio { tab_id, ratio }
+        }
+        SqlSplitter::EditorHistory => {
+            // The history pane owns the right side; its width is the distance
+            // from the splitter to the right edge of the top row.
+            let right_edge = layout.history.right();
+            let width = right_edge.saturating_sub(point.x);
+            SqlTabMessage::SetHistoryWidth { tab_id, width }
+        }
+    };
+    AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(msg))))
 }
 
 /// A round triggered by an external message (keyboard/tick). The seed message

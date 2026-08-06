@@ -20,6 +20,18 @@ pub enum SqlFocus {
     History,
 }
 
+/// Default editor top-pane height (percent of the body) for the SQL tab's
+/// horizontal splitter.
+pub const DEFAULT_SPLIT_RATIO: u8 = 45;
+/// Default history pane width (columns) for the SQL tab's vertical splitter.
+pub const DEFAULT_HISTORY_WIDTH: u16 = 24;
+/// Min/max editor top-pane height as a percent of the body.
+pub const MIN_SPLIT_RATIO: u8 = 20;
+pub const MAX_SPLIT_RATIO: u8 = 80;
+/// Min/max history pane width in columns.
+pub const MIN_HISTORY_WIDTH: u16 = 16;
+pub const MAX_HISTORY_WIDTH: u16 = 200;
+
 /// A single SQL tab: an independent session plus the three child module states.
 #[derive(Debug, Clone)]
 pub struct SqlTab {
@@ -27,12 +39,28 @@ pub struct SqlTab {
     pub session: TabSession,
     /// The sub-pane currently focused (routes keys within this tab).
     pub focus: SqlFocus,
+    /// Editor top-pane height as a percent of the body (horizontal splitter).
+    pub split_ratio: u8,
+    /// History pane width in columns (vertical splitter between editor/history).
+    pub history_pane_width: u16,
     /// Editor child feature state.
     pub editor: EditorState,
     /// Results child feature state.
     pub results: ResultsState,
     /// History child feature state.
     pub history: HistoryState,
+}
+
+impl SqlTab {
+    /// Clamp and store the editor top-pane height percentage.
+    pub fn set_split_ratio(&mut self, ratio: u8) {
+        self.split_ratio = ratio.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO);
+    }
+
+    /// Clamp and store the history pane width (columns).
+    pub fn set_history_pane_width(&mut self, width: u16) {
+        self.history_pane_width = width.clamp(MIN_HISTORY_WIDTH, MAX_HISTORY_WIDTH);
+    }
 }
 
 /// State for the `sql_tab` parent feature: multiple tabs, one active.
@@ -71,6 +99,8 @@ impl SqlTabState {
                 ..TabSession::default()
             },
             focus: SqlFocus::default(),
+            split_ratio: DEFAULT_SPLIT_RATIO,
+            history_pane_width: DEFAULT_HISTORY_WIDTH,
             editor: EditorState::default(),
             results: ResultsState::default(),
             history: HistoryState::default(),
@@ -100,6 +130,8 @@ impl SqlTabState {
                 schema,
             },
             focus: SqlFocus::default(),
+            split_ratio: DEFAULT_SPLIT_RATIO,
+            history_pane_width: DEFAULT_HISTORY_WIDTH,
             editor: EditorState::default(),
             results: ResultsState::default(),
             history: HistoryState::default(),

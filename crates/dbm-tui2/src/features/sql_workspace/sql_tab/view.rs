@@ -4,8 +4,10 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Frame;
 use ratatui::widgets::Block;
 
+use crate::common::view::splitter::{SplitOrientation, draw};
 use crate::common::view::theme::Theme;
 
+use super::layout::sql_tab_layout;
 use super::session::TabSession;
 use super::state::SqlTabState;
 use super::editor::view as editor_view;
@@ -35,32 +37,26 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState)
         return;
     };
 
-    // Layout mirrors the original dbm `sql_tab_layout` (ui.rs §11): a vertical
-    // split puts the editor+history row on top and results on the bottom; the
-    // top row is a horizontal split with the SQL editor on the left and the
-    // query history on the right.
-    let body = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(45), // top row: editor + history
-            Constraint::Min(6),         // bottom: results
-        ])
-        .split(chunks[1]);
+    // Layout mirrors the original dbm `sql_tab_layout` (ui.rs §11): editor +
+    // history on the top row, results below; the pane/splitter rects come from
+    // the shared pure layout so the renderer and the run loop agree.
+    let layout = sql_tab_layout(chunks[1], tab.split_ratio, tab.history_pane_width);
+    if layout.editor.width == 0 {
+        // Area too small to split: show a single results pane.
+        results_view::render(frame, theme, chunks[1], &tab.results);
+        return;
+    }
 
-    let top = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(55), // editor
-            Constraint::Percentage(45), // history
-        ])
-        .split(body[0]);
-
-    editor_view::render(frame, theme, top[0], &tab.editor);
+    editor_view::render(frame, theme, layout.editor, &tab.editor);
 
     let (instance, connection) = session_view_key(&tab.session);
-    history_view::render(frame, theme, top[1], &tab.history, &instance, &connection);
+    history_view::render(frame, theme, layout.history, &tab.history, &instance, &connection);
 
-    results_view::render(frame, theme, body[1], &tab.results);
+    results_view::render(frame, theme, layout.results, &tab.results);
+
+    // Draw the two draggable splitter strips.
+    draw(frame, layout.h_splitter, SplitOrientation::Horizontal, false, false);
+    draw(frame, layout.v_splitter, SplitOrientation::Vertical, false, false);
 }
 
 /// Derive the `(instance, connection)` history key for rendering (mirrors the

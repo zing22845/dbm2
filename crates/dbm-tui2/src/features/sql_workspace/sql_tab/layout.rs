@@ -1,0 +1,156 @@
+//! Pure layout for the SQL tab body.
+//!
+//! The single source of truth for where each pane and splitter sits. Both the
+//! view (to render) and the run loop (to hit-test mouse drags) call
+//! [`sql_tab_layout`], so a splitter can only ever be found where it is drawn.
+//!
+//! Mirrors the original dbm `sql_tab_layout` (ui.rs §11): a vertical split puts
+//! the editor+history row on top and results on the bottom; the top row is a
+//! horizontal split with the SQL editor on the left and the history on the
+//! right. The split positions come from the tab's stored ratio/width, clamped
+//! to the current track so neither pane can collapse.
+
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+
+use crate::common::view::splitter::{clamp_split_px, hit};
+
+/// Identifies which splitter a mouse position is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SqlSplitter {
+    /// Horizontal splitter: editor+history row vs results.
+    EditorResults,
+    /// Vertical splitter: editor vs history in the top row.
+    EditorHistory,
+}
+
+/// The panes and splitter strips computed by [`sql_tab_layout`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SqlTabLayout {
+    pub editor: Rect,
+    pub history: Rect,
+    pub results: Rect,
+    /// The 1-row horizontal splitter between the top row and results.
+    pub h_splitter: Rect,
+    /// The 1-column vertical splitter between editor and history.
+    pub v_splitter: Rect,
+}
+
+/// Compute the SQL tab body layout. `area` is the region below the tab bar.
+pub fn sql_tab_layout(area: Rect, split_ratio: u8, history_width: u16) -> SqlTabLayout {
+    let empty = SqlTabLayout::default();
+
+    let body = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(0), // top row (editor + history)
+            Constraint::Length(1), // horizontal splitter
+            Constraint::Min(0), // results
+        ])
+        .split(area);
+    if body.len() != 3 || body[0].height < 2 || body[2].height < 2 {
+        return empty;
+    }
+
+    // Editor top-pane height: split_ratio% of the body, clamped to [20%, 80%]
+    // of the track so neither the top row nor results collapses.
+    let track_h = body[0].height + 1 + body[2].height;
+    let top_px = ((u32::from(track_h) * u32::from(split_ratio)) / 100) as u16;
+    let row_h = clamp_split_px(top_px, track_h, 20, 20);
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(row_h),
+            Constraint::Length(1),
+            Constraint::Min(0),
+        ])
+        .split(area);
+    if vertical.len() != 3 {
+        return empty;
+    }
+    let (top_row, h_splitter, results) = (vertical[0], vertical[1], vertical[2]);
+    if top_row.height < 2 {
+        return empty;
+    }
+
+    // Top row horizontal split: editor (left) + vertical splitter + history.
+    let track_w = top_row.width;
+    let history_w = history_width
+        .clamp(12, track_w.saturating_sub(30).max(12));
+    let top = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(history_w),
+        ])
+        .split(top_row);
+    if top.len() != 3 || top[0].width < 1 {
+        return empty;
+    }
+    let (editor, v_splitter, history) = (top[0], top[1], top[2]);
+
+    SqlTabLayout {
+        editor,
+        history,
+        results,
+        h_splitter,
+        v_splitter,
+    }
+}
+
+impl SqlTabLayout {
+    /// The splitter the position `(x, y)` is on, if any.
+    pub fn splitter_at(&self, x: u16, y: u16) -> Option<SqlSplitter> {
+        if hit(self.h_splitter, x, y) {
+            return Some(SqlSplitter::EditorResults);
+        }
+        if hit(self.v_splitter, x, y) {
+            return Some(SqlSplitter::EditorHistory);
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layout_places_all_panes() {
+        let area = Rect::new(0, 0, 120, 40);
+        let layout = sql_tab_layout(area, 45, 24);
+        assert!(layout.editor.width > 0 && layout.editor.height > 0);
+        assert!(layout.history.width > 0 && layout.history.height > 0);
+        assert!(layout.results.height > 0);
+        // Editor left of history, both in the top row above results.
+        assert!(layout.editor.x < layout.history.x);
+        assert!(layout.editor.y == layout.history.y);
+        assert!(layout.editor.y + layout.editor.height <= layout.results.y);
+        // Splitter rows have width/height 1.
+        assert_eq!(layout.h_splitter.height, 1);
+        assert_eq!(layout.v_splitter.width, 1);
+    }
+
+    #[test]
+    fn splitter_hit_test_identifies_both() {
+        let area = Rect::new(0, 0, 120, 40);
+        let layout = sql_tab_layout(area, 45, 24);
+        assert_eq!(
+            layout.splitter_at(layout.v_splitter.x, layout.v_splitter.y),
+            Some(SqlSplitter::EditorHistory)
+        );
+        assert_eq!(
+            layout.splitter_at(layout.h_splitter.x, layout.h_splitter.y),
+            Some(SqlSplitter::EditorResults)
+        );
+        assert_eq!(layout.splitter_at(1, 1), None);
+    }
+
+    #[test]
+    fn layout_tiny_area_returns_empty() {
+        assert_eq!(
+            sql_tab_layout(Rect::new(0, 0, 5, 2), 45, 24),
+            SqlTabLayout::default()
+        );
+    }
+}

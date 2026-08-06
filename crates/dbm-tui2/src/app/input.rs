@@ -449,6 +449,21 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         return Some(msg);
     }
 
+    // Vertical-splitter nudges work from any sub-pane: `[` grows the history
+    // pane (it owns the right side of the editor/history split), `]` shrinks it.
+    if !key.modifiers.contains(KeyModifiers::CONTROL) {
+        let nudge = match key.code {
+            KeyCode::Char('[') => Some(crate::common::view::splitter::VerticalSplitterNudge::Left),
+            KeyCode::Char(']') => Some(crate::common::view::splitter::VerticalSplitterNudge::Right),
+            _ => None,
+        };
+        if let Some(nudge) = nudge {
+            return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                SqlTabMsg::Message(SqlTabMessage::NudgeHistoryWidth { tab_id, nudge }),
+            ))));
+        }
+    }
+
     // Route the key to the focused sub-pane.
     match tab.focus {
         SqlFocus::Editor => {
