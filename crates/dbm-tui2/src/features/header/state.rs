@@ -12,4 +12,8 @@ pub const HEADER_BUTTONS: usize = 1;
 pub struct HeaderState {
     /// Index of the currently focused header button.
     pub button: usize,
+    /// The clickable rect of the `Discover` button, recorded on the last render
+    /// so mouse hit-testing uses exactly what was drawn (mirrors the original
+    /// `header_button_rects` in `ui_layout`).
+    pub discover_button_rect: Option<ratatui::layout::Rect>,
 }

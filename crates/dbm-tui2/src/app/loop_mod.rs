@@ -20,7 +20,6 @@ use std::time::Duration;
 use crossterm::event::{Event as CEvent, EventStream, KeyCode};
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::Rect;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
@@ -93,7 +92,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         // Draw the current frame. The perf_monitor feature is passive: the run
         // loop samples each frame here and feeds the smoothed FPS and
         // redundant-redraw ratio from the wrapped backend.
-        terminal.draw(|frame| render(frame, &state))?;
+        terminal.draw(|frame| render(frame, &mut state))?;
         let changed_cells = terminal.backend_mut().last_changed_cells();
         state.perf.record_frame();
         state.perf.record_redundancy(changed_cells);
@@ -129,23 +128,42 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                 } else if let Some(Ok(CEvent::Mouse(mouse))) = maybe_event {
                     use crossterm::event::{MouseButton, MouseEventKind};
                     use ratatui::prelude::Position;
+                    tracing::debug!(
+                        kind = ?mouse.kind,
+                        col = mouse.column,
+                        row = mouse.row,
+                        "mouse event received"
+                    );
                     if matches!(
                         mouse.kind,
                         MouseEventKind::Down(MouseButton::Left)
                     ) && state.modal.is_none()
                     {
-                        // Left-click on the header `Discover` button activates it.
-                        let header_area =
-                            Rect::new(0, 0, terminal.size()?.width, 3);
-                        let clicked = crate::features::header::view::discover_button_rect(
-                            header_area,
-                        )
-                        .is_some_and(|r| r.contains(Position::new(mouse.column, mouse.row)));
+                        // Left-click on the header `Discover` button activates
+                        // it. The button rect is the one recorded on the last
+                        // render, so hit-testing uses exactly what was drawn.
+                        let button_rect = state.header.discover_button_rect;
+                        tracing::debug!(
+                            button_rect = ?button_rect,
+                            modal_open = state.modal.is_some(),
+                            "header button hit-test"
+                        );
+                        let clicked = button_rect
+                            .is_some_and(|r| r.contains(Position::new(mouse.column, mouse.row)));
+                        tracing::debug!(clicked, "header button click resolved");
                         if clicked {
                             state.header.button = 0;
+                            // Clicking the header is an explicit user intent and
+                            // must activate the button regardless of the current
+                            // focus zone. The app's update guards feature
+                            // messages by focus (`AppMsg::Header` → `Header`),
+                            // so mirror the original's `set_focus(Header)` by
+                            // switching focus here before dispatching.
+                            state.focus = crate::app_shell::focus::FocusZone::Header;
                             let msg = AppMsg::Header(HeaderMsg::Message(
                                 HeaderMessage::Activate,
                             ));
+                            tracing::debug!("dispatching HeaderMessage::Activate");
                             process_message_round(
                                 &effect_runner,
                                 &mut action_rx,
@@ -153,6 +171,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 &mut state,
                             );
                         }
+                    } else {
+                        tracing::debug!(
+                            is_left_down = matches!(
+                                mouse.kind,
+                                MouseEventKind::Down(MouseButton::Left)
+                            ),
+                            modal_open = state.modal.is_some(),
+                            "mouse click ignored"
+                        );
                     }
                 }
             }

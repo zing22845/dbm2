@@ -30,9 +30,18 @@ pub fn discover_button_rect(area: Rect) -> Option<Rect> {
 /// Render the header: a bordered app title bar with an action-button row.
 ///
 /// The header currently has a single `Discover` button; when it is the focused
-/// button it is highlighted with the accent/selection slot.
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &HeaderState) {
+/// button it is highlighted with the accent/selection slot. The button's
+/// clickable rect is recorded on `state` so mouse hit-testing uses exactly the
+/// rect that was drawn (mirrors the original `header_button_rects` in
+/// `ui_layout`).
+pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &mut HeaderState) {
     let p = theme.palette();
+    state.discover_button_rect = discover_button_rect(area);
+    tracing::debug!(
+        rect = ?state.discover_button_rect,
+        header_area = ?area,
+        "header button rect recorded during render"
+    );
 
     // The `Discover` button is focused when the header cursor points at it.
     let discover_focused = state.button == 0;
@@ -84,5 +93,33 @@ mod tests {
         let r = discover_button_rect(area).unwrap();
         assert_eq!(r.x, 7);
         assert_eq!(r.y, 3);
+    }
+
+    #[test]
+    fn rendered_discover_text_matches_button_rect() {
+        // Render the header and confirm the literal "Discover" glyphs land
+        // exactly inside the recorded clickable rect (so clicking the drawn
+        // button activates it).
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let area = Rect::new(0, 0, 40, 3);
+        let mut terminal = Terminal::new(TestBackend::new(40, 3)).unwrap();
+        let mut state = HeaderState::default();
+        let theme = crate::common::view::theme::dracula();
+        terminal
+            .draw(|frame| render(frame, &theme, area, &mut state))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let r = state.discover_button_rect.expect("button drawn");
+        // The whole "Discover" glyphs should be inside the rect.
+        let text: String = (r.x..r.right())
+            .map(|x| {
+                buf[(x, r.y)].symbol().chars().next().unwrap_or(' ')
+            })
+            .collect();
+        assert!(text.contains("Discover"), "got: {text:?}");
+        // The drawn rect must be at the header's interior.
+        assert_eq!(r.y, 1);
+        assert_eq!(r.x, 2);
     }
 }

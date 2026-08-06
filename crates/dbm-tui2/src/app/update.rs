@@ -80,6 +80,7 @@ fn focus_zone_of(msg: &AppMsg) -> Option<FocusZone> {
 
 /// Open the discover modal: reset its state and show it as the active modal.
 fn open_discover(state: &mut AppState) {
+    tracing::debug!("open_discover: setting modal to Discover");
     state.discover = crate::features::discover::state::DiscoverState::opened();
     state.modal = Some(ModalKind::Discover);
 }

@@ -37,6 +37,9 @@ enum Commands {
         /// Extra hosts included in Discover scan (repeatable)
         #[arg(long)]
         discover_host: Vec<String>,
+        /// Write debug-level logs to this file (off by default)
+        #[arg(long, value_name = "PATH")]
+        debug_log: Option<PathBuf>,
     },
     /// Verify connectivity and print server version
     Ping {
@@ -193,17 +196,37 @@ enum InstanceConnectionCommands {
 }
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_target(false)
-        .init();
-
     let cli = Cli::parse();
+    init_cli_tracing(&cli);
     if let Err(err) = dispatch(cli) {
         eprintln!("error: {err:#}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
+}
+
+/// Initialize the tracing subscriber for non-interactive commands.
+///
+/// The interactive TUI owns its own subscriber: when `interact --debug-log
+/// <path>` is given, `dbm-tui2` writes `debug` logs to that file; otherwise the
+/// TUI installs the default `warn`/stderr subscriber. Other commands use the
+/// `RUST_LOG`-filtered stderr subscriber here.
+fn init_cli_tracing(cli: &Cli) {
+    // When `interact --debug-log <path>` is given, the TUI installs the file
+    // subscriber; skip the CLI one so it can `try_init` without conflicting.
+    if matches!(
+        &cli.command,
+        Commands::Interact {
+            debug_log: Some(_),
+            ..
+        }
+    ) {
+        return;
+    }
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_target(false)
+        .init();
 }
 
 fn dispatch(cli: Cli) -> anyhow::Result<()> {
@@ -215,7 +238,8 @@ fn dispatch(cli: Cli) -> anyhow::Result<()> {
             instance,
             connection,
             discover_host: _,
-        } => run_interact(url, instance, connection),
+            debug_log,
+        } => run_interact(url, instance, connection, debug_log),
         other => tokio_run(Cli {
             data_dir: cli.data_dir,
             command: other,
@@ -225,9 +249,15 @@ fn dispatch(cli: Cli) -> anyhow::Result<()> {
 
 /// Run the interactive TUI. The CLI may pass `url`/`instance`/`connection` to
 /// pre-select a session; `dbm-tui2` reads its connections from the store.
-fn run_interact(url: Option<String>, instance: Option<String>, connection: Option<String>) -> anyhow::Result<()> {
+/// `debug_log` (when set) captures `debug`-level logs to that file.
+fn run_interact(
+    url: Option<String>,
+    instance: Option<String>,
+    connection: Option<String>,
+    debug_log: Option<PathBuf>,
+) -> anyhow::Result<()> {
     let _ = (url, instance, connection); // session pre-selection not yet plumbed
-    dbm_tui2::app::run()
+    dbm_tui2::app::run_with_log_file(debug_log)
 }
 
 #[tokio::main]
