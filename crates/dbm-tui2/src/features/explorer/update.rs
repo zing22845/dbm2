@@ -33,7 +33,15 @@ pub fn update(
                 )
             })
                 && let Some((instance, connection)) = state.instances.connection_at_cursor() {
-                    state.objects.rebind(instance, connection);
+                    // Rebinding the tree resets its catalog; kick off the
+                    // database fetch so browsing starts loading immediately.
+                    state.objects.rebind(instance.clone(), connection.clone());
+                    effects.push(ExplorerEffect::Objects(
+                        objects::effect::ObjectsEffect::LoadDatabases {
+                            instance,
+                            connection,
+                        },
+                    ));
                 }
             intents.extend(i.into_iter().map(ExplorerIntent::Instances));
             effects.extend(e.into_iter().map(ExplorerEffect::Instances));

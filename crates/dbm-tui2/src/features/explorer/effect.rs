@@ -6,18 +6,26 @@ use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
 use crate::common::service::services::Services;
 
 use super::instances::effect::{InstancesAction, InstancesEffect};
-use super::objects::effect::ObjectsEffect;
+use super::objects::effect::{ObjectsAction, ObjectsEffect};
 
 /// Actions produced by explorer effects.
 #[derive(Debug, Clone)]
 pub enum ExplorerAction {
     /// An action originating from the instances sub-module.
     Instances(InstancesAction),
+    /// An action originating from the objects sub-module.
+    Objects(ObjectsAction),
 }
 
 impl From<InstancesAction> for ExplorerAction {
     fn from(a: InstancesAction) -> Self {
         ExplorerAction::Instances(a)
+    }
+}
+
+impl From<ObjectsAction> for ExplorerAction {
+    fn from(a: ObjectsAction) -> Self {
+        ExplorerAction::Objects(a)
     }
 }
 
@@ -46,7 +54,14 @@ impl Effect for ExplorerEffect {
                         .map(ExplorerAction::Instances)
                         .collect()
                 }
-                ExplorerEffect::Objects(_) => Vec::new(),
+                ExplorerEffect::Objects(e) => {
+                    let emit = emit.map::<ObjectsAction>();
+                    e.run(emit, services)
+                        .await
+                        .into_iter()
+                        .map(ExplorerAction::Objects)
+                        .collect()
+                }
             }
         })
     }

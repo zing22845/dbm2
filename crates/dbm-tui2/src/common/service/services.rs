@@ -177,6 +177,145 @@ impl Services {
             .map_err(|e| e.user_message().to_string())
     }
 
+    /// List the extensions of a specific database.
+    pub async fn list_extensions(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: &str,
+    ) -> Result<Vec<String>, String> {
+        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        self.driver
+            .list_extensions(&pool)
+            .await
+            .map_err(|e| e.user_message().to_string())
+    }
+
+    /// List the tables of a schema within a specific database.
+    pub async fn list_tables(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: &str,
+        schema: &str,
+    ) -> Result<Vec<String>, String> {
+        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        self.driver
+            .list_tables(&pool, schema)
+            .await
+            .map_err(|e| e.user_message().to_string())
+    }
+
+    /// List the views of a schema within a specific database.
+    pub async fn list_views(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: &str,
+        schema: &str,
+    ) -> Result<Vec<String>, String> {
+        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        self.driver
+            .list_views(&pool, schema)
+            .await
+            .map_err(|e| e.user_message().to_string())
+    }
+
+    /// List the materialized views of a schema within a specific database.
+    pub async fn list_matviews(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: &str,
+        schema: &str,
+    ) -> Result<Vec<String>, String> {
+        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        self.driver
+            .list_matviews(&pool, schema)
+            .await
+            .map_err(|e| e.user_message().to_string())
+    }
+
+    /// List the procedures of a schema within a specific database.
+    pub async fn list_procedures(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: &str,
+        schema: &str,
+    ) -> Result<Vec<String>, String> {
+        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        self.driver
+            .list_procedures(&pool, schema)
+            .await
+            .map_err(|e| e.user_message().to_string())
+    }
+
+    /// List the functions of a schema within a specific database.
+    pub async fn list_functions(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: &str,
+        schema: &str,
+    ) -> Result<Vec<String>, String> {
+        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        self.driver
+            .list_functions(&pool, schema)
+            .await
+            .map_err(|e| e.user_message().to_string())
+    }
+
+    /// List the sequences of a schema within a specific database.
+    pub async fn list_sequences(
+        &self,
+        instance: &str,
+        connection: &str,
+        database: &str,
+        schema: &str,
+    ) -> Result<Vec<String>, String> {
+        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let pool = self
+            .driver
+            .connect(&ConnectOpts::new(url))
+            .await
+            .map_err(|e| e.user_message().to_string())?;
+        self.driver
+            .list_sequences(&pool, schema)
+            .await
+            .map_err(|e| e.user_message().to_string())
+    }
+
     /// Execute a batch of DML statements inside a single transaction.
     ///
     /// Every `UPDATE` / `DELETE` must affect exactly one row; a mismatch is

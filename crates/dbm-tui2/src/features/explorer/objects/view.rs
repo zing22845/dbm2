@@ -43,7 +43,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ObjectsState
         let msg = if state.bound_connection.is_empty() {
             "(select a connection to browse objects)"
         } else {
-            "(object tree pending — catalog fetch not yet wired)"
+            "(no objects — press Enter on a connection to load the catalog)"
         };
         lines.push(Line::from(Span::styled(msg, Style::default().fg(p.muted))));
     }

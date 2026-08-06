@@ -16,7 +16,7 @@ impl Intent for ObjectsIntent {
 
     fn into_message(self) -> Self::Message {
         // Cross-feature one-way notification to the shell; the message mapping
-        // is total but currently unused until the SQL workspace is migrated.
+        // is total but unused because the shell consumes the intent itself.
         match self {
             ObjectsIntent::OpenObject { .. } => {
                 ObjectsMsg::Message(ObjectsMessage::MoveUp)

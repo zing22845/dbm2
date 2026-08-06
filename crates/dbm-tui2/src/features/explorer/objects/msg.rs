@@ -1,5 +1,7 @@
 //! Explorer objects feature messages.
 
+use super::state::ObjectKind;
+
 /// The actual objects (object tree) messages.
 #[derive(Debug, Clone)]
 pub enum ObjectsMessage {
@@ -13,6 +15,32 @@ pub enum ObjectsMessage {
     Select,
     /// Rebind the tree to an instance/connection.
     Bind { instance: String, connection: String },
+    /// The databases of the bound connection were loaded.
+    DatabasesLoaded { databases: Vec<String> },
+    /// Loading databases failed.
+    DatabasesError { error: String },
+    /// The schemas (and extensions) of a database were loaded.
+    SchemasLoaded { database: String, schemas: Vec<String> },
+    /// Loading schemas failed.
+    SchemasError { database: String, error: String },
+    /// The extensions of a database were loaded.
+    ExtensionsLoaded { database: String, extensions: Vec<String> },
+    /// Loading extensions failed.
+    ExtensionsError { database: String, error: String },
+    /// A schema-scoped object list was loaded.
+    ObjectListLoaded {
+        database: String,
+        schema: String,
+        kind: ObjectKind,
+        items: Vec<String>,
+    },
+    /// Loading a schema-scoped object list failed.
+    ObjectListError {
+        database: String,
+        schema: String,
+        kind: ObjectKind,
+        error: String,
+    },
 }
 
 /// Feature message envelope (central-router compatible).

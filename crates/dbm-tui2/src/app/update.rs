@@ -226,6 +226,33 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         }
                     }
                 }
+                // Cross-feature: opening an object (e.g. a table) in the object
+                // tree opens a SQL tab scoped to that object's database and
+                // schema, using the connection the tree is currently bound to.
+                if let ExplorerIntent::Objects(
+                    crate::features::explorer::objects::intent::ObjectsIntent::OpenObject { target },
+                ) = intent
+                {
+                    let instance = state.explorer.objects.bound_instance.clone();
+                    let connection = state.explorer.objects.bound_connection.clone();
+                    if !instance.is_empty() && !connection.is_empty() {
+                        let connection_id = state
+                            .explorer
+                            .instances
+                            .connection_id_by_name(&instance, &connection)
+                            .unwrap_or_default();
+                        let sql_msg = SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                            SqlTabMessage::OpenConnectionTab {
+                                instance,
+                                connection,
+                                connection_id,
+                                database: Some(target.database.clone()),
+                                schema: target.schema.clone(),
+                            },
+                        )));
+                        result.pending.push_back(AppMsg::Sql(sql_msg));
+                    }
+                }
             }
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));

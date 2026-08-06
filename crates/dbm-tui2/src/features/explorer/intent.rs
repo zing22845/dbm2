@@ -18,10 +18,6 @@ pub enum ExplorerIntent {
 impl Intent for ExplorerIntent {
     type Message = ExplorerMsg;
 
-    // Skeleton state: the child feature messages are currently uninhabited
-    // because their leaf messages are empty enums. Remove this allow when real
-    // business messages are introduced.
-    #[allow(unreachable_code)]
     fn into_message(self) -> Self::Message {
         match self {
             ExplorerIntent::Instances(i) => i.into_message().into(),

@@ -530,7 +530,43 @@ fn explorer_action_to_msg(action: crate::features::explorer::effect::ExplorerAct
                 EM::Instances(InstancesMsg::Message(InstancesMessage::Load))
             }
         },
+        EA::Objects(action) => EM::Objects(objects_action_to_msg(action)),
     }
+}
+
+/// Convert an objects action into the corresponding objects message.
+fn objects_action_to_msg(
+    action: crate::features::explorer::objects::effect::ObjectsAction,
+) -> crate::features::explorer::objects::msg::ObjectsMsg {
+    use crate::features::explorer::objects::effect::ObjectsAction as OA;
+    use crate::features::explorer::objects::msg::ObjectsMessage as M;
+    let msg = match action {
+        OA::DatabasesLoaded { databases } => M::DatabasesLoaded { databases },
+        OA::DatabasesError { error } => {
+            tracing::warn!("objects database load failed: {error}");
+            M::DatabasesError { error }
+        }
+        OA::SchemasLoaded { database, schemas } => M::SchemasLoaded { database, schemas },
+        OA::SchemasError { database, error } => {
+            tracing::warn!("objects schemas load failed for {database}: {error}");
+            M::SchemasError { database, error }
+        }
+        OA::ExtensionsLoaded { database, extensions } => {
+            M::ExtensionsLoaded { database, extensions }
+        }
+        OA::ExtensionsError { database, error } => {
+            tracing::warn!("objects extensions load failed for {database}: {error}");
+            M::ExtensionsError { database, error }
+        }
+        OA::ObjectListLoaded { database, schema, kind, items } => {
+            M::ObjectListLoaded { database, schema, kind, items }
+        }
+        OA::ObjectListError { database, schema, kind, error } => {
+            tracing::warn!("objects {kind:?} load failed for {database}.{schema}: {error}");
+            M::ObjectListError { database, schema, kind, error }
+        }
+    };
+    crate::features::explorer::objects::msg::ObjectsMsg::Message(msg)
 }
 
 #[cfg(test)]

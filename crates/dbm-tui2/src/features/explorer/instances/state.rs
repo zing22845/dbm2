@@ -139,4 +139,18 @@ impl InstancesState {
         let conn_name = self.nodes.get(i)?.connections.get(conn)?.name.clone();
         Some((instance_name, conn_name))
     }
+
+    /// The id of the connection matching `instance`/`connection` by name, if
+    /// present. Used to resolve the connection_id for an object-tree target.
+    pub fn connection_id_by_name(&self, instance: &str, connection: &str) -> Option<String> {
+        self.nodes.iter().find_map(|node| {
+            if node.display_name() != instance {
+                return None;
+            }
+            node.connections
+                .iter()
+                .find(|c| c.name == connection)
+                .map(|c| c.id.clone())
+        })
+    }
 }
