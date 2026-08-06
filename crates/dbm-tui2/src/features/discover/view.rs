@@ -44,7 +44,8 @@ pub fn render(
     let footer_h = if footer_text.is_empty() {
         0
     } else {
-        footer_text.lines().count().clamp(1, 2) as u16
+        // A separator row above the hint line(s).
+        1 + footer_text.lines().count().clamp(1, 2) as u16
     };
 
     let chunks = Layout::default()
@@ -80,14 +81,19 @@ pub fn render(
     );
     results_view::render(frame, theme, body[2], &state.results, focus);
 
-    // Discover zone footer: separator + hint line (or an error/status line).
+    // Discover zone footer: a separator row above the hint line(s), so the
+    // hints are drawn on their own row instead of overlapping the dashes.
     if footer_h > 0 {
+        let footer = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(chunks[2]);
         let sep = Line::from(Span::styled(
-            "-".repeat(inner.width as usize),
+            "-".repeat(footer[0].width as usize),
             ratatui::style::Style::default().fg(p.border),
         ));
-        frame.render_widget(ratatui::widgets::Paragraph::new(sep), chunks[2]);
-        draw_pane_footer(frame, theme, chunks[2], &footer_text);
+        frame.render_widget(ratatui::widgets::Paragraph::new(sep), footer[0]);
+        draw_pane_footer(frame, theme, footer[1], &footer_text);
     }
 
     // The close-confirmation dialog: asking to close the discover modal shows a
