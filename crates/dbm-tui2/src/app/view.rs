@@ -39,16 +39,9 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
         ])
         .split(chunks[1]);
 
-    // The workspace region holds the SQL view (main) plus a thin performance
-    // readout strip at the bottom. A future tab-switching mechanism will swap
-    // `iw` / `perf` here based on their visibility.
-    let workspace = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(0), // sql workspace
-            Constraint::Length(3), // perf readout
-        ])
-        .split(body[1]);
+    // The workspace region holds only the SQL view (main). The performance
+    // readout moved into the footer row (right-aligned) to save vertical space.
+    let workspace = body[1];
 
     header_view::render(frame, &state.theme, chunks[0], &state.header);
     explorer_view::render(frame, &state.theme, body[0], &state.explorer);
@@ -56,28 +49,45 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     // is open, otherwise the SQL workspace. A future tab mechanism will make
     // this explicit.
     if state.iw.instance_name.is_empty() {
-        sql_view::render(frame, &state.theme, workspace[0], &state.sql);
+        sql_view::render(frame, &state.theme, workspace, &state.sql);
     } else {
-        iw_view::render(frame, &state.theme, workspace[0], &state.iw);
+        iw_view::render(frame, &state.theme, workspace, &state.iw);
     }
-    // perf_monitor adopts the theme-as-rendering-context convention (footer and
-    // it are the migrated features with the `theme` parameter).
-    perf_view::render(frame, &state.theme, workspace[1], &state.perf);
-    footer_view::render(frame, &state.theme, chunks[2], &state.footer);
+    // The bottom row holds the global footer on the left and the performance
+    // readout on the right.
+    render_footer_with_perf(frame, state, chunks[2]);
 
-    // Render any active modal as a centered overlay.
+    // Render any active modal as a centered overlay over the workspace region.
     match &state.modal {
         Some(ModalKind::Discover) => {
-            render_modal_popup(frame, &state.theme, workspace[1], &state.discover, |f, t, a, s| {
+            render_modal_popup(frame, &state.theme, workspace, &state.discover, |f, t, a, s| {
                 discover_view::render(f, t, a, s)
             });
         }
         Some(modal) => {
             // Generic titled popup for the picker/confirm/commit-preview modals.
-            render_popup_modal(frame, &state.theme, workspace[1], modal);
+            render_popup_modal(frame, &state.theme, workspace, modal);
         }
         None => {}
     }
+}
+
+/// Render the footer row: the global footer hints on the left (flexible width)
+/// and the performance readout pinned to the right. The perf portion is
+/// right-aligned; when there is not enough room the perf strip is skipped.
+fn render_footer_with_perf(frame: &mut ratatui::Frame, state: &AppState, area: Rect) {
+    // Reserve a fixed right portion for the perf readout. The footer hints get
+    // the remainder (which is what makes the footer "shorter" in practice).
+    let perf_w = perf_view::perf_width(&state.perf).min(area.width / 3);
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(1),   // footer hints
+            Constraint::Length(perf_w), // perf readout
+        ])
+        .split(area);
+    footer_view::render(frame, &state.theme, chunks[0], &state.footer);
+    perf_view::render(frame, &state.theme, chunks[1], &state.perf);
 }
 
 /// Render a data-carrying modal (row-limit picker / page input / confirm /

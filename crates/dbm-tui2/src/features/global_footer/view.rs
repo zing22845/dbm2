@@ -15,14 +15,14 @@ use super::state::FooterState;
 const SEP: &str = "  ";
 
 /// The fixed global shortcut hints, joined on one line.
+///
+/// Kept intentionally short (the perf readout occupies the footer's right
+/// side): the essential zone/pane navigation and search.
 fn hints_line() -> String {
     let pairs = [
         ("Zone", "TAB"),
         ("Pane", &hint_ctrl("h/j/k/l")),
         ("Search", "/"),
-        ("Width", "[/]"),
-        ("Height", "+/-"),
-        ("Resize", "drag"),
         ("H-Scroll", "←/→"),
         ("Copy", &copy_shortcut_label()),
         ("Quit", &quit_shortcut_label()),
