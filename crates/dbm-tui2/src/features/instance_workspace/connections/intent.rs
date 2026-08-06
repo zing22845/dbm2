@@ -1,7 +1,7 @@
 //! Instance connections feature intents.
 
 use crate::app_shell::intent::Intent;
-use super::msg::{ConnectionsMessage, ConnectionsMsg};
+use super::msg::ConnectionsMsg;
 
 /// Intents emitted by the connections panel.
 #[derive(Debug, Clone)]
@@ -14,13 +14,11 @@ pub enum ConnectionsIntent {
 impl Intent for ConnectionsIntent {
     type Message = ConnectionsMsg;
 
-    fn into_message(self) -> Self::Message {
-        // One-way notification to the shell (refresh the explorer tree); the
-        // message mapping is total but currently unused.
+    fn into_message(self) -> Option<Self::Message> {
+        // One-way notification to the shell (refresh the explorer tree); it is
+        // consumed at the shell layer, so it declines a message here.
         match self {
-            ConnectionsIntent::ConnectionsChanged => {
-                ConnectionsMsg::Message(ConnectionsMessage::MoveUp)
-            }
+            ConnectionsIntent::ConnectionsChanged => None,
         }
     }
 }

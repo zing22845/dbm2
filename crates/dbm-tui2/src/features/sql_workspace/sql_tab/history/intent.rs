@@ -14,11 +14,11 @@ pub enum HistoryIntent {
 impl Intent for HistoryIntent {
     type Message = HistoryMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {
-            HistoryIntent::Recall { .. } => unreachable!(
-                "HistoryIntent::Recall is routed by sql_tab, not re-dispatched"
-            ),
+            // Cross-feature: `Recall` is routed by `sql_tab` (it owns the
+            // editor); it has no history sub-module message.
+            HistoryIntent::Recall { .. } => None,
         }
     }
 }

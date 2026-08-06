@@ -9,7 +9,7 @@ pub enum OverviewIntent {}
 impl Intent for OverviewIntent {
     type Message = OverviewMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {}
     }
 }

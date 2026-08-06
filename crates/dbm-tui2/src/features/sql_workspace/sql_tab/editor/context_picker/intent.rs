@@ -15,14 +15,12 @@ pub enum ContextPickerIntent {
 impl Intent for ContextPickerIntent {
     type Message = ContextPickerMsg;
 
-    fn into_message(self) -> Self::Message {
-        // The apply intent is not a message the picker handles itself; it is
-        // intercepted by `SqlTabIntent` routing and resolved into a session
-        // update. This arm is unreachable for a correctly routed intent.
+    fn into_message(self) -> Option<Self::Message> {
+        // Cross-feature: `ApplyContext` is intercepted by `SqlTabIntent`
+        // routing and resolved into a session update; it has no picker
+        // sub-module message.
         match self {
-            ContextPickerIntent::ApplyContext { .. } => unreachable!(
-                "ContextPickerIntent::ApplyContext is routed by sql_tab, not re-dispatched"
-            ),
+            ContextPickerIntent::ApplyContext { .. } => None,
         }
     }
 }

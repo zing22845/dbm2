@@ -9,7 +9,7 @@ pub enum DetailIntent {}
 impl Intent for DetailIntent {
     type Message = DetailMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {}
     }
 }

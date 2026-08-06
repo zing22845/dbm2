@@ -10,8 +10,9 @@ use super::intent_trait::RoutableIntent;
 pub struct IntentRouter;
 
 impl IntentRouter {
-    /// Convert an erased intent into the global message type.
-    pub fn route<M: Send + 'static>(intent: Box<dyn RoutableIntent<M>>) -> M {
+    /// Convert an erased intent into the global message type, or `None` when
+    /// the intent has no message to dispatch (the router should skip it).
+    pub fn route<M: Send + 'static>(intent: Box<dyn RoutableIntent<M>>) -> Option<M> {
         intent.into_global_message()
     }
 }

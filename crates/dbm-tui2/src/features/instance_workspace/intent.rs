@@ -18,12 +18,10 @@ pub enum IwIntent {
 impl Intent for IwIntent {
     type Message = IwMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {
-            // Child intents route back to this feature; their message mappings
-            // are placeholders until the receiving features are wired.
-            IwIntent::Overview(i) => i.into_message().into(),
-            IwIntent::Connections(i) => i.into_message().into(),
+            IwIntent::Overview(i) => i.into_message().map(Into::into),
+            IwIntent::Connections(i) => i.into_message().map(Into::into),
         }
     }
 }

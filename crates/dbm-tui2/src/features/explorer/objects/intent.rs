@@ -1,7 +1,7 @@
 //! Explorer objects feature intents.
 
 use crate::app_shell::intent::Intent;
-use super::msg::{ObjectsMessage, ObjectsMsg};
+use super::msg::ObjectsMsg;
 use super::state::ObjectsTarget;
 
 /// Intents emitted by the objects tree.
@@ -14,14 +14,12 @@ pub enum ObjectsIntent {
 impl Intent for ObjectsIntent {
     type Message = ObjectsMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         // Cross-feature one-way notification to the shell; the shell
-        // (`app/update.rs`) intercepts `OpenObject` and opens a SQL tab, so
-        // this mapping only satisfies the `Intent` trait and is never routed.
+        // (`app/update.rs`) intercepts `OpenObject` and opens a SQL tab, so it
+        // declines a message and the router skips it.
         match self {
-            ObjectsIntent::OpenObject { .. } => {
-                ObjectsMsg::Message(ObjectsMessage::MoveUp)
-            }
+            ObjectsIntent::OpenObject { .. } => None,
         }
     }
 }

@@ -23,7 +23,7 @@ pub enum SqlTabIntent {
 impl Intent for SqlTabIntent {
     type Message = SqlTabMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {
             // The context picker's `ApplyContext` intent must land on the tab's
             // session (a sibling of the editor), so it is resolved here into a
@@ -32,30 +32,31 @@ impl Intent for SqlTabIntent {
             SqlTabIntent::Editor {
                 tab_id,
                 intent: EditorIntent::ContextPicker(ContextPickerIntent::ApplyContext { database, schema }),
-            } => SqlTabMsg::Message(SqlTabMessage::ApplyContext { tab_id, database, schema }),
+            } => Some(SqlTabMsg::Message(SqlTabMessage::ApplyContext { tab_id, database, schema })),
             // The editor's Run intent is resolved by sql_tab (it owns the
             // connection context), so it becomes a dedicated message.
             SqlTabIntent::Editor {
                 tab_id,
                 intent: EditorIntent::RunQuery { sql },
-            } => SqlTabMsg::Message(SqlTabMessage::RunQueryFromEditor { tab_id, sql }),
-            SqlTabIntent::Editor { tab_id, intent } => SqlTabMsg::Message(
-                SqlTabMessage::Editor {
-                    tab_id,
-                    msg: intent.into_message(),
-                },
-            ),
-            SqlTabIntent::Results { tab_id, intent } => SqlTabMsg::Message(
-                SqlTabMessage::Results {
-                    tab_id,
-                    msg: intent.into_message(),
-                },
-            ),
+            } => Some(SqlTabMsg::Message(SqlTabMessage::RunQueryFromEditor { tab_id, sql })),
+            SqlTabIntent::Editor { tab_id, intent } => {
+                // The child editor intent may itself be cross-feature (a
+                // `RunQuery`/`ApplyContext` that was not intercepted above),
+                // in which case it declines a message and we skip routing.
+                intent.into_message().map(|msg| {
+                    SqlTabMsg::Message(SqlTabMessage::Editor { tab_id, msg })
+                })
+            }
+            SqlTabIntent::Results { tab_id, intent } => {
+                intent.into_message().map(|msg| {
+                    SqlTabMsg::Message(SqlTabMessage::Results { tab_id, msg })
+                })
+            }
             // History Recall is resolved by `sql_tab` (it owns the editor).
             SqlTabIntent::History {
                 tab_id,
                 intent: HistoryIntent::Recall { sql },
-            } => SqlTabMsg::Message(SqlTabMessage::RecallHistory { tab_id, sql }),
+            } => Some(SqlTabMsg::Message(SqlTabMessage::RecallHistory { tab_id, sql })),
         }
     }
 }

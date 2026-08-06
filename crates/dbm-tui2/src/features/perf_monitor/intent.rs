@@ -9,7 +9,7 @@ pub enum PerfIntent {}
 impl Intent for PerfIntent {
     type Message = PerfMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {}
     }
 }

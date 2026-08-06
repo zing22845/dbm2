@@ -17,13 +17,13 @@ pub enum EditorIntent {
 impl Intent for EditorIntent {
     type Message = EditorMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {
-            EditorIntent::ContextPicker(i) => i.into_message().into(),
-            EditorIntent::SqlCompletion(i) => i.into_message().into(),
-            EditorIntent::RunQuery { .. } => unreachable!(
-                "EditorIntent::RunQuery is routed by sql_tab, not re-dispatched"
-            ),
+            EditorIntent::ContextPicker(i) => i.into_message().map(Into::into),
+            EditorIntent::SqlCompletion(i) => i.into_message().map(Into::into),
+            // Cross-feature: `RunQuery` is routed by `sql_tab` (which owns the
+            // connection context); it has no editor sub-module message.
+            EditorIntent::RunQuery { .. } => None,
         }
     }
 }

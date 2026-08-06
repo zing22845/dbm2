@@ -7,6 +7,8 @@
 use crate::app::action::Action;
 use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
 use crate::common::service::services::Services;
+use crate::features::sql_workspace::effect::SqlAction;
+use crate::features::sql_workspace::sql_tab::effect::SqlTabAction;
 use crate::common::utils::sql_editability::{
     all_primary_keys_present, analyze_editable_query_editability, editability_reason_message,
     EditabilityReason,
@@ -30,17 +32,13 @@ pub enum ResultsAction {
 impl From<ResultsAction> for Action {
     fn from(a: ResultsAction) -> Self {
         // Action-to-message routing for SQL actions is handled in the loop
-        // (sql_action_to_msg); this arm is only a compile-time requirement of
-        // the `ErasedEffect` wrapper and is not reached for the variants that
-        // carry tab context.
-        match a {
-            ResultsAction::ResultReady { .. }
-            | ResultsAction::QueryError { .. }
-            | ResultsAction::CommitResult { .. }
-            | ResultsAction::EditabilityReady { .. } => unreachable!(
-                "ResultsAction is routed by sql_action_to_msg, not via Into<Action>"
-            ),
-        }
+        // (`sql_action_to_msg`), which preserves the originating `tab_id`. This
+        // conversion is a compile-time requirement of the `ErasedEffect`
+        // wrapper for streamed emission; it carries no tab context, so it uses
+        // tab 0 as a safe default (the real routed path never goes through
+        // here, so tab 0 is only reached by `sql_action_to_msg` for a streamed
+        // child action).
+        Action::Sql(SqlAction::SqlTab(SqlTabAction::Results { tab_id: 0, action: a }))
     }
 }
 

@@ -9,7 +9,7 @@ pub enum EngineIntent {}
 impl Intent for EngineIntent {
     type Message = EngineMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {}
     }
 }

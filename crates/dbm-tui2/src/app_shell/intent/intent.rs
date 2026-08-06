@@ -14,9 +14,9 @@ pub enum ShellIntent {
 impl Intent for ShellIntent {
     type Message = ShellMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {
-            ShellIntent::Quit => ShellMsg::Quit,
+            ShellIntent::Quit => Some(ShellMsg::Quit),
         }
     }
 }

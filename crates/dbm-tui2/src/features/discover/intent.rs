@@ -21,16 +21,11 @@ pub enum DiscoverIntent {
 impl Intent for DiscoverIntent {
     type Message = DiscoverMsg;
 
-    // The child intent enums (`EngineIntent`/`TargetsIntent`/`ResultsIntent`)
-    // are currently uninhabited, so every arm below is unreachable and the
-    // match is an empty branch. The child `*Msg` enums already carry variants;
-    // remove this allow when real business intents are introduced.
-    #[allow(unreachable_code)]
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {
-            DiscoverIntent::Engine(i) => i.into_message().into(),
-            DiscoverIntent::Targets(i) => i.into_message().into(),
-            DiscoverIntent::Results(i) => i.into_message().into(),
+            DiscoverIntent::Engine(i) => i.into_message().map(Into::into),
+            DiscoverIntent::Targets(i) => i.into_message().map(Into::into),
+            DiscoverIntent::Results(i) => i.into_message().map(Into::into),
         }
     }
 }

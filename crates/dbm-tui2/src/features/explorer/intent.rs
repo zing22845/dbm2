@@ -18,10 +18,10 @@ pub enum ExplorerIntent {
 impl Intent for ExplorerIntent {
     type Message = ExplorerMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {
-            ExplorerIntent::Instances(i) => i.into_message().into(),
-            ExplorerIntent::Objects(i) => i.into_message().into(),
+            ExplorerIntent::Instances(i) => i.into_message().map(Into::into),
+            ExplorerIntent::Objects(i) => i.into_message().map(Into::into),
         }
     }
 }

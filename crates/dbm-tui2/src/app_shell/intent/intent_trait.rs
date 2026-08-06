@@ -17,12 +17,19 @@
 /// Implement this on a feature's `*Intent` enum. Each variant should map to a
 /// single concrete `Message` (1:1 request); if a feature needs to fan out to
 /// multiple targets, produce multiple intents from its `update` instead.
+///
+/// `into_message` returns `None` for *cross-feature* intents: requests that are
+/// routed explicitly by a parent feature (e.g. the SQL editor's `RunQuery` is
+/// intercepted by `sql_tab`, which owns the connection context). Such variants
+/// must not be re-dispatched into their own sub-module, so they explicitly
+/// decline to produce a message and the router skips them instead of panicking.
 pub trait Intent: Send + 'static {
     /// The feature message this intent will be converted into.
     type Message: Send + 'static;
 
-    /// Convert this intent into the concrete feature message.
-    fn into_message(self) -> Self::Message;
+    /// Convert this intent into the concrete feature message, or `None` when
+    /// the intent is routed by a parent feature and has no sub-module message.
+    fn into_message(self) -> Option<Self::Message>;
 }
 
 /// A type-erased intent that resolves directly to the global message type `M`
@@ -34,8 +41,10 @@ pub trait Intent: Send + 'static {
 /// implemented for any `Intent` whose message converts into `M`; business code
 /// should not implement it directly.
 pub trait RoutableIntent<M>: Send {
-    /// Convert the erased intent into the global message type.
-    fn into_global_message(self: Box<Self>) -> M;
+    /// Convert the erased intent into the global message type, or `None` when
+    /// the intent has no message to dispatch (a cross-feature request that the
+    /// router should skip).
+    fn into_global_message(self: Box<Self>) -> Option<M>;
 }
 
 impl<I, Msg, M> RoutableIntent<M> for I
@@ -44,7 +53,7 @@ where
     Msg: Into<M> + 'static,
     M: 'static,
 {
-    fn into_global_message(self: Box<Self>) -> M {
-        I::into_message(*self).into()
+    fn into_global_message(self: Box<Self>) -> Option<M> {
+        I::into_message(*self).map(Into::into)
     }
 }

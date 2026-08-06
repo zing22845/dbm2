@@ -21,13 +21,11 @@ pub enum SqlCompletionIntent {
 impl Intent for SqlCompletionIntent {
     type Message = SqlCompletionMsg;
 
-    fn into_message(self) -> Self::Message {
-        // The apply intent is resolved by the editor, not re-dispatched into
-        // this sub-module.
+    fn into_message(self) -> Option<Self::Message> {
+        // Cross-feature: `Apply` is resolved by the editor (it inserts the
+        // completion into the buffer); it has no completion sub-module message.
         match self {
-            SqlCompletionIntent::Apply { .. } => unreachable!(
-                "SqlCompletionIntent::Apply is routed by the editor, not re-dispatched"
-            ),
+            SqlCompletionIntent::Apply { .. } => None,
         }
     }
 }

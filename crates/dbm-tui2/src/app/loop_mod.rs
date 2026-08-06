@@ -433,8 +433,11 @@ fn queue_result(
         effect_runner.submit(effect);
     }
     for intent in result.intents {
-        let nested = IntentRouter::route::<AppMsg>(intent);
-        pending.push_back(nested);
+        // Cross-feature intents (routed by a parent) produce no message and are
+        // skipped here rather than panicking.
+        if let Some(nested) = IntentRouter::route::<AppMsg>(intent) {
+            pending.push_back(nested);
+        }
     }
     pending.extend(result.pending);
 }

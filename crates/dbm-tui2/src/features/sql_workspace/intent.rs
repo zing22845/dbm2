@@ -15,9 +15,9 @@ pub enum SqlIntent {
 impl Intent for SqlIntent {
     type Message = SqlMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {
-            SqlIntent::SqlTab(i) => i.into_message().into(),
+            SqlIntent::SqlTab(i) => i.into_message().map(Into::into),
         }
     }
 }

@@ -9,7 +9,7 @@ pub enum TargetsIntent {}
 impl Intent for TargetsIntent {
     type Message = TargetsMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {}
     }
 }

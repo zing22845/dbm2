@@ -9,7 +9,7 @@ pub enum ResultsIntent {}
 impl Intent for ResultsIntent {
     type Message = ResultsMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {}
     }
 }

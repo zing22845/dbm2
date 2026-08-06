@@ -9,7 +9,7 @@ pub enum FooterIntent {}
 impl Intent for FooterIntent {
     type Message = FooterMsg;
 
-    fn into_message(self) -> Self::Message {
+    fn into_message(self) -> Option<Self::Message> {
         match self {}
     }
 }
