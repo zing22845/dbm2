@@ -30,7 +30,9 @@ use crate::app::state::AppState;
 use crate::app::update::{handle_action, update, UpdateResult};
 use crate::app::view::render;
 use crate::app_shell::effect::EffectRunner;
+use crate::app_shell::focus::FocusZone;
 use crate::app_shell::intent::IntentRouter;
+use crate::features::global_footer::view as footer_view;
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 use crate::features::perf_monitor::backend::CountingBackend;
 
@@ -140,41 +142,75 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         MouseEventKind::Down(MouseButton::Left)
                     ) && state.modal.is_none()
                     {
-                        // Left-click on the header `Discover` button activates
-                        // it. The button rect is derived purely from the header
-                        // layout (the terminal's frame area), matching how the
-                        // view draws it — no state is written during render.
-                        let header_area = Rect::new(0, 0, terminal.size()?.width, 3);
-                        let button_rect =
-                            crate::features::header::view::discover_button_rect(header_area);
+                        // Map the click to a focus zone by region. The layout
+                        // mirrors `app/view.rs`: header (top 3 rows), explorer
+                        // (left 20% of the body), workspace (right 80%).
+                        let size = terminal.size()?;
+                        let footer_h = footer_view::footer_height(&state.footer, size.width);
+                        let body_top = 3u16;
+                        let body_h = size.height.saturating_sub(body_top).saturating_sub(footer_h);
+                        let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+                        let point = Position::new(mouse.column, mouse.row);
+
+                        // Clicking a region moves focus there (shell-level).
+                        let target_zone = if mouse.row < body_top {
+                            Some(FocusZone::Header)
+                        } else if mouse.row >= body_top + body_h {
+                            None
+                        } else if mouse.column < explorer_w {
+                            Some(FocusZone::Explorer)
+                        } else if state.iw.instance_name.is_empty() {
+                            Some(FocusZone::SQLWorkspace)
+                        } else {
+                            Some(FocusZone::InstanceWorkspace)
+                        };
                         tracing::debug!(
-                            button_rect = ?button_rect,
-                            header_area = ?header_area,
-                            modal_open = state.modal.is_some(),
-                            "header button hit-test"
+                            point = ?point,
+                            target_zone = ?target_zone,
+                            current_focus = ?state.focus,
+                            "mouse click zone mapping"
                         );
-                        let clicked = button_rect
-                            .is_some_and(|r| r.contains(Position::new(mouse.column, mouse.row)));
-                        tracing::debug!(clicked, "header button click resolved");
-                        if clicked {
-                            state.header.button = 0;
-                            // Clicking the header is an explicit user intent and
-                            // must activate the button regardless of the current
-                            // focus zone. The app's update guards feature
-                            // messages by focus (`AppMsg::Header` → `Header`),
-                            // so mirror the original's `set_focus(Header)` by
-                            // switching focus here before dispatching.
-                            state.focus = crate::app_shell::focus::FocusZone::Header;
-                            let msg = AppMsg::Header(HeaderMsg::Message(
-                                HeaderMessage::Activate,
-                            ));
-                            tracing::debug!("dispatching HeaderMessage::Activate");
+                        if let Some(zone) = target_zone.filter(|z| *z != state.focus) {
+                            let msg = AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged {
+                                zone,
+                            });
                             process_message_round(
                                 &effect_runner,
                                 &mut action_rx,
                                 msg,
                                 &mut state,
                             );
+                        }
+
+                        // Left-click on the header `Discover` button activates
+                        // it, in addition to moving focus to the header.
+                        let header_area = Rect::new(0, 0, size.width, 3);
+                        let button_rect =
+                            crate::features::header::view::discover_button_rect(header_area);
+                        let clicked = button_rect
+                            .is_some_and(|r| r.contains(point));
+                        tracing::debug!(clicked, "header button click resolved");
+                        if clicked {
+                            // Clicking the header button is an explicit user
+                            // intent: move focus to the Header zone (via the
+                            // shell message), then dispatch Activate. Both go
+                            // through `update` so every state change flows
+                            // through the single state-transition channel.
+                            process_message_round(
+                                &effect_runner,
+                                &mut action_rx,
+                                AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged {
+                                    zone: crate::app_shell::focus::FocusZone::Header,
+                                }),
+                                &mut state,
+                            );
+                            process_message_round(
+                                &effect_runner,
+                                &mut action_rx,
+                                AppMsg::Header(HeaderMsg::Message(HeaderMessage::Activate)),
+                                &mut state,
+                            );
+                            tracing::debug!("dispatching HeaderMessage::Activate");
                         }
                     } else {
                         tracing::debug!(

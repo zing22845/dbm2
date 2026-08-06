@@ -9,6 +9,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app_shell::focus::FocusZone;
+use crate::app_shell::msg::ShellMsg;
+use crate::common::utils::zone_nav::pane_dir_from_key;
 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
 use crate::features::discover::results::msg::{ResultsMessage, ResultsMsg};
 use crate::features::discover::state::{DiscoverFocus, DiscoverState};
@@ -39,6 +41,14 @@ use super::state::ModalKind;
 /// Returns `None` when nothing consumed the key (a no-op). Global shortcuts
 /// (quit, theme toggle) are handled by the run loop and not routed here.
 pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMsg> {
+    // Pane/zone navigation (Ctrl+h/j/k/l / Ctrl+arrows) is shell-level: it
+    // moves the focus zone regardless of the currently focused pane. Check it
+    // first, before modal/focus routing, so it always works.
+    if state.modal.is_none()
+        && let Some(dir) = pane_dir_from_key(&key)
+    {
+        return switch_zone_by_dir(dir, state.focus);
+    }
     match &state.modal {
         Some(ModalKind::Discover) => discover_key(key, &state.discover),
         // Data-carrying popups: their key routing will be wired once each
@@ -52,6 +62,35 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
             FocusZone::SQLWorkspace => sql_key(key, &state.sql),
         },
     }
+}
+
+/// Move the focus zone one step in `dir`, mirroring the original `zone_nav`
+/// cross-zone edges for the shell layout (header top, explorer left, workspace
+/// right): `Header ↔ Explorer` vertically, `Explorer ↔ workspace` horizontally.
+fn switch_zone_by_dir(dir: crate::common::utils::zone_nav::PaneDir, focus: FocusZone) -> Option<AppMsg> {
+    let zone = match (focus, dir) {
+        // Header moves down into the explorer; explorer moves up to the header.
+        (FocusZone::Header, crate::common::utils::zone_nav::PaneDir::Down) => {
+            FocusZone::Explorer
+        }
+        (FocusZone::Explorer, crate::common::utils::zone_nav::PaneDir::Up) => {
+            FocusZone::Header
+        }
+        // Explorer moves right into the workspace; workspace moves left back
+        // to the explorer (and up to the header).
+        (FocusZone::Explorer, crate::common::utils::zone_nav::PaneDir::Right) => {
+            FocusZone::SQLWorkspace
+        }
+        (FocusZone::SQLWorkspace | FocusZone::InstanceWorkspace, crate::common::utils::zone_nav::PaneDir::Left) => {
+            FocusZone::Explorer
+        }
+        (FocusZone::SQLWorkspace | FocusZone::InstanceWorkspace, crate::common::utils::zone_nav::PaneDir::Up) => {
+            FocusZone::Header
+        }
+        _ => return None,
+    };
+    tracing::debug!(from = ?focus, to = ?zone, "pane/zone switch via Ctrl+nav");
+    Some(AppMsg::Shell(ShellMsg::FocusChanged { zone }))
 }
 
 /// Keys for the data-carrying popups. Returns `Some` only when the popup has
@@ -445,5 +484,55 @@ mod tests {
         let msg = sql_tab_navigation_key(key(KeyCode::Tab, KeyModifiers::CONTROL), &state)
             .expect("ctrl+tab should be handled");
         assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab(0));
+    }
+
+    #[test]
+    fn ctrl_j_moves_from_header_to_explorer() {
+        let state = crate::app::state::AppState::default();
+        assert_eq!(state.focus, FocusZone::Header);
+        let msg = key_to_msg(key(KeyCode::Char('j'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+j should switch zone");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { zone }) => {
+                assert_eq!(zone, FocusZone::Explorer);
+            }
+            _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
+    fn ctrl_h_moves_from_workspace_back_to_explorer() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = FocusZone::SQLWorkspace;
+        let msg = key_to_msg(key(KeyCode::Char('h'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+h should switch zone");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { zone }) => {
+                assert_eq!(zone, FocusZone::Explorer);
+            }
+            _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
+    fn ctrl_l_moves_from_explorer_to_workspace() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = FocusZone::Explorer;
+        let msg = key_to_msg(key(KeyCode::Char('l'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+l should switch zone");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { zone }) => {
+                assert_eq!(zone, FocusZone::SQLWorkspace);
+            }
+            _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
+    fn ctrl_j_without_control_is_not_a_pane_move() {
+        let state = crate::app::state::AppState::default();
+        // Plain 'j' is not a pane-move chord (no Ctrl), so it should not switch
+        // the zone; the header key handler does not consume it either.
+        assert!(key_to_msg(key(KeyCode::Char('j'), KeyModifiers::NONE), &state).is_none());
     }
 }
