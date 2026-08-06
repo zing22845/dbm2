@@ -100,8 +100,7 @@ fn render_empty(frame: &mut Frame, theme: &Theme, area: Rect) {
     let block = Block::default()
         .title(" Results ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border))
-        .style(Style::default().bg(p.surface));
+        .border_style(Style::default().fg(p.border));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(
@@ -136,8 +135,7 @@ fn render_table(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border_active))
-        .style(Style::default().bg(p.surface));
+        .border_style(Style::default().fg(p.border_active));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 

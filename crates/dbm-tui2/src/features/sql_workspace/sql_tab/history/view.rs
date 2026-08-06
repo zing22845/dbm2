@@ -55,8 +55,7 @@ pub fn render(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border_active))
-        .style(Style::default().bg(p.surface));
+        .border_style(Style::default().fg(p.border_active));
     let inner = block.inner(list_area);
     frame.render_widget(block, list_area);
 
