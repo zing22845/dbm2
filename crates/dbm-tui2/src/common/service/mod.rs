@@ -6,4 +6,5 @@
 //! effect as it runs. Features never construct or hold services directly —
 //! effects describe *what* to do, and `Services` supplies the *how*.
 
+pub mod clipboard;
 pub mod services;

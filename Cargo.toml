@@ -19,6 +19,7 @@ rust-version = "1.88"
 
 [workspace.dependencies]
 anyhow = "1"
+arboard = "3.6.1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
 crossterm = "0.29"

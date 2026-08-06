@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+arboard = { workspace = true }
 crossterm = { workspace = true, features = ["event-stream"] }
 dbm-core = { workspace = true }
 dbm-discovery = { workspace = true }

@@ -11,6 +11,11 @@
 
 use unicode_width::UnicodeWidthChar;
 
+/// Display width of the first `char_offset` chars of `text` (CJK-aware).
+pub fn prefix_width(text: &str, char_offset: usize) -> usize {
+    text.chars().take(char_offset).map(char_width).sum()
+}
+
 /// Display width of a single char in terminal cells.
 ///
 /// Control / zero-width combining marks would otherwise read as 0; we floor
