@@ -178,5 +178,14 @@ fn render_modal_popup<'a, S, F>(
         width: w,
         height: h,
     };
+    // Cover the whole modal region with an opaque background first (mirrors the
+    // original `draw_modal_overlay`: clear + solid fill) so the workspace behind
+    // the modal is hidden and the popup reads as a solid, non-transparent layer.
+    crate::common::view::overlay_clear::clear_overlay(frame, base);
+    frame.render_widget(
+        ratatui::widgets::Block::default()
+            .style(ratatui::style::Style::default().bg(theme.palette().bg)),
+        base,
+    );
     inner(frame, theme, popup, state);
 }

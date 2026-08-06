@@ -7,7 +7,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::text::{Line, Span};
 
@@ -36,7 +36,14 @@ where
         width: w,
         height: h,
     };
-    clear_overlay(frame, popup);
+    // Cover the whole modal region with an opaque background so the content
+    // behind is hidden, then place the popup. The `inner` renderer supplies the
+    // popup's own block/surface background.
+    clear_overlay(frame, base);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(Color::Black)),
+        base,
+    );
     inner(frame, popup);
 }
 
