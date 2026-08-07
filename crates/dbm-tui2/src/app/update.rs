@@ -107,6 +107,20 @@ fn close_discover(state: &mut AppState) {
     state.modal = None;
 }
 
+/// An `AppMsg` that reloads the explorer instance tree from the store.
+///
+/// Used by the shell after closing the discover modal so instances registered
+/// during the scan appear in the explorer immediately.
+fn explorer_load_instances_msg() -> AppMsg {
+    AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
+        crate::features::explorer::msg::ExplorerMessage::Instances(
+            crate::features::explorer::instances::msg::InstancesMsg::Message(
+                crate::features::explorer::instances::msg::InstancesMessage::Load,
+            ),
+        ),
+    ))
+}
+
 /// Apply a message to the global state, returning side-channel intents and
 /// effects. Feature messages are only dispatched to their update when the
 /// active focus zone permits keyboard input for them; shell and footer
@@ -311,6 +325,11 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             if should_close {
                 close_discover(state);
                 discover_dirty = true;
+                // Registering discovered instances updates the store while the
+                // discover modal is open, so re-fetch the explorer instance tree
+                // on close so newly registered instances show up immediately
+                // instead of only after a restart.
+                result.pending.push_back(explorer_load_instances_msg());
             }
             result.dirty |= d || discover_dirty;
             result.intents.extend(intents.into_iter().map(box_intent));
