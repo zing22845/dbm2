@@ -16,20 +16,23 @@ use super::sql_completion;
 pub fn update(
     msg: EditorMessage,
     mut state: EditorState,
-) -> (EditorState, Vec<EditorIntent>, Vec<EditorEffect>) {
+) -> (EditorState, Vec<EditorIntent>, Vec<EditorEffect>, bool) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
+    let mut dirty = false;
     match msg {
         EditorMessage::KeyEvent { key, tracked_caps_lock } => {
-            handle_key(&mut state, key, tracked_caps_lock);
+            dirty = handle_key(&mut state, key, tracked_caps_lock);
         }
         EditorMessage::Paste { text } => {
             crate::common::editor::paste_text(&mut state.handler, &mut state.editor, &text);
             refresh_completion(&mut state);
+            dirty = true;
         }
         EditorMessage::SetSql { sql } => {
             crate::common::editor::set_sql_text(&mut state.editor, &sql);
             state.sql_completion.close();
+            dirty = true;
         }
         EditorMessage::Run => {
             let sql = crate::common::editor::editor_text(&state.editor);
@@ -41,30 +44,39 @@ pub fn update(
         } => {
             state.completion_catalog.tables = tables;
             state.completion_catalog.columns_by_table = columns_by_table;
+            dirty = true;
         }
         EditorMessage::ContextPicker(m) => {
             let context_picker::msg::ContextPickerMsg::Message(inner) = m;
             let cp_state = std::mem::take(&mut state.context_picker);
-            let (s, i, e) = context_picker::update::update(inner, cp_state);
+            let (s, i, e, d) = context_picker::update::update(inner, cp_state);
             state.context_picker = s;
             intents.extend(i.into_iter().map(EditorIntent::ContextPicker));
             effects.extend(e.into_iter().map(EditorEffect::ContextPicker));
+            dirty = d;
         }
         EditorMessage::SqlCompletion(m) => {
             let sql_completion::msg::SqlCompletionMsg::Message(inner) = m;
             let sc_state = std::mem::take(&mut state.sql_completion);
-            let (s, i, e) = sql_completion::update::update(inner, sc_state);
+            let (s, i, e, d) = sql_completion::update::update(inner, sc_state);
             state.sql_completion = s;
             intents.extend(i.into_iter().map(EditorIntent::SqlCompletion));
             effects.extend(e.into_iter().map(EditorEffect::SqlCompletion));
+            dirty = d;
         }
     }
 
     // The editor owns the buffer, so a completion Apply intent is resolved here
     // rather than bubbling up to the parent.
+    let intent_count = intents.len();
     intents = resolve_apply_intents(&mut state, intents);
+    // Applying a completion mutates the buffer (and closes the popup), so any
+    // consumed Apply intent counts as a rendered change.
+    if intents.len() < intent_count {
+        dirty = true;
+    }
 
-    (state, intents, effects)
+    (state, intents, effects, dirty)
 }
 
 /// Resolve any `SqlCompletionIntent::Apply` intents by inserting the completion
@@ -131,28 +143,32 @@ fn new_text_char_offset(text: &str, char_count: usize) -> usize {
 }
 
 /// Forward a normalized key to the edtui editor, then refresh completion if the
-/// buffer changed.
-fn handle_key(state: &mut EditorState, key: KeyEvent, tracked_caps_lock: bool) {
+/// buffer changed. Returns whether the editor's rendered state (buffer text or
+/// cursor/completion) changed.
+fn handle_key(state: &mut EditorState, key: KeyEvent, tracked_caps_lock: bool) -> bool {
     use crate::common::editor;
     // In-buffer `/` search takes the key first (active input, `/` to start,
     // `n`/`N` to jump). Consumed keys never reach the buffer.
     if super::sql_search::handle_sql_pane_search_key(&mut state.sql_search, &mut state.editor, key) {
-        return;
+        return true;
     }
     // Non-ASCII chars (IME commits) route through insert_text in Insert mode.
     if editor::try_insert_non_ascii_key(&mut state.handler, &mut state.editor, key, tracked_caps_lock)
     {
         refresh_completion(state);
-        return;
+        return true;
     }
     if !editor::accepts_key_event(&key) {
-        return;
+        return false;
     }
     let before = editor::editor_text(&state.editor);
+    let before_cursor = state.editor.cursor;
     state.handler.on_key_event(key, &mut state.editor);
-    if editor::editor_text(&state.editor) != before {
+    let changed = editor::editor_text(&state.editor) != before || state.editor.cursor != before_cursor;
+    if changed {
         refresh_completion(state);
     }
+    changed
 }
 
 /// Recompute the completion popup for the current buffer/cursor.
@@ -167,7 +183,7 @@ fn refresh_completion(state: &mut EditorState) {
     let tables = state.completion_catalog.tables.clone();
     let columns = scoped_columns(&state.completion_catalog, &sql, cursor);
     let sc_state = std::mem::take(&mut state.sql_completion);
-    let (s, _i, _e) = sql_completion::update::update(
+    let (s, _i, _e, _d) = sql_completion::update::update(
         sql_completion::msg::SqlCompletionMessage::Refresh {
             sql,
             cursor,
@@ -260,12 +276,12 @@ mod tests {
     fn typing_triggers_completion_refresh() {
         let mut state = EditorState::with_sql("");
         // Enter insert mode.
-        let (s, _i, _e) = update(
+        let (s, _i, _e, _d) = update(
             EditorMessage::KeyEvent { key: char_key('i'), tracked_caps_lock: false },
             state,
         );
         state = s;
-        let (s, _i, _e) = update(
+        let (s, _i, _e, _d) = update(
             EditorMessage::KeyEvent { key: char_key('s'), tracked_caps_lock: false },
             state,
         );

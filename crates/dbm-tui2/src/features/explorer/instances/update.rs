@@ -6,23 +6,32 @@ use super::intent::InstancesIntent;
 use super::effect::InstancesEffect;
 
 /// Update the instances (connection tree) state. Pure by-value transition.
+///
+/// The returned `bool` is `dirty`: whether the rendered tree changed.
+/// Navigation reports `false` when clamped at a boundary; `Select` and `Load`
+/// do not change the tree themselves (the shell reacts to their intents).
 pub fn update(
     msg: InstancesMessage,
     mut state: InstancesState,
-) -> (InstancesState, Vec<InstancesIntent>, Vec<InstancesEffect>) {
+) -> (InstancesState, Vec<InstancesIntent>, Vec<InstancesEffect>, bool) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
-    match msg {
+    let dirty = match msg {
         InstancesMessage::Load => {
             effects.push(InstancesEffect::LoadInstances);
+            false
         }
         InstancesMessage::Loaded { instances } => {
             state.set_instances(instances);
+            true
         }
         InstancesMessage::ConnectionsLoaded { instance_idx, connections } => {
             if let Some(node) = state.nodes.get_mut(instance_idx) {
                 node.connections = connections;
                 node.loaded = true;
+                true
+            } else {
+                false
             }
         }
         InstancesMessage::MoveUp => state.move_up(),
@@ -30,7 +39,9 @@ pub fn update(
         InstancesMessage::ToggleExpand => {
             // Only instance rows expand; connection rows ignore the key.
             if let Some((_, None)) = state.cursor_selection() {
-                state.toggle_expand();
+                state.toggle_expand()
+            } else {
+                false
             }
         }
         InstancesMessage::Select => {
@@ -64,7 +75,8 @@ pub fn update(
                 }
                 None => {}
             }
+            false
         }
-    }
-    (state, intents, effects)
+    };
+    (state, intents, effects, dirty)
 }

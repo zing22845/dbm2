@@ -8,17 +8,19 @@ use super::effect::DetailEffect;
 pub fn update(
     msg: DetailMessage,
     mut state: DetailState,
-) -> (DetailState, Vec<DetailIntent>, Vec<DetailEffect>) {
+) -> (DetailState, Vec<DetailIntent>, Vec<DetailEffect>, bool) {
     let intents = Vec::new();
     let effects = Vec::new();
-    match msg {
+    let dirty = match msg {
         DetailMessage::Scroll { delta } => {
+            let before = state.scroll;
             if delta > 0 {
                 state.scroll = state.scroll.saturating_add(delta as usize);
             } else {
                 state.scroll = state.scroll.saturating_sub(delta.unsigned_abs() as usize);
             }
+            state.scroll != before
         }
-    }
-    (state, intents, effects)
+    };
+    (state, intents, effects, dirty)
 }

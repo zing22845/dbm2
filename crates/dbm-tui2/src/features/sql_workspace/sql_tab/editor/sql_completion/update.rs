@@ -17,14 +17,17 @@ use super::engine::SqlEngine;
 use super::provider::{CompletionInput, build_completion_items};
 
 /// Update the SQL completion state. Pure by-value transition.
+///
+/// The returned `bool` is `dirty`: whether the completion popup's rendered
+/// state changed. A `MoveSelection`/`Apply` on a closed popup is a no-op.
 pub fn update(
     msg: SqlCompletionMessage,
     mut state: SqlCompletionState,
-) -> (SqlCompletionState, Vec<SqlCompletionIntent>, Vec<SqlCompletionEffect>) {
+) -> (SqlCompletionState, Vec<SqlCompletionIntent>, Vec<SqlCompletionEffect>, bool) {
     let mut intents = Vec::new();
     let effects = Vec::new();
 
-    match msg {
+    let dirty = match msg {
         SqlCompletionMessage::Refresh {
             sql,
             cursor,
@@ -32,16 +35,24 @@ pub fn update(
             columns,
         } => {
             refresh(&mut state, &sql, cursor, &tables, &columns);
+            true
         }
         SqlCompletionMessage::Close => {
+            let changed = state.is_open();
             state.close();
+            changed
         }
         SqlCompletionMessage::MoveSelection { delta } => {
             if state.is_open() {
+                let before = state.selected;
                 state.move_selection(delta);
+                before != state.selected
+            } else {
+                false
             }
         }
         SqlCompletionMessage::Apply => {
+            let was_open = state.is_open();
             if let Some(item) = state.selected_item().cloned() {
                 let replace_start = state.replace_start;
                 let replace_end = state.replace_end;
@@ -52,10 +63,11 @@ pub fn update(
                 });
             }
             state.close();
+            was_open
         }
-    }
+    };
 
-    (state, intents, effects)
+    (state, intents, effects, dirty)
 }
 
 /// Recompute completion items and update the popup open/closed state.
@@ -128,7 +140,7 @@ mod tests {
 
     #[test]
     fn refresh_opens_keyword_popup_with_prefix() {
-        let (s, _i, _e) = update(
+        let (s, _i, _e, _d) = update(
             SqlCompletionMessage::Refresh {
                 sql: "select * from users wh".into(),
                 cursor: cursor_at("select * from users wh"),
@@ -143,7 +155,7 @@ mod tests {
 
     #[test]
     fn refresh_closes_when_suppressed() {
-        let (s, _i, _e) = update(
+        let (s, _i, _e, _d) = update(
             SqlCompletionMessage::Refresh {
                 sql: "SELECT 'foo".into(),
                 cursor: cursor_at("SELECT 'foo"),
@@ -157,7 +169,7 @@ mod tests {
 
     #[test]
     fn move_selection_wraps() {
-        let (mut s, _i, _e) = update(
+        let (mut s, _i, _e, _d) = update(
             SqlCompletionMessage::Refresh {
                 sql: "sel".into(),
                 cursor: cursor_at("sel"),
@@ -176,7 +188,7 @@ mod tests {
 
     #[test]
     fn close_clears_items() {
-        let (mut s, _i, _e) = update(
+        let (mut s, _i, _e, _d) = update(
             SqlCompletionMessage::Refresh {
                 sql: "sel".into(),
                 cursor: cursor_at("sel"),
@@ -186,7 +198,7 @@ mod tests {
             SqlCompletionState::default(),
         );
         assert!(s.is_open());
-        let (s2, _i, _e) = update(SqlCompletionMessage::Close, s);
+        let (s2, _i, _e, _d) = update(SqlCompletionMessage::Close, s);
         s = s2;
         assert!(!s.is_open());
         assert!(s.items.is_empty());

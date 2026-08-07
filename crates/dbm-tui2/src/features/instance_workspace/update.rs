@@ -13,15 +13,16 @@ use super::overview;
 pub fn update(
     msg: IwMessage,
     mut state: IwState,
-) -> (IwState, Vec<IwIntent>, Vec<IwEffect>) {
+) -> (IwState, Vec<IwIntent>, Vec<IwEffect>, bool) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
-    match msg {
+    let dirty = match msg {
         IwMessage::OpenInstance { instance_name } => {
+            let changed = state.instance_name != instance_name;
             state.instance_name = instance_name.clone();
             // Load the overview and connections for the freshly opened instance
             // by dispatching child Load messages.
-            let (ov, _oi, oe) = overview::update::update(
+            let (ov, _oi, oe, od) = overview::update::update(
                 overview::msg::OverviewMessage::Load {
                     instance_name: instance_name.clone(),
                 },
@@ -29,7 +30,7 @@ pub fn update(
             );
             state.overview = ov;
             effects.extend(oe.into_iter().map(IwEffect::Overview));
-            let (cn, _ci, ce) = connections::update::update(
+            let (cn, _ci, ce, cd) = connections::update::update(
                 connections::msg::ConnectionsMessage::Load {
                     instance_name: instance_name.clone(),
                 },
@@ -37,23 +38,26 @@ pub fn update(
             );
             state.connections = cn;
             effects.extend(ce.into_iter().map(IwEffect::Connections));
+            changed || od || cd
         }
         IwMessage::Overview(m) => {
             let overview::msg::OverviewMsg::Message(inner) = m;
             let s = std::mem::take(&mut state.overview);
-            let (s, i, e) = overview::update::update(inner, s);
+            let (s, i, e, d) = overview::update::update(inner, s);
             state.overview = s;
             intents.extend(i.into_iter().map(IwIntent::Overview));
             effects.extend(e.into_iter().map(IwEffect::Overview));
+            d
         }
         IwMessage::Connections(m) => {
             let connections::msg::ConnectionsMsg::Message(inner) = m;
             let s = std::mem::take(&mut state.connections);
-            let (s, i, e) = connections::update::update(inner, s);
+            let (s, i, e, d) = connections::update::update(inner, s);
             state.connections = s;
             intents.extend(i.into_iter().map(IwIntent::Connections));
             effects.extend(e.into_iter().map(IwEffect::Connections));
+            d
         }
-    }
-    (state, intents, effects)
+    };
+    (state, intents, effects, dirty)
 }

@@ -161,29 +161,29 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // Opening a modal is shell orchestration, handled before the
             // header feature's own update so the modal state is ready for the
             // frame that follows.
-            if let HeaderMsg::Message(HeaderMessage::Activate) = &m
+            let opened_discover = if let HeaderMsg::Message(HeaderMessage::Activate) = &m
                 && state.header.button == 0 {
                     open_discover(state);
-                }
+                    true
+                } else {
+                    false
+                };
             let HeaderMsg::Message(inner) = m;
             // The header feature's update is a pure by-value transition: move
             // the state out, update it, move the result back. No deep clone.
             let header = std::mem::take(&mut state.header);
-            let (s, intents, effects) = header_update(inner, header);
+            let (s, intents, effects, d) = header_update(inner, header);
             state.header = s;
-            result.dirty = true;
+            result.dirty |= d || opened_discover;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
         AppMsg::Explorer(m) => {
-            // Explorer messages always touch rendered state (tree selection,
-            // expansion, or a cross-feature open), so mark dirty unconditionally
-            // at the end of this branch (see the `result.dirty = true` below).
             let ExplorerMsg::Message(inner) = m;
             // The explorer feature's update is a pure by-value transition: move
             // the state out, update it, move the result back. No deep clone.
             let explorer = std::mem::take(&mut state.explorer);
-            let (s, intents, effects) = explorer_update(inner, explorer);
+            let (s, intents, effects, mut explorer_dirty) = explorer_update(inner, explorer);
             state.explorer = s;
             // Cross-feature: selecting an instance in the explorer opens the
             // instance workspace for it. This is shell-level orchestration that
@@ -203,13 +203,14 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         .unwrap_or_default();
                     if !instance_name.is_empty() {
                         let iw = std::mem::take(&mut state.iw);
-                        let (iw2, i, e) = iw_update(
+                        let (iw2, i, e, d) = iw_update(
                             crate::features::instance_workspace::msg::IwMessage::OpenInstance {
                                 instance_name,
                             },
                             iw,
                         );
                         state.iw = iw2;
+                        explorer_dirty |= d;
                         result.intents.extend(i.into_iter().map(box_intent));
                         result.effects.extend(e.into_iter().map(box_effect));
                     }
@@ -238,6 +239,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                                     schema: None,
                                 },
                             )));
+                            explorer_dirty = true;
                             result.pending.push_back(AppMsg::Sql(sql_msg));
                         }
                     }
@@ -266,11 +268,12 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                                 schema: target.schema.clone(),
                             },
                         )));
+                        explorer_dirty = true;
                         result.pending.push_back(AppMsg::Sql(sql_msg));
                     }
                 }
             }
-            result.dirty = true;
+            result.dirty |= explorer_dirty;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
@@ -278,11 +281,14 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // The discover parent pane's child-pane focus lives on `state.focus`,
             // so a focus change (and moving focus to results on scan) is applied
             // here before/with the discover feature's content update.
+            let mut discover_dirty = false;
             if let DiscoverMsg::Message(DiscoverMessage::Focus(sub)) = &m {
                 state.focus = Pane::Discover(*sub);
+                discover_dirty = true;
             }
             if let DiscoverMsg::Message(DiscoverMessage::StartScan) = &m {
                 state.focus = Pane::Discover(DiscoverPane::Results);
+                discover_dirty = true;
             }
             // Closing the modal is shell orchestration, handled after the
             // discover feature's own update so the frame is ready for teardown.
@@ -291,12 +297,13 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // The discover feature's update is a pure by-value transition: move
             // the state out, update it, move the result back. No deep clone.
             let discover = std::mem::take(&mut state.discover);
-            let (s, intents, effects) = discover_update(inner, discover);
+            let (s, intents, effects, d) = discover_update(inner, discover);
             state.discover = s;
             if should_close {
                 close_discover(state);
+                discover_dirty = true;
             }
-            result.dirty = true;
+            result.dirty |= d || discover_dirty;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
@@ -306,9 +313,9 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // transition: move the state out, update it, move the result back.
             // No deep clone.
             let iw = std::mem::take(&mut state.iw);
-            let (s, intents, effects) = iw_update(inner, iw);
+            let (s, intents, effects, d) = iw_update(inner, iw);
             state.iw = s;
-            result.dirty = true;
+            result.dirty |= d;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
@@ -317,9 +324,9 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // The sql feature's update is a pure by-value transition: move the
             // state out, update it, move the result back. No deep clone.
             let sql = std::mem::take(&mut state.sql);
-            let (s, intents, effects) = sql_workspace_update(inner, sql);
+            let (s, intents, effects, d) = sql_workspace_update(inner, sql);
             state.sql = s;
-            result.dirty = true;
+            result.dirty |= d;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
@@ -328,20 +335,21 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // The footer feature's update is a pure by-value transition: move
             // the state out, update it, move the result back. No deep clone.
             let footer = std::mem::take(&mut state.footer);
-            let (s, intents, effects) = footer_update(inner, footer);
+            let (s, intents, effects, d) = footer_update(inner, footer);
             state.footer = s;
             // Keep the shell-level `global_status` mirror in sync with the
             // footer's authoritative status, so other code reading
             // `AppState::global_status` sees the latest value.
             state.global_status = state.footer.status.clone();
-            result.dirty = true;
+            result.dirty |= d;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
         AppMsg::Perf(m) => {
             let PerfMsg::Message(inner) = m;
-            let (s, intents, effects) = perf_update(inner, &mut state.perf);
+            let (s, intents, effects, d) = perf_update(inner, &mut state.perf);
             state.perf = s;
+            result.dirty |= d;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }

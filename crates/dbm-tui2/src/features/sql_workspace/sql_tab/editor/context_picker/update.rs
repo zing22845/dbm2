@@ -15,10 +15,13 @@ use super::intent::ContextPickerIntent;
 use super::effect::ContextPickerEffect;
 
 /// Update the context picker state. Pure by-value transition.
+///
+/// The returned `bool` is `dirty`: whether the rendered picker changed. A
+/// closed picker ignores everything but `Open` (reporting `false`).
 pub fn update(
     msg: ContextPickerMessage,
     mut state: ContextPickerState,
-) -> (ContextPickerState, Vec<ContextPickerIntent>, Vec<ContextPickerEffect>) {
+) -> (ContextPickerState, Vec<ContextPickerIntent>, Vec<ContextPickerEffect>, bool) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
 
@@ -36,37 +39,45 @@ pub fn update(
                 connection: state.connection.clone(),
                 database: state.preview_database.clone(),
             });
+            return (state, intents, effects, true);
         }
-        return (state, intents, effects);
+        return (state, intents, effects, false);
     }
 
-    match msg {
+    let dirty = match msg {
         ContextPickerMessage::Open { .. } => {
             // Already open; ignore a second open.
+            false
         }
         ContextPickerMessage::Close => {
             state.close();
+            true
         }
         ContextPickerMessage::MoveCursor { delta } => {
             move_cursor(&mut state, delta, &mut effects);
+            true
         }
         ContextPickerMessage::MoveColumn(column) => {
             let changed = state.switch_column(column);
             if changed {
                 sync_picker_cursors(&mut state, &mut effects);
             }
+            changed
         }
         ContextPickerMessage::BeginSearch => {
             state.begin_search_input();
+            true
         }
         ContextPickerMessage::SearchKey(key) => {
             handle_search_key(&mut state, key, &mut effects);
+            true
         }
         ContextPickerMessage::Apply => {
             if let Some((database, schema)) = selected_context(&state) {
                 intents.push(ContextPickerIntent::ApplyContext { database, schema });
             }
             state.close();
+            true
         }
         ContextPickerMessage::DatabasesLoaded { items } => {
             // Seed the cursor onto the initial preview database so the picker
@@ -74,20 +85,24 @@ pub fn update(
             state.db_cursor = cursor_for_name(&items, &state.db_search, &state.preview_database);
             state.databases = CachedList::Ready(items);
             sync_picker_cursors(&mut state, &mut effects);
+            true
         }
         ContextPickerMessage::DatabasesError { error } => {
             state.databases = CachedList::Error(error);
+            true
         }
         ContextPickerMessage::SchemasLoaded { items } => {
             state.schemas = CachedList::Ready(items);
             sync_picker_cursors(&mut state, &mut effects);
+            true
         }
         ContextPickerMessage::SchemasError { error } => {
             state.schemas = CachedList::Error(error);
+            true
         }
-    }
+    };
 
-    (state, intents, effects)
+    (state, intents, effects, dirty)
 }
 
 /// Move the cursor in the active column and re-sync the preview/cursors.
@@ -219,7 +234,7 @@ mod tests {
 
     #[test]
     fn open_emits_both_catalog_loads() {
-        let (s, _i, e) = update(
+        let (s, _i, e, _d) = update(
             ContextPickerMessage::Open {
                 column: PickerColumn::Database,
                 instance: "inst".into(),
@@ -235,14 +250,14 @@ mod tests {
 
     #[test]
     fn closed_picker_ignores_non_open_messages() {
-        let (s, _i, e) = update(ContextPickerMessage::Close, ContextPickerState::default());
+        let (s, _i, e, _d) = update(ContextPickerMessage::Close, ContextPickerState::default());
         assert!(!s.open);
         assert!(e.is_empty());
     }
 
     #[test]
     fn databases_loaded_seeds_cursor_onto_active_database() {
-        let (mut s, _i, open_effects) = update(
+        let (mut s, _i, open_effects, _d) = update(
             ContextPickerMessage::Open {
                 column: PickerColumn::Database,
                 instance: "inst".into(),
@@ -259,7 +274,7 @@ mod tests {
 
         // When the databases list arrives, the cursor lands on the active
         // database (postgres, index 1) rather than the first entry.
-        let (s2, _i, e2) = update(
+        let (s2, _i, e2, _d) = update(
             ContextPickerMessage::DatabasesLoaded {
                 items: vec!["app".into(), "postgres".into()],
             },
@@ -275,7 +290,7 @@ mod tests {
 
     #[test]
     fn apply_emits_intent_and_closes() {
-        let (mut s, _i, _e) = update(
+        let (mut s, _i, _e, _d) = update(
             ContextPickerMessage::Open {
                 column: PickerColumn::Database,
                 instance: "inst".into(),
@@ -288,7 +303,7 @@ mod tests {
         s.db_cursor = 1; // postgres
         s.schemas = CachedList::Ready(vec!["public".into(), "analytics".into()]);
         s.schema_cursor = 0; // public
-        let (s2, i, _e) = update(ContextPickerMessage::Apply, s);
+        let (s2, i, _e, _d) = update(ContextPickerMessage::Apply, s);
         assert!(!s2.open);
         assert_eq!(i.len(), 1);
         match &i[0] {
@@ -301,7 +316,7 @@ mod tests {
 
     #[test]
     fn move_column_switches_focus() {
-        let (mut s, _i, _e) = update(
+        let (mut s, _i, _e, _d) = update(
             ContextPickerMessage::Open {
                 column: PickerColumn::Database,
                 instance: "inst".into(),
@@ -310,14 +325,14 @@ mod tests {
             },
             ContextPickerState::default(),
         );
-        let (s2, _i, _e) = update(ContextPickerMessage::MoveColumn(PickerColumn::Schema), s);
+        let (s2, _i, _e, _d) = update(ContextPickerMessage::MoveColumn(PickerColumn::Schema), s);
         s = s2;
         assert_eq!(s.column, PickerColumn::Schema);
     }
 
     #[test]
     fn search_key_queries_and_resets_cursor() {
-        let (mut s, _i, _e) = update(
+        let (mut s, _i, _e, _d) = update(
             ContextPickerMessage::Open {
                 column: PickerColumn::Database,
                 instance: "inst".into(),
@@ -328,8 +343,8 @@ mod tests {
         );
         s.databases = CachedList::Ready(vec!["app".into(), "postgres".into()]);
         s.db_cursor = 1;
-        let (s2, _i, _e) = update(ContextPickerMessage::BeginSearch, s);
-        let (s2, _i, _e) = update(ContextPickerMessage::SearchKey(char_key('a')), s2);
+        let (s2, _i, _e, _d) = update(ContextPickerMessage::BeginSearch, s);
+        let (s2, _i, _e, _d) = update(ContextPickerMessage::SearchKey(char_key('a')), s2);
         assert!(s2.db_search.active);
         assert_eq!(s2.db_search.query, "a");
         assert_eq!(s2.db_cursor, 0);

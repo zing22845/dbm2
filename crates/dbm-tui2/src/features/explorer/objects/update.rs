@@ -6,39 +6,50 @@ use super::msg::ObjectsMessage;
 use super::state::{CatalogList, ObjectKind, ObjectsNode, ObjectsState};
 
 /// Update the objects tree state. Pure by-value transition.
+///
+/// The returned `bool` is `dirty`: whether this update changed any state that
+/// affects rendering. Navigation that ends up at a boundary (e.g. `MoveUp` at
+/// the top row, or `ToggleExpand` on a leaf object) reports `false` so the
+/// event loop can skip a redundant repaint.
 pub fn update(
     msg: ObjectsMessage,
     mut state: ObjectsState,
-) -> (ObjectsState, Vec<ObjectsIntent>, Vec<ObjectsEffect>) {
+) -> (ObjectsState, Vec<ObjectsIntent>, Vec<ObjectsEffect>, bool) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
+    let mut dirty = false;
     match msg {
-        ObjectsMessage::MoveUp => state.move_up(),
-        ObjectsMessage::MoveDown => state.move_down(),
+        ObjectsMessage::MoveUp => dirty |= state.move_up(),
+        ObjectsMessage::MoveDown => dirty |= state.move_down(),
         ObjectsMessage::ToggleExpand => {
             if let Some(node) = state.toggle_expand() {
                 maybe_fetch_on_expand(&node, &state, &mut effects);
+                dirty = true;
             }
         }
         ObjectsMessage::Select => {
             // Selecting an object (e.g. a table) notifies the SQL workspace to
             // open it. This is a cross-feature intent, consumed at the shell
-            // layer.
+            // layer; the objects state itself is unchanged here (the shell
+            // marks the target workspace dirty when it opens the object).
             if let Some(target) = state.selected_target() {
                 intents.push(ObjectsIntent::OpenObject { target });
             }
         }
         ObjectsMessage::Bind { instance, connection } => {
             state.rebind(instance.clone(), connection.clone());
+            dirty = true;
             effects.push(ObjectsEffect::LoadDatabases { instance, connection });
         }
         ObjectsMessage::DatabasesLoaded { databases } => {
             state.catalog.databases = CatalogList::Ready(databases);
             state.rebuild_rows();
+            dirty = true;
         }
         ObjectsMessage::DatabasesError { error } => {
             state.catalog.databases = CatalogList::Error(error);
             state.rebuild_rows();
+            dirty = true;
         }
         ObjectsMessage::SchemasLoaded { database, schemas } => {
             state
@@ -46,6 +57,7 @@ pub fn update(
                 .schemas
                 .insert(database, CatalogList::Ready(schemas));
             state.rebuild_rows();
+            dirty = true;
         }
         ObjectsMessage::SchemasError { database, error } => {
             state
@@ -53,6 +65,7 @@ pub fn update(
                 .schemas
                 .insert(database, CatalogList::Error(error));
             state.rebuild_rows();
+            dirty = true;
         }
         ObjectsMessage::ExtensionsLoaded { database, extensions } => {
             state
@@ -60,6 +73,7 @@ pub fn update(
                 .extensions
                 .insert(database, CatalogList::Ready(extensions));
             state.rebuild_rows();
+            dirty = true;
         }
         ObjectsMessage::ExtensionsError { database, error } => {
             state
@@ -67,6 +81,7 @@ pub fn update(
                 .extensions
                 .insert(database, CatalogList::Error(error));
             state.rebuild_rows();
+            dirty = true;
         }
         ObjectsMessage::ObjectListLoaded { database, schema, kind, items } => {
             state.catalog.objects.insert(
@@ -74,6 +89,7 @@ pub fn update(
                 CatalogList::Ready(items),
             );
             state.rebuild_rows();
+            dirty = true;
         }
         ObjectsMessage::ObjectListError { database, schema, kind, error } => {
             state.catalog.objects.insert(
@@ -81,9 +97,10 @@ pub fn update(
                 CatalogList::Error(error),
             );
             state.rebuild_rows();
+            dirty = true;
         }
     }
-    (state, intents, effects)
+    (state, intents, effects, dirty)
 }
 
 /// Decide which catalog effect to kick off when `node` is being expanded.

@@ -17,23 +17,37 @@ use super::history;
 use super::results;
 
 /// Update the `sql_tab` state, delegating to child modules.
+///
+/// The returned `bool` is `dirty`: whether any rendered tab state changed.
+/// Messages routed to a missing tab (logged and dropped) report `false`.
 pub fn update(
     msg: SqlTabMessage,
     mut state: SqlTabState,
-) -> (SqlTabState, Vec<SqlTabIntent>, Vec<SqlTabEffect>) {
+) -> (SqlTabState, Vec<SqlTabIntent>, Vec<SqlTabEffect>, bool) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
+    let mut dirty = false;
     match msg {
         SqlTabMessage::Tab(idx) => {
+            let before = state.active_tab;
             state.active_tab = idx.min(state.tabs.len().saturating_sub(1));
+            dirty = before != state.active_tab;
         }
         SqlTabMessage::Focus(focus) => {
             if let Some(tab) = state.tabs.get_mut(state.active_tab) {
+                let changed = tab.focus != focus;
                 tab.focus = focus;
+                dirty = changed;
             }
         }
-        SqlTabMessage::OpenTab => state.open_tab(),
-        SqlTabMessage::CloseTab(idx) => state.close_tab(idx),
+        SqlTabMessage::OpenTab => {
+            state.open_tab();
+            dirty = true;
+        }
+        SqlTabMessage::CloseTab(idx) => {
+            state.close_tab(idx);
+            dirty = true;
+        }
         SqlTabMessage::OpenConnectionTab {
             instance,
             connection,
@@ -67,12 +81,16 @@ pub fn update(
                     schema: schema_name,
                 },
             });
+            dirty = true;
         }
         SqlTabMessage::ApplyContext { tab_id, database, schema } => {
             if let Some(idx) = state.index_of(tab_id) {
                 let tab = &mut state.tabs[idx];
+                let changed = tab.session.database.as_ref() != Some(&database)
+                    || tab.session.schema.as_ref() != Some(&schema);
                 tab.session.database = Some(database);
                 tab.session.schema = Some(schema);
+                dirty = changed;
             } else {
                 warn_tab_missing(tab_id);
             }
@@ -80,13 +98,16 @@ pub fn update(
         SqlTabMessage::SetSplitRatio { tab_id, ratio } => {
             if let Some(idx) = state.index_of(tab_id) {
                 state.tabs[idx].set_split_ratio(ratio);
+                dirty = true;
             } else {
                 warn_tab_missing(tab_id);
             }
         }
         SqlTabMessage::SetHistoryWidth { tab_id, width } => {
             if let Some(idx) = state.index_of(tab_id) {
+                let changed = state.tabs[idx].history_pane_width != width;
                 state.tabs[idx].set_history_pane_width(width);
+                dirty = changed;
             } else {
                 warn_tab_missing(tab_id);
             }
@@ -99,7 +120,9 @@ pub fn update(
                 let delta = width_delta_for_right_pane(nudge, WIDTH_NUDGE_STEP);
                 let current = i32::from(state.tabs[idx].history_pane_width);
                 let next = (current + i32::from(delta)).max(0) as u16;
+                let changed = state.tabs[idx].history_pane_width != next;
                 state.tabs[idx].set_history_pane_width(next);
+                dirty = changed;
             } else {
                 warn_tab_missing(tab_id);
             }
@@ -107,11 +130,12 @@ pub fn update(
         SqlTabMessage::RecallHistory { tab_id, sql } => {
             if let Some(idx) = state.index_of(tab_id) {
                 let editor_state = std::mem::take(&mut state.tabs[idx].editor);
-                let (s, _i, _e) = editor::update::update(
+                let (s, _i, _e, d) = editor::update::update(
                     editor::msg::EditorMessage::SetSql { sql },
                     editor_state,
                 );
                 state.tabs[idx].editor = s;
+                dirty = d;
             } else {
                 warn_tab_missing(tab_id);
             }
@@ -133,7 +157,7 @@ pub fn update(
                 let page = state.tabs[idx].results.page.max(1);
                 let row_limit = state.tabs[idx].results.row_limit;
                 let results_state = std::mem::take(&mut state.tabs[idx].results);
-                let (s, i, e) = results::update::update(
+                let (s, i, e, d) = results::update::update(
                     results::msg::ResultsMessage::RunQuery {
                         instance,
                         connection,
@@ -147,6 +171,7 @@ pub fn update(
                     results_state,
                 );
                 state.tabs[idx].results = s;
+                dirty = d;
                 intents.extend(
                     i.into_iter()
                         .map(|intent| SqlTabIntent::Results { tab_id, intent }),
@@ -163,8 +188,9 @@ pub fn update(
             let editor::msg::EditorMsg::Message(inner) = msg;
             if let Some(idx) = state.index_of(tab_id) {
                 let editor_state = std::mem::take(&mut state.tabs[idx].editor);
-                let (s, i, e) = editor::update::update(inner, editor_state);
+                let (s, i, e, d) = editor::update::update(inner, editor_state);
                 state.tabs[idx].editor = s;
+                dirty = d;
                 intents.extend(
                     i.into_iter()
                         .map(|intent| SqlTabIntent::Editor { tab_id, intent }),
@@ -181,8 +207,9 @@ pub fn update(
             let results::msg::ResultsMsg::Message(inner) = msg;
             if let Some(idx) = state.index_of(tab_id) {
                 let results_state = std::mem::take(&mut state.tabs[idx].results);
-                let (s, i, e) = results::update::update(inner, results_state);
+                let (s, i, e, d) = results::update::update(inner, results_state);
                 state.tabs[idx].results = s;
+                dirty = d;
                 intents.extend(
                     i.into_iter()
                         .map(|intent| SqlTabIntent::Results { tab_id, intent }),
@@ -201,7 +228,7 @@ pub fn update(
                 let (instance, connection) = session_key(&state.tabs[idx].session);
                 let history_state = std::mem::take(&mut state.tabs[idx].history);
                 let selected_sql = history_state.selected_entry(&instance, &connection);
-                let (s, i, e) = history::update::update(
+                let (s, i, e, d) = history::update::update(
                     inner,
                     history_state,
                     &instance,
@@ -211,6 +238,7 @@ pub fn update(
                     8,
                 );
                 state.tabs[idx].history = s;
+                dirty = d;
                 intents.extend(
                     i.into_iter()
                         .map(|intent| SqlTabIntent::History { tab_id, intent }),
@@ -224,7 +252,7 @@ pub fn update(
             }
         }
     }
-    (state, intents, effects)
+    (state, intents, effects, dirty)
 }
 
 /// Derive the `(instance, connection)` key from a tab's session, falling back

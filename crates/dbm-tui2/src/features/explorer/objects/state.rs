@@ -179,15 +179,23 @@ impl ObjectsState {
         }
     }
 
-    pub fn move_up(&mut self) {
+    /// Move the cursor up (clamped). Returns whether the cursor actually moved,
+    /// so callers can avoid repainting a no-op navigation.
+    pub fn move_up(&mut self) -> bool {
+        let before = self.cursor;
         self.cursor = self.cursor.saturating_sub(1);
+        self.cursor != before
     }
 
-    pub fn move_down(&mut self) {
+    /// Move the cursor down (clamped). Returns whether the cursor actually
+    /// moved, so callers can avoid repainting a no-op navigation.
+    pub fn move_down(&mut self) -> bool {
         if self.rows.is_empty() {
-            return;
+            return false;
         }
+        let before = self.cursor;
         self.cursor = (self.cursor + 1).min(self.rows.len() - 1);
+        self.cursor != before
     }
 
     /// Toggle the expansion of the row under the cursor. Returns the node that

@@ -50,21 +50,32 @@ impl InstancesState {
     }
 
     /// Move the cursor up (clamped).
-    pub fn move_up(&mut self) {
+    /// Move the cursor up (clamped). Returns whether the cursor actually moved,
+    /// so callers can skip a redundant repaint at the top.
+    pub fn move_up(&mut self) -> bool {
+        let before = self.cursor;
         self.cursor = self.cursor.saturating_sub(1);
+        self.cursor != before
     }
 
-    /// Move the cursor down (clamped to the visible list).
-    pub fn move_down(&mut self) {
+    /// Move the cursor down (clamped to the visible list). Returns whether the
+    /// cursor actually moved, so callers can skip a redundant repaint at the
+    /// bottom.
+    pub fn move_down(&mut self) -> bool {
         let max = self.visible_count().saturating_sub(1);
+        let before = self.cursor;
         self.cursor = (self.cursor + 1).min(max);
+        self.cursor != before
     }
 
     /// Toggle the expansion of the instance the cursor is on (if the cursor is
-    /// on an instance row).
-    pub fn toggle_expand(&mut self) {
+    /// on an instance row). Returns whether anything was toggled.
+    pub fn toggle_expand(&mut self) -> bool {
         if let Some((node, _)) = self.node_at_cursor_mut() {
             node.expanded = !node.expanded;
+            true
+        } else {
+            false
         }
     }
 
