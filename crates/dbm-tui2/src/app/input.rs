@@ -311,6 +311,11 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
 
     match code {
         KeyCode::Esc => Some(discover(DiscoverMessage::RequestClose)),
+        // While a scan is in flight, `c` cancels it (stops at the next host
+        // boundary); this mirrors the original dbm's `c: cancel` hint.
+        KeyCode::Char('c') if state.scanning => {
+            Some(discover(DiscoverMessage::CancelScan))
+        }
         // Scan / register are discover-level actions available from any pane.
         // `r` registers normally (blocks on precheck warnings); `R` force-
         // registers (bypasses warnings, errors still block).
@@ -1129,6 +1134,29 @@ mod tests {
         assert!(matches!(
             force,
             AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::RegisterSelected { force: true }))
+        ));
+    }
+
+    #[test]
+    fn discover_c_cancels_scan_only_while_scanning() {
+        use crate::features::discover::state::DiscoverState;
+        let mut state = DiscoverState::opened();
+        // Not scanning: `c` is not consumed by discover.
+        assert!(
+            discover_key(key(KeyCode::Char('c'), KeyModifiers::NONE), DiscoverPane::Results, &state)
+                .is_none()
+        );
+        // Mark a scan in flight; `c` now cancels it.
+        state.scanning = true;
+        let cancel = discover_key(
+            key(KeyCode::Char('c'), KeyModifiers::NONE),
+            DiscoverPane::Results,
+            &state,
+        )
+        .expect("c while scanning should cancel");
+        assert!(matches!(
+            cancel,
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::CancelScan))
         ));
     }
 

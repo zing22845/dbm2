@@ -18,6 +18,8 @@ pub enum DiscoverMessage {
     Close,
     /// Start a discovery scan over the current targets.
     StartScan,
+    /// Ask the in-flight scan to stop at the next host boundary (`c` key).
+    CancelScan,
     /// Register the currently selected discovered instances. `force` bypasses
     /// precheck warnings (used by the force-register key `R`); errors still block.
     RegisterSelected { force: bool },
@@ -25,6 +27,8 @@ pub enum DiscoverMessage {
     ScanProgress { done: u32, total: u32 },
     /// The scan completed with the discovered instances.
     ScanComplete { items: Vec<dbm_discovery::DiscoveredInstance> },
+    /// The scan was cancelled before completing (no new results persisted).
+    ScanCancelled,
     /// The scan failed.
     ScanError { error: String },
     /// Instances were registered.

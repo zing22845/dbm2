@@ -594,9 +594,16 @@ fn process_action_round(
 ) -> UpdateResult {
     let mut pending: VecDeque<AppMsg> = VecDeque::new();
     let result = handle_action(seed, state);
+    // The seed's own dirty flag must survive into the returned result, or a
+    // completion/error that only mutates state (no queued cascade) would be
+    // applied without ever scheduling a repaint — leaving a stale frame (e.g.
+    // a "scanning… N/N" footer) on screen after the scan already finished.
+    let mut aggregated = UpdateResult::new();
+    aggregated.dirty |= result.dirty;
     queue_result(effect_runner, result, &mut pending);
     drain_async_actions(action_rx, &mut pending);
-    drain_pending(effect_runner, &mut pending, state)
+    aggregated.dirty |= drain_pending(effect_runner, &mut pending, state).dirty;
+    aggregated
 }
 
 /// Iteratively apply every queued message until the queue is empty or the
@@ -737,6 +744,7 @@ fn discover_action_to_msg(action: crate::features::discover::effect::DiscoverAct
     match action {
         A::ScanProgress { done, total } => M::ScanProgress { done, total },
         A::ScanComplete { items } => M::ScanComplete { items },
+        A::ScanCancelled => M::ScanCancelled,
         A::ScanError { error } => M::ScanError { error },
         A::RegisterComplete { count } => M::RegisterComplete { count },
         A::RegisterError { error } => M::RegisterError { error },
@@ -1100,5 +1108,29 @@ mod tests {
         let mut state = crate::app::state::AppState::default();
         state.discover.scanning = true;
         assert!(next_wake(&state).is_some());
+    }
+
+    #[test]
+    fn action_round_propagates_seed_dirty_flag() {
+        // Regression: a completion action that only mutates state (no queued
+        // cascade) must still mark the round dirty, otherwise the event loop
+        // skips the repaint and leaves a stale "scanning…" frame on screen.
+        let (action_tx, mut action_rx) = mpsc::unbounded_channel::<Action>();
+        let services = std::sync::Arc::new(crate::common::service::services::Services::default());
+        let (effect_runner, handle) = EffectRunner::new(action_tx, services);
+        drop(handle); // no effects run in this test; the runner is only a sink
+
+        let mut state = crate::app::state::AppState::default();
+        state.discover.scanning = true;
+        state.discover.scan_progress = Some((10, 11));
+
+        let action = crate::app::action::Action::Discover(
+            crate::features::discover::effect::DiscoverAction::ScanComplete { items: vec![] },
+        );
+        let result = process_action_round(&effect_runner, &mut action_rx, action, &mut state);
+
+        assert!(result.dirty, "completion must mark the round dirty");
+        assert!(!state.discover.scanning, "scanning must clear on completion");
+        assert_eq!(state.discover.scan_progress, None);
     }
 }

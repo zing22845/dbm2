@@ -1,5 +1,7 @@
 //! Discover feature update.
 
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Duration;
 
 use dbm_discovery::{DiscoveryConfig, DiscoveryTarget};
@@ -55,9 +57,30 @@ pub fn update(
         }
         DiscoverMessage::StartScan => {
             if let Some(config) = build_scan_config(&state) {
-                effects.push(DiscoverEffect::StartScan { config });
+                // A fresh shared cancel flag per scan; the effect and the
+                // `CancelScan` message (`c`) both reference it.
+                let cancel = Arc::new(AtomicBool::new(false));
+                effects.push(DiscoverEffect::StartScan {
+                    config,
+                    cancel: Arc::clone(&cancel),
+                });
+                state.scan_cancel = cancel;
                 state.scanning = true;
+                state.scan_progress = None;
+                state.cancelling = false;
+                state.scan_cancelled = false;
                 state.last_error = None;
+                true
+            } else {
+                false
+            }
+        }
+        DiscoverMessage::CancelScan => {
+            if state.scanning {
+                effects.push(DiscoverEffect::CancelScan {
+                    cancel: Arc::clone(&state.scan_cancel),
+                });
+                state.cancelling = true;
                 true
             } else {
                 false
@@ -83,18 +106,45 @@ pub fn update(
             }
             false
         }
-        DiscoverMessage::ScanProgress { .. } => {
-            // Progress is purely informational; the next ScanComplete replaces
-            // the results wholesale, so there is nothing to accumulate here.
-            // Mark the scan as in-flight so the footer can show a live state.
-            let changed = !state.scanning;
-            state.scanning = true;
-            changed
+        DiscoverMessage::ScanProgress { done, total } => {
+            // Live progress is shown in the zone footer (`Scanning… hosts d/t`),
+            // mirroring the original dbm. Progress only refines the in-flight
+            // indicator; it must never re-enter the scanning state once a
+            // completion / error / cancel has cleared it — a progress event that
+            // arrives after `ScanComplete` (cross-thread channel ordering is not
+            // guaranteed) would otherwise resurrect the "scanning…" footer.
+            if state.scanning {
+                let changed = state.scan_progress != Some((done, total)) || state.cancelling;
+                state.scan_progress = Some((done, total));
+                changed
+            } else {
+                false
+            }
         }
         DiscoverMessage::ScanComplete { items } => {
+            let count = items.len();
             state.results.set_items(items);
             state.scanning = false;
+            state.scan_progress = None;
+            state.cancelling = false;
+            state.scan_cancelled = false;
             state.last_error = None;
+            // Surface a completion status in the zone footer, matching the
+            // original dbm's `Scan complete · N instance(s)` line.
+            state.register_message = Some(format!("scan complete · {count} instance(s)"));
+            tracing::debug!(
+                "discover scan complete with {count} instance(s), scanning={}",
+                state.scanning
+            );
+            true
+        }
+        DiscoverMessage::ScanCancelled => {
+            state.scanning = false;
+            state.scan_progress = None;
+            state.cancelling = false;
+            state.scan_cancelled = true;
+            state.last_error = None;
+            tracing::warn!("discover scan cancelled");
             true
         }
         DiscoverMessage::ScanError { error } => {
@@ -102,6 +152,9 @@ pub fn update(
             // a status line); clear the stale results.
             state.results.set_items(Vec::new());
             state.scanning = false;
+            state.scan_progress = None;
+            state.cancelling = false;
+            state.scan_cancelled = false;
             tracing::warn!("discover scan failed: {error}");
             state.last_error = Some(error);
             true
@@ -245,10 +298,116 @@ mod tests {
             update(DiscoverMessage::StartScan, state);
         assert_eq!(effects.len(), 1);
         assert!(
-            matches!(&effects[0], DiscoverEffect::StartScan { config: _ }),
+            matches!(&effects[0], DiscoverEffect::StartScan { config: _, cancel: _ }),
             "expected StartScan effect, got {:?}",
             effects[0]
         );
+    }
+
+    #[test]
+    fn start_scan_marks_scanning_and_stores_cancel_flag() {
+        let state = DiscoverState::opened();
+        let (state, _intents, _effects, dirty) =
+            update(DiscoverMessage::StartScan, state);
+        assert!(dirty);
+        assert!(state.scanning);
+        assert!(!state.scan_cancel.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[test]
+    fn cancel_scan_emits_cancel_effect_and_flags_cancelling() {
+        // First start a scan so `scanning` is true and a cancel flag exists.
+        let state = DiscoverState::opened();
+        let (state, _intents, _effects, _dirty) =
+            update(DiscoverMessage::StartScan, state);
+        let (state, intents, effects, dirty) =
+            update(DiscoverMessage::CancelScan, state);
+
+        assert!(dirty);
+        assert!(state.cancelling);
+        assert_eq!(effects.len(), 1);
+        assert!(
+            matches!(&effects[0], DiscoverEffect::CancelScan { cancel: _ }),
+            "expected CancelScan effect, got {:?}",
+            effects[0]
+        );
+        // The effect's flag and the state's flag are the same shared flag.
+        if let DiscoverEffect::CancelScan { cancel } = &effects[0] {
+            assert!(std::sync::Arc::ptr_eq(cancel, &state.scan_cancel));
+        }
+        assert!(intents.is_empty());
+    }
+
+    #[test]
+    fn cancel_scan_when_idle_emits_nothing() {
+        let state = DiscoverState::opened();
+        let (state, _intents, effects, dirty) =
+            update(DiscoverMessage::CancelScan, state);
+        assert!(!dirty);
+        assert!(effects.is_empty());
+        assert!(!state.cancelling);
+    }
+
+    #[test]
+    fn scan_progress_updates_only_while_scanning() {
+        // `StartScan` drives `scanning`; progress refines the numbers.
+        let state = DiscoverState::opened();
+        let (state, _intents, _effects, _dirty) =
+            update(DiscoverMessage::StartScan, state);
+        let (state, _intents, _effects, _dirty) =
+            update(DiscoverMessage::ScanProgress { done: 1, total: 2 }, state);
+        assert!(state.scanning);
+        assert_eq!(state.scan_progress, Some((1, 2)));
+    }
+
+    #[test]
+    fn late_progress_does_not_resurrect_scanning_after_complete() {
+        // Start + complete the scan, then a stale progress event arrives
+        // (cross-thread channel ordering is not guaranteed). It must not flip
+        // `scanning` back on nor clobber the completion status.
+        let state = DiscoverState::opened();
+        let (state, _i, _e, _d) = update(DiscoverMessage::StartScan, state);
+        let (state, _i, _e, _d) = update(
+            DiscoverMessage::ScanComplete {
+                items: vec![inst("a", false)],
+            },
+            state,
+        );
+        assert!(!state.scanning);
+        assert!(state.register_message.is_some());
+
+        let (state, _intents, _effects, dirty) =
+            update(DiscoverMessage::ScanProgress { done: 11, total: 11 }, state);
+        assert!(!dirty);
+        assert!(!state.scanning);
+        assert_eq!(state.scan_progress, None);
+        // Completion status survives the stale progress event.
+        assert!(state.register_message.is_some());
+    }
+
+    #[test]
+    fn scan_complete_reports_completion_status() {
+        let state = DiscoverState::opened();
+        let (state, _intents, _effects, dirty) = update(
+            DiscoverMessage::ScanComplete {
+                items: vec![inst("a", false), inst("b", false)],
+            },
+            state,
+        );
+        assert!(dirty);
+        assert!(!state.scanning);
+        assert_eq!(state.register_message.as_deref(), Some("scan complete · 2 instance(s)"));
+    }
+
+    #[test]
+    fn cancelled_updates_status_flags() {
+        let state = DiscoverState::opened();
+        let (state, _intents, _effects, dirty) =
+            update(DiscoverMessage::ScanCancelled, state);
+        assert!(dirty);
+        assert!(!state.scanning);
+        assert!(state.scan_cancelled);
+        assert_eq!(state.scan_progress, None);
     }
 
     #[test]

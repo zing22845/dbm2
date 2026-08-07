@@ -35,6 +35,10 @@ impl PortProvider {
                     out.push(candidate);
                 }
             }
+            // Report progress only after a host's ports have been probed, so
+            // `N/N` is reached exactly when scanning finishes — matching the
+            // original dbm. A slow final host therefore shows `(N-1)/N` (still
+            // scanning) rather than a full bar that looks done.
             if let Some(callback) = progress {
                 callback(ScanProgress {
                     hosts_done: u32::try_from(host_index + 1).unwrap_or(u32::MAX),

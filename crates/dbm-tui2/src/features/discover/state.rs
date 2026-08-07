@@ -5,6 +5,9 @@
 //! child panes are the focused region while it is open. `DiscoverState` holds
 //! only the feature's content state.
 
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+
 use super::engine::state::EngineState;
 use super::results::state::ResultsState;
 use super::targets::state::TargetsState;
@@ -22,6 +25,16 @@ pub struct DiscoverState {
     pub close_confirm: bool,
     /// Whether a scan is currently in flight.
     pub scanning: bool,
+    /// Live scan progress (hosts done / hosts total), shown in the zone footer
+    /// while scanning — mirrors the original dbm's `Scanning… hosts d/t`.
+    pub scan_progress: Option<(u32, u32)>,
+    /// Whether the user asked to cancel the in-flight scan (`c` key).
+    pub cancelling: bool,
+    /// The last scan was cancelled (shown as `cancelled` until a new scan).
+    pub scan_cancelled: bool,
+    /// Shared cancel flag handed to the scan effect so `CancelScan` can stop a
+    /// running scan at the next host boundary.
+    pub scan_cancel: Arc<AtomicBool>,
     /// The last scan error, if any (cleared on a successful scan or new scan).
     pub last_error: Option<String>,
     /// The result of the last register attempt (success count or failure

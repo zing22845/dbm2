@@ -4,7 +4,7 @@
 //! They run the (synchronous, blocking) `dbm-store` calls on a blocking task and
 //! stream progress back through the effect emitter.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use dbm_discovery::{DiscoveryConfig, ScanOptions, ScanProgress};
@@ -20,6 +20,8 @@ pub enum DiscoverAction {
     ScanProgress { done: u32, total: u32 },
     /// The scan completed, producing the discovered instances.
     ScanComplete { items: Vec<dbm_discovery::DiscoveredInstance> },
+    /// The scan was cancelled before completing.
+    ScanCancelled,
     /// The scan failed.
     ScanError { error: String },
     /// A batch of instances was registered.
@@ -31,9 +33,13 @@ pub enum DiscoverAction {
 /// Effects emitted by the discover feature.
 #[derive(Debug, Clone)]
 pub enum DiscoverEffect {
-    /// Run a discovery scan over the given config. The results list is read back
-    /// as the full set; the unregistered-only filter is applied in the UI layer.
-    StartScan { config: DiscoveryConfig },
+    /// Run a discovery scan over the given config. `cancel` is the shared flag
+    /// the user can set via `CancelScan` (`c`) to stop the scan at the next
+    /// host boundary. The results list is read back as the full set; the
+    /// unregistered-only filter is applied in the UI layer.
+    StartScan { config: DiscoveryConfig, cancel: Arc<AtomicBool> },
+    /// Ask an in-flight scan (identified by its shared flag) to stop.
+    CancelScan { cancel: Arc<AtomicBool> },
     /// Register the discovered instances with the given discovery ids.
     /// `force` bypasses precheck warnings (the `R` key); errors still block.
     RegisterInstances { discovery_ids: Vec<String>, force: bool },
@@ -45,7 +51,13 @@ impl Effect for DiscoverEffect {
     fn run(self, emit: Emitter<Self::Action>, services: Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             match self {
-                DiscoverEffect::StartScan { config } => run_scan(config, emit, services).await,
+                DiscoverEffect::StartScan { config, cancel } => {
+                    run_scan(config, cancel, emit, services).await
+                }
+                DiscoverEffect::CancelScan { cancel } => {
+                    cancel.store(true, Ordering::Relaxed);
+                    Vec::new()
+                }
                 DiscoverEffect::RegisterInstances { discovery_ids, force } => {
                     run_register(discovery_ids, force, emit, services).await
                 }
@@ -56,14 +68,17 @@ impl Effect for DiscoverEffect {
 
 async fn run_scan(
     config: DiscoveryConfig,
+    cancel: Arc<AtomicBool>,
     emit: Emitter<DiscoverAction>,
     services: Arc<Services>,
 ) -> Vec<DiscoverAction> {
     let store = services.store.clone();
     let emit_progress = emit.clone();
+    // The blocking task uses its own clone; the original `cancel` is kept here
+    // to read the cancellation state once the scan returns.
+    let task_cancel = Arc::clone(&cancel);
     let scan = tokio::task::spawn_blocking(move || {
         let store = store.lock().expect("discover store lock");
-        let cancel = AtomicBool::new(false);
         let scan_options = ScanOptions {
             progress: Some(&|p: ScanProgress| {
                 emit_progress.emit(DiscoverAction::ScanProgress {
@@ -71,7 +86,7 @@ async fn run_scan(
                     total: p.hosts_total,
                 });
             }),
-            cancel: Some(&cancel),
+            cancel: Some(&task_cancel),
         };
         store.run_discovery_with_scan_options(
             config,
@@ -82,6 +97,12 @@ async fn run_scan(
         )
     })
     .await;
+
+    // A cancelled scan yields no new results: report it as cancelled rather
+    // than listing whatever was scanned so far.
+    if cancel.load(Ordering::Relaxed) {
+        return vec![DiscoverAction::ScanCancelled];
+    }
 
     let scan = match scan {
         Ok(result) => result,
