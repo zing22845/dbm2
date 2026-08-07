@@ -38,20 +38,25 @@ pub fn pane_name(pane: Pane) -> &'static str {
         // both as "workspace" (mapped back to SQLWorkspace for compatibility).
         Pane::SQLWorkspace => "sql_workspace",
         Pane::InstanceWorkspace(_) => "instance_workspace",
-        Pane::Discover(_) => "workspace",
+        // A discover-open focus is not persisted as discover (it is a transient
+        // flow, not a workspace to restore); it serializes to its own name and
+        // resolves back to the SQL workspace.
+        Pane::Discover(_) => "discover",
     }
 }
 
 /// Resolve a parent pane from a persistence-friendly name (session snapshots).
-/// Accepts the legacy lowercase names plus a few historical aliases.
 pub fn pane_from_name(name: &str) -> Option<Pane> {
     match name {
-        "header" | "Header" => Some(Pane::Header),
-        "explorer" | "tree" | "Explorer" => Some(Pane::Explorer(
+        "header" => Some(Pane::Header),
+        "explorer" => Some(Pane::Explorer(
             crate::app_shell::nav::ExplorerPane::default(),
         )),
-        "workspace" | "sql_workspace" | "SQLWorkspace" => Some(Pane::SQLWorkspace),
-        "instance_workspace" | "InstanceWorkspace" => Some(Pane::InstanceWorkspace(
+        "sql_workspace" => Some(Pane::SQLWorkspace),
+        // A discover-open focus restores to the SQL workspace (discover is a
+        // transient flow, not a pane to restore).
+        "discover" => Some(Pane::SQLWorkspace),
+        "instance_workspace" => Some(Pane::InstanceWorkspace(
             crate::app_shell::nav::IwPane::default(),
         )),
         _ => None,
@@ -78,9 +83,15 @@ mod tests {
             pane_from_name("instance_workspace"),
             Some(Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::default()))
         );
+    }
 
-        // Legacy alias "workspace" resolves to SQLWorkspace.
-        assert_eq!(pane_from_name("workspace"), Some(Pane::SQLWorkspace));
+    #[test]
+    fn discover_serializes_as_discover_and_restores_to_sql_workspace() {
+        // A discover-open focus is not restored as discover (transient flow);
+        // it round-trips to the SQL workspace.
+        let p = Pane::Discover(crate::app_shell::nav::DiscoverPane::default());
+        assert_eq!(pane_name(p), "discover");
+        assert_eq!(pane_from_name("discover"), Some(Pane::SQLWorkspace));
     }
 
     #[test]

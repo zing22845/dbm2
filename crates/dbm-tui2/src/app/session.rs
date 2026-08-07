@@ -141,7 +141,7 @@ mod tests {
     fn restore_replaces_tabs_from_snapshot() {
         let snap = TuiSessionSnapshot {
             version: TUI_SESSION_VERSION,
-            focus: "workspace".into(),
+            focus: "sql_workspace".into(),
             tree_width: 20,
             tree: TuiTreeSnapshot {
                 expanded_instances: Vec::new(),
