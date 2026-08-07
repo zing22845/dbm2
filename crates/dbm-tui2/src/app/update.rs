@@ -39,10 +39,14 @@ pub struct UpdateResult {
     pub effects: Vec<Box<dyn ErasedEffect<Action>>>,
     /// Messages to be enqueued for a later pass (shell-level orchestration).
     pub pending: std::collections::VecDeque<AppMsg>,
+    /// Whether this update round changed any state that affects rendering. The
+    /// event loop repaints only when this is `true`; a `false` round (e.g. an
+    /// input dropped by the focus guard, or a no-op message) skips the redraw.
+    pub dirty: bool,
 }
 
 impl UpdateResult {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 }
@@ -131,9 +135,11 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
     match msg {
         AppMsg::OpenModal(modal) => {
             state.modal = Some(modal);
+            result.dirty = true;
         }
         AppMsg::CloseModal => {
             state.modal = None;
+            result.dirty = true;
         }
         AppMsg::Shell(shell_msg) => match shell_msg {
             crate::app_shell::msg::ShellMsg::Quit => {
@@ -142,11 +148,13 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             crate::app_shell::msg::ShellMsg::Tick => {}
             crate::app_shell::msg::ShellMsg::FocusChanged { pane } => {
                 state.focus = pane;
+                result.dirty = true;
             }
             crate::app_shell::msg::ShellMsg::ToggleTheme => {
                 // Flip between the theme's dark and light palettes; the next
                 // frame is drawn with the new palette automatically.
                 state.theme.toggle();
+                result.dirty = true;
             }
         },
         AppMsg::Header(m) => {
@@ -163,10 +171,14 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             let header = std::mem::take(&mut state.header);
             let (s, intents, effects) = header_update(inner, header);
             state.header = s;
+            result.dirty = true;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
         AppMsg::Explorer(m) => {
+            // Explorer messages always touch rendered state (tree selection,
+            // expansion, or a cross-feature open), so mark dirty unconditionally
+            // at the end of this branch (see the `result.dirty = true` below).
             let ExplorerMsg::Message(inner) = m;
             // The explorer feature's update is a pure by-value transition: move
             // the state out, update it, move the result back. No deep clone.
@@ -258,6 +270,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                     }
                 }
             }
+            result.dirty = true;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
@@ -283,6 +296,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             if should_close {
                 close_discover(state);
             }
+            result.dirty = true;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
@@ -294,6 +308,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             let iw = std::mem::take(&mut state.iw);
             let (s, intents, effects) = iw_update(inner, iw);
             state.iw = s;
+            result.dirty = true;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
@@ -304,6 +319,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             let sql = std::mem::take(&mut state.sql);
             let (s, intents, effects) = sql_workspace_update(inner, sql);
             state.sql = s;
+            result.dirty = true;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
@@ -318,6 +334,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // footer's authoritative status, so other code reading
             // `AppState::global_status` sees the latest value.
             state.global_status = state.footer.status.clone();
+            result.dirty = true;
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
@@ -344,6 +361,7 @@ pub fn handle_action(action: Action, state: &mut AppState) -> UpdateResult {
     let mut result = UpdateResult::new();
     for msg in crate::app::loop_mod::action_to_app_msgs(action) {
         let sub = update_unchecked(msg, state);
+        result.dirty |= sub.dirty;
         result.intents.extend(sub.intents);
         result.effects.extend(sub.effects);
         result.pending.extend(sub.pending);

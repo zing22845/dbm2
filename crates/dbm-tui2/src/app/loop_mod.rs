@@ -141,6 +141,19 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             terminal.draw(|frame| render(frame, &state))?;
             let changed_cells = terminal.backend_mut().last_changed_cells();
             if real_redraw {
+                // Debug assertion (non-fatal): a real redraw (one asked for by
+                // an event/action, i.e. dirty) that changed zero cells means the
+                // repaint was over-broad — a message marked `dirty` without
+                // actually changing rendered state. Exclude the timed
+                // counter-decay repaint (`fps_stale`), which may legitimately
+                // redraw with 0 changed cells; this check only surfaces the
+                // event-driven dirty case.
+                if !fps_stale && changed_cells == 0 {
+                    tracing::debug!(
+                        "dirty redraw changed 0 cells (over-broad dirty?); \
+                         fps_stale={fps_stale}",
+                    );
+                }
                 state.perf.record_frame();
                 state.perf.record_redundancy(changed_cells);
             } else {
@@ -175,11 +188,17 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     };
                     let msg = global.or_else(|| crate::app::input::key_to_msg(key, &state));
                     if let Some(msg) = msg {
-                        process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                        // Repaint only if the round actually changed rendered
+                        // state (dirty); an input dropped by the focus guard, or
+                        // a no-op key, skips the redraw.
+                        let result =
+                            process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                        needs_redraw |= result.dirty;
                     }
-                    // Any key (handled or not) may have changed the frame; an
-                    // event-driven TUI repaints on input rather than on a timer.
-                    needs_redraw = true;
+                    // `needs_redraw` stays as-is for a key that produced no
+                    // message: it never changes state, so nothing to repaint
+                    // unless a timed refresh (e.g. FPS counter decay) already
+                    // asked for one above.
                 } else if let Some(Ok(CEvent::Mouse(mouse))) = maybe_event {
                     use crossterm::event::{MouseButton, MouseEventKind};
                     use ratatui::prelude::Position;
@@ -190,6 +209,9 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         "mouse event received"
                     );
                     let point = Position::new(mouse.column, mouse.row);
+                    // Aggregated across the dispatched messages below: the round
+                    // repaints only if one of them changed rendered state.
+                    let mut dirty = false;
                     match mouse.kind {
                         MouseEventKind::Down(MouseButton::Left)
                             if state.modal.is_none() && !matches!(state.focus, Pane::Discover(_)) =>
@@ -226,12 +248,13 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 let msg = AppMsg::Shell(
                                     crate::app_shell::msg::ShellMsg::FocusChanged { pane },
                                 );
-                                process_message_round(
+                                let result = process_message_round(
                                     &effect_runner,
                                     &mut action_rx,
                                     msg,
                                     &mut state,
                                 );
+                                dirty |= result.dirty;
                             }
 
                             // Left-click on the header `Discover` button activates
@@ -247,7 +270,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 // shell message), then dispatch Activate. Both go
                                 // through `update` so every state change flows
                                 // through the single state-transition channel.
-                                process_message_round(
+                                let result = process_message_round(
                                     &effect_runner,
                                     &mut action_rx,
                                     AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged {
@@ -255,12 +278,14 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     }),
                                     &mut state,
                                 );
-                                process_message_round(
+                                dirty |= result.dirty;
+                                let result = process_message_round(
                                     &effect_runner,
                                     &mut action_rx,
                                     AppMsg::Header(HeaderMsg::Message(HeaderMessage::Activate)),
                                     &mut state,
                                 );
+                                dirty |= result.dirty;
                                 tracing::debug!("dispatching HeaderMessage::Activate");
                             }
 
@@ -284,12 +309,13 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     // position and dispatch a resize message (all
                                     // state changes flow through `update`).
                                     let msg = split_resize_msg(splitter, point, layout, tab_id);
-                                    process_message_round(
+                                    let result = process_message_round(
                                         &effect_runner,
                                         &mut action_rx,
                                         msg,
                                         &mut state,
                                     );
+                                    dirty |= result.dirty;
                                 }
                             }
                         }
@@ -309,17 +335,21 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             );
                         }
                     }
-                    // Mouse input may move focus / start a drag, so repaint.
-                    needs_redraw = true;
+                    // Repaint only if a dispatched message actually changed
+                    // rendered state (e.g. moved focus, activated the header
+                    // button, or resized a splitter). A click that changed
+                    // nothing, or an ignored event, skips the redraw.
+                    needs_redraw |= dirty;
                 } else if let Some(Ok(CEvent::Paste(contents))) = maybe_event {
                     // Bracketed paste: route the pasted text to the focused
                     // editor cell. The discover targets editor and the SQL
                     // editor both accept it (TSV host:ports rows / text).
                     let msg = crate::app::input::paste_to_msg(&contents, &state);
                     if let Some(msg) = msg {
-                        process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                        let result =
+                            process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                        needs_redraw |= result.dirty;
                     }
-                    needs_redraw = true;
                 }
             }
             // Timed refresh: only fires when a periodic repaint is actually due
@@ -331,8 +361,14 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             }
             maybe_action = action_rx.recv() => {
                 if let Some(action) = maybe_action {
-                    process_action_round(&effect_runner, &mut action_rx, action, &mut state);
-                    needs_redraw = true;
+                    // Repaint only if the effect result changed rendered state.
+                    let result = process_action_round(
+                        &effect_runner,
+                        &mut action_rx,
+                        action,
+                        &mut state,
+                    );
+                    needs_redraw |= result.dirty;
                 }
             }
         }
@@ -476,16 +512,18 @@ fn split_resize_msg(
 
 /// A round triggered by an external message (keyboard/tick). The seed message
 /// and any already-available async actions are queued and drained iteratively.
+/// Returns the aggregated [`UpdateResult`] so the caller can decide whether the
+/// round actually changed rendering state (`dirty`).
 fn process_message_round(
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
     seed: AppMsg,
     state: &mut AppState,
-) {
+) -> UpdateResult {
     let mut pending: VecDeque<AppMsg> = VecDeque::new();
     pending.push_back(seed);
     drain_async_actions(action_rx, &mut pending);
-    drain_pending(effect_runner, &mut pending, state);
+    drain_pending(effect_runner, &mut pending, state)
 }
 
 /// A round triggered by an async action (an effect result). The action is
@@ -496,24 +534,29 @@ fn process_action_round(
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
     seed: Action,
     state: &mut AppState,
-) {
+) -> UpdateResult {
     let mut pending: VecDeque<AppMsg> = VecDeque::new();
     let result = handle_action(seed, state);
     queue_result(effect_runner, result, &mut pending);
     drain_async_actions(action_rx, &mut pending);
-    drain_pending(effect_runner, &mut pending, state);
+    drain_pending(effect_runner, &mut pending, state)
 }
 
 /// Iteratively apply every queued message until the queue is empty or the
 /// per-round budget is exhausted. Intents produced by an update resolve to new
 /// `AppMsg`s that are pushed back onto the queue, replacing recursion with a
 /// heap-backed work list.
+///
+/// Returns an aggregated [`UpdateResult`] whose `dirty` is the OR of every
+/// applied update: if *any* message in the round changed rendering state, the
+/// round as a whole is considered dirty so the caller repaints once.
 fn drain_pending(
     effect_runner: &EffectRunner<Action>,
     pending: &mut VecDeque<AppMsg>,
     state: &mut AppState,
-) {
+) -> UpdateResult {
     let mut processed = 0usize;
+    let mut aggregated = UpdateResult::new();
     while let Some(msg) = pending.pop_front() {
         if processed >= MAX_MESSAGES_PER_ROUND {
             tracing::warn!(
@@ -526,8 +569,10 @@ fn drain_pending(
         processed += 1;
 
         let result = update(msg, state);
+        aggregated.dirty |= result.dirty;
         queue_result(effect_runner, result, pending);
     }
+    aggregated
 }
 
 /// Submit an update result's effects to the runner and push each routed intent
