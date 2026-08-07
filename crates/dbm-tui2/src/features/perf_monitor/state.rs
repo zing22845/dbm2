@@ -13,8 +13,13 @@ use std::time::{Duration, Instant};
 pub struct PerfState {
     /// Exponentially-averaged frames per second.
     pub fps: f64,
-    /// `Instant` of the previous frame, for FPS smoothing.
+    /// `Instant` of the previous frame, for FPS smoothing. Updated by both
+    /// real redraws and forced counter-refresh repaints (see `touch_frame`).
     last_frame_instant: Option<Instant>,
+    /// `Instant` of the last *real* frame (a redraw that feeds the estimates).
+    /// Forced counter-refresh repaints do NOT update this, so the FPS/waste
+    /// decay and the idle stop never get fed by the decay repaints themselves.
+    last_real_frame_instant: Option<Instant>,
     /// Redundant-redraw ratio in `[0,1]` (1 = fully redundant).
     pub redundancy_rate: f64,
     /// Time-decayed accumulators backing the redundancy ratio.
@@ -29,6 +34,7 @@ impl Default for PerfState {
         PerfState {
             fps: 0.0,
             last_frame_instant: None,
+            last_real_frame_instant: None,
             redundancy_rate: 0.0,
             redundant_weight: 0.0,
             total_weight: 0.0,
@@ -56,11 +62,16 @@ impl PerfState {
             }
         }
         self.last_frame_instant = Some(now);
+        self.last_real_frame_instant = Some(now);
     }
 
-    /// Bump the last-frame timestamp without recording a frame. Used for a
-    /// forced counter-refresh repaint (idle decay) that must not feed the FPS /
-    /// waste estimates, so later real redraws still count from this instant.
+    /// Bump the frame timestamp without recording a frame. Used for a forced
+    /// counter-refresh repaint (idle decay) that must not feed the FPS / waste
+    /// estimates, so later real redraws still count from this instant.
+    ///
+    /// This updates `last_frame_instant` only — the "last real frame" instant
+    /// used for the idle-stop decision is untouched, so a decay repaint can
+    /// never keep the counter loop alive by itself.
     pub fn touch_frame(&mut self) {
         self.last_frame_instant = Some(Instant::now());
     }
@@ -68,6 +79,12 @@ impl PerfState {
     /// How long since the last recorded frame, if any.
     pub fn last_frame_elapsed(&self) -> Option<Duration> {
         self.last_frame_instant.map(|l| l.elapsed())
+    }
+
+    /// How long since the last *real* frame (one that fed the estimates), if
+    /// any. Forced counter-refresh repaints do not advance this.
+    pub fn last_real_frame_elapsed(&self) -> Option<Duration> {
+        self.last_real_frame_instant.map(|l| l.elapsed())
     }
 
     /// Record whether the just-rendered frame changed anything on screen and

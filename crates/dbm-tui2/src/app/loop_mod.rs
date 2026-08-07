@@ -103,6 +103,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // a timed refresh is actually due. With no timed work pending the app
     // sleeps until a real event arrives (~0% CPU).
     let mut needs_redraw = true;
+    // A repaint requested by a timed/forced source (counter decay, discover
+    // scan tick) rather than a real event. Such repaints must NOT feed the
+    // FPS/waste estimates, so they are tracked separately from `needs_redraw`.
+    let mut timed_redraw = false;
 
     loop {
         // Whether real work (an event/action) asked for a repaint, captured at
@@ -117,7 +121,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         // refresh gap.
         let fps_stale = state
             .perf
-            .last_frame_elapsed()
+            .last_real_frame_elapsed()
             .is_some_and(|l| l > Duration::from_millis(250));
         if fps_stale && (state.perf.fps > 0.0 || state.perf.redundancy_rate > 0.0) {
             // Both counters live or die with redraw activity: no frames drawn
@@ -125,10 +129,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             // with fps.
             state.perf.fps = 0.0;
             state.perf.redundancy_rate = 0.0;
-            needs_redraw = true;
+            timed_redraw = true;
         }
 
-        if needs_redraw {
+        if needs_redraw || timed_redraw {
             // Exclude the footer's self-updating fps/waste slot from the
             // changed-cell count so those numbers (which change every frame)
             // don't mark every active frame as "changed" and mask real
@@ -145,15 +149,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                 // Debug assertion (non-fatal): a real redraw (one asked for by
                 // an event/action, i.e. dirty) that changed zero cells means the
                 // repaint was over-broad — a message marked `dirty` without
-                // actually changing rendered state. Exclude the timed
-                // counter-decay repaint (`fps_stale`), which may legitimately
-                // redraw with 0 changed cells; this check only surfaces the
-                // event-driven dirty case.
-                if !fps_stale && changed_cells == 0 {
-                    tracing::debug!(
-                        "dirty redraw changed 0 cells (over-broad dirty?); \
-                         fps_stale={fps_stale}",
-                    );
+                // actually changing rendered state. Timed/forced repaints never
+                // reach this branch, so this only surfaces the event-driven
+                // dirty case.
+                if changed_cells == 0 {
+                    tracing::debug!("dirty redraw changed 0 cells (over-broad dirty?)");
                 }
                 state.perf.record_frame();
                 state.perf.record_redundancy(changed_cells);
@@ -163,6 +163,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                 state.perf.touch_frame();
             }
             needs_redraw = false;
+            timed_redraw = false;
         }
 
         // Wait for the next wake: a terminal event, an async action, or (only
@@ -358,7 +359,9 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             // pending, `next_wake` returns `None` and this branch sleeps
             // forever until a real event arrives.
             _ = sleep_until_opt(next_wake(&state)) => {
-                needs_redraw = true;
+                // Tracked separately so the repaint feeds `touch_frame`, not
+                // the FPS/waste estimates.
+                timed_redraw = true;
             }
             maybe_action = action_rx.recv() => {
                 if let Some(action) = maybe_action {
@@ -403,10 +406,11 @@ fn next_wake(state: &AppState) -> Option<Instant> {
     // Keep repainting while a discover scan's progress is advancing.
     let scanning = state.discover.scanning;
     // Wake shortly after the FPS/waste counters would go stale so they decay
-    // to 0 on idle (only while they are live/non-zero).
+    // to 0 on idle (only while they are live/non-zero). Keyed off the *real*
+    // frame time so forced counter-refresh repaints cannot keep this alive.
     let counters_live = state
         .perf
-        .last_frame_elapsed()
+        .last_real_frame_elapsed()
         .is_some_and(|l| l <= Duration::from_millis(250))
         && (state.perf.fps > 0.0 || state.perf.redundancy_rate > 0.0);
     if scanning || counters_live {
