@@ -16,6 +16,12 @@ use crate::common::view::theme::Theme;
 /// Visible field separator for hint pairs.
 pub const SEP: &str = "  ";
 
+/// Empty-state hint shown in the SQL workspace when no connection has an open
+/// query tab, mirroring the original dbm's `workspace_empty_hint`.
+pub fn sql_workspace_empty_hint() -> &'static str {
+    "Select a connection in the tree — ENTER or double-click to open a workspace."
+}
+
 /// `"{desc}: {key_name}"`.
 pub fn key(desc: &str, key_name: &str) -> String {
     format!("{desc}: {key_name}")
@@ -278,6 +284,13 @@ mod tests {
         assert!(footer.contains(&format!("Prev: {}", hint_ctrl("p"))));
         assert!(footer.contains("Apply: ENTER"));
         assert!(footer.contains("Case: "));
+    }
+
+    #[test]
+    fn sql_workspace_empty_hint_points_to_connection_selection() {
+        let hint = sql_workspace_empty_hint();
+        assert!(hint.contains("Select a connection"));
+        assert!(hint.contains("open a workspace"));
     }
 
     #[test]

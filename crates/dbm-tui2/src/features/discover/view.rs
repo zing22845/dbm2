@@ -23,7 +23,7 @@ pub fn render(
     theme: &Theme,
     area: Rect,
     state: &DiscoverState,
-    focus: crate::app_shell::pane::DiscoverPane,
+    focus: crate::app_shell::nav::DiscoverPane,
 ) {
     use crate::common::view::hints::{discover_zone_footer_text, draw_pane_footer};
     let p = theme.palette();

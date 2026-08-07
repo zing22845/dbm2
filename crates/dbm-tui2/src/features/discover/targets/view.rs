@@ -19,11 +19,11 @@ pub fn render(
     theme: &Theme,
     area: Rect,
     state: &TargetsState,
-    focus: crate::app_shell::pane::DiscoverPane,
+    focus: crate::app_shell::nav::DiscoverPane,
 ) {
     use crate::common::view::hints::{discover_targets_footer_text, draw_pane_footer};
     let p = theme.palette();
-    let focused = focus == crate::app_shell::pane::DiscoverPane::Targets;
+    let focused = focus == crate::app_shell::nav::DiscoverPane::Targets;
 
     let footer_text = discover_targets_footer_text(state.editing, state.has_loopback());
     let footer_h = if footer_text.is_empty() {

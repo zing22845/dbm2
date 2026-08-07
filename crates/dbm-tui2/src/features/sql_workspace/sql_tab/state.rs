@@ -64,7 +64,11 @@ impl SqlTab {
 }
 
 /// State for the `sql_tab` parent feature: multiple tabs, one active.
-#[derive(Debug, Clone)]
+///
+/// `Default` starts with **no** tabs: a query tab is only opened when the user
+/// selects a connection in the explorer, matching the original dbm (which
+/// starts with `tabs: Vec::new()` and shows an empty-state hint until then).
+#[derive(Debug, Clone, Default)]
 pub struct SqlTabState {
     /// All open tabs. Tab indices are targets for routed messages; the stable
     /// identity of a tab lives in its `session.id`.
@@ -73,19 +77,6 @@ pub struct SqlTabState {
     pub active_tab: usize,
     /// Monotonic counter for allocating stable session ids to new tabs.
     next_tab_id: usize,
-}
-
-impl Default for SqlTabState {
-    fn default() -> Self {
-        // The application starts with a single empty SQL tab.
-        let mut state = SqlTabState {
-            tabs: Vec::new(),
-            active_tab: 0,
-            next_tab_id: 0,
-        };
-        state.open_tab();
-        state
-    }
 }
 
 impl SqlTabState {
@@ -165,9 +156,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn starts_with_no_tabs() {
+        let state = SqlTabState::default();
+        assert!(state.tabs.is_empty(), "no tab should be auto-created");
+    }
+
+    #[test]
     fn open_connection_tab_binds_session_identity() {
         let mut state = SqlTabState::default();
-        let first_id = state.active_tab_id();
         state.open_connection_tab(
             "local".into(),
             "app-db".into(),
@@ -175,8 +171,6 @@ mod tests {
             Some("mydb".into()),
             Some("public".into()),
         );
-        let active = state.active_tab_id();
-        assert_ne!(active, first_id);
         let session = &state.tabs[state.active_tab].session;
         assert_eq!(session.instance.as_deref(), Some("local"));
         assert_eq!(session.connection.as_deref(), Some("app-db"));
@@ -187,7 +181,8 @@ mod tests {
 
     #[test]
     fn index_of_finds_tab_by_session_id() {
-        let state = SqlTabState::default();
+        let mut state = SqlTabState::default();
+        state.open_tab();
         let id = state.tabs[state.active_tab].session.id;
         assert_eq!(state.index_of(id), Some(state.active_tab));
         assert_eq!(state.index_of(999_999), None);

@@ -1,8 +1,10 @@
 //! `sql_tab` feature rendering.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::Style;
+use ratatui::text::Span;
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
-use ratatui::widgets::Block;
 
 use crate::common::view::splitter::{SplitOrientation, draw};
 use crate::common::view::theme::Theme;
@@ -15,15 +17,23 @@ use super::history::view as history_view;
 use super::results::view as results_view;
 
 /// Render the `sql_tab` feature: a tab bar plus the active tab's child panes.
-/// `focused` colors the body border so the workspace focus is visible.
-pub fn render(
-    frame: &mut Frame,
-    theme: &Theme,
-    area: Rect,
-    state: &SqlTabState,
-    focused: bool,
-) {
-    let p = theme.palette();
+/// The area is already inside the SQL workspace parent pane's border (the outer
+/// " SQL Workspace " block is drawn by `sql_workspace/view.rs`).
+pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState) {
+    // No connection tab open: show an empty-state hint and no tab bar, mirroring
+    // the original dbm's `workspace_empty_hint` (no phantom "sql 0" tab, no
+    // editor / history / results panes).
+    if state.tabs.is_empty() {
+        let p = theme.palette();
+        let hint = crate::common::view::hints::sql_workspace_empty_hint();
+        let para = Paragraph::new(Span::styled(
+            hint,
+            Style::default().fg(p.muted),
+        ));
+        frame.render_widget(para, area);
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -36,15 +46,7 @@ pub fn render(
     let sessions: Vec<TabSession> = state.tabs.iter().map(|t| t.session.clone()).collect();
     super::tab::render(frame, theme, chunks[0], &sessions, Some(state.active_tab));
 
-    // A body border shows whether the workspace owns the focus; children render
-    // inside it.
-    let border_color = if focused { p.border_active } else { p.border };
-    let body = Block::default()
-        .borders(ratatui::widgets::Borders::ALL)
-        .border_style(ratatui::style::Style::default().fg(border_color));
-    let body_area = body.inner(chunks[1]);
-    frame.render_widget(&body, chunks[1]);
-
+    let body_area = chunks[1];
     let Some(tab) = state.tabs.get(state.active_tab) else {
         // No tab is open: render an empty placeholder in the body.
         frame.render_widget(Block::default().title("No open SQL tab"), body_area);

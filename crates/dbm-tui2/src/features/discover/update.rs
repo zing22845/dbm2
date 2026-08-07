@@ -30,7 +30,7 @@ pub fn update(
     let dirty = match msg {
         DiscoverMessage::Focus(focus) => {
             // Moving focus away from targets discards any in-progress edit.
-            if focus != crate::app_shell::pane::DiscoverPane::Targets {
+            if focus != crate::app_shell::nav::DiscoverPane::Targets {
                 let was_editing = state.targets.editing;
                 state.targets.discard_edit();
                 was_editing

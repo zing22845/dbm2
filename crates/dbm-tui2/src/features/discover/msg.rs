@@ -9,7 +9,7 @@ use super::targets::msg::TargetsMsg;
 #[derive(Debug, Clone)]
 pub enum DiscoverMessage {
     /// Set the active discover child pane.
-    Focus(crate::app_shell::pane::DiscoverPane),
+    Focus(crate::app_shell::nav::DiscoverPane),
     /// Show the close-confirmation dialog.
     RequestClose,
     /// Hide the close-confirmation dialog without closing.

@@ -19,59 +19,13 @@ pub enum Pane {
     /// Left-side explorer / object tree. Like `Discover`, it is a parent pane
     /// whose child sub-pane (instances / objects) is the focused region.
     Explorer(crate::app_shell::nav::ExplorerPane),
-    /// Main workspace area (SQL tabs, editor, history, results).
-    Workspace,
-    /// Instance / connection management pane.
-    InstanceWorkspace,
+    /// Main SQL workspace area (tabs, editor, history, results).
+    SQLWorkspace,
+    /// Instance / connection management pane. Like the explorer, it is a
+    /// parent pane whose child sub-pane (overview / connections) is focused.
+    InstanceWorkspace(crate::app_shell::nav::IwPane),
     /// The discover modal, open as a parent pane; its child sub-pane is focused.
-    Discover(DiscoverPane),
-}
-
-/// Child panes under the `Discover` parent pane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DiscoverPane {
-    /// The engine selector.
-    #[default]
-    Engine,
-    /// The targets (host : ports) editor.
-    Targets,
-    /// The results list.
-    Results,
-}
-
-impl Pane {
-    /// Whether this pane is a modal overlay (owns all keyboard input).
-    pub fn is_modal(self) -> bool {
-        matches!(self, Pane::Discover(_))
-    }
-
-    /// The discover child pane, if this is the discover parent pane.
-    pub fn as_discover(self) -> Option<DiscoverPane> {
-        match self {
-            Pane::Discover(sub) => Some(sub),
-            _ => None,
-        }
-    }
-}
-
-impl DiscoverPane {
-    /// Move focus to the previous discover sub-pane (wrapping).
-    pub fn prev(self) -> Self {
-        match self {
-            DiscoverPane::Engine => DiscoverPane::Results,
-            DiscoverPane::Targets => DiscoverPane::Engine,
-            DiscoverPane::Results => DiscoverPane::Targets,
-        }
-    }
-
-    /// Move focus to the next discover sub-pane (wrapping).
-    pub fn next(self) -> Self {
-        match self {
-            DiscoverPane::Engine => DiscoverPane::Targets,
-            DiscoverPane::Targets => DiscoverPane::Results,
-            DiscoverPane::Results => DiscoverPane::Engine,
-        }
-    }
+    Discover(crate::app_shell::nav::DiscoverPane),
 }
 
 /// A persistence-friendly name for a parent pane (for session snapshots).
@@ -79,7 +33,11 @@ pub fn pane_name(pane: Pane) -> &'static str {
     match pane {
         Pane::Header => "header",
         Pane::Explorer(_) => "explorer",
-        Pane::Workspace | Pane::InstanceWorkspace => "workspace",
+        // SQLWorkspace and InstanceWorkspace get distinct names so their focus
+        // can round-trip through the session snapshot; older snapshots stored
+        // both as "workspace" (mapped back to SQLWorkspace for compatibility).
+        Pane::SQLWorkspace => "sql_workspace",
+        Pane::InstanceWorkspace(_) => "instance_workspace",
         Pane::Discover(_) => "workspace",
     }
 }
@@ -92,7 +50,44 @@ pub fn pane_from_name(name: &str) -> Option<Pane> {
         "explorer" | "tree" | "Explorer" => Some(Pane::Explorer(
             crate::app_shell::nav::ExplorerPane::default(),
         )),
-        "workspace" | "SQLWorkspace" | "InstanceWorkspace" => Some(Pane::Workspace),
+        "workspace" | "sql_workspace" | "SQLWorkspace" => Some(Pane::SQLWorkspace),
+        "instance_workspace" | "InstanceWorkspace" => Some(Pane::InstanceWorkspace(
+            crate::app_shell::nav::IwPane::default(),
+        )),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sql_and_instance_workspace_round_trip_distinctly() {
+        // SQLWorkspace and InstanceWorkspace must serialize to different names
+        // and resolve back to their own variant (so session focus restores
+        // correctly instead of both collapsing to SQLWorkspace).
+        assert_eq!(pane_name(Pane::SQLWorkspace), "sql_workspace");
+        assert_eq!(
+            pane_name(Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::default())),
+            "instance_workspace"
+        );
+
+        assert_eq!(pane_from_name("sql_workspace"), Some(Pane::SQLWorkspace));
+        assert_eq!(
+            pane_from_name("instance_workspace"),
+            Some(Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::default()))
+        );
+
+        // Legacy alias "workspace" resolves to SQLWorkspace.
+        assert_eq!(pane_from_name("workspace"), Some(Pane::SQLWorkspace));
+    }
+
+    #[test]
+    fn explorer_round_trips() {
+        let p = Pane::Explorer(crate::app_shell::nav::ExplorerPane::default());
+        assert_eq!(pane_name(p), "explorer");
+        assert_eq!(pane_from_name("explorer"), Some(p));
+        assert_eq!(pane_from_name("bogus"), None);
     }
 }

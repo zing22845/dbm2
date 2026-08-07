@@ -47,8 +47,8 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     // Pass whether each region owns the shell focus so the views can highlight
     // the active pane's border (otherwise focus changes are invisible).
     let explorer_focused = matches!(state.focus, Pane::Explorer(_));
-    let workspace_focused = matches!(state.focus, Pane::Workspace)
-        || matches!(state.focus, Pane::InstanceWorkspace);
+    let workspace_focused = matches!(state.focus, Pane::SQLWorkspace)
+        || matches!(state.focus, Pane::InstanceWorkspace(_));
     header_view::render(frame, &state.theme, chunks[0], &state.header);
     explorer_view::render(frame, &state.theme, body[0], &state.explorer, explorer_focused);
     // The main workspace region shows the instance workspace when an instance

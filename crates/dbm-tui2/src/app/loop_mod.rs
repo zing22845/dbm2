@@ -237,33 +237,32 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 size.height.saturating_sub(body_top).saturating_sub(footer_h);
                             let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
 
-                            // While the discover parent pane is open, clicking
-                            // inside its popup switches the active discover child
-                            // sub-pane (engine / targets / results), mirroring
-                            // Ctrl+j/k. Clicks outside the popup keep discover
-                            // focused (the discover overlay owns input).
-                            let target_pane = if !matches!(state.focus, Pane::Discover(_)) {
-                                if mouse.row < body_top {
-                                    Some(Pane::Header)
-                                } else if mouse.row >= body_top + body_h {
-                                    None
-                                } else if mouse.column < explorer_w {
-                                    // The explorer is a parent pane hosting the
-                                    // instances (top) and objects (bottom) trees;
-                                    // map the click row to the matching sub-pane
-                                    // so mouse navigation agrees with Ctrl+j/k.
-                                    Some(Pane::Explorer(explorer_pane_for_click(
-                                        mouse.row,
-                                        body_top,
-                                        body_h,
-                                    )))
-                                } else if state.iw.instance_name.is_empty() {
-                                    Some(Pane::Workspace)
-                                } else {
-                                    Some(Pane::InstanceWorkspace)
-                                }
-                            } else {
+                            // Map the click to a focus pane by region. While the
+                            // discover parent pane owns focus, any attempt to
+                            // move focus away is rejected by the shell's
+                            // FocusChanged handler (update.rs), so clicks outside
+                            // the discover popup stay in discover. Clicks inside
+                            // the popup switch discover sub-panes below.
+                            let target_pane = if mouse.row < body_top {
+                                Some(Pane::Header)
+                            } else if mouse.row >= body_top + body_h {
                                 None
+                            } else if mouse.column < explorer_w {
+                                // The explorer is a parent pane hosting the
+                                // instances (top) and objects (bottom) trees;
+                                // map the click row to the matching sub-pane
+                                // so mouse navigation agrees with Ctrl+j/k.
+                                Some(Pane::Explorer(explorer_pane_for_click(
+                                    mouse.row,
+                                    body_top,
+                                    body_h,
+                                )))
+                            } else if state.iw.instance_name.is_empty() {
+                                Some(Pane::SQLWorkspace)
+                            } else {
+                                Some(Pane::InstanceWorkspace(
+                                    crate::app_shell::nav::IwPane::default(),
+                                ))
                             };
                             tracing::debug!(
                                 point = ?point,
@@ -347,7 +346,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // Starting a drag on a SQL-tab splitter begins a
                             // resize gesture (only when the SQL workspace owns
                             // focus and it is actually rendered).
-                            if state.focus == Pane::Workspace
+                            if state.focus == Pane::SQLWorkspace
                                 && let Some((layout, _tab_id)) =
                                     sql_tab_layout_for_hit(terminal.size()?, &state)
                                 && let Some(splitter) = layout.splitter_at(point.x, point.y)
@@ -814,8 +813,8 @@ fn discover_subpane_for_click(
     body_top: u16,
     body_h: u16,
     width: u16,
-) -> Option<crate::app_shell::pane::DiscoverPane> {
-    use crate::app_shell::pane::DiscoverPane;
+) -> Option<crate::app_shell::nav::DiscoverPane> {
+    use crate::app_shell::nav::DiscoverPane;
     // The discover popup overlays the workspace region: 3/4 of its size,
     // centered (matches `render_modal_popup` in app/view.rs).
     let base_w = width.saturating_sub(explorer_w);
@@ -1002,7 +1001,7 @@ mod tests {
 
     #[test]
     fn discover_click_maps_rows_to_subpanes() {
-        use crate::app_shell::pane::DiscoverPane;
+        use crate::app_shell::nav::DiscoverPane;
         // Fixed layout: width 100, explorer 20, body_top 3, body_h 50.
         // base_w=80 -> popup w=60,h=37 at px=30,py=9; inner x=31,y=10,w=58,h=35.
         let click = |col: u16, row: u16| {

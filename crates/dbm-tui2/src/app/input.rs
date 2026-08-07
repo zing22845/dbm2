@@ -9,7 +9,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app_shell::msg::ShellMsg;
-use crate::app_shell::pane::{DiscoverPane, Pane};
+use crate::app_shell::nav::{DiscoverPane, IwPane};
+use crate::app_shell::pane::Pane;
 use crate::app_shell::nav::{pane_dir_from_key, PaneDir};
 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
 use crate::features::discover::results::msg::{ResultsMessage, ResultsMsg};
@@ -51,7 +52,6 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
     // within-workspace sub-pane moves only apply to directions that do not
     // leave the workspace.
     if state.modal.is_none()
-        && !matches!(state.focus, Pane::Discover(_))
         && let Some(dir) = pane_dir_from_key(&key)
     {
         if let Some(msg) = switch_zone_by_dir(dir, state.focus) {
@@ -59,7 +59,7 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
         }
         // Inside the SQL workspace, Ctrl+nav moves the sub-pane focus
         // (editor / results / history) when the move stays within the workspace.
-        if state.focus == Pane::Workspace {
+        if state.focus == Pane::SQLWorkspace {
             return switch_subpane(dir, &state.sql);
         }
         return None;
@@ -76,8 +76,8 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
         None => match state.focus {
             Pane::Header => header_key(key),
             Pane::Explorer(sub) => explorer_key(key, sub),
-            Pane::InstanceWorkspace => iw_key(key, &state.iw),
-            Pane::Workspace => sql_key(key, &state.sql),
+            Pane::InstanceWorkspace(sub) => iw_key(key, sub, &state.iw),
+            Pane::SQLWorkspace => sql_key(key, &state.sql),
             // Discover is handled above (owns all input while open).
             Pane::Discover(_) => None,
         },
@@ -90,7 +90,7 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
 /// the right), mirroring the `Discover` parent pane. Workspace/instance leave
 /// left to the explorer and up to the header.
 fn switch_zone_by_dir(dir: crate::app_shell::nav::PaneDir, focus: Pane) -> Option<AppMsg> {
-    use crate::app_shell::nav::{ExplorerPane, PaneDir as D};
+    use crate::app_shell::nav::{ExplorerPane, IwPane, PaneDir as D};
     let pane = match (focus, dir) {
         // Header moves down into the explorer (instances by default).
         (Pane::Header, D::Down) => Pane::Explorer(ExplorerPane::default()),
@@ -100,12 +100,26 @@ fn switch_zone_by_dir(dir: crate::app_shell::nav::PaneDir, focus: Pane) -> Optio
         (Pane::Explorer(ExplorerPane::Instances), D::Down) => Pane::Explorer(ExplorerPane::Objects),
         (Pane::Explorer(ExplorerPane::Objects), D::Up) => Pane::Explorer(ExplorerPane::Instances),
         // Explorer moves right into the workspace.
-        (Pane::Explorer(_), D::Right) => Pane::Workspace,
-        // Workspace/instance leave left to the explorer and up to the header.
-        (Pane::Workspace | Pane::InstanceWorkspace, D::Left) => {
+        (Pane::Explorer(_), D::Right) => Pane::SQLWorkspace,
+        // Inside the instance workspace, Left/Right move overview <-> connections
+        // (matching the original dbm's manager panes): Connections left ->
+        // Overview, Overview left -> explorer (leave), Overview right ->
+        // Connections, Connections right stays (no wrap).
+        (Pane::InstanceWorkspace(IwPane::Connections), D::Left) => {
+            Pane::InstanceWorkspace(IwPane::Overview)
+        }
+        (Pane::InstanceWorkspace(IwPane::Overview), D::Left) => {
             Pane::Explorer(ExplorerPane::default())
         }
-        (Pane::Workspace | Pane::InstanceWorkspace, D::Up) => Pane::Header,
+        (Pane::InstanceWorkspace(IwPane::Overview), D::Right) => {
+            Pane::InstanceWorkspace(IwPane::Connections)
+        }
+        (Pane::InstanceWorkspace(IwPane::Connections), D::Right) => {
+            Pane::InstanceWorkspace(IwPane::Connections)
+        }
+        // Workspace leaves left to the explorer and up to the header.
+        (Pane::SQLWorkspace, D::Left) => Pane::Explorer(ExplorerPane::default()),
+        (Pane::SQLWorkspace, D::Up) => Pane::Header,
         _ => return None,
     };
     tracing::debug!(from = ?focus, to = ?pane, "pane switch via Ctrl+nav");
@@ -158,7 +172,7 @@ pub fn paste_to_msg(contents: &str, state: &super::state::AppState) -> Option<Ap
     }
     // SQL editor focused (no modal): paste into the active tab's buffer.
     let tab_id = state.sql.sql_tab.active_tab;
-    if state.focus == Pane::Workspace
+    if state.focus == Pane::SQLWorkspace
         && state.sql.sql_tab.tabs.get(tab_id).is_some_and(|t| t.focus == SqlFocus::Editor)
     {
         return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
@@ -425,33 +439,48 @@ fn explorer(msg: ExplorerMessage) -> AppMsg {
     AppMsg::Explorer(ExplorerMsg::Message(msg))
 }
 
-/// Instance workspace key bindings: navigate/edit connections, or edit the
-/// form when one is open.
-fn iw_key(key: KeyEvent, state: &IwState) -> Option<AppMsg> {
+/// Instance workspace key bindings, routed by the active sub-pane `sub`
+/// (overview / connections), or the connection form when one is open.
+fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
     if state.connections.form.is_some() {
         return iw_form_key(key);
     }
-    let msg = match key.code {
-        KeyCode::Up | KeyCode::Char('k') => ConnectionsMessage::MoveUp,
-        KeyCode::Down | KeyCode::Char('j') => ConnectionsMessage::MoveDown,
-        KeyCode::Char('a') => ConnectionsMessage::BeginAdd,
-        KeyCode::Char('e') | KeyCode::Enter => ConnectionsMessage::BeginEdit,
-        KeyCode::Char('d') | KeyCode::Delete => ConnectionsMessage::Delete,
-        // `u` unregisters the current managed instance (like the original dbm's
-        // overview `u`); it opens a confirm modal first.
-        KeyCode::Char('u') => {
-            if state.instance_name.is_empty() {
-                return None;
+    // `Tab` cycles the instance-workspace sub-panes (overview <-> connections),
+    // mirroring the explorer's Tab behavior.
+    if key.code == KeyCode::Tab {
+        return Some(AppMsg::Shell(ShellMsg::FocusChanged {
+            pane: Pane::InstanceWorkspace(sub.next()),
+        }));
+    }
+    match sub {
+        IwPane::Overview => {
+            // Overview panel keys: unregister (`u`) opens a confirm modal.
+            match key.code {
+                KeyCode::Char('u') => {
+                    if state.instance_name.is_empty() {
+                        return None;
+                    }
+                    Some(AppMsg::OpenModal(
+                        crate::app::state::ModalKind::UnregisterInstanceConfirm {
+                            instance: state.instance_name.clone(),
+                        },
+                    ))
+                }
+                _ => None,
             }
-            return Some(AppMsg::OpenModal(
-                crate::app::state::ModalKind::UnregisterInstanceConfirm {
-                    instance: state.instance_name.clone(),
-                },
-            ));
         }
-        _ => return None,
-    };
-    Some(iw(IwMessage::Connections(ConnectionsMsg::Message(msg))))
+        IwPane::Connections => {
+            let msg = match key.code {
+                KeyCode::Up | KeyCode::Char('k') => ConnectionsMessage::MoveUp,
+                KeyCode::Down | KeyCode::Char('j') => ConnectionsMessage::MoveDown,
+                KeyCode::Char('a') => ConnectionsMessage::BeginAdd,
+                KeyCode::Char('e') | KeyCode::Enter => ConnectionsMessage::BeginEdit,
+                KeyCode::Char('d') | KeyCode::Delete => ConnectionsMessage::Delete,
+                _ => return None,
+            };
+            Some(iw(IwMessage::Connections(ConnectionsMsg::Message(msg))))
+        }
+    }
 }
 
 /// Form keys when a connection form is open.
@@ -761,11 +790,11 @@ mod tests {
         KeyEvent::new(code, modifiers)
     }
 
-    /// A `SqlState` with `count` tabs open. The default state already opens one
-    /// tab, so we open `count.saturating_sub(1)` more on top of it.
+    /// A `SqlState` with `count` tabs open. The default state opens no tabs, so
+    /// we open `count` explicitly (for `count == 0`, an empty tab state).
     fn state_with_tabs(count: usize) -> SqlState {
         let mut tab_state = SqlTabState::default();
-        for i in 1..count {
+        for i in 0..count {
             tab_state.open_connection_tab(
                 "local".into(),
                 format!("conn-{i}"),
@@ -777,6 +806,14 @@ mod tests {
         SqlState {
             sql_tab: tab_state,
         }
+    }
+
+    /// An `AppState` with one open SQL tab (the default has none, since tabs
+    /// are only created when a connection is selected).
+    fn app_state_with_tab() -> crate::app::state::AppState {
+        let mut state = crate::app::state::AppState::default();
+        state.sql.sql_tab.open_tab();
+        state
     }
 
     fn extract_tab_msg(msg: AppMsg) -> SqlTabMessage {
@@ -838,7 +875,7 @@ mod tests {
     #[test]
     fn ctrl_h_moves_from_workspace_back_to_explorer() {
         let mut state = crate::app::state::AppState::default();
-        state.focus = Pane::Workspace;
+        state.focus = Pane::SQLWorkspace;
         let msg = key_to_msg(key(KeyCode::Char('h'), KeyModifiers::CONTROL), &state)
             .expect("ctrl+h should switch pane");
         match msg {
@@ -857,7 +894,7 @@ mod tests {
             .expect("ctrl+l should switch pane");
         match msg {
             AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
-                assert_eq!(pane, Pane::Workspace);
+                assert_eq!(pane, Pane::SQLWorkspace);
             }
             _ => panic!("expected focus change"),
         }
@@ -892,6 +929,48 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_l_in_instance_workspace_moves_overview_to_connections() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Overview);
+        let msg = key_to_msg(key(KeyCode::Char('l'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+l inside instance workspace should move to connections");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::InstanceWorkspace(IwPane::Connections));
+            }
+            _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
+    fn ctrl_h_in_instance_workspace_moves_connections_to_overview() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Connections);
+        let msg = key_to_msg(key(KeyCode::Char('h'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+h inside instance workspace should move to overview");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::InstanceWorkspace(IwPane::Overview));
+            }
+            _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
+    fn ctrl_h_in_instance_workspace_overview_leaves_to_explorer() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Overview);
+        let msg = key_to_msg(key(KeyCode::Char('h'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+h from overview should leave to explorer");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::Explorer(ExplorerPane::default()));
+            }
+            _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
     fn ctrl_k_from_explorer_instances_leaves_to_header() {
         let mut state = crate::app::state::AppState::default();
         state.focus = Pane::Explorer(ExplorerPane::Instances);
@@ -908,7 +987,7 @@ mod tests {
     #[test]
     fn ctrl_h_from_workspace_leaves_to_explorer_even_when_results_focused() {
         let mut state = crate::app::state::AppState::default();
-        state.focus = Pane::Workspace;
+        state.focus = Pane::SQLWorkspace;
         // Put the active tab on Results so the old `switch_subpane` path would
         // have intercepted ctrl+h; top-level nav must still win.
         if let Some(tab) = state.sql.sql_tab.tabs.get_mut(state.sql.sql_tab.active_tab) {
@@ -962,7 +1041,7 @@ mod tests {
 
     #[test]
     fn results_key_i_enters_edit_mode() {
-        let state = crate::app::state::AppState::default();
+        let state = app_state_with_tab();
         let results = &state.sql.sql_tab.tabs[0].results;
         let msg = results_key(key(KeyCode::Char('i'), KeyModifiers::NONE), 0, results)
             .expect("i should enter edit mode");
@@ -978,7 +1057,7 @@ mod tests {
     #[test]
     fn results_key_ctrl_s_opens_commit_preview_only_when_editing() {
         // With no edit session, Ctrl+s yields no commit preview (no-op).
-        let state = crate::app::state::AppState::default();
+        let state = app_state_with_tab();
         let results = &state.sql.sql_tab.tabs[0].results;
         assert!(
             results_key(key(KeyCode::Char('s'), KeyModifiers::CONTROL), 0, results).is_none(),
@@ -1056,8 +1135,8 @@ mod tests {
         ));
 
         // SQL editor focused (no modal) -> editor paste.
-        let mut state = crate::app::state::AppState::default();
-        state.focus = Pane::Workspace;
+        let mut state = app_state_with_tab();
+        state.focus = Pane::SQLWorkspace;
         state.sql.sql_tab.tabs[0].focus = SqlFocus::Editor;
         let msg = paste_to_msg("SELECT 1", &state).expect("editor paste should route");
         assert!(matches!(

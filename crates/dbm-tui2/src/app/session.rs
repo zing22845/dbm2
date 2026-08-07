@@ -132,9 +132,9 @@ mod tests {
         let snap = snapshot_from_app(&state);
         assert_eq!(snap.version, TUI_SESSION_VERSION);
         assert_eq!(snap.focus, "header");
-        // Default app opens one empty tab.
-        assert_eq!(snap.tabs.len(), 1);
-        assert!(snap.tabs[0].sql.is_empty());
+        // Default app opens no tabs (a tab is opened when a connection is
+        // selected in the tree).
+        assert!(snap.tabs.is_empty());
     }
 
     #[test]
@@ -192,16 +192,16 @@ mod tests {
             state.sql.sql_tab.tabs[0].session.instance.as_deref(),
             Some("local")
         );
-        assert_eq!(state.focus, Pane::Workspace);
+        assert_eq!(state.focus, Pane::SQLWorkspace);
 
         // Sanity: focus round-trips through snapshot_from_app.
         let back = snapshot_from_app(&state);
-        assert_eq!(back.focus, "workspace");
+        assert_eq!(back.focus, "sql_workspace");
         assert_eq!(back.tabs.len(), 2);
     }
 
     #[test]
-    fn empty_tabs_keep_default_tab() {
+    fn empty_tabs_restore_stays_empty() {
         let snap = TuiSessionSnapshot {
             version: TUI_SESSION_VERSION,
             focus: "explorer".into(),
@@ -220,8 +220,8 @@ mod tests {
         };
         let mut state = sample_state();
         apply_snapshot(&mut state, &snap);
-        // One empty default tab remains.
-        assert_eq!(state.sql.sql_tab.tabs.len(), 1);
+        // Restoring an empty tab snapshot leaves no tabs (no phantom default).
+        assert!(state.sql.sql_tab.tabs.is_empty());
         assert_eq!(
             state.focus,
             Pane::Explorer(crate::app_shell::nav::ExplorerPane::default())

@@ -3,8 +3,9 @@
 //! The shell tracks keyboard focus as a `Pane` (see `super::pane`), where a
 //! parent pane may host child sub-panes. This module holds the *pure* navigation
 //! vocabulary that the shell and input layer share: the spatial direction enum,
-//! the key-to-direction mapping, and the explorer child-pane type (also
-//! re-exported by the explorer feature for its own state).
+//! the key-to-direction mapping, and the child-pane enums (`ExplorerPane`,
+//! `DiscoverPane`) with their prev/next cycling. Features re-export the child
+//! pane type they use for their own state.
 //!
 //! Everything here is self-contained and side-effect-free: it only maps keys to
 //! directions and moves sub-pane enums, without touching state, IO or any
@@ -43,6 +44,66 @@ impl ExplorerPane {
         match self {
             ExplorerPane::Instances => ExplorerPane::Objects,
             ExplorerPane::Objects => ExplorerPane::Instances,
+        }
+    }
+}
+
+/// Sub-pane within the Discover parent pane (engine / targets / results).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DiscoverPane {
+    /// The engine selector.
+    #[default]
+    Engine,
+    /// The targets (host : ports) editor.
+    Targets,
+    /// The results list.
+    Results,
+}
+
+impl DiscoverPane {
+    /// Move focus to the previous discover sub-pane (wrapping).
+    pub fn prev(self) -> Self {
+        match self {
+            DiscoverPane::Engine => DiscoverPane::Results,
+            DiscoverPane::Targets => DiscoverPane::Engine,
+            DiscoverPane::Results => DiscoverPane::Targets,
+        }
+    }
+
+    /// Move focus to the next discover sub-pane (wrapping).
+    pub fn next(self) -> Self {
+        match self {
+            DiscoverPane::Engine => DiscoverPane::Targets,
+            DiscoverPane::Targets => DiscoverPane::Results,
+            DiscoverPane::Results => DiscoverPane::Engine,
+        }
+    }
+}
+
+/// Sub-pane within the InstanceWorkspace parent pane (overview / connections).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IwPane {
+    /// The instance overview panel.
+    #[default]
+    Overview,
+    /// The instance connections panel.
+    Connections,
+}
+
+impl IwPane {
+    /// Move focus to the previous instance-workspace sub-pane (wrapping).
+    pub fn prev(self) -> Self {
+        match self {
+            IwPane::Overview => IwPane::Connections,
+            IwPane::Connections => IwPane::Overview,
+        }
+    }
+
+    /// Move focus to the next instance-workspace sub-pane (wrapping).
+    pub fn next(self) -> Self {
+        match self {
+            IwPane::Overview => IwPane::Connections,
+            IwPane::Connections => IwPane::Overview,
         }
     }
 }

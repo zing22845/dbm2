@@ -12,7 +12,8 @@ use crate::app::msg::AppMsg;
 use crate::app::state::AppState;
 use crate::app_shell::effect::ErasedEffect;
 use crate::app_shell::intent::RoutableIntent;
-use crate::app_shell::pane::{DiscoverPane, Pane};
+use crate::app_shell::nav::DiscoverPane;
+use crate::app_shell::pane::Pane;
 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
 use crate::features::discover::update::update as discover_update;
 use crate::features::explorer::intent::ExplorerIntent;
@@ -79,9 +80,9 @@ fn focus_pane_of(msg: &AppMsg) -> Option<Pane> {
             crate::app_shell::nav::ExplorerPane::default(),
         )),
         AppMsg::Discover(_) => Some(Pane::Discover(DiscoverPane::default())),
-        AppMsg::Iw(_) => Some(Pane::InstanceWorkspace),
-        AppMsg::Sql(_) => Some(Pane::Workspace),
-        AppMsg::Perf(_) => Some(Pane::Workspace),
+        AppMsg::Iw(_) => Some(Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::default())),
+        AppMsg::Sql(_) => Some(Pane::SQLWorkspace),
+        AppMsg::Perf(_) => Some(Pane::SQLWorkspace),
     }
 }
 
@@ -105,7 +106,7 @@ fn open_discover(state: &mut AppState) {
 
 /// Close the discover modal and restore focus to the workspace parent pane.
 fn close_discover(state: &mut AppState) {
-    state.focus = Pane::Workspace;
+    state.focus = Pane::SQLWorkspace;
     state.modal = None;
 }
 
@@ -182,6 +183,19 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             }
             crate::app_shell::msg::ShellMsg::Tick => {}
             crate::app_shell::msg::ShellMsg::FocusChanged { pane } => {
+                // While the discover parent pane owns focus, no focus change is
+                // allowed to move away from it (neither keyboard navigation nor
+                // mouse clicks). The discover flow must complete or be closed
+                // explicitly. This is the single choke point for that rule;
+                // discover's own sub-pane switching uses DiscoverMessage::Focus,
+                // not FocusChanged, so it is unaffected.
+                if matches!(state.focus, Pane::Discover(_)) {
+                    tracing::debug!(
+                        to = ?pane,
+                        "ignoring FocusChanged while discover owns focus"
+                    );
+                    return result;
+                }
                 // Keep the explorer feature's own sub-pane in sync with the
                 // shell focus so rendering and key dispatch agree. Unlike an
                 // eager reload on focus, the instance tree is only loaded at
@@ -194,6 +208,11 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                     && state.explorer.pane != sub
                 {
                     state.explorer.pane = sub;
+                }
+                if let Pane::InstanceWorkspace(sub) = pane
+                    && state.iw.pane != sub
+                {
+                    state.iw.pane = sub;
                 }
             }
             crate::app_shell::msg::ShellMsg::ToggleTheme => {
@@ -466,6 +485,37 @@ mod tests {
                 ),
             ),
         )
+    }
+
+    fn focus_changed_msg(pane: Pane) -> AppMsg {
+        AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged { pane })
+    }
+
+    #[test]
+    fn focus_changed_rejected_while_discover_owns_focus() {
+        let mut state = AppState::default();
+        state.focus = Pane::Discover(DiscoverPane::Engine);
+        let before = state.focus;
+        let result = update(
+            focus_changed_msg(Pane::Explorer(
+                crate::app_shell::nav::ExplorerPane::default(),
+            )),
+            &mut state,
+        );
+        // Focus stays on discover: the single choke point blocks leaving it.
+        assert_eq!(state.focus, before);
+        assert!(!result.dirty, "rejected focus change must not mark dirty");
+    }
+
+    #[test]
+    fn focus_changed_allowed_when_not_discover() {
+        let mut state = AppState::default();
+        state.focus = Pane::Header;
+        update(
+            focus_changed_msg(Pane::SQLWorkspace),
+            &mut state,
+        );
+        assert_eq!(state.focus, Pane::SQLWorkspace);
     }
 
     #[test]
