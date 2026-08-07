@@ -104,11 +104,20 @@ pub fn render(
     }
 }
 
-/// A one-line status for the discover zone footer (scanning / last error /
-/// register result).
+/// A one-line status for the discover zone footer (scanning with live progress
+/// / cancelling / cancelled / last error / register result). Mirrors the
+/// original dbm's `Scanning… hosts d/t · c: cancel` status line.
 fn discover_status(state: &DiscoverState) -> String {
     if state.scanning {
-        "scanning…".to_string()
+        if state.cancelling {
+            "cancelling…".to_string()
+        } else if let Some((done, total)) = state.scan_progress {
+            format!("Scanning… hosts {done}/{total} · c: cancel")
+        } else {
+            "Scanning…".to_string()
+        }
+    } else if state.scan_cancelled {
+        "cancelled".to_string()
     } else if state.last_error.is_some() {
         "scan failed".to_string()
     } else if let Some(msg) = &state.register_message {
@@ -122,7 +131,9 @@ fn discover_status(state: &DiscoverState) -> String {
 /// area. Pure `state -> view`: it only draws, never mutates state.
 fn render_close_confirm(frame: &mut Frame, theme: &Theme, area: Rect) {
     let p = theme.palette();
-    render_popup(frame, area, 45, 30, |frame, popup| {
+    // Only the popup's own rectangle gets an opaque background; the rest of the
+    // discover pane stays visible around the confirmation dialog.
+    render_popup(frame, area, 45, 30, false, |frame, popup| {
         let block = ratatui::widgets::Block::default()
             .title(" Close discovery? ")
             .borders(ratatui::widgets::Borders::ALL)

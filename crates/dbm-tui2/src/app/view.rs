@@ -105,7 +105,7 @@ fn render_popup_modal(
     modal: &ModalKind,
 ) {
     use crate::common::view::modal::{modal_title, render_popup, render_titled_popup};
-    render_popup(frame, base, 45, 20, |f, area| {
+    render_popup(frame, base, 45, 20, true, |f, area| {
         let body = match modal {
             ModalKind::ResultsRowLimitPicker { current, limits } => {
                 

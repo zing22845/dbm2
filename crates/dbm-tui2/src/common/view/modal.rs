@@ -18,8 +18,20 @@ use crate::common::view::theme::Theme;
 /// Render a centered popup of `width_pct` × `height_pct` over `base`, clearing
 /// the overlay so wide glyphs below don't bleed through, and delegating the
 /// popup's interior (block + body) to `inner`.
-pub fn render_popup<F>(frame: &mut Frame, base: Rect, width_pct: u16, height_pct: u16, inner: F)
-where
+///
+/// When `dim_base` is `true`, the whole `base` is covered with an opaque
+/// background before drawing the popup (modal focus). When `false`, only the
+/// popup's own rectangle is cleared/filled, leaving the surrounding content
+/// visible (used by the discover close-confirmation, which overlays the still
+/// visible discover pane).
+pub fn render_popup<F>(
+    frame: &mut Frame,
+    base: Rect,
+    width_pct: u16,
+    height_pct: u16,
+    dim_base: bool,
+    inner: F,
+) where
     F: FnOnce(&mut Frame, Rect),
 {
     if base.width == 0 || base.height == 0 {
@@ -36,13 +48,14 @@ where
         width: w,
         height: h,
     };
-    // Cover the whole modal region with an opaque background so the content
-    // behind is hidden, then place the popup. The `inner` renderer supplies the
-    // popup's own block/surface background.
-    clear_overlay(frame, base);
+    // Clear + fill either the whole modal region (dim_base) or only the popup's
+    // own rect (leaving the surroundings visible). The `inner` renderer supplies
+    // the popup's own block/surface background.
+    let cover = if dim_base { base } else { popup };
+    clear_overlay(frame, cover);
     frame.render_widget(
         Block::default().style(Style::default().bg(Color::Black)),
-        base,
+        cover,
     );
     inner(frame, popup);
 }
