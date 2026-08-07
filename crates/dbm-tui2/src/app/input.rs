@@ -45,12 +45,18 @@ use super::state::ModalKind;
 /// Returns `None` when nothing consumed the key (a no-op). Global shortcuts
 /// (quit, theme toggle) are handled by the run loop and not routed here.
 pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMsg> {
+    // The discover parent pane owns all input while open, including Ctrl+nav
+    // (which switches its engine / targets / results sub-panes) and Esc to
+    // close it. Check it first so Ctrl+h/j/k/l never fall through to top-level
+    // pane navigation while discover is focused.
+    if let Pane::Discover(sub) = state.focus {
+        return discover_key(key, sub, &state.discover);
+    }
     // Pane/zone navigation (Ctrl+h/j/k/l / Ctrl+arrows) is shell-level: it
     // moves the focus zone regardless of the currently focused pane. Check it
-    // first, before modal/focus routing, so it always works. Top-level pane
-    // movement wins (so Ctrl+h from the workspace leaves to the explorer);
-    // within-workspace sub-pane moves only apply to directions that do not
-    // leave the workspace.
+    // before modal/focus routing, so it always works. Top-level pane movement
+    // wins (so Ctrl+h from the workspace leaves to the explorer); within-workspace
+    // sub-pane moves only apply to directions that do not leave the workspace.
     if state.modal.is_none()
         && let Some(dir) = pane_dir_from_key(&key)
     {
@@ -63,11 +69,6 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
             return switch_subpane(dir, &state.sql);
         }
         return None;
-    }
-    if let Pane::Discover(sub) = state.focus {
-        // The discover parent pane owns all input; ctrl+hjkl moves between its
-        // child panes (engine / targets / results).
-        return discover_key(key, sub, &state.discover);
     }
     match &state.modal {
         // Data-carrying popups: route their keys here (esc/n close, y/enter
@@ -296,18 +297,14 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
         return targets_pane_key(key, state);
     }
 
-    // Pane-move chords (Ctrl+hjkl / Ctrl+arrows) take precedence. The discover
-    // panes are stacked vertically (engine / targets / results), so Up/Down
-    // (j/k) move between them; Left/Right (h/l) are kept as alternates.
+    // Pane-move chords (Ctrl+nav) take precedence. The discover panes are
+    // stacked vertically (engine / targets / results), so only Up/Down (j/k)
+    // move between them — matching the footer hint. Left/Right (h/l) do not.
     if ctrl {
         let dir = pane_dir_from_key(&key);
         return match dir {
-            Some(PaneDir::Down) | Some(PaneDir::Right) => {
-                Some(discover(DiscoverMessage::Focus(sub.next())))
-            }
-            Some(PaneDir::Up) | Some(PaneDir::Left) => {
-                Some(discover(DiscoverMessage::Focus(sub.prev())))
-            }
+            Some(PaneDir::Down) => Some(discover(DiscoverMessage::Focus(sub.next()))),
+            Some(PaneDir::Up) => Some(discover(DiscoverMessage::Focus(sub.prev()))),
             _ => None,
         };
     }
@@ -1090,6 +1087,20 @@ mod tests {
         assert!(matches!(
             up,
             AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverPane::Results)))
+        ));
+    }
+
+    #[test]
+    fn key_to_msg_discover_ctrl_j_switches_subpane_not_pane_nav() {
+        // Regression: while discover owns focus, Ctrl+j must reach discover_key
+        // (sub-pane switch) rather than be swallowed by top-level pane navigation.
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::Discover(DiscoverPane::Engine);
+        let msg = key_to_msg(key(KeyCode::Char('j'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+j while discover focused should switch sub-pane");
+        assert!(matches!(
+            msg,
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverPane::Targets)))
         ));
     }
 
