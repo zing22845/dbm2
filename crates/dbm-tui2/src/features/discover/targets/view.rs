@@ -5,6 +5,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
+use crate::common::view::pane_scrollbar::{draw_vertical_pane_scrollbar, pane_scroll_layout};
 use crate::common::view::theme::Theme;
 
 use super::state::{TargetCol, TargetsState};
@@ -54,12 +55,29 @@ pub fn render(
         let selected = focused && state.row < state.targets.len();
         let header = ratatui::widgets::Row::new(["#", "Host", "Ports"])
             .style(Style::default().add_modifier(Modifier::BOLD));
+        // Reserve a vertical scrollbar column when the list overflows its
+        // viewport. The scroll offset is derived here from the cursor using
+        // edge-scroll (no centering): the window starts at the top and only
+        // scrolls once the cursor passes the bottom edge, so the cursor row is
+        // always kept within the visible window.
+        let viewport_rows = body.height as usize;
+        let layout = pane_scroll_layout(body, body.width, state.targets.len(), viewport_rows);
+        let content = layout.content_area;
+        // A Table reserves one row for its header, so the visible content rows
+        // are one less than the area height. Use that as the scroll viewport so
+        // the cursor never falls below the last visible data row.
+        let viewport = content.height.saturating_sub(1).max(1) as usize;
+        let start = if state.row < viewport {
+            0
+        } else {
+            state.row - viewport + 1
+        };
         let rows = state
             .targets
             .iter()
             .enumerate()
-            .skip(state.scroll)
-            .take(body.height as usize)
+            .skip(start)
+            .take(viewport)
             .map(|(idx, row)| {
                 let row_sel = selected && idx == state.row;
                 let host_focused = row_sel && state.col == TargetCol::Host;
@@ -91,7 +109,12 @@ pub fn render(
         )
         .header(header)
         .column_spacing(1);
-        frame.render_widget(table, body);
+        frame.render_widget(table, content);
+
+        if let Some(bar) = layout.v_scrollbar {
+            let max_scroll = state.targets.len().saturating_sub(viewport);
+            draw_vertical_pane_scrollbar(frame, bar, start, viewport, max_scroll, p, false);
+        }
     }
 
     if footer_h > 0 {

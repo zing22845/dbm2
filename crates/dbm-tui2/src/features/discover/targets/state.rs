@@ -21,8 +21,9 @@ pub enum TargetCol {
 /// State for the targets editor.
 ///
 /// Owns the editable target list plus the editing machinery (inline cell edit,
-/// undo/redo stacks) and the cursor/scroll position. Pure-functional update is
-/// in `super::update`.
+/// undo/redo stacks) and the cursor position. Pure-functional update is in
+/// `super::update`. The list's scroll offset is derived at render time from the
+/// cursor (kept visible), not stored here.
 #[derive(Debug, Clone, Default)]
 pub struct TargetsState {
     /// The editable target rows.
@@ -41,8 +42,6 @@ pub struct TargetsState {
     pub undo_stack: Vec<Vec<TargetRow>>,
     /// Redo snapshots of the target list.
     pub redo_stack: Vec<Vec<TargetRow>>,
-    /// Scroll offset of the targets list.
-    pub scroll: usize,
 }
 
 
