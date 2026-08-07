@@ -105,6 +105,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     let mut needs_redraw = true;
 
     loop {
+        // Whether real work (an event/action) asked for a repaint, captured at
+        // the top of the loop so the forced counter-decay repaint below (which
+        // must NOT feed the FPS/waste estimates) is never mistaken for one.
+        let real_redraw = needs_redraw;
+
         // FPS/waste counters decay to 0 once redraws stop (idle) so they
         // reflect live rates, not a stale peak. The footer only updates on a
         // draw, so when stale we force one repaint — but that repaint must NOT
@@ -122,10 +127,6 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             state.perf.redundancy_rate = 0.0;
             needs_redraw = true;
         }
-
-        // Whether real work (an event/action) asked for a repaint, captured
-        // before we may force one below for the counter decay.
-        let real_redraw = needs_redraw;
 
         if needs_redraw {
             // Exclude the footer's self-updating fps/waste slot from the
