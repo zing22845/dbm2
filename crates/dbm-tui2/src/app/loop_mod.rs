@@ -28,7 +28,7 @@ use tokio::sync::mpsc;
 use crate::app::action::Action;
 use crate::app::msg::AppMsg;
 use crate::app::state::AppState;
-use crate::app::update::{handle_action, update, UpdateResult};
+use crate::app::update::{handle_action, update_unchecked, UpdateResult};
 use crate::app::view::render;
 use crate::app_shell::effect::EffectRunner;
 use crate::app_shell::intent::IntentRouter;
@@ -78,10 +78,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     }
     let mut reader = EventStream::new();
 
-    // Populate the explorer tree on startup.
-    process_message_round(
-        &effect_runner,
-        &mut action_rx,
+    // Populate the explorer tree on startup. Use `update_unchecked` so the
+    // message is not dropped by the focus guard: at startup focus is still the
+    // header (or the restored session pane), so a guarded `Explorer(Load)`
+    // would be discarded and the tree would stay empty until the explorer
+    // gained focus.
+    let startup_load = crate::app::update::update_unchecked(
         AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
             crate::features::explorer::msg::ExplorerMessage::Instances(
                 crate::features::explorer::instances::msg::InstancesMsg::Message(
@@ -91,6 +93,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         )),
         &mut state,
     );
+    let mut startup_pending = std::collections::VecDeque::new();
+    queue_result(&effect_runner, startup_load, &mut startup_pending);
+    // Synchronously await the startup load's result so the explorer tree is
+    // populated *before* the first frame renders. Otherwise the tree shows
+    // empty on the first paint and only appears after a later event triggers a
+    // repaint (a start-of-session flicker).
+    if let Some(action) = action_rx.recv().await {
+        process_action_round(&effect_runner, &mut action_rx, action, &mut state);
+    }
 
     // Which SQL-tab splitter is being drag-resized, if any. This is transient
     // interaction state that lives only for the lifetime of a drag gesture; it
@@ -204,7 +215,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                 } else if let Some(Ok(CEvent::Mouse(mouse))) = maybe_event {
                     use crossterm::event::{MouseButton, MouseEventKind};
                     use ratatui::prelude::Position;
-                    tracing::debug!(
+                    tracing::trace!(
                         kind = ?mouse.kind,
                         col = mouse.column,
                         row = mouse.row,
@@ -215,9 +226,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     // repaints only if one of them changed rendered state.
                     let mut dirty = false;
                     match mouse.kind {
-                        MouseEventKind::Down(MouseButton::Left)
-                            if state.modal.is_none() && !matches!(state.focus, Pane::Discover(_)) =>
-                        {
+                        MouseEventKind::Down(MouseButton::Left) if state.modal.is_none() => {
                             // Map the click to a focus zone by region. The layout
                             // mirrors `app/view.rs`: header (top 3 rows), explorer
                             // (left 20% of the body), workspace (right 80%).
@@ -228,17 +237,27 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 size.height.saturating_sub(body_top).saturating_sub(footer_h);
                             let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
 
-                            // Clicking a region moves focus there (shell-level).
-                            let target_pane = if mouse.row < body_top {
-                                Some(Pane::Header)
-                            } else if mouse.row >= body_top + body_h {
-                                None
-                            } else if mouse.column < explorer_w {
-                                Some(Pane::Explorer)
-                            } else if state.iw.instance_name.is_empty() {
-                                Some(Pane::Workspace)
+                            // While the discover parent pane is open, clicking
+                            // inside its popup switches the active discover child
+                            // sub-pane (engine / targets / results), mirroring
+                            // Ctrl+j/k. Clicks outside the popup keep discover
+                            // focused (the discover overlay owns input).
+                            let target_pane = if !matches!(state.focus, Pane::Discover(_)) {
+                                if mouse.row < body_top {
+                                    Some(Pane::Header)
+                                } else if mouse.row >= body_top + body_h {
+                                    None
+                                } else if mouse.column < explorer_w {
+                                    Some(Pane::Explorer(
+                                        crate::common::utils::zone_nav::ExplorerPane::default(),
+                                    ))
+                                } else if state.iw.instance_name.is_empty() {
+                                    Some(Pane::Workspace)
+                                } else {
+                                    Some(Pane::InstanceWorkspace)
+                                }
                             } else {
-                                Some(Pane::InstanceWorkspace)
+                                None
                             };
                             tracing::debug!(
                                 point = ?point,
@@ -257,6 +276,34 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     &mut state,
                                 );
                                 dirty |= result.dirty;
+                            }
+
+                            // Inside the discover popup: map the click's row to a
+                            // discover child pane and switch focus to it.
+                            if let Pane::Discover(sub) = state.focus
+                                && let Some(next) = discover_subpane_for_click(
+                                    mouse.column,
+                                    mouse.row,
+                                    explorer_w,
+                                    body_top,
+                                    body_h,
+                                    size.width,
+                                )
+                                && next != sub
+                            {
+                                let msg = AppMsg::Discover(
+                                    crate::features::discover::msg::DiscoverMsg::Message(
+                                        crate::features::discover::msg::DiscoverMessage::Focus(next),
+                                    ),
+                                );
+                                let result = process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    msg,
+                                    &mut state,
+                                );
+                                dirty |= result.dirty;
+                                tracing::debug!(to = ?next, "mouse click switched discover sub-pane");
                             }
 
                             // Left-click on the header `Discover` button activates
@@ -327,7 +374,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
                         }
                         _ => {
-                            tracing::debug!(
+                            tracing::trace!(
                                 is_left_down = matches!(
                                     mouse.kind,
                                     MouseEventKind::Down(MouseButton::Left)
@@ -573,7 +620,13 @@ fn drain_pending(
         }
         processed += 1;
 
-        let result = update(msg, state);
+        // Use `update_unchecked`: keyboard focus routing is done in the input
+        // layer (`key_to_msg` only produces messages for the active pane), so
+        // the focus guard is redundant for keyboard input and actively harmful
+        // for programmatic messages — an intent or pending cascade may target a
+        // *non-focused* pane (e.g. updating the explorer tree while the focus
+        // sits on the workspace). Such cross-pane updates must not be dropped.
+        let result = update_unchecked(msg, state);
         aggregated.dirty |= result.dirty;
         queue_result(effect_runner, result, pending);
     }
@@ -717,6 +770,53 @@ fn iw_action_to_msg(action: crate::features::instance_workspace::effect::IwActio
                 IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::MoveUp))
             }
         },
+        IA::Unregistered { instance } => IM::Unregistered { instance },
+    }
+}
+
+/// Map a click inside the discover popup to a discover child sub-pane
+/// (engine / targets / results), mirroring the discover view's vertical layout
+/// and Ctrl+j/k. Returns `None` for clicks outside the popup body (the header
+/// / explorer / workspace regions around the popup).
+fn discover_subpane_for_click(
+    col: u16,
+    row: u16,
+    explorer_w: u16,
+    body_top: u16,
+    body_h: u16,
+    width: u16,
+) -> Option<crate::app_shell::pane::DiscoverPane> {
+    use crate::app_shell::pane::DiscoverPane;
+    // The discover popup overlays the workspace region: 3/4 of its size,
+    // centered (matches `render_modal_popup` in app/view.rs).
+    let base_w = width.saturating_sub(explorer_w);
+    let w = (base_w * 3) / 4;
+    let h = (body_h * 3) / 4;
+    if w < 4 || h < 4 {
+        return None;
+    }
+    let px = explorer_w + (base_w - w) / 2;
+    let py = body_top + (body_h - h) / 2;
+    // Inner area after the 1-row border.
+    let inner_x = px + 1;
+    let inner_y = py + 1;
+    let inner_w = w.saturating_sub(2);
+    let inner_h = h.saturating_sub(2);
+    if col < inner_x || col >= inner_x + inner_w || row < inner_y || row >= inner_y + inner_h {
+        return None;
+    }
+    let rel = row - inner_y;
+    // Discover layout (vertical): engine selector (top 4 rows), then the
+    // targets/results body (targets upper half, splitter, results lower half).
+    if rel < 4 {
+        return Some(DiscoverPane::Engine);
+    }
+    let body_y = inner_y + 4;
+    let body_half = inner_h.saturating_sub(4) / 2;
+    if row < body_y + body_half {
+        Some(DiscoverPane::Targets)
+    } else {
+        Some(DiscoverPane::Results)
     }
 }
 
@@ -859,6 +959,31 @@ mod tests {
     use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
     use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
     use crate::features::sql_workspace::sql_tab::results::state::QueryResultData;
+
+    #[test]
+    fn discover_click_maps_rows_to_subpanes() {
+        use crate::app_shell::pane::DiscoverPane;
+        // Fixed layout: width 100, explorer 20, body_top 3, body_h 50.
+        // base_w=80 -> popup w=60,h=37 at px=30,py=9; inner x=31,y=10,w=58,h=35.
+        let click = |col: u16, row: u16| {
+            discover_subpane_for_click(col, row, 20, 3, 50, 100)
+        };
+        // Engine: top 4 rows of the inner area (inner_y=10 -> rows 10..14).
+        assert_eq!(click(40, 11), Some(DiscoverPane::Engine));
+        assert_eq!(click(40, 13), Some(DiscoverPane::Engine));
+        // Targets: rows [14, body_y+half). body_y=14, half=(35-4)/2=15 -> [14,29).
+        assert_eq!(click(40, 15), Some(DiscoverPane::Targets));
+        assert_eq!(click(40, 28), Some(DiscoverPane::Targets));
+        // Results: rows [29, 45).
+        assert_eq!(click(40, 30), Some(DiscoverPane::Results));
+        assert_eq!(click(40, 44), Some(DiscoverPane::Results));
+        // Outside the popup: header row, explorer column, or beyond the inner
+        // area yields None.
+        assert_eq!(click(10, 11), None); // explorer column
+        assert_eq!(click(40, 1), None); // header row
+        assert_eq!(click(99, 11), None); // beyond popup right edge
+        assert_eq!(click(40, 45), None); // beyond popup bottom edge
+    }
 
     #[test]
     fn sql_results_result_ready_routes_to_set_result() {

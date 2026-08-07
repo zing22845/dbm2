@@ -50,9 +50,22 @@ async fn load_instances(services: Arc<Services>) -> Vec<InstancesAction> {
     })
     .await;
     match result {
-        Ok(Ok(instances)) => vec![InstancesAction::InstancesLoaded { instances }],
-        Ok(Err(e)) => vec![InstancesAction::LoadError { error: e.to_string() }],
-        Err(e) => vec![InstancesAction::LoadError { error: e.to_string() }],
+        Ok(Ok(instances)) => {
+            tracing::debug!(
+                count = instances.len(),
+                names = ?instances.iter().map(|i| &i.name).collect::<Vec<_>>(),
+                "explorer: load_instances succeeded"
+            );
+            vec![InstancesAction::InstancesLoaded { instances }]
+        }
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "explorer: load_instances failed");
+            vec![InstancesAction::LoadError { error: e.to_string() }]
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "explorer: load_instances join failed");
+            vec![InstancesAction::LoadError { error: e.to_string() }]
+        }
     }
 }
 

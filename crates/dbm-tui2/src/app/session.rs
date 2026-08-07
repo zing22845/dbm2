@@ -222,6 +222,9 @@ mod tests {
         apply_snapshot(&mut state, &snap);
         // One empty default tab remains.
         assert_eq!(state.sql.sql_tab.tabs.len(), 1);
-        assert_eq!(state.focus, Pane::Explorer);
+        assert_eq!(
+            state.focus,
+            Pane::Explorer(crate::common::utils::zone_nav::ExplorerPane::default())
+        );
     }
 }

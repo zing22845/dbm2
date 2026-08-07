@@ -11,7 +11,14 @@ use crate::common::view::theme::Theme;
 use super::state::ObjectsState;
 
 /// Render the object tree with indentation and expansion markers.
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ObjectsState) {
+/// `region_focused` controls the border color so the shell focus is visible.
+pub fn render(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    state: &ObjectsState,
+    region_focused: bool,
+) {
     let p = theme.palette();
 
     let mut lines = Vec::new();
@@ -48,9 +55,10 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ObjectsState
         lines.push(Line::from(Span::styled(msg, Style::default().fg(p.muted))));
     }
 
+    let border_color = if region_focused { p.border_active } else { p.border };
     let block = Block::default()
         .title(" objects ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border));
+        .border_style(Style::default().fg(border_color));
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }

@@ -30,10 +30,29 @@ pub enum Zone {
 }
 
 /// Sub-pane within the Explorer zone (`[I] Instances` / `[O] Objects`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExplorerPane {
+    #[default]
     Instances,
     Objects,
+}
+
+impl ExplorerPane {
+    /// Move focus to the previous explorer sub-pane (wrapping).
+    pub fn prev(self) -> Self {
+        match self {
+            ExplorerPane::Instances => ExplorerPane::Objects,
+            ExplorerPane::Objects => ExplorerPane::Instances,
+        }
+    }
+
+    /// Move focus to the next explorer sub-pane (wrapping).
+    pub fn next(self) -> Self {
+        match self {
+            ExplorerPane::Instances => ExplorerPane::Objects,
+            ExplorerPane::Objects => ExplorerPane::Instances,
+        }
+    }
 }
 
 /// Sub-pane within the Workspace (SQL tab): editor / history / results.
@@ -122,7 +141,11 @@ pub fn pane_dir_from_key(key: &KeyEvent) -> Option<PaneDir> {
         return None;
     }
     match key.code {
-        KeyCode::Char('h') | KeyCode::Left => Some(PaneDir::Left),
+        // `KeyCode::Backspace` maps to Ctrl+h: many terminals report Ctrl+h as
+        // ASCII 0x08 (Backspace), which crossterm parses as `Backspace` rather
+        // than `Char('h')`. Without this, Ctrl+h navigation silently stops
+        // working on those terminals.
+        KeyCode::Char('h') | KeyCode::Backspace | KeyCode::Left => Some(PaneDir::Left),
         KeyCode::Char('j') | KeyCode::Down => Some(PaneDir::Down),
         KeyCode::Char('k') | KeyCode::Up => Some(PaneDir::Up),
         KeyCode::Char('l') | KeyCode::Right => Some(PaneDir::Right),

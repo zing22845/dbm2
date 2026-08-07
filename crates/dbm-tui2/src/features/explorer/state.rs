@@ -3,15 +3,9 @@
 use super::instances::state::InstancesState;
 use super::objects::state::ObjectsState;
 
-/// Which explorer pane is focused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ExplorerPane {
-    /// The instances / connection tree.
-    #[default]
-    Instances,
-    /// The object tree (migrated in a later phase).
-    Objects,
-}
+// Re-export the shared explorer sub-pane type so the shell's `Pane` and the
+// explorer feature agree on the same navigation type.
+pub use crate::common::utils::zone_nav::ExplorerPane;
 
 /// State for the explorer feature, aggregating its two child sub-modules.
 #[derive(Debug, Clone, Default)]

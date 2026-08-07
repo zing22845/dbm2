@@ -22,7 +22,7 @@ use crate::features::global_footer::msg::FooterMsg;
 use crate::features::global_footer::update::update as footer_update;
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 use crate::features::header::update::update as header_update;
-use crate::features::instance_workspace::msg::IwMsg;
+use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
 use crate::features::instance_workspace::update::update as iw_update;
 use crate::features::perf_monitor::msg::PerfMsg;
 use crate::features::perf_monitor::update::update as perf_update;
@@ -75,7 +75,9 @@ fn focus_pane_of(msg: &AppMsg) -> Option<Pane> {
         // and bypass the focus guard.
         AppMsg::Shell(_) | AppMsg::Footer(_) | AppMsg::OpenModal(_) | AppMsg::CloseModal => None,
         AppMsg::Header(_) => Some(Pane::Header),
-        AppMsg::Explorer(_) => Some(Pane::Explorer),
+        AppMsg::Explorer(_) => Some(Pane::Explorer(
+            crate::common::utils::zone_nav::ExplorerPane::default(),
+        )),
         AppMsg::Discover(_) => Some(Pane::Discover(DiscoverPane::default())),
         AppMsg::Iw(_) => Some(Pane::InstanceWorkspace),
         AppMsg::Sql(_) => Some(Pane::Workspace),
@@ -122,9 +124,19 @@ fn explorer_load_instances_msg() -> AppMsg {
 }
 
 /// Apply a message to the global state, returning side-channel intents and
-/// effects. Feature messages are only dispatched to their update when the
-/// active focus zone permits keyboard input for them; shell and footer
-/// messages always pass through.
+/// effects.
+///
+/// The main message loop uses [`update_unchecked`]: focus routing is owned by
+/// the input layer (`input::key_to_msg` only emits messages for the pane that
+/// owns the keyboard), and *programmatic* messages — effect/action results,
+/// cross-feature intents, and pending cascades — must reach a non-focused pane
+/// (e.g. a background reload updating the explorer tree while focus sits on the
+/// workspace). Gating those on focus would drop legitimate cross-pane updates.
+///
+/// This focus-gated entry exists as a defensive backstop for explicit keyboard
+/// paths: it drops feature messages whose target pane does not own the focus,
+/// so unfocused features never react to stray input. Shell and footer messages
+/// always pass through, and an open modal / discover parent pane owns all input.
 pub fn update(msg: AppMsg, state: &mut AppState) -> UpdateResult {
     // When a modal (data popup) is open it owns all keyboard input, so its
     // messages bypass the focus guard. The discover parent pane likewise owns
@@ -170,8 +182,19 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             }
             crate::app_shell::msg::ShellMsg::Tick => {}
             crate::app_shell::msg::ShellMsg::FocusChanged { pane } => {
+                // Keep the explorer feature's own sub-pane in sync with the
+                // shell focus so rendering and key dispatch agree. Unlike an
+                // eager reload on focus, the instance tree is only loaded at
+                // startup and reloaded after registration (mirroring the
+                // original dbm), so connections cached in the tree are not
+                // discarded on every focus switch.
                 state.focus = pane;
                 result.dirty = true;
+                if let Pane::Explorer(sub) = pane
+                    && state.explorer.pane != sub
+                {
+                    state.explorer.pane = sub;
+                }
             }
             crate::app_shell::msg::ShellMsg::ToggleTheme => {
                 // Flip between the theme's dark and light palettes; the next
@@ -336,6 +359,30 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             result.effects.extend(effects.into_iter().map(box_effect));
         }
         AppMsg::Iw(m) => {
+            // A confirm-unregister arrived, so the confirm modal should close.
+            // The shell owns the modal, so this is shell orchestration here.
+            if matches!(
+                &m,
+                IwMsg::Message(IwMessage::UnregisterInstance { .. })
+            ) {
+                state.modal = None;
+                result.dirty = true;
+            }
+            // When an unregister completes, drop out of the (now removed)
+            // instance workspace, refresh the explorer tree, and return focus
+            // to the explorer (matching the original dbm's post-unregister
+            // `reload_tree` + focus return).
+            if let IwMsg::Message(IwMessage::Unregistered { instance }) = &m {
+                tracing::debug!(instance, "shell: instance unregistered; returning to explorer");
+                result.pending.push_back(explorer_load_instances_msg());
+                result.pending.push_back(AppMsg::Shell(
+                    crate::app_shell::msg::ShellMsg::FocusChanged {
+                        pane: Pane::Explorer(
+                            crate::common::utils::zone_nav::ExplorerPane::default(),
+                        ),
+                    },
+                ));
+            }
             let IwMsg::Message(inner) = m;
             // The instance workspace feature's update is a pure by-value
             // transition: move the state out, update it, move the result back.
@@ -403,4 +450,47 @@ pub fn handle_action(action: Action, state: &mut AppState) -> UpdateResult {
         result.pending.extend(sub.pending);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn explorer_load_msg() -> AppMsg {
+        AppMsg::Explorer(
+            crate::features::explorer::msg::ExplorerMsg::Message(
+                crate::features::explorer::msg::ExplorerMessage::Instances(
+                    crate::features::explorer::instances::msg::InstancesMsg::Message(
+                        crate::features::explorer::instances::msg::InstancesMessage::Load,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    #[test]
+    fn focus_guard_drops_explorer_load_when_focus_not_on_explorer() {
+        // Default focus is the header; a guarded `update` must drop an
+        // Explorer(Load) so the tree is not loaded by stray input.
+        let mut state = AppState::default();
+        assert_eq!(state.focus, Pane::Header);
+        let result = update(explorer_load_msg(), &mut state);
+        assert!(
+            result.effects.is_empty(),
+            "guarded update must drop explorer load while focus is the header"
+        );
+    }
+
+    #[test]
+    fn update_unchecked_allows_explorer_load_regardless_of_focus() {
+        // Startup uses `update_unchecked` so the tree loads even though focus
+        // is still on the header at boot.
+        let mut state = AppState::default();
+        assert_eq!(state.focus, Pane::Header);
+        let result = update_unchecked(explorer_load_msg(), &mut state);
+        assert!(
+            !result.effects.is_empty(),
+            "update_unchecked must emit the load effect regardless of focus"
+        );
+    }
 }

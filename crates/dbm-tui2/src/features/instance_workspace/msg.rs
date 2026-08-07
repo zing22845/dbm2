@@ -9,6 +9,11 @@ use super::overview::msg::OverviewMsg;
 pub enum IwMessage {
     /// Open the workspace for `instance_name` (sent by the explorer).
     OpenInstance { instance_name: String },
+    /// Unregister (delete) the given instance from the managed instances store.
+    UnregisterInstance { instance: String },
+    /// The store reported that the instance was unregistered; the shell reacts
+    /// (closes the workspace, refreshes the explorer, returns focus).
+    Unregistered { instance: String },
     /// Forwarded overview panel message.
     Overview(OverviewMsg),
     /// Forwarded connections panel message.

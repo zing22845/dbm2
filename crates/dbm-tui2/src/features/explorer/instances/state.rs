@@ -121,19 +121,62 @@ impl InstancesState {
         None
     }
 
-    /// Replace the tree with freshly loaded instances.
+    /// Replace the tree with freshly loaded instances, preserving which
+    /// instances were expanded (matching the original dbm's `reload_tree`, which
+    /// re-expands and re-loads the previously selected instance). Connections
+    /// are intentionally left unloaded here; they reload lazily on expand.
     pub fn set_instances(&mut self, instances: Vec<ManagedInstance>) {
+        let expanded_names: std::collections::HashSet<String> = self
+            .nodes
+            .iter()
+            .filter(|n| n.expanded)
+            .filter_map(|n| n.instance.as_ref())
+            .map(|i| i.name.clone())
+            .collect();
         self.nodes = instances
             .into_iter()
-            .map(|i| InstanceNode {
-                instance: Some(i),
-                expanded: false,
-                connections: Vec::new(),
-                loaded: false,
+            .map(|i| {
+                let expanded = expanded_names.contains(&i.name);
+                InstanceNode {
+                    instance: Some(i),
+                    expanded,
+                    connections: Vec::new(),
+                    loaded: false,
+                }
             })
             .collect();
         self.cursor = 0;
         self.scroll = 0;
+    }
+
+    /// Remove the instance node at `idx` (e.g. after unregistering it) and
+    /// clamp the cursor/scroll into the new tree. Returns whether a node was
+    /// actually removed.
+    pub fn remove_instance(&mut self, idx: usize) -> bool {
+        if idx >= self.nodes.len() {
+            return false;
+        }
+        self.nodes.remove(idx);
+        let max = self.visible_count().saturating_sub(1);
+        self.cursor = self.cursor.min(max);
+        self.scroll = self.scroll.min(max);
+        true
+    }
+
+    /// Update a single instance's metadata in place (matching the original
+    /// dbm's `reload_managed_instance`), preserving its expansion state and any
+    /// loaded connections. Returns whether the named instance was found.
+    pub fn set_single_instance(&mut self, instance: ManagedInstance) -> bool {
+        if let Some(node) = self
+            .nodes
+            .iter_mut()
+            .find(|n| n.display_name() == instance.name)
+        {
+            node.instance = Some(instance);
+            true
+        } else {
+            false
+        }
     }
 
     /// Display name of the instance at `idx`.
@@ -163,5 +206,93 @@ impl InstancesState {
                 .find(|c| c.name == connection)
                 .map(|c| c.id.clone())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inst(name: &str) -> ManagedInstance {
+        ManagedInstance {
+            id: format!("id-{name}"),
+            fingerprint: format!("fp-{name}"),
+            name: name.to_string(),
+            engine: dbm_core::Engine::Postgres,
+            host: "127.0.0.1".to_string(),
+            port: 5432,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "now".to_string(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        }
+    }
+
+    fn conn(name: &str) -> InstanceConnection {
+        InstanceConnection {
+            id: format!("c-{name}"),
+            instance_id: "id".to_string(),
+            name: name.to_string(),
+            username: "postgres".to_string(),
+            database: "postgres".to_string(),
+            has_password: false,
+            ssl_mode: String::new(),
+            env_label: None,
+            created_at: "now".to_string(),
+            updated_at: "now".to_string(),
+        }
+    }
+
+    #[test]
+    fn set_instances_preserves_expanded_instances() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b")]);
+        s.nodes[0].expanded = true;
+        s.nodes[0].loaded = true;
+        s.nodes[0].connections = vec![conn("c")];
+
+        // Reloading keeps "a" expanded but drops its (stale) connections.
+        s.set_instances(vec![inst("a"), inst("c")]);
+        assert!(s.nodes[0].expanded, "previously expanded instance stays expanded");
+        assert!(!s.nodes[0].loaded, "connections are re-lazily loaded");
+        assert!(s.nodes[0].connections.is_empty());
+        assert!(!s.nodes[1].expanded);
+    }
+
+    #[test]
+    fn remove_instance_removes_and_clamps_cursor() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b"), inst("c")]);
+        s.cursor = 2;
+        assert!(s.remove_instance(1));
+        assert_eq!(s.nodes.len(), 2);
+        assert_eq!(s.instance_name(1), "c");
+        assert!(s.cursor <= 1, "cursor clamped into the new tree");
+        assert!(!s.remove_instance(5), "out-of-range removal is a no-op");
+    }
+
+    #[test]
+    fn set_single_instance_updates_only_matching_node() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b")]);
+        s.nodes[0].expanded = true;
+        s.nodes[0].connections = vec![conn("c")];
+
+        let mut updated = inst("b");
+        updated.host = "10.0.0.5".to_string();
+        assert!(s.set_single_instance(updated));
+        // "b" metadata updated; "a" expansion + connections untouched.
+        assert_eq!(s.nodes[1].instance.as_ref().unwrap().host, "10.0.0.5");
+        assert!(s.nodes[0].expanded);
+        assert_eq!(s.nodes[0].connections.len(), 1);
+
+        // Unknown instance name returns false.
+        assert!(!s.set_single_instance(inst("nope")));
     }
 }

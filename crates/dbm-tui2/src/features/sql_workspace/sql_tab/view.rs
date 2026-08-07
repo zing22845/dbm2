@@ -15,7 +15,15 @@ use super::history::view as history_view;
 use super::results::view as results_view;
 
 /// Render the `sql_tab` feature: a tab bar plus the active tab's child panes.
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState) {
+/// `focused` colors the body border so the workspace focus is visible.
+pub fn render(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    state: &SqlTabState,
+    focused: bool,
+) {
+    let p = theme.palette();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -28,22 +36,28 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState)
     let sessions: Vec<TabSession> = state.tabs.iter().map(|t| t.session.clone()).collect();
     super::tab::render(frame, theme, chunks[0], &sessions, Some(state.active_tab));
 
+    // A body border shows whether the workspace owns the focus; children render
+    // inside it.
+    let border_color = if focused { p.border_active } else { p.border };
+    let body = Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(ratatui::style::Style::default().fg(border_color));
+    let body_area = body.inner(chunks[1]);
+    frame.render_widget(&body, chunks[1]);
+
     let Some(tab) = state.tabs.get(state.active_tab) else {
         // No tab is open: render an empty placeholder in the body.
-        frame.render_widget(
-            Block::default().title("No open SQL tab"),
-            chunks[1],
-        );
+        frame.render_widget(Block::default().title("No open SQL tab"), body_area);
         return;
     };
 
     // Layout mirrors the original dbm `sql_tab_layout` (ui.rs §11): editor +
     // history on the top row, results below; the pane/splitter rects come from
     // the shared pure layout so the renderer and the run loop agree.
-    let layout = sql_tab_layout(chunks[1], tab.split_ratio, tab.history_pane_width);
+    let layout = sql_tab_layout(body_area, tab.split_ratio, tab.history_pane_width);
     if layout.editor.width == 0 {
         // Area too small to split: show a single results pane.
-        results_view::render(frame, theme, chunks[1], &tab.results);
+        results_view::render(frame, theme, body_area, &tab.results);
         return;
     }
 

@@ -17,6 +17,20 @@ pub fn update(
     let mut intents = Vec::new();
     let mut effects = Vec::new();
     let dirty = match msg {
+        IwMessage::UnregisterInstance { instance } => {
+            effects.push(IwEffect::UnregisterInstance { instance });
+            false
+        }
+        IwMessage::Unregistered { instance } => {
+            // The instance is gone; reset the workspace so the shell can show
+            // the SQL workspace again. The shell also refreshes the explorer
+            // tree and returns focus there.
+            tracing::debug!(instance, "iw: instance unregistered, resetting workspace");
+            state.instance_name.clear();
+            state.overview = overview::state::OverviewState::default();
+            state.connections = connections::state::ConnectionsState::default();
+            true
+        }
         IwMessage::OpenInstance { instance_name } => {
             let changed = state.instance_name != instance_name;
             state.instance_name = instance_name.clone();
@@ -60,4 +74,38 @@ pub fn update(
         }
     };
     (state, intents, effects, dirty)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unregister_instance_emits_effect() {
+        let state = IwState::default();
+        let (_s, _i, effects, dirty) = update(
+            IwMessage::UnregisterInstance { instance: "inst-a".into() },
+            state,
+        );
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            IwEffect::UnregisterInstance { instance } => {
+                assert_eq!(instance, "inst-a");
+            }
+            other => panic!("expected UnregisterInstance effect, got {other:?}"),
+        }
+        assert!(!dirty, "unregister itself does not repaint locally");
+    }
+
+    #[test]
+    fn unregistered_resets_workspace() {
+        let mut state = IwState::default();
+        state.instance_name = "inst-a".to_string();
+        let (s, _i, _e, dirty) = update(
+            IwMessage::Unregistered { instance: "inst-a".into() },
+            state,
+        );
+        assert!(s.instance_name.is_empty(), "workspace reset after unregister");
+        assert!(dirty);
+    }
 }

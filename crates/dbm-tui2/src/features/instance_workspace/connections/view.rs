@@ -11,8 +11,14 @@ use crate::common::view::theme::Theme;
 use super::state::{ConnectionsState, FormField};
 
 /// Render the connections panel: the connection list plus (when open) the
-/// add/edit form.
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ConnectionsState) {
+/// add/edit form. `region_focused` controls the border color.
+pub fn render(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    state: &ConnectionsState,
+    region_focused: bool,
+) {
     let p = theme.palette();
 
     if let Some(form) = &state.form {
@@ -48,10 +54,11 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ConnectionsS
         )));
     }
 
+    let border_color = if region_focused { p.border_active } else { p.border };
     let block = Block::default()
         .title(" connections ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border));
+        .border_style(Style::default().fg(border_color));
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 

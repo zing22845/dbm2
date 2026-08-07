@@ -40,7 +40,7 @@ pub fn render(
         return;
     }
 
-    let footer_text = discover_zone_footer_text(discover_status(state));
+    let footer_text = discover_zone_footer_text(&discover_status(state));
     let footer_h = if footer_text.is_empty() {
         0
     } else {
@@ -104,14 +104,17 @@ pub fn render(
     }
 }
 
-/// A one-line status for the discover zone footer (scanning / last error).
-fn discover_status(state: &DiscoverState) -> &'static str {
+/// A one-line status for the discover zone footer (scanning / last error /
+/// register result).
+fn discover_status(state: &DiscoverState) -> String {
     if state.scanning {
-        "scanning…"
+        "scanning…".to_string()
     } else if state.last_error.is_some() {
-        "scan failed"
+        "scan failed".to_string()
+    } else if let Some(msg) = &state.register_message {
+        msg.clone()
     } else {
-        ""
+        String::new()
     }
 }
 

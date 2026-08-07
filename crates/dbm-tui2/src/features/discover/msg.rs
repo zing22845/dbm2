@@ -18,8 +18,9 @@ pub enum DiscoverMessage {
     Close,
     /// Start a discovery scan over the current targets.
     StartScan,
-    /// Register the currently selected discovered instances.
-    RegisterSelected,
+    /// Register the currently selected discovered instances. `force` bypasses
+    /// precheck warnings (used by the force-register key `R`); errors still block.
+    RegisterSelected { force: bool },
     /// Scan progress update (streamed from the scan effect).
     ScanProgress { done: u32, total: u32 },
     /// The scan completed with the discovered instances.

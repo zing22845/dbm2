@@ -56,6 +56,10 @@ pub fn init_tracing(log_file: Option<std::path::PathBuf>) {
             let _ = tracing_subscriber::fmt()
                 .with_env_filter(EnvFilter::new("debug"))
                 .with_writer(writer)
+                // Include the source file and line number of each log call so
+                // issues can be traced back to the exact code location.
+                .with_file(true)
+                .with_line_number(true)
                 .try_init();
         }
         None => {
@@ -64,6 +68,8 @@ pub fn init_tracing(log_file: Option<std::path::PathBuf>) {
             let _ = tracing_subscriber::fmt()
                 .with_env_filter(filter)
                 .with_writer(std::io::stderr)
+                .with_file(true)
+                .with_line_number(true)
                 .try_init();
         }
     }

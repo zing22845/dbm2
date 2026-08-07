@@ -31,10 +31,12 @@ pub enum DiscoverAction {
 /// Effects emitted by the discover feature.
 #[derive(Debug, Clone)]
 pub enum DiscoverEffect {
-    /// Run a discovery scan over the given config.
+    /// Run a discovery scan over the given config. The results list is read back
+    /// as the full set; the unregistered-only filter is applied in the UI layer.
     StartScan { config: DiscoveryConfig },
     /// Register the discovered instances with the given discovery ids.
-    RegisterInstances { discovery_ids: Vec<String> },
+    /// `force` bypasses precheck warnings (the `R` key); errors still block.
+    RegisterInstances { discovery_ids: Vec<String>, force: bool },
 }
 
 impl Effect for DiscoverEffect {
@@ -44,8 +46,8 @@ impl Effect for DiscoverEffect {
         Box::pin(async move {
             match self {
                 DiscoverEffect::StartScan { config } => run_scan(config, emit, services).await,
-                DiscoverEffect::RegisterInstances { discovery_ids } => {
-                    run_register(discovery_ids, emit, services).await
+                DiscoverEffect::RegisterInstances { discovery_ids, force } => {
+                    run_register(discovery_ids, force, emit, services).await
                 }
             }
         })
@@ -89,7 +91,10 @@ async fn run_scan(
         return vec![DiscoverAction::ScanError { error: e.to_string() }];
     }
 
-    // The scan was persisted by the store; read the fresh cache back.
+    // The scan was persisted by the store; read the fresh cache back as the
+    // full list. The unregistered-only filter is applied in the UI layer
+    // (`ResultsState::visible_indices`) so that toggling `u` can show or hide
+    // already-registered instances without re-querying the store.
     let store = services.store.clone();
     let listed = tokio::task::spawn_blocking(move || {
         let store = store.lock().expect("discover store lock");
@@ -106,24 +111,51 @@ async fn run_scan(
 
 async fn run_register(
     discovery_ids: Vec<String>,
+    force: bool,
     _emit: Emitter<DiscoverAction>,
     services: Arc<Services>,
 ) -> Vec<DiscoverAction> {
+    tracing::debug!(
+        force,
+        count = discovery_ids.len(),
+        discovery_ids = ?discovery_ids,
+        "run_register: calling store.register_discovered"
+    );
     let store = services.store.clone();
     let result = tokio::task::spawn_blocking(move || {
         let store = store.lock().expect("discover store lock");
         store.register_discovered(
             &discovery_ids,
-            dbm_store::RegisterOptions { name: None, force: false },
+            dbm_store::RegisterOptions { name: None, force },
         )
     })
     .await;
 
     match result {
-        Ok(Ok(reg)) => vec![DiscoverAction::RegisterComplete {
-            count: reg.instances.len(),
-        }],
-        Ok(Err(e)) => vec![DiscoverAction::RegisterError { error: e.to_string() }],
-        Err(e) => vec![DiscoverAction::RegisterError { error: e.to_string() }],
+        Ok(Ok(reg)) => {
+            tracing::debug!(
+                count = reg.instances.len(),
+                "run_register: register_discovered succeeded"
+            );
+            vec![DiscoverAction::RegisterComplete {
+                count: reg.instances.len(),
+            }]
+        }
+        Ok(Err(e)) => {
+            // A plain register (`r`) stops on precheck warnings; tell the user
+            // they can force-register (`R`) to bypass warnings (errors still
+            // block). Force-register failures are reported as-is.
+            tracing::warn!(error = %e, "run_register: register_discovered failed");
+            let error = if !force && matches!(e, dbm_store::StoreError::PrecheckFailed { .. }) {
+                format!("{e}\nuse R to force register (bypass warnings)")
+            } else {
+                e.to_string()
+            };
+            vec![DiscoverAction::RegisterError { error }]
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "run_register: spawn_blocking join failed");
+            vec![DiscoverAction::RegisterError { error: e.to_string() }]
+        }
     }
 }

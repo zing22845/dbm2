@@ -18,10 +18,7 @@ pub fn update(
         ResultsMessage::MoveUp => state.move_up(),
         ResultsMessage::MoveDown => state.move_down(),
         ResultsMessage::ToggleSelect => state.toggle_select(),
-        ResultsMessage::ToggleUnregisteredFilter => {
-            state.unregistered_only = !state.unregistered_only;
-            true
-        }
+        ResultsMessage::ToggleUnregisteredFilter => state.toggle_unregistered_filter(),
     };
     (state, Vec::new(), Vec::new(), dirty)
 }

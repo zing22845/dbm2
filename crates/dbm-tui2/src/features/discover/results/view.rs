@@ -49,13 +49,17 @@ pub fn render(
             Style::default().fg(p.muted),
         )));
     } else {
+        // Cursor/scroll are positions within the filtered (visible) list, so
+        // iterate the visible items indices and use the display position for
+        // focus/selection markers. `selected` stores underlying `items` indices.
+        let visible = state.visible_indices();
         let body_h = body.height as usize;
-        for (vis, idx) in (state.scroll..state.items.len()).enumerate() {
-            if vis >= body_h {
+        for (vis, &idx) in visible.iter().enumerate().skip(state.scroll) {
+            if vis - state.scroll >= body_h {
                 break;
             }
             let item = &state.items[idx];
-            let row_focused = idx == state.cursor;
+            let row_focused = vis == state.cursor;
             let checked = if state.selected.contains(&idx) { "✓" } else { " " };
             let style = if row_focused {
                 Style::default()

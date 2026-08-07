@@ -10,8 +10,14 @@ use super::connections::view as connections_view;
 use super::overview::view as overview_view;
 
 /// Render the instance workspace: the overview panel on top and the
-/// connections panel below.
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &IwState) {
+/// connections panel below. `focused` colors the connections border.
+pub fn render(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    state: &IwState,
+    focused: bool,
+) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -21,5 +27,5 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &IwState) {
         .split(area);
 
     overview_view::render(frame, theme, chunks[0], &state.overview);
-    connections_view::render(frame, theme, chunks[1], &state.connections);
+    connections_view::render(frame, theme, chunks[1], &state.connections, focused);
 }

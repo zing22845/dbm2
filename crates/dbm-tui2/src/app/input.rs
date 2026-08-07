@@ -18,7 +18,7 @@ use crate::features::discover::targets::msg::{TargetsMessage, TargetsMsg};
 use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
 use crate::features::explorer::objects::msg::{ObjectsMessage, ObjectsMsg};
-use crate::features::explorer::state::{ExplorerPane, ExplorerState};
+use crate::features::explorer::state::ExplorerPane;
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 use crate::features::instance_workspace::connections::msg::{ConnectionsMessage, ConnectionsMsg};
 use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
@@ -46,19 +46,23 @@ use super::state::ModalKind;
 pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMsg> {
     // Pane/zone navigation (Ctrl+h/j/k/l / Ctrl+arrows) is shell-level: it
     // moves the focus zone regardless of the currently focused pane. Check it
-    // first, before modal/focus routing, so it always works.
+    // first, before modal/focus routing, so it always works. Top-level pane
+    // movement wins (so Ctrl+h from the workspace leaves to the explorer);
+    // within-workspace sub-pane moves only apply to directions that do not
+    // leave the workspace.
     if state.modal.is_none()
         && !matches!(state.focus, Pane::Discover(_))
         && let Some(dir) = pane_dir_from_key(&key)
     {
-        // Inside the SQL workspace, Ctrl+nav moves the sub-pane focus
-        // (editor / results / history) rather than the top-level pane.
-        if state.focus == Pane::Workspace
-            && let Some(msg) = switch_subpane(dir, &state.sql)
-        {
+        if let Some(msg) = switch_zone_by_dir(dir, state.focus) {
             return Some(msg);
         }
-        return switch_zone_by_dir(dir, state.focus);
+        // Inside the SQL workspace, Ctrl+nav moves the sub-pane focus
+        // (editor / results / history) when the move stays within the workspace.
+        if state.focus == Pane::Workspace {
+            return switch_subpane(dir, &state.sql);
+        }
+        return None;
     }
     if let Pane::Discover(sub) = state.focus {
         // The discover parent pane owns all input; ctrl+hjkl moves between its
@@ -71,7 +75,7 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
         Some(modal) => modal_key(key, modal, state),
         None => match state.focus {
             Pane::Header => header_key(key),
-            Pane::Explorer => explorer_key(key, &state.explorer),
+            Pane::Explorer(sub) => explorer_key(key, sub),
             Pane::InstanceWorkspace => iw_key(key, &state.iw),
             Pane::Workspace => sql_key(key, &state.sql),
             // Discover is handled above (owns all input while open).
@@ -80,23 +84,28 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
     }
 }
 
-/// Move the focus pane one step in `dir`, mirroring the original `zone_nav`
-/// cross-zone edges for the shell layout (header top, explorer left, workspace
-/// right): `Header ↔ Explorer` vertically, `Explorer ↔ workspace` horizontally.
+/// Move the focus pane one step in `dir`. The explorer is a parent pane whose
+/// child sub-pane (instances / objects) is the focused region, so Ctrl+nav
+/// cycles within it and crosses to its neighbors (header above, workspace to
+/// the right), mirroring the `Discover` parent pane. Workspace/instance leave
+/// left to the explorer and up to the header.
 fn switch_zone_by_dir(dir: crate::common::utils::zone_nav::PaneDir, focus: Pane) -> Option<AppMsg> {
+    use crate::common::utils::zone_nav::{ExplorerPane, PaneDir as D};
     let pane = match (focus, dir) {
-        // Header moves down into the explorer; explorer moves up to the header.
-        (Pane::Header, crate::common::utils::zone_nav::PaneDir::Down) => Pane::Explorer,
-        (Pane::Explorer, crate::common::utils::zone_nav::PaneDir::Up) => Pane::Header,
-        // Explorer moves right into the workspace; workspace moves left back
-        // to the explorer (and up to the header).
-        (Pane::Explorer, crate::common::utils::zone_nav::PaneDir::Right) => Pane::Workspace,
-        (Pane::Workspace | Pane::InstanceWorkspace, crate::common::utils::zone_nav::PaneDir::Left) => {
-            Pane::Explorer
+        // Header moves down into the explorer (instances by default).
+        (Pane::Header, D::Down) => Pane::Explorer(ExplorerPane::default()),
+        // Inside the explorer, Up/Down cycle instances <-> objects; Up from
+        // instances leaves to the header.
+        (Pane::Explorer(ExplorerPane::Instances), D::Up) => Pane::Header,
+        (Pane::Explorer(ExplorerPane::Instances), D::Down) => Pane::Explorer(ExplorerPane::Objects),
+        (Pane::Explorer(ExplorerPane::Objects), D::Up) => Pane::Explorer(ExplorerPane::Instances),
+        // Explorer moves right into the workspace.
+        (Pane::Explorer(_), D::Right) => Pane::Workspace,
+        // Workspace/instance leave left to the explorer and up to the header.
+        (Pane::Workspace | Pane::InstanceWorkspace, D::Left) => {
+            Pane::Explorer(ExplorerPane::default())
         }
-        (Pane::Workspace | Pane::InstanceWorkspace, crate::common::utils::zone_nav::PaneDir::Up) => {
-            Pane::Header
-        }
+        (Pane::Workspace | Pane::InstanceWorkspace, D::Up) => Pane::Header,
         _ => return None,
     };
     tracing::debug!(from = ?focus, to = ?pane, "pane switch via Ctrl+nav");
@@ -196,8 +205,12 @@ fn modal_key(key: KeyEvent, modal: &ModalKind, state: &super::state::AppState) -
                 // `CommitResult`).
                 active_tab_id().map(|id| sql_results(R::Commit, id))
             }
-            ModalKind::DeleteConnectionConfirm { .. }
-            | ModalKind::UnregisterInstanceConfirm { .. } => Some(close()),
+            ModalKind::DeleteConnectionConfirm { .. } => Some(close()),
+            // Confirm unregistering the current instance: close the modal and
+            // dispatch the unregister to the instance workspace.
+            ModalKind::UnregisterInstanceConfirm { instance } => Some(close_and_unregister(
+                instance.clone(),
+            )),
             _ => None,
         },
         // Row-limit picker: up/down cycle the presets, enter applies.
@@ -288,8 +301,17 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
     match code {
         KeyCode::Esc => Some(discover(DiscoverMessage::RequestClose)),
         // Scan / register are discover-level actions available from any pane.
+        // `r` registers normally (blocks on precheck warnings); `R` force-
+        // registers (bypasses warnings, errors still block).
         KeyCode::Char('s') => Some(discover(DiscoverMessage::StartScan)),
-        KeyCode::Char('r') => Some(discover(DiscoverMessage::RegisterSelected)),
+        KeyCode::Char('r') => {
+            tracing::debug!(pane = ?sub, "discover key: register (force=false)");
+            Some(discover(DiscoverMessage::RegisterSelected { force: false }))
+        }
+        KeyCode::Char('R') => {
+            tracing::debug!(pane = ?sub, "discover key: force-register (force=true)");
+            Some(discover(DiscoverMessage::RegisterSelected { force: true }))
+        }
         _ => match sub {
             DiscoverPane::Engine => match code {
                 KeyCode::Enter | KeyCode::Char('e') => {
@@ -353,17 +375,22 @@ fn results(msg: ResultsMessage) -> AppMsg {
     )))
 }
 
-/// Explorer key bindings, dispatched by the active explorer pane.
-fn explorer_key(key: KeyEvent, state: &ExplorerState) -> Option<AppMsg> {
+/// Explorer key bindings, dispatched by the active explorer child pane `sub`.
+/// `Tab` (and Ctrl+Up/Down via the shell) moves between the instances and
+/// objects panes; that flows through a shell `FocusChanged` so the shell focus
+/// and the explorer feature's sub-pane stay in sync.
+fn explorer_key(key: KeyEvent, sub: ExplorerPane) -> Option<AppMsg> {
     // `Tab` toggles between the instances and objects panes.
     if key.code == KeyCode::Tab {
-        let next = match state.pane {
+        let next = match sub {
             ExplorerPane::Instances => ExplorerPane::Objects,
             ExplorerPane::Objects => ExplorerPane::Instances,
         };
-        return Some(explorer(ExplorerMessage::SetPane(next)));
+        return Some(AppMsg::Shell(ShellMsg::FocusChanged {
+            pane: Pane::Explorer(next),
+        }));
     }
-    match state.pane {
+    match sub {
         ExplorerPane::Instances => instances_key(key),
         ExplorerPane::Objects => objects_key(key),
     }
@@ -410,6 +437,18 @@ fn iw_key(key: KeyEvent, state: &IwState) -> Option<AppMsg> {
         KeyCode::Char('a') => ConnectionsMessage::BeginAdd,
         KeyCode::Char('e') | KeyCode::Enter => ConnectionsMessage::BeginEdit,
         KeyCode::Char('d') | KeyCode::Delete => ConnectionsMessage::Delete,
+        // `u` unregisters the current managed instance (like the original dbm's
+        // overview `u`); it opens a confirm modal first.
+        KeyCode::Char('u') => {
+            if state.instance_name.is_empty() {
+                return None;
+            }
+            return Some(AppMsg::OpenModal(
+                crate::app::state::ModalKind::UnregisterInstanceConfirm {
+                    instance: state.instance_name.clone(),
+                },
+            ));
+        }
         _ => return None,
     };
     Some(iw(IwMessage::Connections(ConnectionsMsg::Message(msg))))
@@ -432,6 +471,13 @@ fn iw_form_key(key: KeyEvent) -> Option<AppMsg> {
 
 fn iw(msg: IwMessage) -> AppMsg {
     AppMsg::Iw(IwMsg::Message(msg))
+}
+
+/// Confirm-unregister helper: the shell closes the modal and dispatches the
+/// unregister to the instance workspace. The shell closes the modal when it
+/// sees the `UnregisterInstance` message.
+fn close_and_unregister(instance: String) -> AppMsg {
+    iw(IwMessage::UnregisterInstance { instance })
 }
 
 /// SQL workspace key bindings, routed to the active tab's editor and its
@@ -783,7 +829,7 @@ mod tests {
             .expect("ctrl+j should switch pane");
         match msg {
             AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
-                assert_eq!(pane, Pane::Explorer);
+                assert_eq!(pane, Pane::Explorer(ExplorerPane::default()));
             }
             _ => panic!("expected focus change"),
         }
@@ -797,7 +843,7 @@ mod tests {
             .expect("ctrl+h should switch pane");
         match msg {
             AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
-                assert_eq!(pane, Pane::Explorer);
+                assert_eq!(pane, Pane::Explorer(ExplorerPane::default()));
             }
             _ => panic!("expected focus change"),
         }
@@ -806,12 +852,73 @@ mod tests {
     #[test]
     fn ctrl_l_moves_from_explorer_to_workspace() {
         let mut state = crate::app::state::AppState::default();
-        state.focus = Pane::Explorer;
+        state.focus = Pane::Explorer(ExplorerPane::default());
         let msg = key_to_msg(key(KeyCode::Char('l'), KeyModifiers::CONTROL), &state)
             .expect("ctrl+l should switch pane");
         match msg {
             AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
                 assert_eq!(pane, Pane::Workspace);
+            }
+            _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
+    fn ctrl_j_within_explorer_switches_instances_to_objects() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::Explorer(ExplorerPane::Instances);
+        let msg = key_to_msg(key(KeyCode::Char('j'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+j inside explorer should switch sub-pane");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::Explorer(ExplorerPane::Objects));
+            }
+            _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
+    fn ctrl_k_within_explorer_switches_objects_to_instances() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::Explorer(ExplorerPane::Objects);
+        let msg = key_to_msg(key(KeyCode::Char('k'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+k inside explorer should switch sub-pane");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::Explorer(ExplorerPane::Instances));
+            }
+            _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
+    fn ctrl_k_from_explorer_instances_leaves_to_header() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::Explorer(ExplorerPane::Instances);
+        let msg = key_to_msg(key(KeyCode::Char('k'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+k from explorer instances should leave to header");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::Header);
+            }
+            _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
+    fn ctrl_h_from_workspace_leaves_to_explorer_even_when_results_focused() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::Workspace;
+        // Put the active tab on Results so the old `switch_subpane` path would
+        // have intercepted ctrl+h; top-level nav must still win.
+        if let Some(tab) = state.sql.sql_tab.tabs.get_mut(state.sql.sql_tab.active_tab) {
+            tab.focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::Results;
+        }
+        let msg = key_to_msg(key(KeyCode::Char('h'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+h from workspace should leave to explorer");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::Explorer(ExplorerPane::default()));
             }
             _ => panic!("expected focus change"),
         }
@@ -904,6 +1011,34 @@ mod tests {
         assert!(matches!(
             up,
             AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverPane::Results)))
+        ));
+    }
+
+    #[test]
+    fn discover_r_register_and_r_force_register() {
+        use crate::features::discover::state::DiscoverState;
+        let state = DiscoverState::opened();
+        // `r` registers normally (no force).
+        let reg = discover_key(
+            key(KeyCode::Char('r'), KeyModifiers::NONE),
+            DiscoverPane::Results,
+            &state,
+        )
+        .expect("r should register");
+        assert!(matches!(
+            reg,
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::RegisterSelected { force: false }))
+        ));
+        // `R` force-registers (bypasses warnings).
+        let force = discover_key(
+            key(KeyCode::Char('R'), KeyModifiers::NONE),
+            DiscoverPane::Results,
+            &state,
+        )
+        .expect("R should force-register");
+        assert!(matches!(
+            force,
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::RegisterSelected { force: true }))
         ));
     }
 

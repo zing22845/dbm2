@@ -15,6 +15,8 @@ pub enum IwAction {
     Overview(OverviewAction),
     /// An action originating from the connections panel.
     Connections(ConnectionsAction),
+    /// The store confirmed the instance was unregistered.
+    Unregistered { instance: String },
 }
 
 impl From<OverviewAction> for IwAction {
@@ -37,6 +39,8 @@ pub enum IwEffect {
     Overview(OverviewEffect),
     /// An effect originating from the connections panel.
     Connections(ConnectionsEffect),
+    /// Unregister (delete) the named managed instance from the store.
+    UnregisterInstance { instance: String },
 }
 
 impl Effect for IwEffect {
@@ -60,6 +64,26 @@ impl Effect for IwEffect {
                         .into_iter()
                         .map(IwAction::Connections)
                         .collect()
+                }
+                IwEffect::UnregisterInstance { instance } => {
+                    let name = instance.clone();
+                    let store = services.store.clone();
+                    let result = tokio::task::spawn_blocking(move || {
+                        let store = store.lock().expect("iw store lock");
+                        store.unregister_managed(&name)
+                    })
+                    .await;
+                    match result {
+                        Ok(Ok(_)) => vec![IwAction::Unregistered { instance }],
+                        Ok(Err(e)) => {
+                            tracing::warn!(error = %e, "iw unregister failed");
+                            Vec::new()
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "iw unregister join failed");
+                            Vec::new()
+                        }
+                    }
                 }
             }
         })

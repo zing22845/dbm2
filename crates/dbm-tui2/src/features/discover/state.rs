@@ -24,6 +24,9 @@ pub struct DiscoverState {
     pub scanning: bool,
     /// The last scan error, if any (cleared on a successful scan or new scan).
     pub last_error: Option<String>,
+    /// The result of the last register attempt (success count or failure
+    /// reason), shown in the discover zone footer. Cleared on reopen.
+    pub register_message: Option<String>,
 }
 
 impl DiscoverState {

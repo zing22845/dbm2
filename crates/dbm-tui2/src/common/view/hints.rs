@@ -203,6 +203,7 @@ pub fn discover_results_footer_text() -> String {
     keys(&[
         ("Select", lit("SPACE")),
         ("Register", lit("r")),
+        ("Force", lit("R")),
         ("Filter", lit("u")),
     ])
 }
@@ -352,10 +353,11 @@ mod tests {
         let committing = discover_targets_footer_text(true, false);
         assert!(committing.contains("Commit: ENTER"));
         assert!(committing.contains("Cancel: ESC"));
-        // Results footer lists selection/register/filter.
+        // Results footer lists selection / register / force-register / filter.
         let results = discover_results_footer_text();
         assert!(results.contains("Select: SPACE"));
         assert!(results.contains("Register: r"));
+        assert!(results.contains("Force: R"));
         assert!(results.contains("Filter: u"));
     }
 

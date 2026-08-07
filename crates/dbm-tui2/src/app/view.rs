@@ -44,15 +44,20 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     // readout moved into the footer row (right-aligned) to save vertical space.
     let workspace = body[1];
 
+    // Pass whether each region owns the shell focus so the views can highlight
+    // the active pane's border (otherwise focus changes are invisible).
+    let explorer_focused = matches!(state.focus, Pane::Explorer(_));
+    let workspace_focused = matches!(state.focus, Pane::Workspace)
+        || matches!(state.focus, Pane::InstanceWorkspace);
     header_view::render(frame, &state.theme, chunks[0], &state.header);
-    explorer_view::render(frame, &state.theme, body[0], &state.explorer);
+    explorer_view::render(frame, &state.theme, body[0], &state.explorer, explorer_focused);
     // The main workspace region shows the instance workspace when an instance
     // is open, otherwise the SQL workspace. A future tab mechanism will make
     // this explicit.
     if state.iw.instance_name.is_empty() {
-        sql_view::render(frame, &state.theme, workspace, &state.sql);
+        sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused);
     } else {
-        iw_view::render(frame, &state.theme, workspace, &state.iw);
+        iw_view::render(frame, &state.theme, workspace, &state.iw, workspace_focused);
     }
     // The bottom row holds the global footer on the left and the performance
     // readout on the right.

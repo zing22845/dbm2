@@ -63,10 +63,23 @@ pub fn update(
                 false
             }
         }
-        DiscoverMessage::RegisterSelected => {
+        DiscoverMessage::RegisterSelected { force } => {
             let discovery_ids = state.results.selected_discovery_ids();
+            tracing::debug!(
+                force,
+                selected = discovery_ids.len(),
+                discovery_ids = ?discovery_ids,
+                "RegisterSelected: emitting RegisterInstances"
+            );
             if !discovery_ids.is_empty() {
-                effects.push(DiscoverEffect::RegisterInstances { discovery_ids });
+                effects.push(DiscoverEffect::RegisterInstances {
+                    discovery_ids,
+                    force,
+                });
+            } else {
+                tracing::warn!(
+                    "RegisterSelected: no selected instances, no effect emitted"
+                );
             }
             false
         }
@@ -95,11 +108,13 @@ pub fn update(
         }
         DiscoverMessage::RegisterComplete { count } => {
             tracing::info!("registered {count} discovered instance(s)");
-            false
+            state.register_message = Some(format!("registered {count} instance(s)"));
+            true
         }
         DiscoverMessage::RegisterError { error } => {
             tracing::warn!("discover register failed: {error}");
-            false
+            state.register_message = Some(format!("register failed: {error}"));
+            true
         }
         DiscoverMessage::Engine(m) => {
             let engine::msg::EngineMsg::Message(inner) = m;
@@ -155,4 +170,176 @@ fn build_scan_config(state: &DiscoverState) -> Option<DiscoveryConfig> {
         max_duration: Duration::from_secs(10),
         engine: state.engine.engine,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbm_core::Engine;
+    use dbm_discovery::{Confidence, DiscoveredInstance, DiscoverySource, InstanceRunStatus};
+
+    fn sample_instance(discovery_id: &str) -> DiscoveredInstance {
+        DiscoveredInstance {
+            discovery_id: discovery_id.into(),
+            fingerprint: format!("fp-{discovery_id}"),
+            engine: Engine::Postgres,
+            host: "127.0.0.1".into(),
+            port: 5432,
+            socket_path: None,
+            data_dir: None,
+            systemd_unit: None,
+            version: None,
+            status: InstanceRunStatus::Running,
+            sources: vec![DiscoverySource::Port],
+            confidence: Confidence::Medium,
+            already_registered: false,
+            registered_instance_id: None,
+            scanned_at: "now".into(),
+        }
+    }
+
+    #[test]
+    fn register_selected_emits_effect_with_selected_ids_and_force() {
+        let mut state = DiscoverState::opened();
+        state.results.items = vec![
+            sample_instance("dsc-1"),
+            sample_instance("dsc-2"),
+            sample_instance("dsc-3"),
+        ];
+        // Select the first and third rows (cursor 0 and 2).
+        state.results.selected = vec![0, 2];
+
+        let (_state, _intents, effects, _dirty) = update(
+            DiscoverMessage::RegisterSelected { force: true },
+            state,
+        );
+
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            DiscoverEffect::RegisterInstances { discovery_ids, force } => {
+                assert_eq!(discovery_ids, &["dsc-1".to_string(), "dsc-3".to_string()]);
+                assert!(*force);
+            }
+            other => panic!("expected RegisterInstances effect, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn register_selected_with_no_selection_emits_no_effect() {
+        let mut state = DiscoverState::opened();
+        state.results.items = vec![sample_instance("dsc-1")];
+        state.results.selected = Vec::new();
+
+        let (_state, _intents, effects, _dirty) = update(
+            DiscoverMessage::RegisterSelected { force: false },
+            state,
+        );
+
+        assert!(effects.is_empty(), "no selection must not emit an effect");
+    }
+
+    #[test]
+    fn start_scan_emits_scan_effect() {
+        let state = DiscoverState::opened();
+        let (_state, _intents, effects, _dirty) =
+            update(DiscoverMessage::StartScan, state);
+        assert_eq!(effects.len(), 1);
+        assert!(
+            matches!(&effects[0], DiscoverEffect::StartScan { config: _ }),
+            "expected StartScan effect, got {:?}",
+            effects[0]
+        );
+    }
+
+    #[test]
+    fn results_filter_defaults_to_unregistered_only() {
+        let state = DiscoverState::opened();
+        assert!(state.results.unregistered_only);
+    }
+
+    fn inst(id: &str, registered: bool) -> DiscoveredInstance {
+        DiscoveredInstance {
+            discovery_id: id.into(),
+            fingerprint: format!("fp-{id}"),
+            engine: Engine::Postgres,
+            host: "127.0.0.1".into(),
+            port: 5432,
+            socket_path: None,
+            data_dir: None,
+            systemd_unit: None,
+            version: None,
+            status: InstanceRunStatus::Running,
+            sources: vec![DiscoverySource::Port],
+            confidence: Confidence::Medium,
+            already_registered: registered,
+            registered_instance_id: registered.then(|| "inst-1".to_string()),
+            scanned_at: "now".into(),
+        }
+    }
+
+    #[test]
+    fn results_visible_indices_respect_filter() {
+        let mut state = DiscoverState::opened();
+        state.results.items = vec![inst("a", false), inst("b", true), inst("c", false)];
+
+        // Default filter (unregistered_only) hides the registered one.
+        assert!(state.results.unregistered_only);
+        assert_eq!(state.results.visible_indices(), vec![0, 2]);
+        assert_eq!(state.results.row_count(), 2);
+
+        // Toggling off shows the full list.
+        assert!(state.results.toggle_unregistered_filter());
+        assert!(!state.results.unregistered_only);
+        assert_eq!(state.results.visible_indices(), vec![0, 1, 2]);
+        assert_eq!(state.results.row_count(), 3);
+
+        // Toggling back on hides it again.
+        assert!(state.results.toggle_unregistered_filter());
+        assert_eq!(state.results.visible_indices(), vec![0, 2]);
+    }
+
+    #[test]
+    fn toggle_select_uses_underlying_items_index() {
+        let mut state = DiscoverState::opened();
+        state.results.items = vec![inst("a", false), inst("b", true), inst("c", false)];
+        // cursor at visible position 0 -> items index 0 ("a").
+        assert!(state.results.toggle_select());
+        assert_eq!(state.results.selected, vec![0]);
+        assert_eq!(
+            state.results.selected_discovery_ids(),
+            vec!["a".to_string()]
+        );
+
+        // move to visible position 1 -> items index 2 ("c").
+        assert!(state.results.move_down());
+        assert!(state.results.toggle_select());
+        assert_eq!(state.results.selected, vec![0, 2]);
+        assert_eq!(
+            state.results.selected_discovery_ids(),
+            vec!["a".to_string(), "c".to_string()]
+        );
+    }
+
+    #[test]
+    fn register_complete_records_message_and_is_dirty() {
+        let state = DiscoverState::opened();
+        let (state, _intents, _effects, dirty) =
+            update(DiscoverMessage::RegisterComplete { count: 2 }, state);
+        assert_eq!(state.register_message.as_deref(), Some("registered 2 instance(s)"));
+        assert!(dirty);
+    }
+
+    #[test]
+    fn register_error_records_message_and_is_dirty() {
+        let state = DiscoverState::opened();
+        let (state, _intents, _effects, dirty) = update(
+            DiscoverMessage::RegisterError { error: "boom".into() },
+            state,
+        );
+        assert_eq!(
+            state.register_message.as_deref(),
+            Some("register failed: boom")
+        );
+        assert!(dirty);
+    }
 }
