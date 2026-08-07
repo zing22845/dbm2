@@ -248,9 +248,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 } else if mouse.row >= body_top + body_h {
                                     None
                                 } else if mouse.column < explorer_w {
-                                    Some(Pane::Explorer(
-                                        crate::app_shell::nav::ExplorerPane::default(),
-                                    ))
+                                    // The explorer is a parent pane hosting the
+                                    // instances (top) and objects (bottom) trees;
+                                    // map the click row to the matching sub-pane
+                                    // so mouse navigation agrees with Ctrl+j/k.
+                                    Some(Pane::Explorer(explorer_pane_for_click(
+                                        mouse.row,
+                                        body_top,
+                                        body_h,
+                                    )))
                                 } else if state.iw.instance_name.is_empty() {
                                     Some(Pane::Workspace)
                                 } else {
@@ -774,6 +780,29 @@ fn iw_action_to_msg(action: crate::features::instance_workspace::effect::IwActio
     }
 }
 
+/// Map a click row inside the explorer column to an explorer child sub-pane
+/// (instances on top / objects on the bottom), mirroring the explorer view's
+/// vertical layout and Ctrl+j/k. The row is relative to the explorer's outer
+/// border (top row) and body height, matching the layout in `explorer/view.rs`.
+fn explorer_pane_for_click(
+    row: u16,
+    body_top: u16,
+    body_h: u16,
+) -> crate::app_shell::nav::ExplorerPane {
+    use crate::app_shell::nav::ExplorerPane;
+    // The outer " Explorer " border occupies the top row; child panes sit below
+    // it. Instances fill the upper half, objects the lower half (splitter row
+    // between them).
+    let inner_y = body_top + 1;
+    let inner_h = body_h.saturating_sub(2); // minus the outer border
+    let half = inner_h / 2;
+    if row <= inner_y + half {
+        ExplorerPane::Instances
+    } else {
+        ExplorerPane::Objects
+    }
+}
+
 /// Map a click inside the discover popup to a discover child sub-pane
 /// (engine / targets / results), mirroring the discover view's vertical layout
 /// and Ctrl+j/k. Returns `None` for clicks outside the popup body (the header
@@ -959,6 +988,17 @@ mod tests {
     use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
     use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
     use crate::features::sql_workspace::sql_tab::results::state::QueryResultData;
+
+    #[test]
+    fn explorer_click_maps_rows_to_instances_objects() {
+        use crate::app_shell::nav::ExplorerPane;
+        // body_top=3, body_h=20 -> inner_y=4, inner_h=18, half=9.
+        // Instances: rows <= 13; Objects: rows > 13.
+        assert_eq!(explorer_pane_for_click(5, 3, 20), ExplorerPane::Instances);
+        assert_eq!(explorer_pane_for_click(13, 3, 20), ExplorerPane::Instances);
+        assert_eq!(explorer_pane_for_click(14, 3, 20), ExplorerPane::Objects);
+        assert_eq!(explorer_pane_for_click(21, 3, 20), ExplorerPane::Objects);
+    }
 
     #[test]
     fn discover_click_maps_rows_to_subpanes() {
