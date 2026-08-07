@@ -183,14 +183,14 @@ fn render_modal_popup<'a, S, F>(
         width: w,
         height: h,
     };
-    // Cover the whole modal region with an opaque background first (mirrors the
-    // original `draw_modal_overlay`: clear + solid fill) so the workspace behind
-    // the modal is hidden and the popup reads as a solid, non-transparent layer.
-    crate::common::view::overlay_clear::clear_overlay(frame, base);
+    // Clear + opaque fill only over the discover pane's own frame (the popup
+    // rect), not the whole workspace, so the SQL workspace behind remains
+    // visible around the modal.
+    crate::common::view::overlay_clear::clear_overlay(frame, popup);
     frame.render_widget(
         ratatui::widgets::Block::default()
             .style(ratatui::style::Style::default().bg(theme.palette().bg)),
-        base,
+        popup,
     );
     inner(frame, theme, popup, state);
 }
