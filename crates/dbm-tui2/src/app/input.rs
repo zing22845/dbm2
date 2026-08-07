@@ -261,6 +261,14 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
         };
     }
 
+    // While editing a target cell, route every key to the targets editor so
+    // `Esc` cancels the edit instead of triggering the discover close-confirm
+    // dialog, and text/navigation keys edit the cell rather than firing
+    // discover-level actions.
+    if sub == DiscoverPane::Targets && state.targets.editing {
+        return targets_pane_key(key, state);
+    }
+
     // Pane-move chords (Ctrl+hjkl / Ctrl+arrows) take precedence. The discover
     // panes are stacked vertically (engine / targets / results), so Up/Down
     // (j/k) move between them; Left/Right (h/l) are kept as alternates.

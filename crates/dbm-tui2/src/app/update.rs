@@ -85,9 +85,18 @@ fn focus_pane_of(msg: &AppMsg) -> Option<Pane> {
 
 /// Open the discover modal: reset its state and make it the active parent pane,
 /// focused on the engine child pane.
+///
+/// The user's edited targets are preserved across reopen (process lifetime),
+/// matching the original dbm: only seed the loopback default when the list is
+/// empty. Everything else (engine, results, scan state) resets for a fresh
+/// scan session.
 fn open_discover(state: &mut AppState) {
     tracing::debug!("open_discover: setting focus to Discover parent pane");
+    let preserved_targets = std::mem::take(&mut state.discover.targets).targets;
     state.discover = crate::features::discover::state::DiscoverState::opened();
+    if !preserved_targets.is_empty() {
+        state.discover.targets.targets = preserved_targets;
+    }
     state.focus = Pane::Discover(DiscoverPane::Engine);
     state.modal = None;
 }
