@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(state.sql.sql_tab.tabs.len(), 1);
         assert_eq!(
             state.focus,
-            Pane::Explorer(crate::common::utils::zone_nav::ExplorerPane::default())
+            Pane::Explorer(crate::app_shell::nav::ExplorerPane::default())
         );
     }
 }

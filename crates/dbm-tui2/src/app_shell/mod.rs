@@ -25,4 +25,5 @@ pub mod action;
 pub mod effect;
 pub mod intent;
 pub mod msg;
+pub mod nav;
 pub mod pane;

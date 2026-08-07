@@ -5,7 +5,7 @@ use super::objects::state::ObjectsState;
 
 // Re-export the shared explorer sub-pane type so the shell's `Pane` and the
 // explorer feature agree on the same navigation type.
-pub use crate::common::utils::zone_nav::ExplorerPane;
+pub use crate::app_shell::nav::ExplorerPane;
 
 /// State for the explorer feature, aggregating its two child sub-modules.
 #[derive(Debug, Clone, Default)]

@@ -249,7 +249,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     None
                                 } else if mouse.column < explorer_w {
                                     Some(Pane::Explorer(
-                                        crate::common::utils::zone_nav::ExplorerPane::default(),
+                                        crate::app_shell::nav::ExplorerPane::default(),
                                     ))
                                 } else if state.iw.instance_name.is_empty() {
                                     Some(Pane::Workspace)

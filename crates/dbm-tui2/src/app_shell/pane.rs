@@ -18,7 +18,7 @@ pub enum Pane {
     Header,
     /// Left-side explorer / object tree. Like `Discover`, it is a parent pane
     /// whose child sub-pane (instances / objects) is the focused region.
-    Explorer(crate::common::utils::zone_nav::ExplorerPane),
+    Explorer(crate::app_shell::nav::ExplorerPane),
     /// Main workspace area (SQL tabs, editor, history, results).
     Workspace,
     /// Instance / connection management pane.
@@ -90,7 +90,7 @@ pub fn pane_from_name(name: &str) -> Option<Pane> {
     match name {
         "header" | "Header" => Some(Pane::Header),
         "explorer" | "tree" | "Explorer" => Some(Pane::Explorer(
-            crate::common::utils::zone_nav::ExplorerPane::default(),
+            crate::app_shell::nav::ExplorerPane::default(),
         )),
         "workspace" | "SQLWorkspace" | "InstanceWorkspace" => Some(Pane::Workspace),
         _ => None,

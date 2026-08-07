@@ -9,4 +9,3 @@ pub mod shortcuts;
 pub mod sql_editability;
 pub mod sql_search;
 pub mod text_width;
-pub mod zone_nav;

@@ -10,7 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app_shell::msg::ShellMsg;
 use crate::app_shell::pane::{DiscoverPane, Pane};
-use crate::common::utils::zone_nav::{pane_dir_from_key, PaneDir};
+use crate::app_shell::nav::{pane_dir_from_key, PaneDir};
 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
 use crate::features::discover::results::msg::{ResultsMessage, ResultsMsg};
 use crate::features::discover::state::DiscoverState;
@@ -89,8 +89,8 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
 /// cycles within it and crosses to its neighbors (header above, workspace to
 /// the right), mirroring the `Discover` parent pane. Workspace/instance leave
 /// left to the explorer and up to the header.
-fn switch_zone_by_dir(dir: crate::common::utils::zone_nav::PaneDir, focus: Pane) -> Option<AppMsg> {
-    use crate::common::utils::zone_nav::{ExplorerPane, PaneDir as D};
+fn switch_zone_by_dir(dir: crate::app_shell::nav::PaneDir, focus: Pane) -> Option<AppMsg> {
+    use crate::app_shell::nav::{ExplorerPane, PaneDir as D};
     let pane = match (focus, dir) {
         // Header moves down into the explorer (instances by default).
         (Pane::Header, D::Down) => Pane::Explorer(ExplorerPane::default()),
@@ -117,8 +117,8 @@ fn switch_zone_by_dir(dir: crate::common::utils::zone_nav::PaneDir, focus: Pane)
 /// editor → results via right/down; results ↔ history via down/up; back to the
 /// editor via left/up from the right pane. Emits a `SqlTabMessage::Focus` so
 /// the change flows through `update`.
-fn switch_subpane(dir: crate::common::utils::zone_nav::PaneDir, sql: &SqlState) -> Option<AppMsg> {
-    use crate::common::utils::zone_nav::PaneDir;
+fn switch_subpane(dir: crate::app_shell::nav::PaneDir, sql: &SqlState) -> Option<AppMsg> {
+    use crate::app_shell::nav::PaneDir;
     use crate::features::sql_workspace::sql_tab::state::SqlFocus;
 
     let tab = sql.sql_tab.tabs.get(sql.sql_tab.active_tab)?;
@@ -936,7 +936,7 @@ mod tests {
     fn ctrl_l_in_sql_workspace_moves_subpane_editor_to_results() {
         // Default tab focus is Editor; Ctrl+l (right) moves editor → results.
         let sql = state_with_tabs(1);
-        let msg = switch_subpane(crate::common::utils::zone_nav::PaneDir::Right, &sql)
+        let msg = switch_subpane(crate::app_shell::nav::PaneDir::Right, &sql)
             .expect("editor right should move to results");
         assert_eq!(extract_tab_msg(msg), SqlTabMessage::Focus(SqlFocus::Results));
     }
@@ -945,7 +945,7 @@ mod tests {
     fn ctrl_j_in_sql_workspace_from_editor_moves_to_results() {
         // Editor down → results (results sits below-right of the editor).
         let sql = state_with_tabs(1);
-        let msg = switch_subpane(crate::common::utils::zone_nav::PaneDir::Down, &sql)
+        let msg = switch_subpane(crate::app_shell::nav::PaneDir::Down, &sql)
             .expect("editor down should move to results");
         assert_eq!(extract_tab_msg(msg), SqlTabMessage::Focus(SqlFocus::Results));
     }
@@ -955,7 +955,7 @@ mod tests {
         // Set focus to Results, then Down → history.
         let mut sql = state_with_tabs(1);
         sql.sql_tab.tabs[0].focus = SqlFocus::Results;
-        let msg = switch_subpane(crate::common::utils::zone_nav::PaneDir::Down, &sql)
+        let msg = switch_subpane(crate::app_shell::nav::PaneDir::Down, &sql)
             .expect("results down should move to history");
         assert_eq!(extract_tab_msg(msg), SqlTabMessage::Focus(SqlFocus::History));
     }

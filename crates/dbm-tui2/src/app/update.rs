@@ -76,7 +76,7 @@ fn focus_pane_of(msg: &AppMsg) -> Option<Pane> {
         AppMsg::Shell(_) | AppMsg::Footer(_) | AppMsg::OpenModal(_) | AppMsg::CloseModal => None,
         AppMsg::Header(_) => Some(Pane::Header),
         AppMsg::Explorer(_) => Some(Pane::Explorer(
-            crate::common::utils::zone_nav::ExplorerPane::default(),
+            crate::app_shell::nav::ExplorerPane::default(),
         )),
         AppMsg::Discover(_) => Some(Pane::Discover(DiscoverPane::default())),
         AppMsg::Iw(_) => Some(Pane::InstanceWorkspace),
@@ -378,7 +378,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                 result.pending.push_back(AppMsg::Shell(
                     crate::app_shell::msg::ShellMsg::FocusChanged {
                         pane: Pane::Explorer(
-                            crate::common::utils::zone_nav::ExplorerPane::default(),
+                            crate::app_shell::nav::ExplorerPane::default(),
                         ),
                     },
                 ));
