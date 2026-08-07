@@ -17,10 +17,7 @@ pub fn update(
     let dirty = match msg {
         ResultsMessage::MoveUp => state.move_up(),
         ResultsMessage::MoveDown => state.move_down(),
-        ResultsMessage::ToggleSelect => {
-            state.toggle_select();
-            true
-        }
+        ResultsMessage::ToggleSelect => state.toggle_select(),
         ResultsMessage::ToggleUnregisteredFilter => {
             state.unregistered_only = !state.unregistered_only;
             true

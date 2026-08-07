@@ -50,13 +50,19 @@ impl ResultsState {
         self.cursor != before
     }
 
-    /// Toggle selection of the row under the cursor.
-    pub fn toggle_select(&mut self) {
+    /// Toggle selection of the row under the cursor. Returns whether the
+    /// selection actually changed (i.e. there is a row to select); a no-op when
+    /// the list is empty, so callers can skip a redundant repaint.
+    pub fn toggle_select(&mut self) -> bool {
+        if self.items.is_empty() {
+            return false;
+        }
         if let Some(pos) = self.selected.iter().position(|&i| i == self.cursor) {
             self.selected.remove(pos);
         } else {
             self.selected.push(self.cursor);
         }
+        true
     }
 
     /// Discovery ids of the currently selected rows.

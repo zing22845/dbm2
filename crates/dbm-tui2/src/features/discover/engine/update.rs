@@ -7,14 +7,18 @@ use super::effect::EngineEffect;
 
 /// Update the engine selector state. Pure by-value transition.
 ///
-/// The returned `bool` is `dirty`: selecting an engine always changes the
-/// rendered engine selector.
+/// The returned `bool` is `dirty`: whether the selected engine actually
+/// changed. Re-selecting the current engine reports `false`.
 pub fn update(
     msg: EngineMessage,
     mut state: EngineState,
 ) -> (EngineState, Vec<EngineIntent>, Vec<EngineEffect>, bool) {
-    match msg {
-        EngineMessage::Select(engine) => state.engine = engine,
-    }
-    (state, Vec::new(), Vec::new(), true)
+    let dirty = match msg {
+        EngineMessage::Select(engine) => {
+            let changed = state.engine != engine;
+            state.engine = engine;
+            changed
+        }
+    };
+    (state, Vec::new(), Vec::new(), dirty)
 }
