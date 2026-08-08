@@ -10,8 +10,10 @@ use crate::common::view::theme::Theme;
 
 use super::state::OverviewState;
 
-/// Render the instance overview panel: name/host/port and status.
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &OverviewState) {
+/// Render the instance overview panel: name/host/port and status. `focused`
+/// highlights the pane border when the instance workspace owns the shell focus
+/// (matching the connections sub-pane).
+pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &OverviewState, focused: bool) {
     let p = theme.palette();
     let mut lines = Vec::new();
     match &state.instance {
@@ -43,6 +45,6 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &OverviewStat
     let block = Block::default()
         .title(" overview ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border));
+        .border_style(p.active_border(focused));
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }

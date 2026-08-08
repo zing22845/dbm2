@@ -29,7 +29,7 @@ pub fn render(
     let block = Block::default()
         .title(" results ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(if focused { p.border_active } else { p.border }));
+        .border_style(p.active_border(focused));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {

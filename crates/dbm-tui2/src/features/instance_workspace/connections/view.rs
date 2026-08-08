@@ -54,11 +54,10 @@ pub fn render(
         )));
     }
 
-    let border_color = if region_focused { p.border_active } else { p.border };
     let block = Block::default()
         .title(" connections ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(p.active_border(region_focused));
     frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 

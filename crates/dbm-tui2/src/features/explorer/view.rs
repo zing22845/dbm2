@@ -7,7 +7,6 @@
 //! border.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Style;
 use ratatui::Frame;
 
 use crate::common::view::theme::Theme;
@@ -34,11 +33,10 @@ pub fn render(
     // The explorer parent pane wraps both child panes in a single bordered
     // block. Only the outer border reacts to the shell focus so the whole
     // region reads as one pane; the active child sub-pane highlights below.
-    let outer_color = if focused { p.border_active } else { p.border };
     let outer = ratatui::widgets::Block::default()
         .title(" Explorer ")
         .borders(ratatui::widgets::Borders::ALL)
-        .border_style(Style::default().fg(outer_color));
+        .border_style(p.active_border(focused));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     if inner.width == 0 || inner.height < 3 {

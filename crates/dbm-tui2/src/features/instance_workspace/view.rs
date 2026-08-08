@@ -28,11 +28,10 @@ pub fn render(
     focused: bool,
 ) {
     let p = theme.palette();
-    let border_color = if focused { p.border_active } else { p.border };
     let outer = Block::default()
         .title(" Instance Workspace ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(p.active_border(focused));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     if inner.width == 0 || inner.height < 3 {
@@ -73,7 +72,7 @@ pub fn render(
     // Body shows only the active sub-pane (like a tab page).
     match state.pane {
         crate::app_shell::nav::IwPane::Overview => {
-            overview_view::render(frame, theme, chunks[1], &state.overview)
+            overview_view::render(frame, theme, chunks[1], &state.overview, focused)
         }
         crate::app_shell::nav::IwPane::Connections => {
             connections_view::render(frame, theme, chunks[1], &state.connections, focused)

@@ -6,7 +6,6 @@
 //! the active one.
 
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
@@ -25,11 +24,10 @@ pub fn render(
     focused: bool,
 ) {
     let p = theme.palette();
-    let border_color = if focused { p.border_active } else { p.border };
     let outer = Block::default()
         .title(" SQL Workspace ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(p.active_border(focused));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     sql_tab_view::render(frame, theme, inner, &state.sql_tab);

@@ -49,11 +49,10 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &HeaderState,
     // Draw the bordered title bar (no text: the button and hint are placed
     // explicitly below, using the same single source of truth as hit-testing).
     // The border is highlighted only when the header owns the shell focus.
-    let border = if focused { p.border_active } else { p.border };
     let block = Block::default()
         .title(" dbm ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border));
+        .border_style(p.active_border(focused));
     frame.render_widget(block, area);
 
     // The button glyphs come from `discover_button_rect`, the same rect used

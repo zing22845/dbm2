@@ -56,11 +56,10 @@ pub fn render(
         lines.push(Line::from(Span::styled(msg, Style::default().fg(p.muted))));
     }
 
-    let border_color = if region_focused { p.border_active } else { p.border };
     let block = Block::default()
         .title(" objects ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(p.active_border(region_focused));
     let inner = block.inner(area);
     // The widest rendered row drives the horizontal scrollbar: it only appears
     // when content is wider than the text viewport, and its thumb position

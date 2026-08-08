@@ -10,7 +10,7 @@
 //! `common/view` convention), which keeps feature views self-contained pure
 //! functions: pass a different theme to verify different colors.
 
-use ratatui::style::Color;
+use ratatui::style::{Color, Style};
 use ratatui_themes::ThemeName;
 
 /// The semantic color slots available to every view.
@@ -55,6 +55,14 @@ impl Palette {
     /// depending only on our semantic `Palette`. Fields that `ratatui-themes`
     /// does not expose (`fg_dim`, `surface`, `border`, `border_active`) are
     /// derived from the closest available slot.
+    /// The border style for a pane: the active (accent) color when the pane is
+    /// on the focus chain, otherwise the regular border color. Pane views use
+    /// this instead of hand-rolling `if focused { border_active } else { border }`
+    /// so focus highlighting is defined in one place.
+    pub fn active_border(&self, active: bool) -> Style {
+        Style::default().fg(if active { self.border_active } else { self.border })
+    }
+
     pub fn from_ratatui(p: &ratatui_themes::ThemePalette) -> Self {
         Palette {
             fg: p.fg,
