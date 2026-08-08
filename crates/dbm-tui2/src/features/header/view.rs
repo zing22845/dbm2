@@ -33,7 +33,7 @@ pub fn discover_button_rect(area: Rect) -> Option<Rect> {
 /// button it is highlighted with the accent/selection slot. This is a pure
 /// `state -> view` function: it never mutates state (mouse hit-testing calls
 /// the standalone [`discover_button_rect`], not a field written here).
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &HeaderState) {
+pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &HeaderState, focused: bool) {
     let p = theme.palette();
 
     // The `Discover` button is focused when the header cursor points at it.
@@ -48,10 +48,12 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &HeaderState)
 
     // Draw the bordered title bar (no text: the button and hint are placed
     // explicitly below, using the same single source of truth as hit-testing).
+    // The border is highlighted only when the header owns the shell focus.
+    let border = if focused { p.border_active } else { p.border };
     let block = Block::default()
         .title(" dbm ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border_active));
+        .border_style(Style::default().fg(border));
     frame.render_widget(block, area);
 
     // The button glyphs come from `discover_button_rect`, the same rect used
@@ -125,7 +127,7 @@ mod tests {
         let state = HeaderState::default();
         let theme = crate::common::view::theme::dracula();
         terminal
-            .draw(|frame| render(frame, &theme, area, &state))
+            .draw(|frame| render(frame, &theme, area, &state, false))
             .unwrap();
         let buf = terminal.backend().buffer();
         let r = discover_button_rect(area).expect("button drawn");
