@@ -284,8 +284,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
 
                             // Inside the discover popup: map the click's row to a
-                            // discover child pane and switch focus to it.
+                            // discover child pane and switch focus to it. This is
+                            // suppressed while the close-confirmation dialog is
+                            // open, so clicks on the discover pane behind it are
+                            // ignored (only Enter/Esc operate on the dialog).
                             if let Pane::Discover(sub) = state.focus
+                                && !state.discover.close_confirm
                                 && let Some(next) = discover_subpane_for_click(
                                     mouse.column,
                                     mouse.row,
