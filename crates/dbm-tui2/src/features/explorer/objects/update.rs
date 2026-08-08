@@ -25,11 +25,14 @@ pub fn update(
             dirty |= state.collapse();
         }
         ObjectsMessage::ScrollHorizontal { delta, term_width } => {
-            // The explorer takes ~20% of terminal width.  Clamp so `h_scroll`
+            // The explorer takes ~20% of terminal width, minus the 2 border
+            // columns, matching the view's text viewport.  Clamp so `h_scroll`
             // never grows past the longest content row beyond the viewport.
             // When content fits fully inside the viewport, `max` is 0 and
             // pressing Right is a no-op — matching the original dbm.
-            let viewport_w = (term_width as u32 * 20 / 100).max(1) as u16;
+            let viewport_w = (term_width as u32 * 20 / 100)
+                .saturating_sub(2)
+                .max(1) as u16;
             let max = state.max_row_width().saturating_sub(viewport_w);
             dirty |= state.scroll_horizontal(delta, max);
         }
