@@ -23,8 +23,8 @@ pub enum ConnectionsMessage {
     CancelForm,
     /// Commit the open form (add or edit).
     CommitForm,
-    /// Delete the connection at the cursor.
-    Delete,
+    /// Delete a specific connection (dispatched from the delete-confirm modal).
+    DeleteConnection { instance_name: String, connection_name: String },
     /// Move the form field cursor.
     FormField(FormField),
     /// Insert a character into the active form field.

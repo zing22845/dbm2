@@ -107,7 +107,7 @@ pub fn update(
             false
         }
         DiscoverMessage::ScanProgress { done, total } => {
-            // Live progress is shown in the zone footer (`Scanning… hosts d/t`),
+            // Live progress is shown in the discover footer (`Scanning… hosts d/t`),
             // mirroring the original dbm. Progress only refines the in-flight
             // indicator; it must never re-enter the scanning state once a
             // completion / error / cancel has cleared it — a progress event that
@@ -129,7 +129,7 @@ pub fn update(
             state.cancelling = false;
             state.scan_cancelled = false;
             state.last_error = None;
-            // Surface a completion status in the zone footer, matching the
+            // Surface a completion status in the discover footer, matching the
             // original dbm's `Scan complete · N instance(s)` line.
             state.register_message = Some(format!("scan complete · {count} instance(s)"));
             tracing::debug!(

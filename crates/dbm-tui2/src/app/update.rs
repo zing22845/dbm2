@@ -141,9 +141,28 @@ fn explorer_load_instances_msg() -> AppMsg {
 pub fn update(msg: AppMsg, state: &mut AppState) -> UpdateResult {
     // When a modal (data popup) is open it owns all keyboard input, so its
     // messages bypass the focus guard. The discover parent pane likewise owns
-    // all input while it is open.
+    // all input while it is open. A confirm action dispatched from a modal's
+    // `y` key (e.g. delete connection / unregister instance) must also bypass
+    // the guard: the modal may have been opened from a sub-pane (connections)
+    // whose exact `Pane` doesn't equal the guard's coarse parent mapping.
+    let modal_open = state.modal.is_some();
     let discover_open = matches!(state.focus, Pane::Discover(_));
-    if (state.modal.is_some() || discover_open) && matches!(msg, AppMsg::Discover(_)) {
+    let modal_confirm = modal_open
+        && matches!(
+            msg,
+            AppMsg::Iw(IwMsg::Message(
+                IwMessage::UnregisterInstance { .. }
+                    | IwMessage::Connections(
+                        crate::features::instance_workspace::connections::msg::ConnectionsMsg::Message(
+                            crate::features::instance_workspace::connections::msg::ConnectionsMessage::DeleteConnection { .. }
+                        )
+                    )
+            ))
+        );
+    if (modal_open || discover_open) && matches!(msg, AppMsg::Discover(_)) {
+        return update_unchecked(msg, state);
+    }
+    if modal_confirm {
         return update_unchecked(msg, state);
     }
     if let Some(pane) = focus_pane_of(&msg)
@@ -157,7 +176,7 @@ pub fn update(msg: AppMsg, state: &mut AppState) -> UpdateResult {
     update_unchecked(msg, state)
 }
 
-/// Apply a message regardless of the current focus zone. Used by the effect
+/// Apply a message regardless of the current focus pane. Used by the effect
 /// action dispatcher and intent router, where delivery is programmatic and
 /// must not be gated by focus.
 pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
@@ -378,11 +397,17 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             result.effects.extend(effects.into_iter().map(box_effect));
         }
         AppMsg::Iw(m) => {
-            // A confirm-unregister arrived, so the confirm modal should close.
-            // The shell owns the modal, so this is shell orchestration here.
+            // A confirm-unregister / confirm-delete arrived, so the confirm
+            // modal should close. The shell owns the modal, so this is shell
+            // orchestration here.
             if matches!(
                 &m,
                 IwMsg::Message(IwMessage::UnregisterInstance { .. })
+                    | IwMsg::Message(IwMessage::Connections(
+                        crate::features::instance_workspace::connections::msg::ConnectionsMsg::Message(
+                            crate::features::instance_workspace::connections::msg::ConnectionsMessage::DeleteConnection { .. }
+                        )
+                    ))
             ) {
                 state.modal = None;
                 result.dirty = true;
@@ -529,6 +554,31 @@ mod tests {
             result.effects.is_empty(),
             "guarded update must drop explorer load while focus is the header"
         );
+    }
+
+    #[test]
+    fn delete_connection_closes_confirm_modal() {
+        use crate::features::instance_workspace::connections::msg::{
+            ConnectionsMessage, ConnectionsMsg,
+        };
+        use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+
+        let mut state = AppState::default();
+        // Focus is on the instance workspace (where the delete-confirm modal
+        // was opened), so the DeleteConnection message passes the focus guard.
+        state.focus = Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::Connections);
+        state.modal = Some(crate::app::state::ModalKind::DeleteConnectionConfirm {
+            instance: "inst".into(),
+            connection: "conn".into(),
+        });
+        let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
+            ConnectionsMsg::Message(ConnectionsMessage::DeleteConnection {
+                instance_name: "inst".into(),
+                connection_name: "conn".into(),
+            }),
+        )));
+        update(msg, &mut state);
+        assert!(state.modal.is_none(), "confirm modal must close on delete");
     }
 
     #[test]

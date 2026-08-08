@@ -197,7 +197,7 @@ mod tests {
             width_delta_for_left_pane(VerticalSplitterNudge::Left, WIDTH_NUDGE_STEP),
             -WIDTH_NUDGE_STEP
         );
-        // Right-owned width (History zone from SQL, Results Detail): ] shrinks, [ grows.
+        // Right-owned width (History pane from SQL, Results Detail): ] shrinks, [ grows.
         assert_eq!(
             width_delta_for_right_pane(VerticalSplitterNudge::Right, WIDTH_NUDGE_STEP),
             -WIDTH_NUDGE_STEP

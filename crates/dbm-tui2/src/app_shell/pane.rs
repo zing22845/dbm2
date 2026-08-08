@@ -2,7 +2,7 @@
 //!
 //! The shell tracks which pane currently owns keyboard input as a single value:
 //! a **parent pane** (the focused top-level region) that may host **child
-//! panes**. This replaces the previous flat `FocusZone` plus the separate
+//! panes**. This replaces the earlier flat focus model plus the separate
 //! discover-modal focus: `Discover` is itself a parent pane whose child sub
 //! panes (engine / targets / results) are the focused region while the discover
 //! modal is open.

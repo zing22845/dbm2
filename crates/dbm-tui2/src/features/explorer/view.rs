@@ -2,7 +2,7 @@
 //!
 //! The explorer is a parent pane that hosts two child sub-panes — the
 //! instances tree (top) and the objects tree (bottom) — inside a single
-//! bordered " Explorer " block, mirroring the original dbm's zone layout. Both
+//! bordered " Explorer " block, mirroring the original dbm's layout. Both
 //! child panes are always visible; the one that owns focus draws an active
 //! border.
 
@@ -33,7 +33,7 @@ pub fn render(
 
     // The explorer parent pane wraps both child panes in a single bordered
     // block. Only the outer border reacts to the shell focus so the whole
-    // region reads as one zone; the active child sub-pane highlights below.
+    // region reads as one pane; the active child sub-pane highlights below.
     let outer_color = if focused { p.border_active } else { p.border };
     let outer = ratatui::widgets::Block::default()
         .title(" Explorer ")

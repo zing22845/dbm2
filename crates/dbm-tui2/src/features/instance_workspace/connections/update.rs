@@ -20,6 +20,9 @@ pub fn update(
     let mut effects = Vec::new();
     let dirty = match msg {
         ConnectionsMessage::Load { instance_name } => {
+            // Remember the bound instance so a later Reload (after add/edit/
+            // delete) re-queries the same instance instead of an empty name.
+            state.instance_name = instance_name.clone();
             effects.push(ConnectionsEffect::LoadConnections { instance_name });
             false
         }
@@ -84,16 +87,16 @@ pub fn update(
             intents.push(ConnectionsIntent::ConnectionsChanged);
             true
         }
-        ConnectionsMessage::Delete => {
-            if let Some(name) = state.selected_name() {
-                let instance_name = state.instance_name.clone();
-                if !instance_name.is_empty() {
-                    effects.push(ConnectionsEffect::DeleteConnection {
-                        instance_name,
-                        connection_name: name,
-                    });
-                    intents.push(ConnectionsIntent::ConnectionsChanged);
-                }
+        ConnectionsMessage::DeleteConnection {
+            instance_name,
+            connection_name,
+        } => {
+            if !instance_name.is_empty() && !connection_name.is_empty() {
+                effects.push(ConnectionsEffect::DeleteConnection {
+                    instance_name,
+                    connection_name,
+                });
+                intents.push(ConnectionsIntent::ConnectionsChanged);
             }
             false
         }
@@ -136,5 +139,32 @@ fn form_field_mut(form: &mut super::state::ConnectionForm, field: FormField) -> 
         FormField::Username => &mut form.username,
         FormField::Database => &mut form.database,
         FormField::Password => &mut form.password,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_binds_instance_name_for_later_reload() {
+        // Regression: after `Load` binds an instance, `Reload` (dispatched
+        // after an add/edit/delete) must re-query the same instance rather than
+        // an empty name, otherwise the list comes back empty.
+        let s = ConnectionsState::default();
+        let (s, _i, _effects, _dirty) = update(
+            ConnectionsMessage::Load {
+                instance_name: "inst".to_string(),
+            },
+            s,
+        );
+        assert_eq!(s.instance_name, "inst");
+        let (_, _i, reload_effects, _dirty) = update(ConnectionsMessage::Reload, s);
+        assert!(
+            reload_effects
+                .iter()
+                .any(|e| matches!(e, ConnectionsEffect::LoadConnections { instance_name } if instance_name == "inst")),
+            "Reload must query the bound instance, got {reload_effects:?}"
+        );
     }
 }

@@ -25,8 +25,8 @@ pub struct DiscoverState {
     pub close_confirm: bool,
     /// Whether a scan is currently in flight.
     pub scanning: bool,
-    /// Live scan progress (hosts done / hosts total), shown in the zone footer
-    /// while scanning — mirrors the original dbm's `Scanning… hosts d/t`.
+    /// Live scan progress (hosts done / hosts total), shown in the discover
+    /// footer while scanning — mirrors the original dbm's `Scanning… hosts d/t`.
     pub scan_progress: Option<(u32, u32)>,
     /// Whether the user asked to cancel the in-flight scan (`c` key).
     pub cancelling: bool,
@@ -38,7 +38,7 @@ pub struct DiscoverState {
     /// The last scan error, if any (cleared on a successful scan or new scan).
     pub last_error: Option<String>,
     /// The result of the last register attempt (success count or failure
-    /// reason), shown in the discover zone footer. Cleared on reopen.
+    /// reason), shown in the discover footer. Cleared on reopen.
     pub register_message: Option<String>,
 }
 

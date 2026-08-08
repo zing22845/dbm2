@@ -3,7 +3,7 @@
 //! Provides a centered, bordered popup renderer plus the `ModalKind` footer
 //! hints shared across the confirm/picker popups (row limit, page input,
 //! delete/unregister confirm, edit-commit preview). The Discover modal draws
-//! its own zone footer and leaves `modal_footer_text` empty.
+//! its own footer and leaves `modal_footer_text` empty.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;

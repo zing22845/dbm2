@@ -2,8 +2,8 @@
 //!
 //! The SQL workspace is a parent pane: an outer " SQL Workspace " border wraps
 //! the active tab (its tab bar plus editor / history / results), mirroring the
-//! original dbm's `draw_workspace` zone block. `focused` draws the outer border
-//! as the active one.
+//! original dbm's `draw_workspace` block. `focused` draws the outer border as
+//! the active one.
 
 use ratatui::layout::Rect;
 use ratatui::style::Style;

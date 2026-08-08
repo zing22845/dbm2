@@ -6,8 +6,8 @@
 //!
 //! Treat `app_shell` as a read-only "standard library". It defines the
 //! *pluggable abstraction slots*: what an `Intent` is, what an `Effect` is,
-//! what a `FocusZone` is, and how messages/actions flow. Business features are
-//! the *plugs* that fit into these slots.
+//! what a focus `Pane` is, and how messages/actions flow. Business features
+//! are the *plugs* that fit into these slots.
 //!
 //! - **Business feature iteration (the common case):** adding a new feature
 //!   (a panel, a tab, a modal) only touches `app/` (aggregation + dispatch)
@@ -17,7 +17,7 @@
 //!   heterogeneous intents/effects without knowing their concrete types.
 //! - **System capability upgrade (rare):** only modify `app_shell` when adding
 //!   a system-level capability that no single feature owns, e.g. global hotkeys
-//!   (`ShellMsg`/`ShellAction`), a new focus region (`FocusZone`), or a change
+//!   (`ShellMsg`/`ShellAction`), a new focus pane (`Pane`), or a change
 //!   to effect execution policy (`EffectRunner`). Keep such changes generic so
 //!   existing business features keep compiling unchanged.
 

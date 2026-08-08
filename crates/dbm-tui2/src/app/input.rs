@@ -3,7 +3,7 @@
 //! The run loop reads raw key events; global shortcuts are handled there, and
 //! everything else is handed to [`key_to_msg`], which maps a key to a feature
 //! message. When a modal is open it owns all keys; otherwise the key is routed
-//! by the active focus zone. This keeps key parsing centralised in one place
+//! by the active focus pane. This keeps key parsing centralised in one place
 //! (per feature) instead of leaking into each feature's `update`.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -23,8 +23,7 @@ use crate::features::explorer::state::ExplorerPane;
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 use crate::features::instance_workspace::connections::msg::{ConnectionsMessage, ConnectionsMsg};
 use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
-use crate::features::instance_workspace::state::{IwState};
-use crate::features::instance_workspace::connections::state::FormField;
+use crate::features::instance_workspace::state::IwState;
 use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
 use crate::features::sql_workspace::state::SqlState;
 use crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn;
@@ -40,7 +39,7 @@ use super::msg::AppMsg;
 use super::state::ModalKind;
 
 /// Map a key to a feature message. A modal (if open) consumes all keys;
-/// otherwise the active focus zone routes the key.
+/// otherwise the active focus pane routes the key.
 ///
 /// Returns `None` when nothing consumed the key (a no-op). Global shortcuts
 /// (quit, theme toggle) are handled by the run loop and not routed here.
@@ -52,15 +51,16 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
     if let Pane::Discover(sub) = state.focus {
         return discover_key(key, sub, &state.discover);
     }
-    // Pane/zone navigation (Ctrl+h/j/k/l / Ctrl+arrows) is shell-level: it
-    // moves the focus zone regardless of the currently focused pane. Check it
+    // Pane navigation (Ctrl+h/j/k/l / Ctrl+arrows) is shell-level: it
+    // moves the focus pane regardless of the currently focused pane. Check it
     // before modal/focus routing, so it always works. Top-level pane movement
     // wins (so Ctrl+h from the workspace leaves to the explorer); within-workspace
     // sub-pane moves only apply to directions that do not leave the workspace.
     if state.modal.is_none()
         && let Some(dir) = pane_dir_from_key(&key)
     {
-        if let Some(msg) = switch_zone_by_dir(dir, state.focus) {
+        if let Some(msg) = switch_pane_by_dir(dir, state.focus, !state.iw.instance_name.is_empty())
+        {
             return Some(msg);
         }
         // Inside the SQL workspace, Ctrl+nav moves the sub-pane focus
@@ -90,7 +90,18 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
 /// cycles within it and crosses to its neighbors (header above, workspace to
 /// the right), mirroring the `Discover` parent pane. Workspace/instance leave
 /// left to the explorer and up to the header.
-fn switch_zone_by_dir(dir: crate::app_shell::nav::PaneDir, focus: Pane) -> Option<AppMsg> {
+///
+/// `instance_open` tells whether an instance workspace is currently shown in
+/// the workspace region (i.e. `state.iw.instance_name` is non-empty). Moving
+/// right from the explorer must land on the *displayed* workspace: the instance
+/// workspace when an instance is open, otherwise the SQL workspace — otherwise
+/// the focus (SQLWorkspace) no longer matches what is on screen, and Ctrl+nav
+/// inside the instance workspace stops working.
+fn switch_pane_by_dir(
+    dir: crate::app_shell::nav::PaneDir,
+    focus: Pane,
+    instance_open: bool,
+) -> Option<AppMsg> {
     use crate::app_shell::nav::{ExplorerPane, IwPane, PaneDir as D};
     let pane = match (focus, dir) {
         // Header moves down into the explorer (instances by default).
@@ -100,7 +111,10 @@ fn switch_zone_by_dir(dir: crate::app_shell::nav::PaneDir, focus: Pane) -> Optio
         (Pane::Explorer(ExplorerPane::Instances), D::Up) => Pane::Header,
         (Pane::Explorer(ExplorerPane::Instances), D::Down) => Pane::Explorer(ExplorerPane::Objects),
         (Pane::Explorer(ExplorerPane::Objects), D::Up) => Pane::Explorer(ExplorerPane::Instances),
-        // Explorer moves right into the workspace.
+        // Explorer moves right into the displayed workspace (instance if open).
+        (Pane::Explorer(_), D::Right) if instance_open => {
+            Pane::InstanceWorkspace(IwPane::Overview)
+        }
         (Pane::Explorer(_), D::Right) => Pane::SQLWorkspace,
         // Inside the instance workspace, Left/Right move overview <-> connections
         // (matching the original dbm's manager panes): Connections left ->
@@ -220,7 +234,12 @@ fn modal_key(key: KeyEvent, modal: &ModalKind, state: &super::state::AppState) -
                 // `CommitResult`).
                 active_tab_id().map(|id| sql_results(R::Commit, id))
             }
-            ModalKind::DeleteConnectionConfirm { .. } => Some(close()),
+            // Confirm deleting a connection: dispatch the delete to the
+            // connections panel (the shell closes the modal when it sees the
+            // DeleteConnection message).
+            ModalKind::DeleteConnectionConfirm { instance, connection } => {
+                Some(confirm_delete_connection(instance.clone(), connection.clone()))
+            }
             // Confirm unregistering the current instance: close the modal and
             // dispatch the unregister to the instance workspace.
             ModalKind::UnregisterInstanceConfirm { instance } => Some(close_and_unregister(
@@ -264,7 +283,7 @@ fn modal_key(key: KeyEvent, modal: &ModalKind, state: &super::state::AppState) -
     }
 }
 
-/// Key bindings for the Header focus zone: move the button cursor and activate.
+/// Key bindings for the Header focus pane: move the button cursor and activate.
 fn header_key(key: KeyEvent) -> Option<AppMsg> {
     let msg = match key.code {
         KeyCode::Left => HeaderMessage::MoveLeft,
@@ -452,7 +471,7 @@ fn explorer(msg: ExplorerMessage) -> AppMsg {
 /// (overview / connections), or the connection form when one is open.
 fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
     if state.connections.form.is_some() {
-        return iw_form_key(key);
+        return iw_form_key(key, state);
     }
     // `Tab` cycles the instance-workspace sub-panes (overview <-> connections),
     // mirroring the explorer's Tab behavior.
@@ -479,12 +498,25 @@ fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
             }
         }
         IwPane::Connections => {
+            // `d` opens a delete-confirm modal for the selected connection
+            // (matching the original dbm); the actual delete is dispatched from
+            // the modal's `y` key.
+            if matches!(key.code, KeyCode::Char('d') | KeyCode::Delete) {
+                let Some(connection) = state.connections.selected_name() else {
+                    return None;
+                };
+                return Some(AppMsg::OpenModal(
+                    crate::app::state::ModalKind::DeleteConnectionConfirm {
+                        instance: state.instance_name.clone(),
+                        connection,
+                    },
+                ));
+            }
             let msg = match key.code {
                 KeyCode::Up | KeyCode::Char('k') => ConnectionsMessage::MoveUp,
                 KeyCode::Down | KeyCode::Char('j') => ConnectionsMessage::MoveDown,
                 KeyCode::Char('a') => ConnectionsMessage::BeginAdd,
                 KeyCode::Char('e') | KeyCode::Enter => ConnectionsMessage::BeginEdit,
-                KeyCode::Char('d') | KeyCode::Delete => ConnectionsMessage::Delete,
                 _ => return None,
             };
             Some(iw(IwMessage::Connections(ConnectionsMsg::Message(msg))))
@@ -492,14 +524,24 @@ fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
     }
 }
 
-/// Form keys when a connection form is open.
-fn iw_form_key(key: KeyEvent) -> Option<AppMsg> {
+/// Form keys when a connection form is open. Up/Down cycle through all four
+/// fields (Name → Username → Database → Password) so every field is reachable.
+fn iw_form_key(key: KeyEvent, state: &IwState) -> Option<AppMsg> {
+    let current = state
+        .connections
+        .form
+        .as_ref()
+        .map(|f| f.field)
+        .unwrap_or_default();
     let msg = match key.code {
         KeyCode::Esc => ConnectionsMessage::CancelForm,
         KeyCode::Enter => ConnectionsMessage::CommitForm,
-        KeyCode::Up => ConnectionsMessage::FormField(FormField::Name),
-        KeyCode::Down => ConnectionsMessage::FormField(FormField::Password),
-        KeyCode::Tab => ConnectionsMessage::FormField(FormField::Database),
+        // Cycle through every field (Name → Username → Database → Password)
+        // so all four are reachable. Letters remain free to type in a field.
+        KeyCode::Up => ConnectionsMessage::FormField(current.prev()),
+        KeyCode::Down | KeyCode::Tab => {
+            ConnectionsMessage::FormField(current.next())
+        }
         KeyCode::Char(c) if !c.is_control() => ConnectionsMessage::FormChar(c),
         KeyCode::Backspace => ConnectionsMessage::FormBackspace,
         _ => return None,
@@ -516,6 +558,18 @@ fn iw(msg: IwMessage) -> AppMsg {
 /// sees the `UnregisterInstance` message.
 fn close_and_unregister(instance: String) -> AppMsg {
     iw(IwMessage::UnregisterInstance { instance })
+}
+
+/// Confirm-delete-connection helper: dispatch the delete to the connections
+/// panel. The shell closes the modal when it sees the `DeleteConnection`
+/// message (matching the unregister confirm flow).
+fn confirm_delete_connection(instance: String, connection: String) -> AppMsg {
+    iw(IwMessage::Connections(ConnectionsMsg::Message(
+        ConnectionsMessage::DeleteConnection {
+            instance_name: instance,
+            connection_name: connection,
+        },
+    )))
 }
 
 /// SQL workspace key bindings, routed to the active tab's editor and its
@@ -1018,6 +1072,39 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_l_from_explorer_enters_instance_workspace_when_instance_open() {
+        use crate::features::instance_workspace::state::IwState;
+
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::Explorer(ExplorerPane::default());
+        // An instance is open, so the workspace region shows the instance pane.
+        state.iw = IwState {
+            instance_name: "inst".into(),
+            ..Default::default()
+        };
+        let msg = key_to_msg(key(KeyCode::Char('l'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+l should move into the instance workspace");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::InstanceWorkspace(IwPane::Overview));
+            }
+            _ => panic!("expected focus change to instance workspace"),
+        }
+
+        // From the instance overview, ctrl+l moves to Connections.
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Overview);
+        let msg = key_to_msg(key(KeyCode::Char('l'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+l inside overview should move to connections");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { pane }) => {
+                assert_eq!(pane, Pane::InstanceWorkspace(IwPane::Connections));
+            }
+            _ => panic!("expected focus change to connections"),
+        }
+    }
+
+    #[test]
     fn ctrl_h_in_instance_workspace_moves_connections_to_overview() {
         let mut state = crate::app::state::AppState::default();
         state.focus = Pane::InstanceWorkspace(IwPane::Connections);
@@ -1028,6 +1115,72 @@ mod tests {
                 assert_eq!(pane, Pane::InstanceWorkspace(IwPane::Overview));
             }
             _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
+    fn d_in_connections_opens_delete_confirm_modal() {
+        use crate::app::state::ModalKind;
+        use crate::features::instance_workspace::connections::state::ConnectionsState;
+        use dbm_store::InstanceConnection;
+
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Connections);
+        state.iw.instance_name = "inst".into();
+        state.iw.connections = ConnectionsState {
+            instance_name: "inst".into(),
+            connections: vec![InstanceConnection {
+                id: "1".into(),
+                instance_id: "1".into(),
+                name: "conn".into(),
+                username: "u".into(),
+                database: "db".into(),
+                has_password: false,
+                ssl_mode: String::new(),
+                env_label: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+            }],
+            cursor: 0,
+            form: None,
+        };
+        let msg = key_to_msg(key(KeyCode::Char('d'), KeyModifiers::NONE), &state)
+            .expect("d should open the delete-confirm modal");
+        match msg {
+            AppMsg::OpenModal(ModalKind::DeleteConnectionConfirm { instance, connection }) => {
+                assert_eq!(instance, "inst");
+                assert_eq!(connection, "conn");
+            }
+            other => panic!("expected DeleteConnectionConfirm modal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn modal_y_confirms_delete_connection() {
+        use crate::app::state::ModalKind;
+        use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+        use crate::features::instance_workspace::connections::msg::{
+            ConnectionsMessage, ConnectionsMsg,
+        };
+
+        let state = crate::app::state::AppState::default();
+        let modal = ModalKind::DeleteConnectionConfirm {
+            instance: "inst".into(),
+            connection: "conn".into(),
+        };
+        let msg = modal_key(key(KeyCode::Char('y'), KeyModifiers::NONE), &modal, &state)
+            .expect("y should confirm delete");
+        match msg {
+            AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::DeleteConnection {
+                    instance_name,
+                    connection_name,
+                }),
+            ))) => {
+                assert_eq!(instance_name, "inst");
+                assert_eq!(connection_name, "conn");
+            }
+            other => panic!("expected DeleteConnection, got {other:?}"),
         }
     }
 
@@ -1082,7 +1235,7 @@ mod tests {
     fn ctrl_j_without_control_is_not_a_pane_move() {
         let state = crate::app::state::AppState::default();
         // Plain 'j' is not a pane-move chord (no Ctrl), so it should not switch
-        // the zone; the header key handler does not consume it either.
+        // the pane; the header key handler does not consume it either.
         assert!(key_to_msg(key(KeyCode::Char('j'), KeyModifiers::NONE), &state).is_none());
     }
 

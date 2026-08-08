@@ -12,6 +12,28 @@ pub enum FormField {
     Password,
 }
 
+impl FormField {
+    /// The next field in the form (wrapping), in display order.
+    pub fn next(self) -> Self {
+        match self {
+            FormField::Name => FormField::Username,
+            FormField::Username => FormField::Database,
+            FormField::Database => FormField::Password,
+            FormField::Password => FormField::Name,
+        }
+    }
+
+    /// The previous field in the form (wrapping), in display order.
+    pub fn prev(self) -> Self {
+        match self {
+            FormField::Name => FormField::Password,
+            FormField::Username => FormField::Name,
+            FormField::Database => FormField::Username,
+            FormField::Password => FormField::Database,
+        }
+    }
+}
+
 /// A connection add/edit form in progress.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionForm {

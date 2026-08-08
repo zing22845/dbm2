@@ -15,8 +15,8 @@ use super::targets::view as targets_view;
 /// Render the discover feature: engine selector on top, with the targets editor
 /// and results list stacked vertically below (mirrors the original dbm layout,
 /// where targets sits above results and they are separated by a splitter row).
-/// Each pane's border highlights when it owns focus, and the discover zone gets
-/// a footer (pane nav + scan/close hints) across the bottom.
+/// Each pane's border highlights when it owns focus, and the discover dialog
+/// gets a footer (pane nav + scan/close hints) across the bottom.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
@@ -24,7 +24,7 @@ pub fn render(
     state: &DiscoverState,
     focus: crate::app_shell::nav::DiscoverPane,
 ) {
-    use crate::common::view::hints::{discover_zone_footer_text, draw_pane_footer};
+    use crate::common::view::hints::{discover_footer_text, draw_pane_footer};
     let p = theme.palette();
 
     // The discover parent pane wraps the three child panes (engine, targets,
@@ -39,7 +39,7 @@ pub fn render(
         return;
     }
 
-    let footer_text = discover_zone_footer_text(&discover_status(state));
+    let footer_text = discover_footer_text(&discover_status(state));
     let footer_h = if footer_text.is_empty() {
         0
     } else {
@@ -52,7 +52,7 @@ pub fn render(
         .constraints([
             Constraint::Length(4),            // engine selector + its footer
             Constraint::Min(0),               // targets + results
-            Constraint::Length(footer_h),     // discover zone footer
+            Constraint::Length(footer_h),     // discover dialog footer
         ])
         .split(inner);
 
@@ -80,7 +80,7 @@ pub fn render(
     );
     results_view::render(frame, theme, body[2], &state.results, focus);
 
-    // Discover zone footer: a separator row above the hint line(s), so the
+    // Discover dialog footer: a separator row above the hint line(s), so the
     // hints are drawn on their own row instead of overlapping the dashes.
     if footer_h > 0 {
         let footer = Layout::default()
@@ -103,9 +103,9 @@ pub fn render(
     }
 }
 
-/// A one-line status for the discover zone footer (scanning with live progress
-/// / cancelling / cancelled / last error / register result). Mirrors the
-/// original dbm's `Scanning… hosts d/t · c: cancel` status line.
+/// A one-line status for the discover dialog footer (scanning with live
+/// progress / cancelling / cancelled / last error / register result). Mirrors
+/// the original dbm's `Scanning… hosts d/t · c: cancel` status line.
 fn discover_status(state: &DiscoverState) -> String {
     if state.scanning {
         if state.cancelling {

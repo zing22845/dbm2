@@ -227,7 +227,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     let mut dirty = false;
                     match mouse.kind {
                         MouseEventKind::Down(MouseButton::Left) if state.modal.is_none() => {
-                            // Map the click to a focus zone by region. The layout
+                            // Map the click to a focus pane by region. The layout
                             // mirrors `app/view.rs`: header (top 3 rows), explorer
                             // (left 20% of the body), workspace (right 80%).
                             let size = terminal.size()?;
@@ -324,7 +324,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             tracing::debug!(clicked, "header button click resolved");
                             if clicked {
                                 // Clicking the header button is an explicit user
-                                // intent: move focus to the Header zone (via the
+                                // intent: move focus to the Header pane (via the
                                 // shell message), then dispatch Activate. Both go
                                 // through `update` so every state change flows
                                 // through the single state-transition channel.

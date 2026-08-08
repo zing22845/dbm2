@@ -157,10 +157,10 @@ pub fn history_list_footer_text(
     hints
 }
 
-/// Footer for the discover zone (the whole modal): pane navigation + the
+/// Footer for the discover dialog (the whole modal): pane navigation + the
 /// discover-level actions available from any pane. `status` (e.g. scanning /
 /// last error) is appended on a second line when non-empty.
-pub fn discover_zone_footer_text(status: &str) -> String {
+pub fn discover_footer_text(status: &str) -> String {
     let hints = keys(&[
         ("Pane", hint_ctrl("j/k")),
         ("Scan", lit("s")),
@@ -214,22 +214,22 @@ pub fn discover_results_footer_text() -> String {
     ])
 }
 
-/// Footer hints for the data-carrying modals; Discover draws its own zone
-/// footer and returns empty.
+/// Footer hints for the data-carrying modals; Discover draws its own footer
+/// and returns empty.
 pub fn modal_footer_text(modal: Option<&ModalKind>) -> String {
     crate::common::view::modal::modal_footer_text(modal)
 }
 
-/// Global footer hints (zone navigation + shortcuts).
+/// Global footer hints (pane navigation + shortcuts).
 ///
 /// Kept intentionally short (the perf readout occupies the footer's right side)
-/// so only the essential zone/pane navigation and search are shown. This is the
+/// so only the essential pane navigation and search are shown. This is the
 /// single source of truth for the global footer; `global_footer::view` renders
 /// it instead of a hardcoded list.
 pub fn global_footer_text(global_status: &str) -> String {
     let hints = keys(&[
-        ("Zone", lit("TAB")),
-        ("Pane", hint_ctrl("h/j/k/l")),
+        ("Pane", lit("TAB")),
+        ("SubPane", hint_ctrl("h/j/k/l")),
         ("Search", lit("/")),
         ("H-Scroll", lit("←/→")),
         ("Copy", copy_shortcut_label()),
@@ -345,13 +345,13 @@ mod tests {
 
     #[test]
     fn discover_footers_switch_on_state() {
-        // Zone footer lists pane nav + scan/close; a status appends a line.
-        let zone = discover_zone_footer_text("");
-        assert!(zone.contains("Pane: "));
-        assert!(zone.contains("Scan: s"));
-        assert!(zone.contains("Close: ESC"));
-        assert!(!zone.contains('\n'));
-        let with_status = discover_zone_footer_text("scanning…");
+        // Footer lists pane nav + scan/close; a status appends a line.
+        let footer = discover_footer_text("");
+        assert!(footer.contains("Pane: "));
+        assert!(footer.contains("Scan: s"));
+        assert!(footer.contains("Close: ESC"));
+        assert!(!footer.contains('\n'));
+        let with_status = discover_footer_text("scanning…");
         assert!(with_status.contains("\nscanning…"));
         // Targets footer shows edit keys when not editing, commit/cancel when editing.
         let edit = discover_targets_footer_text(false, false);
