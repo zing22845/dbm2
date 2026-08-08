@@ -404,6 +404,13 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                         needs_redraw |= result.dirty;
                     }
+                } else if let Some(Ok(CEvent::Resize(_, _))) = maybe_event {
+                    // Terminal window resized: force a repaint so the layout
+                    // recomputes against the new terminal size. Without this,
+                    // `terminal.draw` is skipped while idle (no dirty state) and
+                    // the rendered frame never catches up with the window size,
+                    // unlike the original dbm which redraws on resize.
+                    needs_redraw = true;
                 }
             }
             // Timed refresh: only fires when a periodic repaint is actually due
