@@ -112,3 +112,93 @@ impl<B: Backend> Backend for CountingBackend<B> {
         self.inner.flush()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::layout::Rect;
+
+    /// A minimal backend that just records every drawn cell, so the counting
+    /// wrapper can be exercised without a real terminal.
+    struct Recorder {
+        _cells: Vec<(u16, u16)>,
+    }
+    impl Backend for Recorder {
+        type Error = std::io::Error;
+        fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+        where
+            I: Iterator<Item = (u16, u16, &'a Cell)>,
+        {
+            self._cells
+                .extend(content.map(|(x, y, _)| (x, y)));
+            Ok(())
+        }
+        fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn show_cursor(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn get_cursor_position(&mut self) -> Result<Position, Self::Error> {
+            Ok(Position::new(0, 0))
+        }
+        fn set_cursor_position<P: Into<Position>>(&mut self, _p: P) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn clear_region(&mut self, _c: ClearType) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn window_size(&mut self) -> Result<WindowSize, Self::Error> {
+            Ok(WindowSize {
+                columns_rows: Size::new(100, 30),
+                pixels: Size::default(),
+            })
+        }
+        fn clear(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+        fn size(&self) -> Result<Size, Self::Error> {
+            Ok(Size::new(100, 30))
+        }
+        fn flush(&mut self) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn excluded_rect_cells_do_not_count_as_changed() {
+        let inner = Recorder { _cells: Vec::new() };
+        let mut backend = CountingBackend::new(inner);
+        // Exclude the footer readout strip (e.g. rightmost 23 cols of the bottom row).
+        backend.set_exclude_rects(vec![Rect::new(100 - 23, 29, 23, 1)]);
+
+        let c0 = Cell::default();
+        let c1 = Cell::default();
+        let c2 = Cell::default();
+        let content: Vec<(u16, u16, &Cell)> = vec![
+            (0, 0, &c0),    // normal changed cell -> counts
+            (90, 29, &c1),  // inside excluded strip -> ignored
+            (99, 29, &c2),  // inside excluded strip -> ignored
+        ];
+        // Draw via the Backend trait.
+        {
+            use ratatui::backend::Backend as _;
+            backend.draw(content.into_iter()).unwrap();
+        }
+        assert_eq!(backend.last_changed_cells(), 1);
+    }
+
+    #[test]
+    fn excluded_rect_is_relative_to_whole_screen() {
+        // A readout change inside the excluded strip must not bump the count.
+        let inner = Recorder { _cells: Vec::new() };
+        let mut backend = CountingBackend::new(inner);
+        backend.set_exclude_rects(vec![Rect::new(80, 28, 20, 2)]);
+        let c = Cell::default();
+        {
+            use ratatui::backend::Backend as _;
+            backend.draw(vec![(85, 29, &c)].into_iter()).unwrap();
+        }
+        assert_eq!(backend.last_changed_cells(), 0);
+    }
+}
