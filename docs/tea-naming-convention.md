@@ -23,7 +23,7 @@ app_shell/
 ├── view.rs             # 全局渲染（如 overlay）
 ├── intent_router.rs    # IntentRouter（单文件，所有 Intent 路由）
 ├── effect_runner.rs    # EffectRunner（单文件，所有 Effect 执行）
-└── focus.rs            # 焦点/区域导航逻辑
+└── nav.rs            # 焦点/区域导航逻辑
 ```
 
 #### 大规模结构（按功能拆分）
@@ -37,7 +37,7 @@ app_shell/
 ├── state.rs
 ├── update.rs
 ├── view.rs
-├── focus.rs
+├── nav.rs
 ├── intent_router/              # 按功能拆分的意图路由
 │   ├── mod.rs                  # pub fn route(intent, shell)
 │   ├── header.rs               # Header 相关 Intent 路由
@@ -64,7 +64,7 @@ app_shell/
 | `state.rs` | `ShellState` 结构体 | 壳层状态（焦点、全局状态等） |
 | `update.rs` | `update(app_msg, shell_state)` | 顶层消息分派，调用各 Feature 的 update |
 | `view.rs` | 全局渲染函数 | key_echo overlay、调试信息等 |
-| `focus.rs` | 焦点/区域导航 | FocusZone 切换逻辑 |
+| `nav.rs` | 焦点/区域导航 | Pane 切换逻辑 |
 | `intent_router.rs` / `intent_router/` | `IntentRouter` | Intent → Msg 路由 |
 | `effect_runner.rs` / `effect_runner/` | `EffectRunner` | Effect 异步执行 → Msg 回传 |
 
@@ -102,7 +102,7 @@ feature_name/
 | `intent_router.rs` / `intent_router/` | ✅ 必须 | Intent 路由 |
 | `effect_runner.rs` / `effect_runner/` | ✅ 必须 | Effect 执行 |
 | `view.rs` | ❌ 可选 | 全局 overlay 渲染 |
-| `focus.rs` | ❌ 可选 | 焦点管理 |
+| `nav.rs` | ❌ 可选 | 焦点管理 |
 
 #### Feature 文件
 
@@ -157,7 +157,7 @@ global_footer/
 | `view.rs` | 渲染函数 |
 | `intent.rs` | 意图枚举 |
 | `effect.rs` | 副作用枚举 |
-| `focus.rs` | 焦点管理（app_shell 专用） |
+| `nav.rs` | 焦点管理（app_shell 专用） |
 | `intent_router/` | 意图路由（目录，按功能拆分） |
 | `effect_runner/` | 副作用执行（目录，按功能拆分） |
 
@@ -178,7 +178,7 @@ global_footer/
 | 壳层状态结构体 | `ShellState` | `ShellState` | app_shell 的状态 |
 | 全局意图枚举 | `AppIntent`（可选） | `AppIntent` | 聚合所有 Feature 的 Intent |
 | 全局副作用枚举 | `AppEffect`（可选） | `AppEffect` | 聚合所有 Feature 的 Effect |
-| 焦点枚举 | `FocusZone` | `FocusZone` | 各 Feature 的焦点区域 |
+| 焦点枚举 | `Pane` | `Pane` | 各 Feature 的焦点区域 |
 
 **注意**: `AppIntent` 和 `AppEffect` 是可选的。也可以在 `AppMsg` 中直接使用枚举变体包装各 Feature 的 Intent/Effect，而不需要单独定义。
 
@@ -587,7 +587,7 @@ Feature.update() 冒泡 Intent/Effect 到 app_shell
 // 父 Feature 的 Msg 枚举
 pub enum ExplorerMsg {
     // 自身消息
-    SetFocusZone(ExplorerZone),
+    SetPane(ExplorerPane),
     ToggleTree,
     
     // 嵌套子模块消息
@@ -617,7 +617,7 @@ pub enum AppMsg {
     SqlMsg(SqlMsg),
     
     // 全局消息
-    FocusChanged { zone: FocusZone },
+    FocusChanged { pane: Pane },
     Tick,  // 每帧触发
     Quit,
 }
@@ -735,12 +735,12 @@ pub enum FormMode {
     Edit { idx: usize },  // 编辑模式（携带索引）
 }
 
-pub enum ExplorerZone {
+pub enum ExplorerPane {
     Instances,
     Objects,
 }
 
-pub enum FocusZone {
+pub enum Pane {
     Header,
     Explorer,
     InstanceWorkspace,
@@ -762,7 +762,7 @@ app_shell/
 ├── state.rs            # ShellState
 ├── update.rs           # app_shell::update()
 ├── view.rs             # render_overlay()
-├── focus.rs            # FocusZone 切换
+├── nav.rs            # Pane 切换
 ├── intent_router.rs    # route(intent, shell) - 小规模
 ├── effect_runner.rs    # run(effects, tx, services) - 小规模
 ```
@@ -781,13 +781,13 @@ pub enum AppMsg {
     SqlMsg(SqlMsg),
     
     // 全局消息
-    FocusChanged { zone: FocusZone },
+    FocusChanged { pane: Pane },
     Tick,
     Quit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FocusZone {
+pub enum Pane {
     Header,
     Explorer,
     InstanceWorkspace,
@@ -811,7 +811,7 @@ pub struct ShellState {
     pub instance_workspace: IwState,
     pub sql_workspace: SqlWorkspaceState,
     
-    pub focus_zone: FocusZone,
+    pub focus_pane: Pane,
     pub global_status: String,
     
     pub tx: mpsc::Sender<AppMsg>,
@@ -885,8 +885,8 @@ pub fn update(shell: &mut ShellState, msg: AppMsg) {
         // ... 其他 Feature
         
         // 全局消息
-        AppMsg::FocusChanged { zone } => {
-            shell.focus_zone = zone;
+        AppMsg::FocusChanged { pane } => {
+            shell.focus_pane = pane;
         }
         
         AppMsg::Tick => {

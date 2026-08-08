@@ -446,7 +446,7 @@ pub fn update(state: &PerfState, frame_instant: Instant) -> PerfState {
 pub fn render(
     frame: &mut Frame, 
     area: Rect, 
-    focus_zone: &FocusZone, 
+    focus_pane: &Pane, 
     global_status: Option<&str>
 ) {
     // 纯渲染，不需要 State
@@ -516,7 +516,7 @@ pub fn render(
 | 异步结果返回后更新状态         | **Msg**（异步结果先变为 Msg）        | `AppMsg::ScanResult { items }` → `DiscoverMsg::ScanResult { items }` |
 | 组件完成操作后通知其他 Feature | 异步结果 → **Msg** → **Intent** | `Msg::QueryResult(data)` → `Intent::NotifyDataChanged`               |
 | 被动计算（如 FPS）         | 不需要 Msg，由 app\_shell 每帧调用   | `perf_monitor::update(state, frame_instant)`                         |
-| 纯显示（如 Footer）       | 不需要任何 Msg/Intent/Effect     | `global_footer::render(frame, area, focus_zone, status)`             |
+| 纯显示（如 Footer）       | 不需要任何 Msg/Intent/Effect     | `global_footer::render(frame, area, focus_pane, status)`             |
 
 ### 三种 Feature 类型
 
@@ -1377,7 +1377,7 @@ pub fn update(
 pub fn render(
     frame: &mut Frame,
     area: Rect,
-    focus_zone: &FocusZone,
+    focus_pane: &Pane,
     global_status: Option<&str>,
 ) {
     // 根据当前焦点区域显示对应的快捷键提示
@@ -2670,7 +2670,7 @@ pub enum HistoryMsg {
 | `msg.rs`             | `AppMsg` 枚举（全局消息 + 跨 feature 路由） | 从 `app.rs` 的 handle\_\* 消息提取             |
 | `state.rs`           | `ShellState` + `KeyEchoState`    | 从 `app.rs` + `app_model.rs` 中壳层相关字段      |
 | `update.rs`          | `update(msg, state) -> State`    | 从 `app.rs` 的路由逻辑提取                       |
-| `focus.rs`           | 焦点/区域导航逻辑                        | 从 `zone_nav.rs`                          |
+| `nav.rs`           | 焦点/区域导航逻辑                        | 从 `zone_nav.rs`                     |
 | `debug_overlay.rs`   | key\_echo 调试覆盖层渲染                | 从 `ui.rs` 的 `draw_key_echo_overlay()` 提取 |
 | `session.rs`         | Session 持久化                      | 从 `session.rs`                           |
 | `intent.rs`          | `AppIntent` 枚举（统一 Intent 定义）     | 新建，聚合所有 Feature 的 Intent                 |
@@ -2690,13 +2690,13 @@ pub enum HistoryMsg {
 | `ui.rs:draw_key_echo_overlay()`            | `app_shell/debug_overlay.rs` | 覆盖层渲染                               |
 | `lib.rs:key_echo 切换逻辑`                     | `app_shell/update.rs`        | F12 切换逻辑                            |
 | `components/focus.rs` (FocusState)         | `app_shell/state.rs`         | 焦点状态                                |
-| `zone_nav.rs`                              | `app_shell/focus.rs`         | 区域导航                                |
+| `zone_nav.rs`                              | `app_shell/nav.rs`         | 区域导航                                |
 | `session.rs`                               | `app_shell/session.rs`       | Session 持久化                         |
 | `components/interaction.rs` 通用拖拽           | `app_shell/state.rs`         | 全局拖拽状态                              |
 
 **状态归属**:
 
-- `FocusZone`（Header / Explorer / Workspace 切换）
+- `Pane`（Header / Explorer / Workspace 切换）
 - `ModalKind`（Discover 模态开关）
 - `ActiveSplitter`（全局分割器拖拽）
 - `FocusState`（explorer\_pane、focus）
@@ -2728,7 +2728,7 @@ pub enum HistoryMsg {
 │  │                                                                     │    │
 │  │  - header_state, discover_state, explorer_state                     │    │
 │  │  - iw_state, sql_workspace_state                                    │    │
-│  │  - focus_zone: FocusZone                                           │    │
+│  │  - focus_pane: Pane                                           │    │
 │  │  - pending_effects: Vec<PendingEffect>                             │    │
 │  │  - effect_results: Vec<EffectResult>                               │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
@@ -2761,7 +2761,7 @@ pub struct AppShellState {
     pub sql_workspace: SqlWorkspaceState,
     
     // 焦点管理
-    pub focus_zone: FocusZone,
+    pub focus_pane: Pane,
     
     // Effect 执行管理
     pub pending_effects: Vec<PendingEffect>,
@@ -2807,7 +2807,7 @@ pub enum AppMsg {
     SqlMsg(SqlMsg),
     
     // 焦点切换
-    FocusChanged { zone: FocusZone },
+    FocusChanged { pane: Pane },
     
     // Effect 执行结果（由 EffectExecutor 返回）
     EffectResult(EffectResult),
@@ -3233,8 +3233,8 @@ pub fn update(state: &mut AppShellState, msg: AppMsg) {
         }
         
         // === 处理焦点切换 ===
-        AppMsg::FocusChanged { zone } => {
-            state.focus_zone = zone;
+        AppMsg::FocusChanged { pane } => {
+            state.focus_pane = pane;
         }
         
         // === 每帧 Tick ===
@@ -3377,7 +3377,7 @@ fn main() {
         
         // 2. 处理用户输入
         if let Some(input) = read_key() {
-            let msg = handle_input(input, &state.focus_zone);
+            let msg = handle_input(input, &state.focus_pane);
             app_shell::update(&mut state, msg);
         }
         
@@ -3916,11 +3916,11 @@ Sprint 7: Central Message Router 实现 + App Shell 迁移
 ├── 实现 app_shell 作为 Central Message Router
 │   ├── 消息路由逻辑 → app_shell/update.rs
 │   ├── Effect 执行引擎 → app_shell/update.rs
-│   ├── 焦点管理 → app_shell/focus.rs
+│   ├── 焦点管理 → app_shell/nav.rs
 │   ├── 模态管理 → app_shell/state.rs
 │   └── key_echo 调试覆盖层 → app_shell/debug_overlay.rs
 └── 迁移剩余壳层逻辑
-    ├── 迁移 zone_nav.rs → app_shell/focus.rs
+    ├── 迁移 zone_nav.rs → app_shell/nav.rs
     ├── 迁移 session.rs → app_shell/session.rs
     ├── 迁移 key_echo 相关逻辑 → app_shell/
     ├── 迁移 components/focus.rs → app_shell/state.rs
