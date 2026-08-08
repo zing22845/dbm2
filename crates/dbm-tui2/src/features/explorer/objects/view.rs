@@ -6,6 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
+use crate::common::view::hints::{draw_pane_footer, objects_pane_footer_text};
 use crate::common::view::pane_scrollbar::{draw_horizontal_pane_scrollbar, pane_scroll_layout};
 use crate::common::view::theme::Theme;
 
@@ -13,6 +14,7 @@ use super::state::ObjectsState;
 
 /// Render the object tree with indentation and expansion markers.
 /// `region_focused` controls the border color so the shell focus is visible.
+/// A pane footer hint line occupies the bottom row.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
@@ -22,8 +24,37 @@ pub fn render(
 ) {
     let p = theme.palette();
 
+    // The block is drawn over `area`; its inner area is split into a body (the
+    // tree, with a horizontal scrollbar) and a footer hint line at the bottom,
+    // both *inside* the pane's border — matching the original dbm.
+    let block = Block::default()
+        .title(" objects ")
+        .borders(Borders::ALL)
+        .border_style(p.active_border(region_focused));
+    frame.render_widget(&block, area);
+    let inner = block.inner(area);
+    let (body, footer_area) = if inner.height > 1 {
+        let h = inner.height.saturating_sub(1);
+        (
+            Rect {
+                x: inner.x,
+                y: inner.y,
+                width: inner.width,
+                height: h,
+            },
+            Rect {
+                x: inner.x,
+                y: inner.y.saturating_add(h),
+                width: inner.width,
+                height: 1,
+            },
+        )
+    } else {
+        (inner, Rect::default())
+    };
+
     let mut lines = Vec::new();
-    let inner_h = area.height.saturating_sub(2) as usize;
+    let inner_h = body.height as usize;
     for (vis, idx) in (state.scroll..state.rows.len()).enumerate() {
         if vis >= inner_h {
             break;
@@ -56,28 +87,22 @@ pub fn render(
         lines.push(Line::from(Span::styled(msg, Style::default().fg(p.muted))));
     }
 
-    let block = Block::default()
-        .title(" objects ")
-        .borders(Borders::ALL)
-        .border_style(p.active_border(region_focused));
-    let inner = block.inner(area);
     // The widest rendered row drives the horizontal scrollbar: it only appears
     // when content is wider than the text viewport, and its thumb position
     // reflects `h_scroll` so the user can tell at a glance whether the content
     // is scrolled to its end (matching the original dbm).
     let max_row_w = state.max_row_width();
     let layout = pane_scroll_layout(
-        inner,
+        body,
         max_row_w,
         lines.len(),
-        inner.height as usize,
+        body.height as usize,
     );
     let viewport_w = layout.content_area.width as usize;
     let effective_h = state
         .h_scroll
         .min(max_row_w.saturating_sub(viewport_w as u16));
-    // Border on `area`; content (clipped + horizontally panned) on `content_area`.
-    frame.render_widget(&block, area);
+    // Content (clipped + horizontally panned) on the body's content_area.
     let paragraph = Paragraph::new(lines).scroll((0, effective_h));
     frame.render_widget(paragraph, layout.content_area);
     if let Some(bar) = layout.h_scrollbar {
@@ -92,4 +117,7 @@ pub fn render(
             false,
         );
     }
+
+    // Pane footer (inside the border).
+    draw_pane_footer(frame, theme, footer_area, &objects_pane_footer_text());
 }

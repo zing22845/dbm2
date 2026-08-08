@@ -80,6 +80,7 @@ pub fn sql_pane_footer_text(
         "insert" => keys(&[
             ("History", hint_ctrl("r")),
             ("Complete", "SHIFT+TAB".into()),
+            ("Context", lit("click title")),
             ("Normal", lit("ESC")),
             ("Run", "ALT+ENTER".into()),
         ]),
@@ -117,9 +118,15 @@ pub fn results_pane_footer_text(
     } else {
         ("Deselect", lit("ESC"))
     };
+    // When the detail pane is open the original dbm also exposes the detail
+    // width splitter ("Width: [/]") right after Inspect.
     let base = keys(&[
         ("Inspect", lit("ENTER")),
-        ("Col width", lit(",/.")),
+        if detail_open {
+            ("Width", lit("[/]"))
+        } else {
+            ("Col width", lit(",/."))
+        },
         ("Copy Col Name", hint_ctrl("n")),
         esc_hint,
         ("Flip", lit("f/b")),
@@ -231,6 +238,9 @@ pub fn global_footer_text(global_status: &str) -> String {
         ("Pane", lit("TAB")),
         ("SubPane", hint_ctrl("h/j/k/l")),
         ("Search", lit("/")),
+        ("Width", lit("[/]")),
+        ("Height", lit("+/-")),
+        ("Resize", lit("drag")),
         ("H-Scroll", lit("←/→")),
         ("Copy", copy_shortcut_label()),
         ("Quit", quit_shortcut_label()),
@@ -239,6 +249,56 @@ pub fn global_footer_text(global_status: &str) -> String {
         hints
     } else {
         format!("{hints}\n{global_status}")
+    }
+}
+
+/// Footer for the explorer instances tree, mirroring the original dbm. The
+/// hints differ by row kind: an instance row shows Open/Add/Expand/Collapse,
+/// a connection row shows New/Open/Add/Edit.
+pub fn instances_pane_footer_text(instance_row: bool) -> String {
+    if instance_row {
+        keys(&[
+            ("Open", lit("ENTER / Dbl-click")),
+            ("Add conn", lit("a")),
+            ("Expand", lit("l")),
+            ("Collapse", lit("h")),
+        ])
+    } else {
+        keys(&[
+            ("New", lit("n")),
+            ("Open", lit("ENTER / Dbl-click")),
+            ("Add conn", lit("a")),
+            ("Edit conn", lit("i")),
+        ])
+    }
+}
+
+/// Footer for the explorer objects tree, mirroring the original dbm.
+pub fn objects_pane_footer_text() -> String {
+    keys(&[
+        ("Open schema", lit("ENTER")),
+        ("Expand", lit("l")),
+        ("Collapse", lit("h")),
+        ("Refresh", lit("r")),
+    ])
+}
+
+/// Footer for the instance workspace sub-pane, mirroring the original dbm:
+/// the Overview pane shows Refresh/Unregister/H-Scroll; the Connections pane
+/// shows Add/Edit/Delete/Test.
+pub fn instance_workspace_footer_text(pane: crate::app_shell::nav::IwPane) -> String {
+    match pane {
+        crate::app_shell::nav::IwPane::Overview => keys(&[
+            ("Refresh", lit("r")),
+            ("Unregister", lit("u")),
+            ("H-Scroll", lit("←/→")),
+        ]),
+        crate::app_shell::nav::IwPane::Connections => keys(&[
+            ("Add", lit("a")),
+            ("Edit", lit("i")),
+            ("Delete", lit("d")),
+            ("Test", lit("t")),
+        ]),
     }
 }
 
@@ -336,6 +396,42 @@ mod tests {
         assert!(!base.contains("Back to SQL"));
         let ret = history_list_footer_text(false, false, true);
         assert!(ret.contains("Back to SQL: ESC"));
+    }
+
+    #[test]
+    fn explorer_instance_footer_varies_by_row_kind() {
+        let inst = instances_pane_footer_text(true);
+        assert!(inst.contains("Expand: l"));
+        assert!(inst.contains("Collapse: h"));
+        assert!(inst.contains("Add conn: a"));
+        assert!(inst.contains("Open: ENTER / Dbl-click"));
+        // Connection row shows New/Edit instead of Expand/Collapse.
+        let conn = instances_pane_footer_text(false);
+        assert!(conn.contains("New: n"));
+        assert!(conn.contains("Edit conn: i"));
+        assert!(!conn.contains("Expand:"));
+    }
+
+    #[test]
+    fn explorer_objects_footer_lists_open_expand_collapse_refresh() {
+        let footer = objects_pane_footer_text();
+        assert!(footer.contains("Open schema: ENTER"));
+        assert!(footer.contains("Expand: l"));
+        assert!(footer.contains("Collapse: h"));
+        assert!(footer.contains("Refresh: r"));
+    }
+
+    #[test]
+    fn instance_workspace_footer_varies_by_subpane() {
+        use crate::app_shell::nav::IwPane;
+        let ov = instance_workspace_footer_text(IwPane::Overview);
+        assert!(ov.contains("Refresh: r"));
+        assert!(ov.contains("Unregister: u"));
+        let conn = instance_workspace_footer_text(IwPane::Connections);
+        assert!(conn.contains("Add: a"));
+        assert!(conn.contains("Edit: i"));
+        assert!(conn.contains("Delete: d"));
+        assert!(conn.contains("Test: t"));
     }
 
     #[test]

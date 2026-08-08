@@ -127,89 +127,15 @@ fn discover_status(state: &DiscoverState) -> String {
 }
 
 /// Render the "close discovery?" confirmation popup over the whole discover
-/// area, matching the original dbm's close-confirm dialog: a centered popup
-/// with a message row and a `Yes`/`No` button row. Pure `state -> view`: it
-/// only draws, never mutates state.
+/// area. It reuses the shared confirm popup (title + body + Yes/No buttons) so
+/// it looks identical to every other confirm dialog. Pure `state -> view`.
 fn render_close_confirm(frame: &mut Frame, theme: &Theme, area: Rect) {
-    let p = theme.palette();
-
-    let popup_w = area.width.clamp(28, 44);
-    let popup_h = 5u16;
-    let popup = Rect {
-        x: area.x.saturating_add(area.width.saturating_sub(popup_w) / 2),
-        y: area.y.saturating_add(area.height.saturating_sub(popup_h) / 2),
-        width: popup_w,
-        height: popup_h.min(area.height),
-    };
-    if popup.width == 0 || popup.height == 0 {
-        return;
-    }
-
-    // Only the popup's own rectangle gets cleared/filled; the rest of the
-    // discover pane stays visible around the confirmation dialog.
-    crate::common::view::overlay_clear::clear_overlay(frame, popup);
-    frame.render_widget(
-        ratatui::widgets::Block::default().style(ratatui::style::Style::default().bg(p.surface)),
-        popup,
+    crate::common::view::modal::render_confirm_popup(
+        frame,
+        theme,
+        area,
+        " Close Discover ",
+        vec![Line::from(Span::raw("Close Discover and return to the tree?"))],
+        true,
     );
-
-    let block = ratatui::widgets::Block::default()
-        .title(" Close Discover ")
-        .borders(ratatui::widgets::Borders::ALL)
-        .border_style(ratatui::style::Style::default().fg(p.border))
-        .style(ratatui::style::Style::default().bg(p.surface));
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-    if inner.width == 0 || inner.height < 2 {
-        return;
-    }
-
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
-        .split(inner);
-
-    frame.render_widget(
-        ratatui::widgets::Paragraph::new("Close Discover and return to the tree?")
-            .style(ratatui::style::Style::default().bg(p.surface)),
-        chunks[0],
-    );
-
-    // Button row: a highlighted " Yes " and a plain " No ", centered.
-    let btn_row = chunks[1];
-    let yes_label = " Yes ";
-    let no_label = " No ";
-    let gap = 3u16;
-    let yes_w = yes_label.chars().count() as u16;
-    let no_w = no_label.chars().count() as u16;
-    let total = yes_w.saturating_add(gap).saturating_add(no_w);
-    let start_x = btn_row
-        .x
-        .saturating_add(btn_row.width.saturating_sub(total) / 2);
-    let yes_rect = Rect {
-        x: start_x,
-        y: btn_row.y,
-        width: yes_w.min(btn_row.width),
-        height: 1,
-    };
-    let no_rect = Rect {
-        x: start_x.saturating_add(yes_w).saturating_add(gap),
-        y: btn_row.y,
-        width: no_w,
-        height: 1,
-    };
-    let yes_style = ratatui::style::Style::default()
-        .fg(p.selection)
-        .add_modifier(ratatui::style::Modifier::BOLD);
-    let no_style = ratatui::style::Style::default().bg(p.surface);
-    frame.render_widget(
-        ratatui::widgets::Paragraph::new(yes_label).style(yes_style),
-        yes_rect,
-    );
-    if no_rect.x + no_rect.width <= btn_row.right() {
-        frame.render_widget(
-            ratatui::widgets::Paragraph::new(no_label).style(no_style),
-            no_rect,
-        );
-    }
 }

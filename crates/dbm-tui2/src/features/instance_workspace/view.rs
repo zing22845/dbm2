@@ -69,7 +69,8 @@ pub fn render(
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), chunks[0]);
 
-    // Body shows only the active sub-pane (like a tab page).
+    // Body shows only the active sub-pane (like a tab page). Each sub-pane
+    // renders its own footer inside its border.
     match state.pane {
         crate::app_shell::nav::IwPane::Overview => {
             overview_view::render(frame, theme, chunks[1], &state.overview, focused)

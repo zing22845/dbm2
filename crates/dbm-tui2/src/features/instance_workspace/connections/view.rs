@@ -6,7 +6,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
+use crate::common::view::hints::{draw_pane_footer, instance_workspace_footer_text};
 use crate::common::view::theme::Theme;
+use crate::app_shell::nav::IwPane;
 
 use super::state::{ConnectionsState, FormField};
 
@@ -26,8 +28,37 @@ pub fn render(
         return;
     }
 
+    // The block is drawn over `area`; its inner area is split into a body (the
+    // connection list) and a footer hint line at the bottom, both *inside* the
+    // pane's border — matching the original dbm.
+    let block = Block::default()
+        .title(" connections ")
+        .borders(Borders::ALL)
+        .border_style(p.active_border(region_focused));
+    frame.render_widget(&block, area);
+    let inner = block.inner(area);
+    let (body, footer_area) = if inner.height > 1 {
+        let h = inner.height.saturating_sub(1);
+        (
+            Rect {
+                x: inner.x,
+                y: inner.y,
+                width: inner.width,
+                height: h,
+            },
+            Rect {
+                x: inner.x,
+                y: inner.y.saturating_add(h),
+                width: inner.width,
+                height: 1,
+            },
+        )
+    } else {
+        (inner, Rect::default())
+    };
+
     let mut lines = Vec::new();
-    let inner_h = area.height.saturating_sub(2) as usize;
+    let inner_h = body.height as usize;
     for (vis, idx) in (0..state.connections.len()).enumerate() {
         if vis >= inner_h {
             break;
@@ -54,11 +85,14 @@ pub fn render(
         )));
     }
 
-    let block = Block::default()
-        .title(" connections ")
-        .borders(Borders::ALL)
-        .border_style(p.active_border(region_focused));
-    frame.render_widget(Paragraph::new(lines).block(block), area);
+    frame.render_widget(Paragraph::new(lines), body);
+    // Pane footer (inside the border): Add/Edit/Delete/Test.
+    draw_pane_footer(
+        frame,
+        theme,
+        footer_area,
+        &instance_workspace_footer_text(IwPane::Connections),
+    );
 }
 
 fn render_form(

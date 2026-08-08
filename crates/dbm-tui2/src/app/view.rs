@@ -105,27 +105,16 @@ fn render_popup_modal(
     base: Rect,
     modal: &ModalKind,
 ) {
-    use crate::common::view::modal::{modal_title, render_popup, render_titled_popup};
-    render_popup(frame, base, 45, 20, true, |f, area| {
+    use crate::common::view::modal::{
+        is_confirm_modal, modal_title, render_confirm_popup, render_popup,
+        render_titled_popup,
+    };
+    // Confirm-style modals (delete connection / unregister / commit preview)
+    // share the generic Yes/No confirm popup so their look matches the discover
+    // close dialog and every other confirm dialog.
+    if is_confirm_modal(modal) {
+        let title = modal_title(modal);
         let body = match modal {
-            ModalKind::ResultsRowLimitPicker { current, limits } => {
-                
-                limits
-                    .iter()
-                    .map(|l| {
-                        let marker = if *l == *current { "◄" } else { " " };
-                        Line::from(Span::raw(format!("{marker} {l} rows")))
-                    })
-                    .collect()
-            }
-            ModalKind::ResultsPageInput { current_page, total_pages } => {
-                let total = total_pages
-                    .map(|t| t.to_string())
-                    .unwrap_or_else(|| "?".to_string());
-                vec![Line::from(Span::raw(format!(
-                    "Page {current_page} of {total} — type a page number"
-                )))]
-            }
             ModalKind::DeleteConnectionConfirm { instance, connection } => {
                 vec![
                     Line::from(Span::raw(format!("Connection: {connection}"))),
@@ -158,6 +147,34 @@ fn render_popup_modal(
                     shown
                 }
             }
+            ModalKind::ResultsRowLimitPicker { .. } | ModalKind::ResultsPageInput { .. } => {
+                Vec::new() // unreachable: not a confirm modal
+            }
+        };
+        render_confirm_popup(frame, theme, base, &title, body, true);
+        return;
+    }
+
+    render_popup(frame, base, 45, 20, true, |f, area| {
+        let body = match modal {
+            ModalKind::ResultsRowLimitPicker { current, limits } => {
+                limits
+                    .iter()
+                    .map(|l| {
+                        let marker = if *l == *current { "◄" } else { " " };
+                        Line::from(Span::raw(format!("{marker} {l} rows")))
+                    })
+                    .collect()
+            }
+            ModalKind::ResultsPageInput { current_page, total_pages } => {
+                let total = total_pages
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "?".to_string());
+                vec![Line::from(Span::raw(format!(
+                    "Page {current_page} of {total} — type a page number"
+                )))]
+            }
+            _ => Vec::new(), // unreachable: confirm modals handled above
         };
         render_titled_popup(f, theme, area, &modal_title(modal), body);
     });

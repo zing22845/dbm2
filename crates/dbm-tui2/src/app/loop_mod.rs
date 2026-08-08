@@ -226,6 +226,104 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     // repaints only if one of them changed rendered state.
                     let mut dirty = false;
                     match mouse.kind {
+                        // A confirm modal is open: clicking its Yes/No button
+                        // confirms or cancels, matching the `y`/`n` keys.
+                        MouseEventKind::Down(MouseButton::Left)
+                            if state
+                                .modal
+                                .as_ref()
+                                .is_some_and(crate::common::view::modal::is_confirm_modal) =>
+                        {
+                            let size = terminal.size()?;
+                            let footer_h =
+                                footer_view::footer_height(&state.footer, size.width);
+                            let body_top = 3u16;
+                            let body_h = size
+                                .height
+                                .saturating_sub(body_top)
+                                .saturating_sub(footer_h);
+                            let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+                            let workspace = Rect::new(
+                                explorer_w,
+                                body_top,
+                                size.width.saturating_sub(explorer_w),
+                                body_h,
+                            );
+                            let popup =
+                                crate::common::view::modal::confirm_popup_rect(workspace);
+                            let buttons =
+                                crate::common::view::modal::confirm_buttons(popup);
+                            let msg = if buttons.yes_rect.contains(point) {
+                                crate::app::input::confirm_yes_msg(
+                                    state.modal.as_ref().unwrap(),
+                                    &state,
+                                )
+                            } else if buttons.no_rect.contains(point) {
+                                Some(AppMsg::CloseModal)
+                            } else {
+                                None
+                            };
+                            if let Some(msg) = msg {
+                                let result = process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    msg,
+                                    &mut state,
+                                );
+                                dirty |= result.dirty;
+                            }
+                        }
+                        // Discover's close-confirmation dialog: clicking Yes/No
+                        // confirms or cancels closing discover.
+                        MouseEventKind::Down(MouseButton::Left)
+                            if state.modal.is_none()
+                                && matches!(state.focus, Pane::Discover(_))
+                                && state.discover.close_confirm =>
+                        {
+                            let size = terminal.size()?;
+                            let footer_h =
+                                footer_view::footer_height(&state.footer, size.width);
+                            let body_top = 3u16;
+                            let body_h = size
+                                .height
+                                .saturating_sub(body_top)
+                                .saturating_sub(footer_h);
+                            let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+                            let workspace = Rect::new(
+                                explorer_w,
+                                body_top,
+                                size.width.saturating_sub(explorer_w),
+                                body_h,
+                            );
+                            let popup =
+                                crate::common::view::modal::confirm_popup_rect(workspace);
+                            let buttons =
+                                crate::common::view::modal::confirm_buttons(popup);
+                            let msg = if buttons.yes_rect.contains(point) {
+                                Some(AppMsg::Discover(
+                                    crate::features::discover::msg::DiscoverMsg::Message(
+                                        crate::features::discover::msg::DiscoverMessage::Close,
+                                    ),
+                                ))
+                            } else if buttons.no_rect.contains(point) {
+                                Some(AppMsg::Discover(
+                                    crate::features::discover::msg::DiscoverMsg::Message(
+                                        crate::features::discover::msg::DiscoverMessage::CancelClose,
+                                    ),
+                                ))
+                            } else {
+                                None
+                            };
+                            if let Some(msg) = msg {
+                                let result = process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    msg,
+                                    &mut state,
+                                );
+                                dirty |= result.dirty;
+                            }
+                        }
                         MouseEventKind::Down(MouseButton::Left) if state.modal.is_none() => {
                             // Map the click to a focus pane by region. The layout
                             // mirrors `app/view.rs`: header (top 3 rows), explorer

@@ -202,6 +202,38 @@ pub fn paste_to_msg(contents: &str, state: &super::state::AppState) -> Option<Ap
     None
 }
 
+/// The action dispatched when a confirm modal's `Yes`/`y` is triggered (by key
+/// or by clicking the Yes button). The shell closes the modal itself when it
+/// sees the dispatched message (e.g. `DeleteConnection` / `UnregisterInstance`),
+/// or the action runner does (e.g. a `Commit`). `None` for non-confirm modals.
+pub fn confirm_yes_msg(modal: &ModalKind, state: &super::state::AppState) -> Option<AppMsg> {
+    use crate::features::sql_workspace::sql_tab::results::msg::ResultsMessage as R;
+    match modal {
+        ModalKind::ResultsEditCommitPreview { .. } => {
+            // Confirm the commit: dispatch Commit to the active tab's results
+            // (the modal closes when the commit completes, via `CommitResult`).
+            state
+                .sql
+                .sql_tab
+                .tabs
+                .get(state.sql.sql_tab.active_tab)
+                .map(|t| t.session.id)
+                .map(|id| sql_results(R::Commit, id))
+        }
+        // Confirm deleting a connection: dispatch the delete to the connections
+        // panel (the shell closes the modal when it sees DeleteConnection).
+        ModalKind::DeleteConnectionConfirm { instance, connection } => {
+            Some(confirm_delete_connection(instance.clone(), connection.clone()))
+        }
+        // Confirm unregistering the current instance: dispatch the unregister
+        // (the shell closes the modal when it sees UnregisterInstance).
+        ModalKind::UnregisterInstanceConfirm { instance } => {
+            Some(close_and_unregister(instance.clone()))
+        }
+        _ => None,
+    }
+}
+
 /// Keys for the data-carrying popups (row-limit picker / page input / confirm
 /// / commit preview). `Esc` closes; `n`/`N` cancels a confirm; `y`/`Y`/`Enter`
 /// confirms and dispatches the owning feature's action (e.g. the commit preview
@@ -227,26 +259,7 @@ fn modal_key(key: KeyEvent, modal: &ModalKind, state: &super::state::AppState) -
                 None
             }
         }
-        KeyCode::Char('y') | KeyCode::Char('Y') => match modal {
-            ModalKind::ResultsEditCommitPreview { .. } => {
-                // Confirm the commit: dispatch Commit to the active tab's
-                // results (the modal closes when the commit completes, via
-                // `CommitResult`).
-                active_tab_id().map(|id| sql_results(R::Commit, id))
-            }
-            // Confirm deleting a connection: dispatch the delete to the
-            // connections panel (the shell closes the modal when it sees the
-            // DeleteConnection message).
-            ModalKind::DeleteConnectionConfirm { instance, connection } => {
-                Some(confirm_delete_connection(instance.clone(), connection.clone()))
-            }
-            // Confirm unregistering the current instance: close the modal and
-            // dispatch the unregister to the instance workspace.
-            ModalKind::UnregisterInstanceConfirm { instance } => Some(close_and_unregister(
-                instance.clone(),
-            )),
-            _ => None,
-        },
+        KeyCode::Char('y') | KeyCode::Char('Y') => confirm_yes_msg(modal, state),
         // Row-limit picker: up/down cycle the presets, enter applies.
         KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') | KeyCode::Enter => {
             if let ModalKind::ResultsRowLimitPicker { current, limits } = modal {
@@ -302,8 +315,12 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
 
     if state.close_confirm {
         return match code {
-            KeyCode::Enter => Some(discover(DiscoverMessage::Close)),
-            KeyCode::Esc => Some(discover(DiscoverMessage::CancelClose)),
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                Some(discover(DiscoverMessage::Close))
+            }
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                Some(discover(DiscoverMessage::CancelClose))
+            }
             _ => None,
         };
     }
