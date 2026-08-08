@@ -5,6 +5,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use crate::common::view::theme::Theme;
 
@@ -60,5 +61,20 @@ pub fn render(
         .title(" objects ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
-    frame.render_widget(Paragraph::new(lines).block(block), area);
+    // Clamp the horizontal scroll to the widest content row so that a narrow
+    // tree (fully visible) cannot be panned into blank space. `h_scroll` only
+    // takes effect when the longest rendered line exceeds the text viewport.
+    let viewport_w = area.width.saturating_sub(2) as usize;
+    let max_row_w = lines
+        .iter()
+        .map(|l| UnicodeWidthStr::width(l.to_string().as_str()))
+        .max()
+        .unwrap_or(0);
+    let effective_h = state
+        .h_scroll
+        .min(max_row_w.saturating_sub(viewport_w) as u16);
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .scroll((0, effective_h));
+    frame.render_widget(paragraph, area);
 }

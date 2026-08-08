@@ -36,24 +36,19 @@ pub fn update(
         }
         InstancesMessage::MoveUp => state.move_up(),
         InstancesMessage::MoveDown => state.move_down(),
-        InstancesMessage::ToggleExpand => {
-            // Only instance rows expand; connection rows ignore the key. On
-            // expand, lazily load the instance's connections so the subtree
-            // renders its connections (matching the original dbm).
+        InstancesMessage::Expand => {
+            // Only instance rows expand; connection rows ignore the key. On a
+            // fresh expand, lazily load the instance's connections so the
+            // subtree renders its connections (matching the original dbm).
             match state.cursor_selection() {
                 Some((instance_idx, None)) => {
-                    let was_expanded = state.toggle_expand();
-                    let now_expanded = state
-                        .nodes
-                        .get(instance_idx)
-                        .map(|n| n.expanded)
-                        .unwrap_or(false);
+                    let changed = state.expand();
                     let needs_load = state
                         .nodes
                         .get(instance_idx)
                         .map(|n| !n.loaded)
                         .unwrap_or(false);
-                    if was_expanded && now_expanded && needs_load {
+                    if changed && needs_load {
                         let instance_name = state.nodes[instance_idx]
                             .instance
                             .as_ref()
@@ -64,10 +59,27 @@ pub fn update(
                             instance_name,
                         });
                     }
-                    was_expanded
+                    changed
                 }
                 _ => false,
             }
+        }
+        InstancesMessage::Collapse => {
+            // Only instance rows collapse; connection rows ignore the key.
+            match state.cursor_selection() {
+                Some((_instance_idx, None)) => state.collapse(),
+                _ => false,
+            }
+        }
+        InstancesMessage::ScrollHorizontal { delta, term_width } => {
+            // The explorer takes ~20% of terminal width.  Clamp so `h_scroll`
+            // never grows past the longest content row beyond the viewport.
+            // When content fits fully inside the viewport, `max` is 0 and
+            // pressing Right is a no-op — matching the original dbm.
+            let viewport_w = (term_width as u32 * 20 / 100).max(1) as u16;
+            let max_row_w = state.max_row_width();
+            let max = max_row_w.saturating_sub(viewport_w);
+            state.scroll_horizontal(delta, max)
         }
         InstancesMessage::Select => {
             match state.cursor_selection() {
@@ -132,13 +144,13 @@ mod tests {
     }
 
     #[test]
-    fn toggle_expand_loads_connections_when_expanding() {
+    fn expand_loads_connections_when_expanding() {
         let mut s = InstancesState::default();
         s.set_instances(vec![inst("a")]);
         s.cursor = 0;
 
-        // First expand emits a LoadConnections effect (connections not loaded).
-        let (_s, _i, effects, dirty) = update(InstancesMessage::ToggleExpand, s);
+        // Fresh expand emits a LoadConnections effect (connections not loaded).
+        let (_s, _i, effects, dirty) = update(InstancesMessage::Expand, s);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
             InstancesEffect::LoadConnections { instance_idx, instance_name } => {
@@ -151,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn toggle_collapse_does_not_reload() {
+    fn collapse_does_not_reload() {
         let mut s = InstancesState::default();
         s.set_instances(vec![inst("a")]);
         s.nodes[0].expanded = true;
@@ -159,7 +171,28 @@ mod tests {
         s.cursor = 0;
 
         // Collapsing (expanded -> false) must not emit a load effect.
-        let (_s, _i, effects, _dirty) = update(InstancesMessage::ToggleExpand, s);
+        let (_s, _i, effects, dirty) = update(InstancesMessage::Collapse, s);
         assert!(effects.is_empty());
+        assert!(dirty);
+    }
+
+    #[test]
+    fn horizontal_scroll_clamps_and_reports_noop() {
+        let mut s = InstancesState::default();
+        // Instance row " ▸ a_long_enough_name" is wider than the explorer
+        // viewport (16 cols), so scrolling is allowed.
+        s.set_instances(vec![inst("a_very_long_instance_name_for_scroll_test")]);
+
+        // Scrolling at the left boundary is a no-op (dirty=false).
+        let (s2, _i, _e, dirty) =
+            update(InstancesMessage::ScrollHorizontal { delta: -1, term_width: 80 }, s);
+        assert!(!dirty);
+        assert_eq!(s2.h_scroll, 0);
+
+        // Scrolling right moves the offset (content wider than viewport).
+        let (s3, _i, _e, dirty) =
+            update(InstancesMessage::ScrollHorizontal { delta: 3, term_width: 80 }, s2);
+        assert!(dirty);
+        assert_eq!(s3.h_scroll, 3);
     }
 }

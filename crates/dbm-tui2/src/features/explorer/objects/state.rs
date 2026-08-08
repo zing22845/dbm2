@@ -124,6 +124,9 @@ pub struct ObjectsState {
     pub cursor: usize,
     /// Scroll offset.
     pub scroll: usize,
+    /// Horizontal scroll offset of the tree (`Left`/`Right`), matching the
+    /// original dbm's objects horizontal scroll.
+    pub h_scroll: u16,
     /// The instance and connection the tree is bound to (empty = unbound).
     pub bound_instance: String,
     pub bound_connection: String,
@@ -216,6 +219,52 @@ impl ObjectsState {
         Some(node)
     }
 
+    /// Collapse the row under the cursor (if it is expanded), matching the
+    /// original dbm's `h` key. Returns whether anything was collapsed.
+    pub fn collapse(&mut self) -> bool {
+        let Some(node) = self.node_at_cursor().cloned() else {
+            return false;
+        };
+        let key = self.expand_key_of(&node);
+        if key.is_empty() {
+            return false;
+        }
+        if self.expanded.remove(&key) {
+            self.rebuild_rows();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The display width (in columns) of the widest rendered row. Used to
+    /// clamp horizontal scrolling so it stops at the content boundary.
+    pub fn max_row_width(&self) -> u16 {
+        self.rows
+            .iter()
+            .map(|r| {
+                // Each row renders as "{indent}{marker} {label}"
+                // where indent = depth * 2 spaces, marker = ▸/▾/─/·
+                let indent = r.depth.saturating_mul(2) as usize;
+                let marker_w = 1usize; // ▸/▾/─/· = 1 col each
+                let label_w = unicode_width::UnicodeWidthStr::width(r.label.as_str());
+                let total: usize = indent + marker_w + 1 + label_w; // +1 for space after marker
+                total.try_into().unwrap_or(u16::MAX)
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Scroll the tree horizontally by `delta` columns, clamped to `[0, max]`.
+    /// Returns whether the offset moved, so a no-op at a boundary skips a
+    /// redundant repaint (matching the original dbm).
+    pub fn scroll_horizontal(&mut self, delta: i16, max: u16) -> bool {
+        let before = self.h_scroll;
+        self.h_scroll = (self.h_scroll as i32 + i32::from(delta))
+            .clamp(0, i32::from(max)) as u16;
+        self.h_scroll != before
+    }
+
     /// Rebind the tree to a new instance/connection, reset navigation and
     /// catalog.
     pub fn rebind(&mut self, instance: String, connection: String) {
@@ -223,6 +272,7 @@ impl ObjectsState {
         self.bound_connection = connection;
         self.cursor = 0;
         self.scroll = 0;
+        self.h_scroll = 0;
         self.expanded.clear();
         self.catalog = ObjectsCatalog::default();
         self.rows.clear();

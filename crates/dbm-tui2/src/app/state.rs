@@ -24,6 +24,10 @@ pub struct AppState {
     pub modal: Option<ModalKind>,
     /// The active theme, injected into every view as a rendering context.
     pub theme: Theme,
+    /// Terminal width in columns, updated on resize. Used by explorer
+    /// horizontal-scroll to clamp at the content boundary instead of a
+    /// fixed cap.
+    pub term_width: u16,
 
     // --- Feature states ---
     pub header: HeaderState,
@@ -60,6 +64,7 @@ impl Default for AppState {
             should_quit: false,
             global_status: String::new(),
             modal: None,
+            term_width: 0,
             theme: crate::common::view::theme::dracula(),
             header: HeaderState::default(),
             explorer: ExplorerState::default(),

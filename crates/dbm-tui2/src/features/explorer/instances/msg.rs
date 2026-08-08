@@ -13,8 +13,17 @@ pub enum InstancesMessage {
     MoveUp,
     /// Move the cursor down.
     MoveDown,
-    /// Toggle expansion of the current instance.
-    ToggleExpand,
+    /// Expand the current instance (loading its connections), matching the
+    /// original dbm's `l` key.
+    Expand,
+    /// Collapse the current instance, matching the original dbm's `h` key.
+    Collapse,
+    /// Scroll the tree horizontally by `delta` columns (`Left`/`Right`),
+    /// matching the original dbm's tree horizontal scroll. `term_width` is the
+    /// current terminal width in columns (used to approximate the explorer
+    /// viewport so scrolling stops at the content boundary). No-op
+    /// (dirty=false) when already at a scroll boundary.
+    ScrollHorizontal { delta: i16, term_width: u16 },
     /// Activate the current row (instance -> instance workspace, connection ->
     /// SQL workspace).
     Select,

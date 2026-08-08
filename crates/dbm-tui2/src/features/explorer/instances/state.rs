@@ -38,6 +38,9 @@ pub struct InstancesState {
     pub cursor: usize,
     /// Scroll offset of the tree.
     pub scroll: usize,
+    /// Horizontal scroll offset of the tree (`Left`/`Right`), matching the
+    /// original dbm's tree horizontal scroll.
+    pub h_scroll: u16,
 }
 
 impl InstancesState {
@@ -68,15 +71,73 @@ impl InstancesState {
         self.cursor != before
     }
 
-    /// Toggle the expansion of the instance the cursor is on (if the cursor is
-    /// on an instance row). Returns whether anything was toggled.
-    pub fn toggle_expand(&mut self) -> bool {
-        if let Some((node, _)) = self.node_at_cursor_mut() {
-            node.expanded = !node.expanded;
+    /// Expand the instance the cursor is on (if the cursor is on an instance
+    /// row and it isn't already expanded). Returns whether expansion changed.
+    pub fn expand(&mut self) -> bool {
+        if let Some((node, _)) = self.node_at_cursor_mut()
+            && !node.expanded
+        {
+            node.expanded = true;
             true
         } else {
             false
         }
+    }
+
+    /// Collapse the instance the cursor is on (if the cursor is on an instance
+    /// row and it is currently expanded). Returns whether collapse changed.
+    pub fn collapse(&mut self) -> bool {
+        if let Some((node, _)) = self.node_at_cursor_mut()
+            && node.expanded
+        {
+            node.expanded = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The display width (in columns) of the widest rendered row. Used to
+    /// clamp horizontal scrolling so it stops at the content boundary.
+    pub fn max_row_width(&self) -> u16 {
+        self.nodes
+            .iter()
+            .map(|n| {
+                let mut w: u16 = 0;
+                if let Some(inst) = &n.instance {
+                    // Instance row: " ▸/▾ name"
+                    let marker = if n.expanded { "▾" } else { "▸" };
+                    w = w.max(
+                        (2
+                            + unicode_width::UnicodeWidthStr::width(marker)
+                            + unicode_width::UnicodeWidthStr::width(inst.name.as_str()))
+                        .try_into()
+                        .unwrap_or(u16::MAX),
+                    );
+                }
+                if n.expanded {
+                    for c in &n.connections {
+                        // Connection row: "    └ name"
+                        let conn_w: usize = 4 + 1 // └
+                            + unicode_width::UnicodeWidthStr::width(c.name.as_str());
+                        w = w.max(conn_w.try_into().unwrap_or(u16::MAX));
+                    }
+                }
+                w
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Scroll the tree horizontally by `delta` columns, clamped to `[0, max]`.
+    /// Returns whether the scroll offset actually moved, so callers can skip a
+    /// redundant repaint when already at a boundary (matching the original dbm,
+    /// where a no-op horizontal scroll does not redraw).
+    pub fn scroll_horizontal(&mut self, delta: i16, max: u16) -> bool {
+        let before = self.h_scroll;
+        self.h_scroll = (self.h_scroll as i32 + i32::from(delta))
+            .clamp(0, i32::from(max)) as u16;
+        self.h_scroll != before
     }
 
     /// The visible row index of the node the cursor is on, if any.

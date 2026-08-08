@@ -9,9 +9,15 @@ pub enum ObjectsMessage {
     MoveUp,
     /// Move the cursor down.
     MoveDown,
-    /// Toggle expansion of the current row.
-    ToggleExpand,
-    /// Activate the current row (open an object, e.g. a table).
+    /// Collapse the current row (`h`), matching the original dbm.
+    Collapse,
+    /// Scroll the tree horizontally by `delta` columns (`Left`/`Right`),
+    /// matching the original dbm. `term_width` is the current terminal width
+    /// (used to approximate the explorer viewport). No-op (dirty=false) at a
+    /// scroll boundary.
+    ScrollHorizontal { delta: i16, term_width: u16 },
+    /// Activate the current row: expand/collapse an expandable row, otherwise
+    /// open an object (e.g. a table) — matching the original dbm's `Enter`.
     Select,
     /// Rebind the tree to an instance/connection.
     Bind { instance: String, connection: String },

@@ -76,7 +76,7 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
         Some(modal) => modal_key(key, modal, state),
         None => match state.focus {
             Pane::Header => header_key(key),
-            Pane::Explorer(sub) => explorer_key(key, sub),
+            Pane::Explorer(sub) => explorer_key(key, sub, state.term_width),
             Pane::InstanceWorkspace(sub) => iw_key(key, sub, &state.iw),
             Pane::SQLWorkspace => sql_key(key, &state.sql),
             // Discover is handled above (owns all input while open).
@@ -395,7 +395,7 @@ fn results(msg: ResultsMessage) -> AppMsg {
 /// `Tab` (and Ctrl+Up/Down via the shell) moves between the instances and
 /// objects panes; that flows through a shell `FocusChanged` so the shell focus
 /// and the explorer feature's sub-pane stay in sync.
-fn explorer_key(key: KeyEvent, sub: ExplorerPane) -> Option<AppMsg> {
+fn explorer_key(key: KeyEvent, sub: ExplorerPane, term_width: u16) -> Option<AppMsg> {
     // `Tab` toggles between the instances and objects panes.
     if key.code == KeyCode::Tab {
         let next = match sub {
@@ -407,31 +407,38 @@ fn explorer_key(key: KeyEvent, sub: ExplorerPane) -> Option<AppMsg> {
         }));
     }
     match sub {
-        ExplorerPane::Instances => instances_key(key),
-        ExplorerPane::Objects => objects_key(key),
+        ExplorerPane::Instances => instances_key(key, term_width),
+        ExplorerPane::Objects => objects_key(key, term_width),
     }
 }
 
-/// Objects pane keys: navigate the object tree.
-fn objects_key(key: KeyEvent) -> Option<AppMsg> {
+/// Objects pane keys: navigate the object tree. Expansion is on `Enter`
+/// (toggle, or open an object), `h` collapses, and Left/Right scroll
+/// horizontally — matching the original dbm.
+fn objects_key(key: KeyEvent, term_width: u16) -> Option<AppMsg> {
     let msg = match key.code {
         KeyCode::Up | KeyCode::Char('k') => ObjectsMessage::MoveUp,
         KeyCode::Down | KeyCode::Char('j') => ObjectsMessage::MoveDown,
         KeyCode::Enter => ObjectsMessage::Select,
-        KeyCode::Right | KeyCode::Left => ObjectsMessage::ToggleExpand,
+        KeyCode::Char('h') => ObjectsMessage::Collapse,
+        KeyCode::Right => ObjectsMessage::ScrollHorizontal { delta: 1, term_width },
+        KeyCode::Left => ObjectsMessage::ScrollHorizontal { delta: -1, term_width },
         _ => return None,
     };
     Some(explorer(ExplorerMessage::Objects(ObjectsMsg::Message(msg))))
 }
 
-/// Instances pane keys: navigate the connection tree.
-fn instances_key(key: KeyEvent) -> Option<AppMsg> {
+/// Instances pane keys: navigate the connection tree. Expansion is bound to
+/// `l`/`h` and Left/Right to horizontal scroll, matching the original dbm.
+fn instances_key(key: KeyEvent, term_width: u16) -> Option<AppMsg> {
     let msg = match key.code {
         KeyCode::Up | KeyCode::Char('k') => InstancesMessage::MoveUp,
         KeyCode::Down | KeyCode::Char('j') => InstancesMessage::MoveDown,
         KeyCode::Enter => InstancesMessage::Select,
-        KeyCode::Right => InstancesMessage::ToggleExpand,
-        KeyCode::Left => InstancesMessage::ToggleExpand,
+        KeyCode::Char('l') => InstancesMessage::Expand,
+        KeyCode::Char('h') => InstancesMessage::Collapse,
+        KeyCode::Right => InstancesMessage::ScrollHorizontal { delta: 1, term_width },
+        KeyCode::Left => InstancesMessage::ScrollHorizontal { delta: -1, term_width },
         _ => return None,
     };
     Some(explorer(ExplorerMessage::Instances(InstancesMsg::Message(msg))))
@@ -927,6 +934,72 @@ mod tests {
                 assert_eq!(pane, Pane::Explorer(ExplorerPane::Instances));
             }
             _ => panic!("expected focus change"),
+        }
+    }
+
+    #[test]
+    fn explorer_instances_l_h_expand_collapse_and_arrows_scroll() {
+        use crate::features::explorer::instances::msg::InstancesMessage;
+        use crate::features::explorer::msg::ExplorerMessage;
+
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::Explorer(ExplorerPane::Instances);
+
+        // `l` expands, `h` collapses, arrows scroll (original dbm bindings).
+        for (code, expect) in [
+            (KeyCode::Char('l'), InstancesMessage::Expand),
+            (KeyCode::Char('h'), InstancesMessage::Collapse),
+            (KeyCode::Right, InstancesMessage::ScrollHorizontal { delta: 1, term_width: 0 }),
+            (KeyCode::Left, InstancesMessage::ScrollHorizontal { delta: -1, term_width: 0 }),
+        ] {
+            let msg = key_to_msg(key(code, KeyModifiers::NONE), &state).expect("explorer key");
+            let got = match msg {
+                AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                    InstancesMsg::Message(m),
+                ))) => m,
+                other => panic!("unexpected msg for {code:?}: {other:?}"),
+            };
+            let match_kind = match (&got, &expect) {
+                (InstancesMessage::Expand, InstancesMessage::Expand)
+                | (InstancesMessage::Collapse, InstancesMessage::Collapse)
+                | (InstancesMessage::ScrollHorizontal { .. }, InstancesMessage::ScrollHorizontal { .. }) => {
+                    true
+                }
+                _ => false,
+            };
+            assert!(match_kind, "for {code:?}: got {got:?}, expected kind {expect:?}");
+        }
+    }
+
+    #[test]
+    fn explorer_objects_h_collapses_and_arrows_scroll() {
+        use crate::features::explorer::msg::ExplorerMessage;
+        use crate::features::explorer::objects::msg::ObjectsMessage;
+
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::Explorer(ExplorerPane::Objects);
+
+        for (code, expect) in [
+            (KeyCode::Char('h'), ObjectsMessage::Collapse),
+            (KeyCode::Right, ObjectsMessage::ScrollHorizontal { delta: 1, term_width: 0 }),
+            (KeyCode::Left, ObjectsMessage::ScrollHorizontal { delta: -1, term_width: 0 }),
+            (KeyCode::Enter, ObjectsMessage::Select),
+        ] {
+            let msg = key_to_msg(key(code, KeyModifiers::NONE), &state).expect("explorer key");
+            let got = match msg {
+                AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
+                    ObjectsMsg::Message(m),
+                ))) => m,
+                other => panic!("unexpected msg for {code:?}: {other:?}"),
+            };
+            // Compare discriminant (messages carry payload).
+            let match_kind = match (&got, &expect) {
+                (ObjectsMessage::Collapse, ObjectsMessage::Collapse)
+                | (ObjectsMessage::ScrollHorizontal { .. }, ObjectsMessage::ScrollHorizontal { .. })
+                | (ObjectsMessage::Select, ObjectsMessage::Select) => true,
+                _ => false,
+            };
+            assert!(match_kind, "for {code:?}: got {got:?}, expected kind {expect:?}");
         }
     }
 
