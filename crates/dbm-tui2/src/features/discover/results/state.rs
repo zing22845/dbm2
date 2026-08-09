@@ -102,16 +102,25 @@ impl ResultsState {
     /// within the *visible* list; the underlying `items` index is stored so
     /// `selected_discovery_ids` stays stable when the filter changes. Returns
     /// whether the selection actually changed; a no-op when the list is empty.
+    ///
+    /// An already-registered row always renders the same `×` mark regardless of
+    /// selection, so toggling it reports `false` (no repaint) — otherwise a held
+    /// SPACE would redraw on every auto-repeat even though nothing on screen
+    /// changes, matching the original dbm's behavior.
     pub fn toggle_select(&mut self) -> bool {
         let Some(item_idx) = self.item_index_at(self.cursor) else {
             return false;
         };
+        let already_registered = self
+            .items
+            .get(item_idx)
+            .is_some_and(|item| item.already_registered);
         if let Some(pos) = self.selected.iter().position(|&i| i == item_idx) {
             self.selected.remove(pos);
         } else {
             self.selected.push(item_idx);
         }
-        true
+        !already_registered
     }
 
     /// Discovery ids of the currently selected rows.
@@ -126,5 +135,68 @@ impl ResultsState {
     /// The `items` index at the given visible position, if any.
     fn item_index_at(&self, vis: usize) -> Option<usize> {
         self.visible_indices().get(vis).copied()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbm_discovery::{
+        Confidence, DiscoveredInstance, DiscoverySource, InstanceRunStatus,
+    };
+
+    fn instance(id: &str, registered: bool) -> DiscoveredInstance {
+        DiscoveredInstance {
+            discovery_id: id.to_string(),
+            fingerprint: id.to_string(),
+            engine: dbm_core::Engine::Postgres,
+            host: "127.0.0.1".to_string(),
+            port: 5432,
+            socket_path: None,
+            data_dir: None,
+            systemd_unit: None,
+            version: None,
+            status: InstanceRunStatus::Running,
+            sources: vec![DiscoverySource::Port],
+            confidence: Confidence::High,
+            already_registered: registered,
+            registered_instance_id: registered.then(|| "inst-1".to_string()),
+            scanned_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn toggle_select_registered_row_does_not_repaint() {
+        // Show all rows (including already-registered ones) so the cursor can
+        // land on a registered row.
+        let mut state = ResultsState {
+            items: vec![
+                instance("a", true),  // registered -> always renders `×`
+                instance("b", false), // unregistered
+            ],
+            unregistered_only: false,
+            ..ResultsState::default()
+        };
+        // Cursor starts at row 0 = the registered instance.
+        assert!(!state.toggle_select(), "registered row mark is unchanged");
+        // Its selection state still toggled, even though we do not repaint.
+        assert!(state.selected.contains(&0));
+        // Toggling again also reports no repaint.
+        assert!(!state.toggle_select());
+        assert!(state.selected.is_empty());
+    }
+
+    #[test]
+    fn toggle_select_unregistered_row_repaints() {
+        let mut state = ResultsState {
+            items: vec![instance("b", false)],
+            unregistered_only: false,
+            ..ResultsState::default()
+        };
+        // An unregistered row switches between blank and `✓`, so it repaints.
+        assert!(state.toggle_select());
+        assert!(state.selected.contains(&0));
+        assert!(state.toggle_select());
+        assert!(state.selected.is_empty());
     }
 }

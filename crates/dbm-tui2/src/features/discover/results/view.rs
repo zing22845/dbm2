@@ -19,12 +19,12 @@ pub fn render(
     state: &ResultsState,
     focus: crate::app_shell::nav::DiscoverPane,
 ) {
+    use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::{discover_results_footer_text, draw_pane_footer};
     let p = theme.palette();
     let focused = focus == crate::app_shell::nav::DiscoverPane::Results;
 
     let footer_text = discover_results_footer_text();
-    let footer_h = if footer_text.is_empty() { 0 } else { 1 };
 
     let block = Block::default()
         .title(" results ")
@@ -35,6 +35,14 @@ pub fn render(
     if inner.width == 0 || inner.height == 0 {
         return;
     }
+
+    // The footer is a keys line plus a mark legend line; size it to its wrapped
+    // height so the legend survives a narrow pane.
+    let footer_h = if footer_text.is_empty() {
+        0
+    } else {
+        wrapped_line_count(&footer_text, inner.width).max(1)
+    };
 
     let body = Rect::new(
         inner.x,
@@ -60,7 +68,10 @@ pub fn render(
             }
             let item = &state.items[idx];
             let row_focused = vis == state.cursor;
-            let checked = if state.selected.contains(&idx) { "✓" } else { " " };
+            // Row mark matches the original dbm: an already-registered instance
+            // is `×`, a selected (unregistered) one is `✓`, anything else is
+            // blank — not registered rows carry no mark.
+            let checked = result_selection_glyph(item.already_registered, state.selected.contains(&idx));
             let style = if row_focused {
                 Style::default()
                     .fg(p.selection)
@@ -83,5 +94,34 @@ pub fn render(
     if footer_h > 0 {
         let footer_area = Rect::new(inner.x, inner.y + body.height, inner.width, footer_h);
         draw_pane_footer(frame, theme, footer_area, &footer_text);
+    }
+}
+
+/// The row mark for a result, matching the original dbm: an already-registered
+/// instance is `×`, a selected (unregistered) one is `✓`, and an unselected
+/// unregistered row carries no mark at all.
+pub fn result_selection_glyph(already_registered: bool, selected: bool) -> &'static str {
+    if already_registered {
+        "×"
+    } else if selected {
+        "✓"
+    } else {
+        " "
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn result_selection_glyph_three_states() {
+        // Unregistered + unselected -> no mark.
+        assert_eq!(result_selection_glyph(false, false), " ");
+        // Unregistered + selected -> ✓.
+        assert_eq!(result_selection_glyph(false, true), "✓");
+        // Registered rows are always × regardless of selection.
+        assert_eq!(result_selection_glyph(true, false), "×");
+        assert_eq!(result_selection_glyph(true, true), "×");
     }
 }

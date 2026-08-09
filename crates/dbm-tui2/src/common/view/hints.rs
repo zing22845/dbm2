@@ -223,14 +223,23 @@ pub fn discover_targets_footer_text(editing: bool, has_loopback: bool, status: O
 pub const DISCOVER_LOOPBACK_SCAN_NOTE: &str =
     "Loopback also runs local discovery (process/pid/socket); Ports only limit TCP probes.";
 
-/// Footer for the discover results list pane.
+/// Row-mark legend shown under the results keys: `✓` marks a selected
+/// (unregistered) instance, `×` marks one that is already registered.
+pub const RESULTS_LEGEND: &str = "mark: ✓ selected · × registered";
+
+/// Footer for the discover results list pane: a keys line plus a legend line
+/// explaining the row marks (`✓` selected, `×` already registered).
 pub fn discover_results_footer_text() -> String {
-    keys(&[
-        ("Select", lit("SPACE")),
-        ("Register", lit("r")),
-        ("Force", lit("R")),
-        ("Filter", lit("u")),
-    ])
+    format!(
+        "{}\n{}",
+        keys(&[
+            ("Select", lit("SPACE")),
+            ("Register", lit("r")),
+            ("Force", lit("R")),
+            ("Filter", lit("u")),
+        ]),
+        RESULTS_LEGEND
+    )
 }
 
 /// Footer hints for the data-carrying modals; Discover draws its own footer
@@ -479,12 +488,15 @@ mod tests {
         assert!(committing.contains("Commit: ENTER"));
         assert!(committing.contains("Cancel: ESC"));
         assert!(!committing.contains("Paste: 1/2 added"));
-        // Results footer lists selection / register / force-register / filter.
+        // Results footer lists selection / register / force-register / filter,
+        // plus the mark legend on a second line.
         let results = discover_results_footer_text();
         assert!(results.contains("Select: SPACE"));
         assert!(results.contains("Register: r"));
         assert!(results.contains("Force: R"));
         assert!(results.contains("Filter: u"));
+        assert!(results.contains('\n'));
+        assert!(results.ends_with(RESULTS_LEGEND));
     }
 
     #[test]
