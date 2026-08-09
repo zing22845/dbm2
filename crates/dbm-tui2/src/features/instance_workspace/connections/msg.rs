@@ -25,8 +25,33 @@ pub enum ConnectionsMessage {
     CommitForm,
     /// Delete a specific connection (dispatched from the delete-confirm modal).
     DeleteConnection { instance_name: String, connection_name: String },
+    /// A save succeeded: close the form and reload the list.
+    Saved,
+    /// A save failed with `error`: keep the form open and show it on the footer.
+    SaveError(String),
+    /// Set the pane footer status text and its color kind (e.g. a test result).
+    SetStatus {
+        status: String,
+        kind: super::state::ConnectionStatusKind,
+    },
+    /// Test the form's current values against the database (the form's `t`).
+    TestForm,
     /// Move the form field cursor.
     FormField(FormField),
+    /// Enter insert mode on the current form field (`i`), snapshotting its value
+    /// so `Esc` can revert it.
+    BeginFieldInsert,
+    /// Commit the current field and return to normal mode (`Enter`).
+    CommitFieldInsert,
+    /// Cancel the current field edit, reverting it to its pre-edit value
+    /// (`Esc` in insert mode).
+    CancelFieldInsert,
+    /// Clear the current field and enter insert mode (`d` `d`), snapshotting the
+    /// old value for `Esc` to restore.
+    ClearFieldAndInsert,
+    /// Record the first `d` press (the `dd` clear-field chord needs two `d`
+    /// within a short window, matching the original dbm).
+    SetPendingD,
     /// Insert a character into the active form field.
     FormChar(char),
     /// Backspace in the active form field.

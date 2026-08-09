@@ -584,8 +584,10 @@ fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
             let msg = match key.code {
                 KeyCode::Up | KeyCode::Char('k') => ConnectionsMessage::MoveUp,
                 KeyCode::Down | KeyCode::Char('j') => ConnectionsMessage::MoveDown,
+                // Align with the original dbm: `a` adds, `i` edits the selected
+                // connection (no separate `e`/`Enter` binding).
                 KeyCode::Char('a') => ConnectionsMessage::BeginAdd,
-                KeyCode::Char('e') | KeyCode::Enter => ConnectionsMessage::BeginEdit,
+                KeyCode::Char('i') => ConnectionsMessage::BeginEdit,
                 _ => return None,
             };
             Some(iw(IwMessage::Connections(ConnectionsMsg::Message(msg))))
@@ -593,27 +595,48 @@ fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
     }
 }
 
-/// Form keys when a connection form is open. Up/Down cycle through all four
-/// fields (Name → Username → Database → Password) so every field is reachable.
+/// Form keys when a connection form is open, matching the original dbm: typing
+/// happens in an explicit per-field insert mode. In insert mode keys edit the
+/// current field (`Enter` commits it, `Esc` reverts it); in normal mode `i`
+/// starts editing a field, `j`/`k` move between fields, `Enter` saves the whole
+/// connection and `Esc` cancels the form.
 fn iw_form_key(key: KeyEvent, state: &IwState) -> Option<AppMsg> {
-    let current = state
-        .connections
-        .form
-        .as_ref()
-        .map(|f| f.field)
-        .unwrap_or_default();
-    let msg = match key.code {
-        KeyCode::Esc => ConnectionsMessage::CancelForm,
-        KeyCode::Enter => ConnectionsMessage::CommitForm,
-        // Cycle through every field (Name → Username → Database → Password)
-        // so all four are reachable. Letters remain free to type in a field.
-        KeyCode::Up => ConnectionsMessage::FormField(current.prev()),
-        KeyCode::Down | KeyCode::Tab => {
-            ConnectionsMessage::FormField(current.next())
+    use crate::features::instance_workspace::connections::state::FormMode;
+    let form = state.connections.form.as_ref()?;
+    let insert = form.mode == FormMode::Insert;
+    let msg = if insert {
+        match key.code {
+            // In insert mode, printable characters go straight into the field.
+            KeyCode::Char(c) if !c.is_control() => ConnectionsMessage::FormChar(c),
+            KeyCode::Backspace => ConnectionsMessage::FormBackspace,
+            KeyCode::Enter => ConnectionsMessage::CommitFieldInsert,
+            KeyCode::Esc => ConnectionsMessage::CancelFieldInsert,
+            _ => return None,
         }
-        KeyCode::Char(c) if !c.is_control() => ConnectionsMessage::FormChar(c),
-        KeyCode::Backspace => ConnectionsMessage::FormBackspace,
-        _ => return None,
+    } else {
+        match key.code {
+            KeyCode::Char('i') | KeyCode::Char('I') => ConnectionsMessage::BeginFieldInsert,
+            KeyCode::Up | KeyCode::Char('k') => ConnectionsMessage::FormField(form.field.prev()),
+            KeyCode::Down | KeyCode::Char('j') => ConnectionsMessage::FormField(form.field.next()),
+            KeyCode::Enter => ConnectionsMessage::CommitForm,
+            KeyCode::Esc => ConnectionsMessage::CancelForm,
+            // Test the form's current values against the database.
+            KeyCode::Char('t') | KeyCode::Char('T') => ConnectionsMessage::TestForm,
+            // `dd` clears the current field and enters insert mode: the first
+            // `d` arms a short window, a second `d` within it clears.
+            KeyCode::Char('d') => {
+                let within = form.pending_d_at.is_some_and(|at| {
+                    at.elapsed()
+                        <= std::time::Duration::from_millis(300)
+                });
+                if within {
+                    ConnectionsMessage::ClearFieldAndInsert
+                } else {
+                    ConnectionsMessage::SetPendingD
+                }
+            }
+            _ => return None,
+        }
     };
     Some(iw(IwMessage::Connections(ConnectionsMsg::Message(msg))))
 }
@@ -1217,6 +1240,7 @@ mod tests {
             cursor: 0,
             form: None,
             status: None,
+            status_kind: crate::features::instance_workspace::connections::state::ConnectionStatusKind::Idle,
         };
         let msg = key_to_msg(key(KeyCode::Char('d'), KeyModifiers::NONE), &state)
             .expect("d should open the delete-confirm modal");

@@ -3,7 +3,7 @@
 use dbm_store::NewInstanceConnection;
 
 use super::msg::ConnectionsMessage;
-use super::state::{ConnectionsState, FormField};
+use super::state::{ConnectionStatusKind, ConnectionsState, FormMode};
 use super::intent::ConnectionsIntent;
 use super::effect::ConnectionsEffect;
 
@@ -55,12 +55,24 @@ pub fn update(
             changed
         }
         ConnectionsMessage::CommitForm => {
-            let Some(form) = state.form.take() else {
+            // Saving the whole connection only happens in normal mode; in insert
+            // mode `Enter` is handled by CommitFieldInsert instead. Guard here so
+            // a stray CommitForm in insert mode does not save prematurely.
+            if state
+                .form
+                .as_ref()
+                .is_some_and(|f| f.mode == FormMode::Insert)
+            {
+                return (state, intents, effects, false);
+            }
+            // Keep the form open until the save actually succeeds: it is closed
+            // on `Saved` and the error is surfaced on `Error` (fixing a failed
+            // save silently dropping the form and leaving an empty list/table).
+            let Some(form) = state.form.as_ref() else {
                 return (state, intents, effects, false);
             };
             if form.name.trim().is_empty() {
                 // Name is required; keep the form open for correction.
-                state.form = Some(form);
                 return (state, intents, effects, false);
             }
             let connection = NewInstanceConnection {
@@ -76,10 +88,10 @@ pub fn update(
                 env_label: None,
             };
             let instance_name = state.instance_name.clone();
-            match form.edit_original_name {
+            match form.edit_original_name.as_ref() {
                 Some(original_name) => effects.push(ConnectionsEffect::EditConnection {
                     instance_name,
-                    original_name,
+                    original_name: original_name.clone(),
                     connection,
                 }),
                 None => effects.push(ConnectionsEffect::AddConnection {
@@ -88,6 +100,58 @@ pub fn update(
                 }),
             }
             intents.push(ConnectionsIntent::ConnectionsChanged);
+            true
+        }
+        ConnectionsMessage::Saved => {
+            // The add/edit succeeded: close the form and reload the list so the
+            // new/updated row appears (and the connection is visible in both the
+            // list and the store).
+            state.form = None;
+            let instance_name = state.instance_name.clone();
+            effects.push(ConnectionsEffect::LoadConnections { instance_name });
+            state.status = None;
+            state.status_kind = ConnectionStatusKind::Idle;
+            true
+        }
+        ConnectionsMessage::SaveError(error) => {
+            // Keep the form open so the user can fix the fields, and show the
+            // error on the footer instead of silently dropping the form.
+            let changed = state.status.as_deref() != Some(error.as_str());
+            state.status = Some(error);
+            state.status_kind = ConnectionStatusKind::Failure;
+            changed
+        }
+        ConnectionsMessage::SetStatus { status, kind } => {
+            let changed = state.status.as_deref() != Some(status.as_str());
+            state.status = Some(status);
+            state.status_kind = kind;
+            changed
+        }
+        ConnectionsMessage::TestForm => {
+            // Test the form's current values against the database (no save).
+            let Some(form) = state.form.as_ref() else {
+                return (state, intents, effects, false);
+            };
+            if form.name.trim().is_empty() {
+                return (state, intents, effects, false);
+            }
+            let connection = NewInstanceConnection {
+                name: form.name.trim().to_string(),
+                username: form.username.clone(),
+                database: form.database.clone(),
+                password: if form.password.is_empty() {
+                    None
+                } else {
+                    Some(form.password.clone())
+                },
+                ssl_mode: None,
+                env_label: None,
+            };
+            let instance_name = state.instance_name.clone();
+            effects.push(ConnectionsEffect::TestFormConnection {
+                instance_name,
+                connection,
+            });
             true
         }
         ConnectionsMessage::DeleteConnection {
@@ -104,50 +168,40 @@ pub fn update(
             false
         }
         ConnectionsMessage::FormField(field) => {
-            if let Some(form) = state.form.as_mut() {
-                let changed = form.field != field;
-                form.field = field;
-                changed
+            // Field navigation only applies in normal mode; while inserting, the
+            // cursor stays on the field being edited (matching the original dbm).
+            if state
+                .form
+                .as_ref()
+                .is_some_and(|f| f.mode == FormMode::Normal)
+            {
+                if let Some(form) = state.form.as_mut() {
+                    let changed = form.field != field;
+                    form.field = field;
+                    changed
+                } else {
+                    false
+                }
             } else {
                 false
             }
         }
-        ConnectionsMessage::FormChar(c) if !c.is_control() => {
-            if let Some(form) = state.form.as_mut() {
-                let field_value = form_field_mut(form, form.field);
-                field_value.push(c);
-                true
-            } else {
-                false
-            }
-        }
+        ConnectionsMessage::BeginFieldInsert => state.begin_field_insert(),
+        ConnectionsMessage::CommitFieldInsert => state.commit_field_insert(),
+        ConnectionsMessage::CancelFieldInsert => state.cancel_field_insert(),
+        ConnectionsMessage::ClearFieldAndInsert => state.clear_field_and_insert(),
+        ConnectionsMessage::SetPendingD => state.set_pending_d(),
+        ConnectionsMessage::FormChar(c) if !c.is_control() => state.form_insert_char(c),
         ConnectionsMessage::FormChar(_) => false,
-        ConnectionsMessage::FormBackspace => {
-            if let Some(form) = state.form.as_mut() {
-                let field_value = form_field_mut(form, form.field);
-                let changed = !field_value.is_empty();
-                field_value.pop();
-                changed
-            } else {
-                false
-            }
-        }
+        ConnectionsMessage::FormBackspace => state.form_backspace(),
     };
     (state, intents, effects, dirty)
-}
-
-fn form_field_mut(form: &mut super::state::ConnectionForm, field: FormField) -> &mut String {
-    match field {
-        FormField::Name => &mut form.name,
-        FormField::Username => &mut form.username,
-        FormField::Database => &mut form.database,
-        FormField::Password => &mut form.password,
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::features::instance_workspace::connections::state::ConnectionForm;
 
     #[test]
     fn load_binds_instance_name_for_later_reload() {
@@ -203,5 +257,124 @@ mod tests {
             s,
         );
         assert!(!dirty);
+    }
+
+    #[test]
+    fn saved_closes_form_and_reloads() {
+        let mut s = ConnectionsState {
+            instance_name: "inst".into(),
+            form: Some(ConnectionForm {
+                name: "main".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (s, _i, effects, dirty) = update(ConnectionsMessage::Saved, std::mem::take(&mut s));
+        // The form closes and the list reloads so the new row appears.
+        assert!(dirty);
+        assert!(s.form.is_none());
+        assert!(effects
+            .iter()
+            .any(|e| matches!(e, ConnectionsEffect::LoadConnections { instance_name } if instance_name == "inst")));
+    }
+
+    #[test]
+    fn save_error_keeps_form_and_shows_status() {
+        let mut s = ConnectionsState {
+            instance_name: "inst".into(),
+            form: Some(ConnectionForm {
+                name: "main".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::SaveError("SELECT 1 failed".into()),
+            std::mem::take(&mut s),
+        );
+        // A failed save keeps the form open for correction and shows the error
+        // on the footer (fixes a silent drop that left the list/table empty).
+        assert!(dirty);
+        assert!(s.form.is_some(), "form must stay open on save error");
+        assert_eq!(s.status.as_deref(), Some("SELECT 1 failed"));
+    }
+
+    #[test]
+    fn field_insert_commits_and_cancels() {
+        let mut s = ConnectionsState {
+            form: Some(ConnectionForm {
+                name: "main".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        // Enter insert mode on Name, snapshotting "main".
+        let (mut s, _i, _e, dirty) = update(ConnectionsMessage::BeginFieldInsert, std::mem::take(&mut s));
+        assert!(dirty);
+        assert_eq!(s.form.as_ref().unwrap().mode, FormMode::Insert);
+        // Type into the field while in insert mode.
+        let (mut s, _i, _e, _) = update(ConnectionsMessage::FormChar('2'), std::mem::take(&mut s));
+        assert_eq!(s.form.as_ref().unwrap().name, "main2");
+        // Cancel the field edit reverts to the snapshot.
+        let (s, _i, _e, dirty) = update(ConnectionsMessage::CancelFieldInsert, std::mem::take(&mut s));
+        assert!(dirty);
+        assert_eq!(s.form.as_ref().unwrap().mode, FormMode::Normal);
+        assert_eq!(s.form.as_ref().unwrap().name, "main");
+    }
+
+    #[test]
+    fn test_form_emits_test_effect() {
+        let mut s = ConnectionsState {
+            instance_name: "inst".into(),
+            form: Some(ConnectionForm {
+                name: "main".into(),
+                username: "postgres".into(),
+                database: "appdb".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (s, _i, effects, dirty) = update(ConnectionsMessage::TestForm, std::mem::take(&mut s));
+        assert!(dirty);
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            ConnectionsEffect::TestFormConnection { instance_name, connection }
+                if instance_name == "inst" && connection.name == "main"
+        )));
+        assert!(s.form.is_some(), "testing must keep the form open");
+    }
+
+    #[test]
+    fn set_status_shows_on_footer() {
+        let mut s = ConnectionsState::default();
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::SetStatus {
+                status: "Test OK".into(),
+                kind: ConnectionStatusKind::Success,
+            },
+            std::mem::take(&mut s),
+        );
+        assert!(dirty);
+        assert_eq!(s.status.as_deref(), Some("Test OK"));
+        assert_eq!(s.status_kind, ConnectionStatusKind::Success);
+    }
+
+    #[test]
+    fn commit_form_ignored_in_insert_mode() {
+        let mut s = ConnectionsState {
+            instance_name: "inst".into(),
+            form: Some(ConnectionForm {
+                name: "main".into(),
+                mode: FormMode::Insert,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        // A stray CommitForm in insert mode must not save (no effects) and must
+        // keep the form open; Enter is meant to commit the field instead.
+        let (s, _i, effects, dirty) = update(ConnectionsMessage::CommitForm, std::mem::take(&mut s));
+        assert!(!dirty);
+        assert!(effects.is_empty(), "insert-mode Enter must not save the whole form");
+        assert!(s.form.is_some());
     }
 }

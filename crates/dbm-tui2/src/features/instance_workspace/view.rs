@@ -83,9 +83,12 @@ pub fn render(
     // a second line; each sub-pane keeps its own status so it does not leak
     // across pane switches.
     let mut footer_text = instance_workspace_footer_text(state.pane);
+    // The overview shows its own status ("Refreshed"). The connections status
+    // (e.g. a test result) is shown inside the add/edit popup instead of the
+    // pane footer, so it is not duplicated here.
     let status = match state.pane {
         crate::app_shell::nav::IwPane::Overview => state.overview.status.as_deref(),
-        crate::app_shell::nav::IwPane::Connections => state.connections.status.as_deref(),
+        crate::app_shell::nav::IwPane::Connections => None,
     };
     if let Some(status) = status.filter(|s| !s.is_empty()) {
         footer_text.push('\n');
@@ -134,7 +137,14 @@ pub fn render(
             overview_view::render(frame, theme, chunks[1], &state.overview, conn_count, focused)
         }
         crate::app_shell::nav::IwPane::Connections => {
-            connections_view::render(frame, theme, chunks[1], &state.connections, focused)
+            connections_view::render(
+                frame,
+                theme,
+                chunks[1],
+                &state.connections,
+                state.overview.instance.as_ref(),
+                focused,
+            )
         }
     }
     draw_pane_footer(frame, theme, chunks[2], &footer_text);

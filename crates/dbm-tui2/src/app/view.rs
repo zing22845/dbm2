@@ -67,9 +67,15 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     // The discover parent pane renders as a centered overlay over the workspace
     // region while it is focused.
     if let Pane::Discover(sub) = state.focus {
-        render_modal_popup(frame, &state.theme, workspace, &state.discover, |f, t, a, s| {
-            discover_view::render(f, t, a, s, sub)
-        });
+        crate::common::view::modal::render_modal_popup(
+            frame,
+            &state.theme,
+            workspace,
+            75,
+            75,
+            &state.discover,
+            |f, t, a, s| discover_view::render(f, t, a, s, sub),
+        );
     }
 
     // Render any active modal (data popup) as a centered overlay.
@@ -115,12 +121,10 @@ fn render_popup_modal(
     if is_confirm_modal(modal) {
         let title = modal_title(modal);
         let body = match modal {
-            ModalKind::DeleteConnectionConfirm { instance, connection } => {
-                vec![
-                    Line::from(Span::raw(format!("Connection: {connection}"))),
-                    Line::from(Span::raw(format!("Instance: {instance}"))),
-                    Line::from(Span::raw("This will remove the stored connection.")),
-                ]
+            ModalKind::DeleteConnectionConfirm { connection, .. } => {
+                vec![Line::from(Span::raw(format!(
+                    "Delete connection `{connection}`?"
+                )))]
             }
             // The instance is already shown in the title, so the body only
             // states what unregistering does.
@@ -154,7 +158,7 @@ fn render_popup_modal(
         return;
     }
 
-    render_popup(frame, base, 45, 20, true, |f, area| {
+    render_popup(frame, theme, base, 45, 20, true, |f, area| {
         let body = match modal {
             ModalKind::ResultsRowLimitPicker { current, limits } => {
                 limits
@@ -179,35 +183,4 @@ fn render_popup_modal(
     });
 }
 
-/// Render a modal as a centered, bordered popup over `base`.
-fn render_modal_popup<'a, S, F>(
-    frame: &mut ratatui::Frame,
-    theme: &crate::common::view::theme::Theme,
-    base: Rect,
-    state: &'a S,
-    inner: F,
-) where
-    F: Fn(&mut ratatui::Frame, &crate::common::view::theme::Theme, Rect, &'a S),
-{
-    let w = (base.width * 3) / 4;
-    let h = (base.height * 3) / 4;
-    if w < 2 || h < 2 {
-        return;
-    }
-    let popup = Rect {
-        x: base.x + (base.width - w) / 2,
-        y: base.y + (base.height - h) / 2,
-        width: w,
-        height: h,
-    };
-    // Clear + opaque fill only over the discover pane's own frame (the popup
-    // rect), not the whole workspace, so the SQL workspace behind remains
-    // visible around the modal.
-    crate::common::view::overlay_clear::clear_overlay(frame, popup);
-    frame.render_widget(
-        ratatui::widgets::Block::default()
-            .style(ratatui::style::Style::default().bg(theme.palette().bg)),
-        popup,
-    );
-    inner(frame, theme, popup, state);
-}
+

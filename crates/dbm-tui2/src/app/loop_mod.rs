@@ -910,14 +910,41 @@ fn iw_action_to_msg(action: crate::features::instance_workspace::effect::IwActio
             CA::Loaded { connections } => {
                 IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::Loaded { connections }))
             }
-            CA::Saved | CA::Deleted => {
-                // Reload the connections after a mutation (the connections
-                // update fills in the current instance name).
+            CA::Saved => {
+                // The form is still open until the save succeeds; `Saved` closes
+                // it and reloads the list (a failed save keeps the form via
+                // `SaveError`, so it is not silently dropped).
+                IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::Saved))
+            }
+            CA::Deleted => {
+                // Reload the connections after a delete (no form involved).
                 IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::Reload))
             }
             CA::Error { error } => {
                 tracing::warn!("iw connections op failed: {error}");
-                IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::MoveUp))
+                IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::SaveError(error)))
+            }
+            CA::TestResult { ok, error } => {
+                // Match the original dbm's wording and color: "Test OK" in green
+                // on success, "Test failed: <reason>" in red on failure.
+                let (status, kind) = if ok {
+                    (
+                        "Test OK".to_string(),
+                        crate::features::instance_workspace::connections::state::ConnectionStatusKind::Success,
+                    )
+                } else {
+                    (
+                        format!(
+                            "Test failed: {}",
+                            error.unwrap_or_else(|| "could not connect".to_string())
+                        ),
+                        crate::features::instance_workspace::connections::state::ConnectionStatusKind::Failure,
+                    )
+                };
+                IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::SetStatus {
+                    status,
+                    kind,
+                }))
             }
         },
         IA::Unregistered { instance } => IM::Unregistered { instance },

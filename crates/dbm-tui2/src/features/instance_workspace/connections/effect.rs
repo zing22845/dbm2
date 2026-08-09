@@ -18,6 +18,9 @@ pub enum ConnectionsAction {
     Deleted,
     /// The operation failed.
     Error { error: String },
+    /// A form test completed: `ok` reports whether the connection reached the
+    /// database, `error` carries the reason when it did not.
+    TestResult { ok: bool, error: Option<String> },
 }
 
 /// Effects emitted by the connections panel.
@@ -38,6 +41,12 @@ pub enum ConnectionsEffect {
     },
     /// Delete a connection.
     DeleteConnection { instance_name: String, connection_name: String },
+    /// Test the form's current values against the instance (ping), without
+    /// saving (the form's `t` action).
+    TestFormConnection {
+        instance_name: String,
+        connection: NewInstanceConnection,
+    },
 }
 
 impl Effect for ConnectionsEffect {
@@ -116,6 +125,40 @@ impl Effect for ConnectionsEffect {
                         Ok(Ok(_)) => vec![ConnectionsAction::Deleted],
                         Ok(Err(e)) => vec![ConnectionsAction::Error { error: e.to_string() }],
                         Err(e) => vec![ConnectionsAction::Error { error: e.to_string() }],
+                    }
+                }
+                ConnectionsEffect::TestFormConnection { instance_name, connection } => {
+                    // Ping the database with the form's current values; nothing
+                    // is saved. A store error or any error-level precheck issue
+                    // means the connection did not reach the database.
+                    let ping = services.connection_test_ping();
+                    let result = tokio::task::spawn_blocking(move || {
+                        store
+                            .lock()
+                            .expect("iw store lock")
+                            .test_instance_connection(&instance_name, &connection, ping)
+                    })
+                    .await;
+                    match result {
+                        Ok(Ok(precheck)) => {
+                            let error = precheck
+                                .issues
+                                .iter()
+                                .find(|i| i.level == dbm_store::PrecheckLevel::Error)
+                                .map(|i| i.message.clone());
+                            vec![ConnectionsAction::TestResult {
+                                ok: error.is_none(),
+                                error,
+                            }]
+                        }
+                        Ok(Err(e)) => vec![ConnectionsAction::TestResult {
+                            ok: false,
+                            error: Some(e.to_string()),
+                        }],
+                        Err(e) => vec![ConnectionsAction::TestResult {
+                            ok: false,
+                            error: Some(e.to_string()),
+                        }],
                     }
                 }
             }

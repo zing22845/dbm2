@@ -7,7 +7,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::text::{Line, Span};
 
@@ -26,6 +26,7 @@ use crate::common::view::theme::Theme;
 /// visible discover pane).
 pub fn render_popup<F>(
     frame: &mut Frame,
+    theme: &Theme,
     base: Rect,
     width_pct: u16,
     height_pct: u16,
@@ -54,10 +55,29 @@ pub fn render_popup<F>(
     let cover = if dim_base { base } else { popup };
     clear_overlay(frame, cover);
     frame.render_widget(
-        Block::default().style(Style::default().bg(Color::Black)),
+        Block::default().style(Style::default().bg(theme.palette().bg)),
         cover,
     );
     inner(frame, popup);
+}
+
+/// Render a modal popup (the same family as the discover modal): a centered
+/// theme-background popup whose body is drawn by `inner` from `state`. Only the
+/// popup's own rect is covered, so the surrounding content stays visible.
+pub fn render_modal_popup<'a, S, F>(
+    frame: &mut Frame,
+    theme: &Theme,
+    base: Rect,
+    width_pct: u16,
+    height_pct: u16,
+    state: &'a S,
+    inner: F,
+) where
+    F: Fn(&mut Frame, &Theme, Rect, &'a S),
+{
+    render_popup(frame, theme, base, width_pct, height_pct, false, |f, popup| {
+        inner(f, theme, popup, state);
+    });
 }
 
 /// Render a titled, bordered popup containing `body_lines` (no header row).
@@ -112,9 +132,7 @@ pub fn modal_title(modal: &ModalKind) -> String {
     match modal {
         ModalKind::ResultsRowLimitPicker { .. } => "Rows per page".to_string(),
         ModalKind::ResultsPageInput { .. } => "Jump to page".to_string(),
-        ModalKind::DeleteConnectionConfirm { instance, connection } => {
-            format!("Delete connection {connection} ({instance})?")
-        }
+        ModalKind::DeleteConnectionConfirm { .. } => "Delete connection".to_string(),
         ModalKind::UnregisterInstanceConfirm { instance } => {
             format!("Unregister instance {instance}?")
         }
@@ -335,12 +353,13 @@ mod tests {
 
     #[test]
     fn modal_titles_include_payload() {
+        // The delete-connection confirm title is fixed ("Delete connection"),
+        // matching the original dbm; the payload (name) is in the body instead.
         let t = modal_title(&ModalKind::DeleteConnectionConfirm {
             instance: "pg".into(),
             connection: "default".into(),
         });
-        assert!(t.contains("default"));
-        assert!(t.contains("pg"));
+        assert_eq!(t, "Delete connection");
     }
 
     #[test]
