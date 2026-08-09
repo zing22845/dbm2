@@ -218,4 +218,47 @@ mod tests {
         assert_eq!(rows[9].1, "—");
         assert_eq!(rows[14].1, "—");
     }
+
+    #[test]
+    fn lifecycle_change_repaints_nonzero_cells() {
+        // A refresh updates lifecycle_checked_at, which the overview renders as
+        // the "Lifecycle checked" row. Verify that redrawing with a changed
+        // lifecycle actually changes cells — so this repaint is NOT counted as
+        // waste by the perf monitor (changed_cells > 0).
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        use crate::common::view::theme;
+        let theme = theme::dracula();
+        let area = Rect::new(0, 0, 60, 20);
+        let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
+
+        let mut a = inst();
+        a.lifecycle_checked_at = Some("2026-01-03 10:00:00".into());
+        let s1 = OverviewState {
+            instance: Some(a.clone()),
+            ..Default::default()
+        };
+        terminal
+            .draw(|f| render(f, &theme, area, &s1, 0, true))
+            .unwrap();
+        let buf1 = terminal.backend().buffer().clone();
+
+        a.lifecycle_checked_at = Some("2026-01-03 10:00:01".into());
+        let s2 = OverviewState {
+            instance: Some(a),
+            ..Default::default()
+        };
+        terminal
+            .draw(|f| render(f, &theme, area, &s2, 0, true))
+            .unwrap();
+        let buf2 = terminal.backend().buffer().clone();
+
+        let changed = buf1
+            .content()
+            .iter()
+            .zip(buf2.content().iter())
+            .filter(|(a, b)| a.symbol() != b.symbol())
+            .count();
+        assert!(changed > 0, "lifecycle change must repaint cells, got {changed}");
+    }
 }

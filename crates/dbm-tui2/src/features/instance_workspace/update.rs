@@ -160,4 +160,28 @@ mod tests {
             .iter()
             .any(|e| matches!(e, IwEffect::Connections(_))));
     }
+
+    #[test]
+    fn repeated_refresh_does_not_repaint_when_status_unchanged() {
+        // A held `r` fires one refresh per second (cooldown). The second
+        // refresh must NOT be dirty by itself — the status is already
+        // "Refreshed" — otherwise every second would trigger a redundant redraw
+        // even though nothing on screen changed.
+        let mut state = IwState::default();
+        state.instance_name = "inst-a".to_string();
+        let (state, _i, _e, first_dirty) = update(
+            IwMessage::Refresh {
+                instance_name: "inst-a".into(),
+            },
+            state,
+        );
+        assert!(first_dirty, "first refresh shows \"Refreshed\" and repaints");
+        let (_, _i, _e, second_dirty) = update(
+            IwMessage::Refresh {
+                instance_name: "inst-a".into(),
+            },
+            state,
+        );
+        assert!(!second_dirty, "unchanged status must not repaint");
+    }
 }
