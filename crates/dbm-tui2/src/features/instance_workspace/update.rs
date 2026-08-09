@@ -54,6 +54,34 @@ pub fn update(
             effects.extend(ce.into_iter().map(IwEffect::Connections));
             changed || od || cd
         }
+        IwMessage::Refresh { instance_name } => {
+            // Refresh re-probes lifecycle and reloads both the overview data and
+            // the connections, matching the original dbm. The 1s cooldown
+            // (checked in the input layer) is set here so a held `r` does not
+            // fire a refresh per auto-repeat. A held `r` repaints only when the
+            // status actually changes (the first refresh shows "Refreshed");
+            // later refreshes with an unchanged status do not redraw (no waste).
+            use std::time::{Duration, Instant};
+            let status_changed = state.status.as_deref() != Some("Refreshed");
+            state.refresh_cooldown_until = Some(Instant::now() + Duration::from_secs(1));
+            state.status = Some("Refreshed".into());
+            effects.push(IwEffect::Refresh {
+                instance_name: instance_name.clone(),
+            });
+            let (ov, _oi, oe, _od) = overview::update::update(
+                overview::msg::OverviewMessage::Reload,
+                std::mem::take(&mut state.overview),
+            );
+            state.overview = ov;
+            effects.extend(oe.into_iter().map(IwEffect::Overview));
+            let (cn, _ci, ce, _cd) = connections::update::update(
+                connections::msg::ConnectionsMessage::Reload,
+                std::mem::take(&mut state.connections),
+            );
+            state.connections = cn;
+            effects.extend(ce.into_iter().map(IwEffect::Connections));
+            status_changed
+        }
         IwMessage::Overview(m) => {
             let overview::msg::OverviewMsg::Message(inner) = m;
             let s = std::mem::take(&mut state.overview);
@@ -107,5 +135,29 @@ mod tests {
         );
         assert!(s.instance_name.is_empty(), "workspace reset after unregister");
         assert!(dirty);
+    }
+
+    #[test]
+    fn refresh_sets_cooldown_status_and_reload_effects() {
+        let mut state = IwState::default();
+        state.instance_name = "inst-a".to_string();
+        let (s, _i, effects, dirty) = update(
+            IwMessage::Refresh {
+                instance_name: "inst-a".into(),
+            },
+            state,
+        );
+        // Status set for the footer, cooldown armed, and a refresh repaint.
+        assert_eq!(s.status.as_deref(), Some("Refreshed"));
+        assert!(s.refresh_cooldown_until.is_some());
+        assert!(dirty);
+        // Effects: lifecycle probe + overview reload + connections reload.
+        assert!(effects
+            .iter()
+            .any(|e| matches!(e, IwEffect::Refresh { instance_name } if instance_name == "inst-a")));
+        assert!(effects.iter().any(|e| matches!(e, IwEffect::Overview(_))));
+        assert!(effects
+            .iter()
+            .any(|e| matches!(e, IwEffect::Connections(_))));
     }
 }

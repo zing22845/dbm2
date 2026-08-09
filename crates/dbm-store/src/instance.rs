@@ -1,7 +1,7 @@
 use dbm_core::Engine;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ManagedInstance {
     pub id: String,
     pub fingerprint: String,

@@ -546,6 +546,23 @@ fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
                         ))
                     }
                 }
+                KeyCode::Char('r') => {
+                    // Refresh the open instance (matching the original dbm): the
+                    // update re-probes lifecycle and reloads overview +
+                    // connections. A 1s cooldown set on refresh means a held `r`
+                    // fires once and ignores the auto-repeat.
+                    if state.instance_name.is_empty()
+                        || state
+                            .refresh_cooldown_until
+                            .is_some_and(|until| std::time::Instant::now() < until)
+                    {
+                        None
+                    } else {
+                        Some(iw(IwMessage::Refresh {
+                            instance_name: state.instance_name.clone(),
+                        }))
+                    }
+                }
                 _ => None,
             };
             msg
@@ -1287,6 +1304,33 @@ mod tests {
                 OverviewMessage::HScroll(1)
             ))))
         ));
+    }
+
+    #[test]
+    fn overview_r_refreshes_instance() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Overview);
+        state.iw.instance_name = "inst-a".to_string();
+        let msg = key_to_msg(key(KeyCode::Char('r'), KeyModifiers::NONE), &state)
+            .expect("r in overview should refresh the instance");
+        assert!(matches!(
+            msg,
+            AppMsg::Iw(IwMsg::Message(IwMessage::Refresh { instance_name }))
+                if instance_name == "inst-a"
+        ));
+    }
+
+    #[test]
+    fn overview_r_honors_refresh_cooldown() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Overview);
+        state.iw.instance_name = "inst-a".to_string();
+        // Within the cooldown -> `r` is a no-op (no refresh message).
+        state.iw.refresh_cooldown_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
+        assert!(key_to_msg(key(KeyCode::Char('r'), KeyModifiers::NONE), &state).is_none());
+        // Once the cooldown has passed -> `r` refreshes again.
+        state.iw.refresh_cooldown_until = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        assert!(key_to_msg(key(KeyCode::Char('r'), KeyModifiers::NONE), &state).is_some());
     }
 
     #[test]

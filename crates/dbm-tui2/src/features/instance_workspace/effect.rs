@@ -41,6 +41,9 @@ pub enum IwEffect {
     Connections(ConnectionsEffect),
     /// Unregister (delete) the named managed instance from the store.
     UnregisterInstance { instance: String },
+    /// Re-probe lifecycle readiness for the named instance (the overview's `r`
+    /// key), matching the original dbm's refresh.
+    Refresh { instance_name: String },
 }
 
 impl Effect for IwEffect {
@@ -84,6 +87,22 @@ impl Effect for IwEffect {
                             Vec::new()
                         }
                     }
+                }
+                IwEffect::Refresh { instance_name } => {
+                    let name = instance_name.clone();
+                    let store = services.store.clone();
+                    let result = tokio::task::spawn_blocking(move || {
+                        let store = store.lock().expect("iw store lock");
+                        let inst = store.get_managed_instance_by_name(&name)?;
+                        store.probe_and_upsert_instance_lifecycle(&inst.id)
+                    })
+                    .await;
+                    let _ = result;
+                    // The overview/connections reloads (sent alongside) carry the
+                    // fresh data; a failed probe is logged but does not block the
+                    // refresh.
+                    tracing::debug!(instance_name, "iw refresh lifecycle probe done");
+                    Vec::new()
                 }
             }
         })

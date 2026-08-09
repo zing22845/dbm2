@@ -35,8 +35,9 @@ pub fn update(
             );
         }
         OverviewMessage::Loaded { instance } => {
+            let dirty = state.instance.as_ref() != Some(instance.as_ref());
             state.instance = Some(*instance);
-            (state, Vec::new(), Vec::new(), true)
+            (state, Vec::new(), Vec::new(), dirty)
         }
         OverviewMessage::MoveCursor(delta) => {
             // The overview has a fixed set of rows regardless of connection
@@ -137,5 +138,41 @@ mod tests {
         let (state, _i, _e, dirty) = update(OverviewMessage::MoveCursor(1), state);
         assert!(!dirty);
         assert_eq!(state.cursor, 0);
+    }
+
+    #[test]
+    fn loaded_identical_instance_does_not_repaint() {
+        let inst = dbm_store::ManagedInstance {
+            id: "id-1".into(),
+            fingerprint: "fp-1".into(),
+            name: "postgres".into(),
+            engine: Engine::Postgres,
+            host: "127.0.0.1".into(),
+            port: 5432,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "2026-01-01".into(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        };
+        let state = OverviewState {
+            instance: Some(inst.clone()),
+            ..Default::default()
+        };
+        // Re-loading the identical instance (refresh with unchanged data) must
+        // NOT repaint — otherwise a held `r` redraws every second.
+        let (state, _i, _e, dirty) = update(
+            OverviewMessage::Loaded {
+                instance: Box::new(inst),
+            },
+            state,
+        );
+        assert!(!dirty);
+        assert!(state.instance.is_some());
     }
 }

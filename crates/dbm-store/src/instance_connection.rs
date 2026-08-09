@@ -8,7 +8,7 @@ use crate::register_precheck::{PrecheckIssue, PrecheckLevel};
 use crate::store::{build_database_url_from_parts, encrypt_password};
 use crate::{StoreError, StoreResult};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InstanceConnection {
     pub id: String,
     pub instance_id: String,

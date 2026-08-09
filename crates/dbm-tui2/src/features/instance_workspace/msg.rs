@@ -14,6 +14,9 @@ pub enum IwMessage {
     /// The store reported that the instance was unregistered; the shell reacts
     /// (closes the workspace, refreshes the explorer, returns focus).
     Unregistered { instance: String },
+    /// Refresh the open instance (the overview's `r` key): re-probe lifecycle,
+    /// reload the overview data and the connections, and show "Refreshed".
+    Refresh { instance_name: String },
     /// Forwarded overview panel message.
     Overview(OverviewMsg),
     /// Forwarded connections panel message.

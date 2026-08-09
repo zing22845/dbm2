@@ -32,9 +32,12 @@ pub fn update(
             false
         }
         ConnectionsMessage::Loaded { connections } => {
+            // Repaint only when the list (or the cursor reset) actually changed,
+            // so a refresh that reloads identical data does not redraw.
+            let dirty = state.connections != connections || state.cursor != 0;
             state.connections = connections;
             state.cursor = 0;
-            true
+            dirty
         }
         ConnectionsMessage::MoveUp => state.move_up(),
         ConnectionsMessage::MoveDown => state.move_down(),
@@ -166,5 +169,39 @@ mod tests {
                 .any(|e| matches!(e, ConnectionsEffect::LoadConnections { instance_name } if instance_name == "inst")),
             "Reload must query the bound instance, got {reload_effects:?}"
         );
+    }
+
+    #[test]
+    fn loaded_identical_connections_does_not_repaint() {
+        let conn = dbm_store::InstanceConnection {
+            id: "c1".into(),
+            instance_id: "inst".into(),
+            name: "main".into(),
+            username: "postgres".into(),
+            database: "postgres".into(),
+            has_password: false,
+            ssl_mode: "prefer".into(),
+            env_label: None,
+            created_at: "now".into(),
+            updated_at: "now".into(),
+        };
+        let s = ConnectionsState::default();
+        // First load with two connections repaints.
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::Loaded {
+                connections: vec![conn.clone(), conn.clone()],
+            },
+            s,
+        );
+        assert!(dirty);
+        // Re-loading the identical list (refresh with unchanged data) must NOT
+        // repaint — otherwise a held `r` redraws every second.
+        let (_s, _i, _e, dirty) = update(
+            ConnectionsMessage::Loaded {
+                connections: vec![conn.clone(), conn.clone()],
+            },
+            s,
+        );
+        assert!(!dirty);
     }
 }

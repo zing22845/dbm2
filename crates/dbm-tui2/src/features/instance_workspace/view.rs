@@ -78,8 +78,13 @@ pub fn render(
     }
 
     // The pane footer wraps its hint line, so reserve a row for it and size the
-    // pane footer to the wrapped height (a narrow pane can wrap the keys).
-    let footer_text = instance_workspace_footer_text(state.pane);
+    // pane footer to the wrapped height (a narrow pane can wrap the keys). The
+    // last status (e.g. "Refreshed") is appended on a second line.
+    let mut footer_text = instance_workspace_footer_text(state.pane);
+    if let Some(status) = state.status.as_deref().filter(|s| !s.is_empty()) {
+        footer_text.push('\n');
+        footer_text.push_str(status);
+    }
     let footer_h = wrapped_line_count(&footer_text, inner.width)
         .max(1)
         .min(inner.height.saturating_sub(2).max(1));
