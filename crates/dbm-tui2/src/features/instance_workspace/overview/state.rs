@@ -9,4 +9,8 @@ pub struct OverviewState {
     pub instance: Option<ManagedInstance>,
     /// The instance name (used to re-load on demand).
     pub instance_name: String,
+    /// Cursor row within the overview list, highlighted like the original dbm.
+    pub cursor: usize,
+    /// Horizontal scroll offset (columns) for long rows, like the original dbm.
+    pub h_scroll: u16,
 }

@@ -10,6 +10,10 @@ pub enum OverviewMessage {
     /// The store returned the instance. Boxed to keep the enum small (a
     /// `ManagedInstance` is large and would otherwise bloat every message).
     Loaded { instance: Box<dbm_store::ManagedInstance> },
+    /// Move the overview cursor by `delta` rows (`j`/`k`, `↑`/`↓`).
+    MoveCursor(i32),
+    /// Adjust the horizontal scroll offset by `delta` columns (`←`/`→`).
+    HScroll(i32),
 }
 
 /// Feature message envelope (central-router compatible).

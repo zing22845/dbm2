@@ -6,20 +6,20 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::common::view::hints::{draw_pane_footer, instance_workspace_footer_text};
 use crate::common::view::theme::Theme;
-use crate::app_shell::nav::IwPane;
 
 use super::state::{ConnectionsState, FormField};
 
 /// Render the connections panel: the connection list plus (when open) the
-/// add/edit form. `region_focused` controls the border color.
+/// add/edit form. The list body is drawn inside the workspace's single outer
+/// border (the tab bar and pane footer are rendered by the parent), so no
+/// border or footer is drawn here — matching the original dbm.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
     state: &ConnectionsState,
-    region_focused: bool,
+    _region_focused: bool,
 ) {
     let p = theme.palette();
 
@@ -28,42 +28,8 @@ pub fn render(
         return;
     }
 
-    // The block is drawn over `area`; its inner area is split into a body (the
-    // connection list) and a footer hint line at the bottom, both *inside* the
-    // pane's border — matching the original dbm.
-    let block = Block::default()
-        .title(" connections ")
-        .borders(Borders::ALL)
-        .border_style(p.active_border(region_focused));
-    frame.render_widget(&block, area);
-    let inner = block.inner(area);
-    let (body, footer_area) = if inner.height > 1 {
-        let h = inner.height.saturating_sub(1);
-        (
-            Rect {
-                x: inner.x,
-                y: inner.y,
-                width: inner.width,
-                height: h,
-            },
-            Rect {
-                x: inner.x,
-                y: inner.y.saturating_add(h),
-                width: inner.width,
-                height: 1,
-            },
-        )
-    } else {
-        (inner, Rect::default())
-    };
-
     let mut lines = Vec::new();
-    let inner_h = body.height as usize;
-    for (vis, idx) in (0..state.connections.len()).enumerate() {
-        if vis >= inner_h {
-            break;
-        }
-        let conn = &state.connections[idx];
+    for (idx, conn) in state.connections.iter().enumerate() {
         let focused = idx == state.cursor;
         let style = if focused {
             Style::default()
@@ -85,14 +51,7 @@ pub fn render(
         )));
     }
 
-    frame.render_widget(Paragraph::new(lines), body);
-    // Pane footer (inside the border): Add/Edit/Delete/Test.
-    draw_pane_footer(
-        frame,
-        theme,
-        footer_area,
-        &instance_workspace_footer_text(IwPane::Connections),
-    );
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn render_form(

@@ -24,6 +24,7 @@ use crate::features::explorer::state::ExplorerPane;
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 use crate::features::instance_workspace::connections::msg::{ConnectionsMessage, ConnectionsMsg};
 use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+use crate::features::instance_workspace::overview::msg::{OverviewMessage, OverviewMsg};
 use crate::features::instance_workspace::state::IwState;
 use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
 use crate::features::sql_workspace::state::SqlState;
@@ -527,20 +528,27 @@ fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
     }
     match sub {
         IwPane::Overview => {
-            // Overview panel keys: unregister (`u`) opens a confirm modal.
-            match key.code {
+            // Overview panel keys: move the cursor (j/k, ↑/↓), H-Scroll (←/→),
+            // and unregister (`u`) which opens a confirm modal.
+            let msg = match key.code {
+                KeyCode::Up | KeyCode::Char('k') => Some(overview(OverviewMessage::MoveCursor(-1))),
+                KeyCode::Down | KeyCode::Char('j') => Some(overview(OverviewMessage::MoveCursor(1))),
+                KeyCode::Left => Some(overview(OverviewMessage::HScroll(-1))),
+                KeyCode::Right => Some(overview(OverviewMessage::HScroll(1))),
                 KeyCode::Char('u') => {
                     if state.instance_name.is_empty() {
-                        return None;
+                        None
+                    } else {
+                        Some(AppMsg::OpenModal(
+                            crate::app::state::ModalKind::UnregisterInstanceConfirm {
+                                instance: state.instance_name.clone(),
+                            },
+                        ))
                     }
-                    Some(AppMsg::OpenModal(
-                        crate::app::state::ModalKind::UnregisterInstanceConfirm {
-                            instance: state.instance_name.clone(),
-                        },
-                    ))
                 }
                 _ => None,
-            }
+            };
+            msg
         }
         IwPane::Connections => {
             // `d` opens a delete-confirm modal for the selected connection
@@ -596,6 +604,10 @@ fn iw_form_key(key: KeyEvent, state: &IwState) -> Option<AppMsg> {
 
 fn iw(msg: IwMessage) -> AppMsg {
     AppMsg::Iw(IwMsg::Message(msg))
+}
+
+fn overview(msg: OverviewMessage) -> AppMsg {
+    iw(IwMessage::Overview(OverviewMsg::Message(msg)))
 }
 
 /// Confirm-unregister helper: the shell closes the modal and dispatches the
@@ -1241,6 +1253,40 @@ mod tests {
             }
             _ => panic!("expected focus change"),
         }
+    }
+
+    #[test]
+    fn overview_jk_move_cursor_and_arrows_hscroll() {
+        use crate::features::instance_workspace::overview::msg::{OverviewMessage, OverviewMsg};
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Overview);
+        // j -> MoveCursor(1)
+        let msg = key_to_msg(key(KeyCode::Char('j'), KeyModifiers::NONE), &state)
+            .expect("j in overview should move cursor down");
+        assert!(matches!(
+            msg,
+            AppMsg::Iw(IwMsg::Message(IwMessage::Overview(OverviewMsg::Message(
+                OverviewMessage::MoveCursor(1)
+            ))))
+        ));
+        // k -> MoveCursor(-1)
+        let msg = key_to_msg(key(KeyCode::Char('k'), KeyModifiers::NONE), &state)
+            .expect("k in overview should move cursor up");
+        assert!(matches!(
+            msg,
+            AppMsg::Iw(IwMsg::Message(IwMessage::Overview(OverviewMsg::Message(
+                OverviewMessage::MoveCursor(-1)
+            ))))
+        ));
+        // Right -> HScroll(1)
+        let msg = key_to_msg(key(KeyCode::Right, KeyModifiers::NONE), &state)
+            .expect("right in overview should h-scroll");
+        assert!(matches!(
+            msg,
+            AppMsg::Iw(IwMsg::Message(IwMessage::Overview(OverviewMsg::Message(
+                OverviewMessage::HScroll(1)
+            ))))
+        ));
     }
 
     #[test]

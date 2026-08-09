@@ -365,8 +365,26 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             } else if state.iw.instance_name.is_empty() {
                                 Some(Pane::SQLWorkspace)
                             } else {
+                                // The workspace region holds the instance pane
+                                // (outer border included). A click on its tab bar
+                                // switches the active sub-pane (overview /
+                                // connections); a click elsewhere keeps the
+                                // current sub-pane (default when not focused).
+                                let ws = Rect::new(
+                                    explorer_w,
+                                    body_top,
+                                    size.width.saturating_sub(explorer_w),
+                                    body_h,
+                                );
+                                let current = match state.focus {
+                                    Pane::InstanceWorkspace(p) => p,
+                                    _ => crate::app_shell::nav::IwPane::default(),
+                                };
                                 Some(Pane::InstanceWorkspace(
-                                    crate::app_shell::nav::IwPane::default(),
+                                    crate::features::instance_workspace::view::iw_tab_at(
+                                        ws, mouse.column, mouse.row,
+                                    )
+                                    .unwrap_or(current),
                                 ))
                             };
                             tracing::debug!(
