@@ -62,9 +62,7 @@ pub fn update(
             // status actually changes (the first refresh shows "Refreshed");
             // later refreshes with an unchanged status do not redraw (no waste).
             use std::time::{Duration, Instant};
-            let status_changed = state.status.as_deref() != Some("Refreshed");
-            state.refresh_cooldown_until = Some(Instant::now() + Duration::from_secs(1));
-            state.status = Some("Refreshed".into());
+            let status_changed = state.overview.status.as_deref() != Some("Refreshed");
             effects.push(IwEffect::Refresh {
                 instance_name: instance_name.clone(),
             });
@@ -73,6 +71,12 @@ pub fn update(
                 std::mem::take(&mut state.overview),
             );
             state.overview = ov;
+            // Refresh status and cooldown belong to the overview pane (they must
+            // not leak into the connections state), so set them after the
+            // overview state is taken back from the Reload.
+            state.overview.status = Some("Refreshed".into());
+            state.overview.refresh_cooldown_until =
+                Some(Instant::now() + Duration::from_secs(1));
             effects.extend(oe.into_iter().map(IwEffect::Overview));
             let (cn, _ci, ce, _cd) = connections::update::update(
                 connections::msg::ConnectionsMessage::Reload,
@@ -147,9 +151,11 @@ mod tests {
             },
             state,
         );
-        // Status set for the footer, cooldown armed, and a refresh repaint.
-        assert_eq!(s.status.as_deref(), Some("Refreshed"));
-        assert!(s.refresh_cooldown_until.is_some());
+        // Status set on the overview pane footer (not shared), cooldown armed,
+        // and a refresh repaint.
+        assert_eq!(s.overview.status.as_deref(), Some("Refreshed"));
+        assert_eq!(s.connections.status, None, "connections status stays independent");
+        assert!(s.overview.refresh_cooldown_until.is_some());
         assert!(dirty);
         // Effects: lifecycle probe + overview reload + connections reload.
         assert!(effects

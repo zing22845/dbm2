@@ -551,6 +551,7 @@ fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
                     // fires once and ignores the auto-repeat.
                     if state.instance_name.is_empty()
                         || state
+                            .overview
                             .refresh_cooldown_until
                             .is_some_and(|until| std::time::Instant::now() < until)
                     {
@@ -1215,6 +1216,7 @@ mod tests {
             }],
             cursor: 0,
             form: None,
+            status: None,
         };
         let msg = key_to_msg(key(KeyCode::Char('d'), KeyModifiers::NONE), &state)
             .expect("d should open the delete-confirm modal");
@@ -1315,10 +1317,10 @@ mod tests {
         state.focus = Pane::InstanceWorkspace(IwPane::Overview);
         state.iw.instance_name = "inst-a".to_string();
         // Within the cooldown -> `r` is a no-op (no refresh message).
-        state.iw.refresh_cooldown_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
+        state.iw.overview.refresh_cooldown_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
         assert!(key_to_msg(key(KeyCode::Char('r'), KeyModifiers::NONE), &state).is_none());
         // Once the cooldown has passed -> `r` refreshes again.
-        state.iw.refresh_cooldown_until = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        state.iw.overview.refresh_cooldown_until = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
         assert!(key_to_msg(key(KeyCode::Char('r'), KeyModifiers::NONE), &state).is_some());
     }
 

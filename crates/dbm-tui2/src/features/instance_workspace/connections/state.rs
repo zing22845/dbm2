@@ -58,6 +58,9 @@ pub struct ConnectionsState {
     pub cursor: usize,
     /// Whether an add/edit form is open.
     pub form: Option<ConnectionForm>,
+    /// One-line status shown on the connections pane footer (e.g. "Added …").
+    /// Owned by this pane so it does not leak into the overview footer.
+    pub status: Option<String>,
 }
 
 impl ConnectionsState {

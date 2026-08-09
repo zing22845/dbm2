@@ -79,9 +79,15 @@ pub fn render(
 
     // The pane footer wraps its hint line, so reserve a row for it and size the
     // pane footer to the wrapped height (a narrow pane can wrap the keys). The
-    // last status (e.g. "Refreshed") is appended on a second line.
+    // active pane's own status (e.g. the overview's "Refreshed") is appended on
+    // a second line; each sub-pane keeps its own status so it does not leak
+    // across pane switches.
     let mut footer_text = instance_workspace_footer_text(state.pane);
-    if let Some(status) = state.status.as_deref().filter(|s| !s.is_empty()) {
+    let status = match state.pane {
+        crate::app_shell::nav::IwPane::Overview => state.overview.status.as_deref(),
+        crate::app_shell::nav::IwPane::Connections => state.connections.status.as_deref(),
+    };
+    if let Some(status) = status.filter(|s| !s.is_empty()) {
         footer_text.push('\n');
         footer_text.push_str(status);
     }

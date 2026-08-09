@@ -305,14 +305,13 @@ pub fn objects_pane_footer_text() -> String {
 }
 
 /// Footer for the instance workspace sub-pane, mirroring the original dbm:
-/// the Overview pane shows Refresh/Unregister/H-Scroll; the Connections pane
-/// shows Add/Edit/Delete/Test.
+/// the Overview pane shows Refresh/Unregister; the Connections pane shows
+/// Add/Edit/Delete/Test.
 pub fn instance_workspace_footer_text(pane: crate::app_shell::nav::IwPane) -> String {
     match pane {
         crate::app_shell::nav::IwPane::Overview => keys(&[
             ("Refresh", lit("r")),
             ("Unregister", lit("u")),
-            ("H-Scroll", lit("←/→")),
         ]),
         crate::app_shell::nav::IwPane::Connections => keys(&[
             ("Add", lit("a")),
