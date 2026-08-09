@@ -55,13 +55,6 @@ pub fn update(
             let dirty = state.cursor != prev;
             (state, Vec::new(), Vec::new(), dirty)
         }
-        OverviewMessage::HScroll(delta) => {
-            let prev = state.h_scroll;
-            state.h_scroll = ((state.h_scroll as i64) + (delta as i64))
-                .clamp(0, 4096) as u16;
-            let dirty = state.h_scroll != prev;
-            (state, Vec::new(), Vec::new(), dirty)
-        }
     }
 }
 
@@ -114,22 +107,6 @@ mod tests {
         let (state, _i, _e, dirty) = update(OverviewMessage::MoveCursor(-1), state);
         assert!(!dirty);
         assert_eq!(state.cursor, 0);
-    }
-
-    #[test]
-    fn h_scroll_adjusts_and_clamps() {
-        let state = instance_state();
-        let (state, _i, _e, dirty) = update(OverviewMessage::HScroll(3), state);
-        assert!(dirty);
-        assert_eq!(state.h_scroll, 3);
-        // Same offset -> no repaint.
-        let (state, _i, _e, dirty) = update(OverviewMessage::HScroll(0), state);
-        assert!(!dirty);
-        assert_eq!(state.h_scroll, 3);
-        // Negative offset clamps to 0.
-        let (state, _i, _e, dirty) = update(OverviewMessage::HScroll(-10), state);
-        assert!(dirty);
-        assert_eq!(state.h_scroll, 0);
     }
 
     #[test]

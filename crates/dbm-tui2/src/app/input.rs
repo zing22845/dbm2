@@ -533,8 +533,6 @@ fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
             let msg = match key.code {
                 KeyCode::Up | KeyCode::Char('k') => Some(overview(OverviewMessage::MoveCursor(-1))),
                 KeyCode::Down | KeyCode::Char('j') => Some(overview(OverviewMessage::MoveCursor(1))),
-                KeyCode::Left => Some(overview(OverviewMessage::HScroll(-1))),
-                KeyCode::Right => Some(overview(OverviewMessage::HScroll(1))),
                 KeyCode::Char('u') => {
                     if state.instance_name.is_empty() {
                         None
@@ -1293,15 +1291,6 @@ mod tests {
             msg,
             AppMsg::Iw(IwMsg::Message(IwMessage::Overview(OverviewMsg::Message(
                 OverviewMessage::MoveCursor(-1)
-            ))))
-        ));
-        // Right -> HScroll(1)
-        let msg = key_to_msg(key(KeyCode::Right, KeyModifiers::NONE), &state)
-            .expect("right in overview should h-scroll");
-        assert!(matches!(
-            msg,
-            AppMsg::Iw(IwMsg::Message(IwMessage::Overview(OverviewMsg::Message(
-                OverviewMessage::HScroll(1)
             ))))
         ));
     }

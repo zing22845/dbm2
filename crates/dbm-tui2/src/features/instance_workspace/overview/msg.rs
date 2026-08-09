@@ -12,8 +12,6 @@ pub enum OverviewMessage {
     Loaded { instance: Box<dbm_store::ManagedInstance> },
     /// Move the overview cursor by `delta` rows (`j`/`k`, `↑`/`↓`).
     MoveCursor(i32),
-    /// Adjust the horizontal scroll offset by `delta` columns (`←`/`→`).
-    HScroll(i32),
 }
 
 /// Feature message envelope (central-router compatible).

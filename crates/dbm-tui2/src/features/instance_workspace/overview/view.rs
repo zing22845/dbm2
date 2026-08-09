@@ -6,7 +6,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::common::utils::text_width::truncate_from;
 use crate::common::view::theme::Theme;
 use dbm_store::ManagedInstance;
 
@@ -87,9 +86,10 @@ fn management_scope_labels(inst: &ManagedInstance, conn_count: usize) -> String 
 
 /// Render the instance overview body: the instance's attribute rows laid out
 /// like the original dbm (`label:20 value`), with the cursor row highlighted.
-/// Drawn inside the workspace's single outer border (the tab bar and pane
-/// footer are rendered by the instance-workspace parent), so no border or
-/// footer is drawn here.
+/// Long rows wrap onto the next line when the pane is too narrow, so no
+/// horizontal scrolling is needed. Drawn inside the workspace's single outer
+/// border (the tab bar and pane footer are rendered by the instance-workspace
+/// parent), so no border or footer is drawn here.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
@@ -143,12 +143,14 @@ pub fn render(
             Style::default().fg(p.fg)
         };
         let text = format!("{label:20} {value}");
-        // Horizontal scroll crops the line at the pane width, like the original
-        // dbm's `←/→` H-Scroll.
-        let shown = truncate_from(&text, state.h_scroll as usize, area.width as usize);
-        lines.push(Line::from(Span::styled(shown, style)));
+        lines.push(Line::from(Span::styled(text, style)));
     }
-    frame.render_widget(Paragraph::new(lines), area);
+    // Wrap long rows so a narrow pane shows the full value instead of cropping
+    // it; the wrapped continuation keeps the same style as the row.
+    frame.render_widget(
+        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
+        area,
+    );
 }
 
 #[cfg(test)]
@@ -260,5 +262,42 @@ mod tests {
             .filter(|(a, b)| a.symbol() != b.symbol())
             .count();
         assert!(changed > 0, "lifecycle change must repaint cells, got {changed}");
+    }
+
+    #[test]
+    fn narrow_width_wraps_long_rows_instead_of_cropping() {
+        // A narrow pane must wrap long rows (e.g. the fingerprint / version
+        // full values) onto the next line rather than crop them, so the full
+        // value stays readable without horizontal scrolling.
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        use crate::common::view::theme;
+        let theme = theme::dracula();
+        // A very narrow body: only ~16 columns.
+        let area = Rect::new(0, 0, 16, 30);
+        let mut terminal = Terminal::new(TestBackend::new(16, 30)).unwrap();
+
+        let mut a = inst();
+        a.version_full = Some("PostgreSQL 17.2 on x86_64-pc-linux-gnu, compiled by gcc".into());
+        let state = OverviewState {
+            instance: Some(a),
+            ..Default::default()
+        };
+        terminal
+            .draw(|f| render(f, &theme, area, &state, 0, true))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        // The version-full value (long, single token) must appear somewhere in
+        // the buffer — i.e. it wrapped instead of being cropped at column 16.
+        let text: String = buf
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(
+            text.contains("x86_64-pc-linux-gnu"),
+            "long value should wrap into view, buffer contains: {text:?}"
+        );
     }
 }
