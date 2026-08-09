@@ -15,5 +15,5 @@ pub use context::{
 };
 pub use fingerprint::compute_fingerprint;
 pub use scanner::{DiscoveryScanner, ScanOptions, ScanProgress};
-pub use tsv::parse_targets_tsv;
+pub use tsv::{parse_targets_lines_lenient, parse_targets_tsv};
 pub use types::{Confidence, DiscoveredInstance, DiscoverySource, InstanceRunStatus, ScanResult};

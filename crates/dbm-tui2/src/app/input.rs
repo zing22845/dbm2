@@ -354,13 +354,16 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
     // Pane-move chords (Ctrl+nav) take precedence. The discover panes are
     // stacked vertically (engine / targets / results), so only Up/Down (j/k)
     // move between them — matching the footer hint. Left/Right (h/l) do not.
+    // Non-navigation Ctrl chords (e.g. Ctrl+r = redo in the targets pane) must
+    // fall through to the per-pane handler instead of being swallowed here.
     if ctrl {
-        let dir = pane_dir_from_key(&key);
-        return match dir {
-            Some(PaneDir::Down) => Some(discover(DiscoverMessage::Focus(sub.next()))),
-            Some(PaneDir::Up) => Some(discover(DiscoverMessage::Focus(sub.prev()))),
-            _ => None,
-        };
+        if let Some(dir) = pane_dir_from_key(&key) {
+            return match dir {
+                PaneDir::Down => Some(discover(DiscoverMessage::Focus(sub.next()))),
+                PaneDir::Up => Some(discover(DiscoverMessage::Focus(sub.prev()))),
+                _ => None,
+            };
+        }
     }
 
     match code {
@@ -372,13 +375,14 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
         }
         // Scan / register are discover-level actions available from any pane.
         // `r` registers normally (blocks on precheck warnings); `R` force-
-        // registers (bypasses warnings, errors still block).
+        // registers (bypasses warnings, errors still block). Ctrl+r / Ctrl+Shift+r
+        // are redo in the targets pane, so register only fires without Ctrl.
         KeyCode::Char('s') => Some(discover(DiscoverMessage::StartScan)),
-        KeyCode::Char('r') => {
+        KeyCode::Char('r') if !ctrl => {
             tracing::debug!(pane = ?sub, "discover key: register (force=false)");
             Some(discover(DiscoverMessage::RegisterSelected { force: false }))
         }
-        KeyCode::Char('R') => {
+        KeyCode::Char('R') if !ctrl => {
             tracing::debug!(pane = ?sub, "discover key: force-register (force=true)");
             Some(discover(DiscoverMessage::RegisterSelected { force: true }))
         }
@@ -1353,6 +1357,27 @@ mod tests {
         assert!(matches!(
             up,
             AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverPane::Results)))
+        ));
+    }
+
+    #[test]
+    fn discover_ctrl_r_in_targets_redoes() {
+        use crate::features::discover::state::DiscoverState;
+        use crate::features::discover::targets::msg::{TargetsMessage, TargetsMsg};
+        let state = DiscoverState::opened();
+        // Ctrl+r must reach the targets pane's Redo, not be swallowed by the
+        // discover Ctrl-navigation branch (non-nav Ctrl chords fall through).
+        let msg = discover_key(
+            key(KeyCode::Char('r'), KeyModifiers::CONTROL),
+            DiscoverPane::Targets,
+            &state,
+        )
+        .expect("ctrl+r in targets should dispatch Redo");
+        assert!(matches!(
+            msg,
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Targets(
+                TargetsMsg::Message(TargetsMessage::Redo)
+            )))
         ));
     }
 

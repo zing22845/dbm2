@@ -42,6 +42,14 @@ pub struct TargetsState {
     pub undo_stack: Vec<Vec<TargetRow>>,
     /// Redo snapshots of the target list.
     pub redo_stack: Vec<Vec<TargetRow>>,
+    /// Raw payload of the last paste. Re-feeding the identical payload (a held
+    /// Cmd+V auto-repeat) is de-duped so the same targets are not appended
+    /// twice — matching the original dbm.
+    pub last_paste_content: Option<String>,
+    /// One-line feedback for the last paste/undo/redo action (e.g. how many
+    /// rows were added / undone). Rendered as a status line in the targets
+    /// footer and cleared on the next action or a fresh edit.
+    pub status: Option<String>,
 }
 
 

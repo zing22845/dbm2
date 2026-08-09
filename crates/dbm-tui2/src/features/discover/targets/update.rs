@@ -1,6 +1,6 @@
 //! Discovery targets editor feature update.
 
-use dbm_discovery::{parse_port_spec, parse_targets_tsv, validate_host};
+use dbm_discovery::{parse_port_spec, parse_targets_lines_lenient, validate_host};
 
 use super::msg::TargetsMessage;
 use super::state::{TargetCol, TargetRow, TargetsState};
@@ -17,6 +17,11 @@ pub fn update(
     msg: TargetsMessage,
     mut state: TargetsState,
 ) -> (TargetsState, Vec<TargetsIntent>, Vec<TargetsEffect>, bool) {
+    // `last_paste_content` guards against a held Cmd+V re-feeding the exact
+    // same payload as consecutive paste events. Any non-paste action (deleting
+    // the pasted rows, editing, undoing, …) ends that run, so a later paste of
+    // the same text is treated as a fresh action instead of being swallowed.
+    let is_paste = matches!(&msg, TargetsMessage::Paste(_));
     let dirty = match msg {
         TargetsMessage::MoveUp => {
             let before = state.row;
@@ -136,8 +141,19 @@ pub fn update(
                 false
             }
         }
-        TargetsMessage::Undo => undo_targets(&mut state),
-        TargetsMessage::Redo => redo_targets(&mut state),
+        TargetsMessage::Undo => {
+            // A list change marks dirty; an empty undo stack still sets the
+            // "Nothing to undo" status, so repaint only when that status is
+            // newly shown (holding `u` must not repaint every repeat).
+            let before = state.status.clone();
+            let dirty = undo_targets(&mut state);
+            dirty || state.status != before
+        }
+        TargetsMessage::Redo => {
+            let before = state.status.clone();
+            let dirty = redo_targets(&mut state);
+            dirty || state.status != before
+        }
         TargetsMessage::Paste(contents) => {
             if state.editing {
                 state.edit_buf.insert_str(state.edit_cursor, &contents);
@@ -159,6 +175,11 @@ pub fn update(
             }
         }
     };
+    if !is_paste {
+        // A non-paste action ends the current paste de-dup run (see `is_paste`
+        // above), so a later paste of the same text is not swallowed.
+        state.last_paste_content = None;
+    }
     (state, Vec::new(), Vec::new(), dirty)
 }
 
@@ -172,8 +193,10 @@ fn undo_targets(state: &mut TargetsState) -> bool {
     if let Some(prev) = state.undo_stack.pop() {
         state.redo_stack.push(std::mem::replace(&mut state.targets, prev));
         state.row = state.row.min(state.targets.len().saturating_sub(1));
+        state.status = Some(format!("Undone {} target(s)", state.targets.len()));
         true
     } else {
+        state.status = Some("Nothing to undo".into());
         false
     }
 }
@@ -182,8 +205,10 @@ fn redo_targets(state: &mut TargetsState) -> bool {
     if let Some(next) = state.redo_stack.pop() {
         state.undo_stack.push(std::mem::replace(&mut state.targets, next));
         state.row = state.row.min(state.targets.len().saturating_sub(1));
+        state.status = Some(format!("Redone {} target(s)", state.targets.len()));
         true
     } else {
+        state.status = Some("Nothing to redo".into());
         false
     }
 }
@@ -211,20 +236,235 @@ fn commit_edit(state: &mut TargetsState) -> bool {
     true
 }
 
-/// Paste TSV target rows onto the end of the list. Strict: a malformed row
-/// rejects the whole batch. Returns whether any rows were added.
+/// Paste TSV target rows onto the end of the list. Lenient: each line is parsed
+/// independently, so valid rows are added while bad rows are skipped (unlike
+/// the strict [`parse_targets_tsv`], which rejects the whole batch). The result
+/// is reported on the targets footer status line.
+///
+/// De-duplicates like the original dbm: (1) re-feeding the exact same payload
+/// (a held Cmd+V auto-repeat) is ignored, and (2) a pasted `host:ports` that
+/// already exists in the list is not appended twice.
+///
+/// Returns `dirty` as a single unified rule: `true` iff the target list **or**
+/// the status line changed. A held Cmd+V therefore repaints only on the first
+/// repeat (status flips to "Duplicate paste ignored"); further repeats change
+/// neither, so they repaint nothing (no redraw storm).
 fn paste_targets(state: &mut TargetsState, contents: &str) -> bool {
-    let Ok(rows) = parse_targets_tsv(contents) else {
-        return false;
-    };
-    if rows.is_empty() {
-        return false;
+    let before_status = state.status.clone();
+    let before_len = state.targets.len();
+
+    // Re-fed identical payload (a held Cmd+V) -> ignore, just set the status.
+    if state.last_paste_content.as_deref() == Some(contents) {
+        state.status = Some("Duplicate paste ignored".into());
+        return state.targets.len() != before_len || state.status != before_status;
     }
-    push_undo(state);
-    state.targets.extend(rows.into_iter().map(|(host, ports_spec)| TargetRow {
-        host,
-        ports_spec,
-    }));
-    state.row = state.targets.len().saturating_sub(1);
-    true
+
+    let lines = parse_targets_lines_lenient(contents);
+    let total = lines.len();
+    if total == 0 {
+        state.status = Some("Nothing to paste".into());
+        return state.targets.len() != before_len || state.status != before_status;
+    }
+
+    let mut added = 0usize;
+    let mut duplicated = 0usize;
+    let mut failed = 0usize;
+    let mut new_rows = Vec::new();
+    for line in lines {
+        match line {
+            Ok((host, ports_spec)) => {
+                let row = TargetRow { host, ports_spec };
+                if state.targets.contains(&row) {
+                    duplicated += 1;
+                } else {
+                    added += 1;
+                    new_rows.push(row);
+                }
+            }
+            Err(_) => failed += 1,
+        }
+    }
+    state.last_paste_content = Some(contents.to_string());
+    state.status = Some(format!(
+        "Paste: {added}/{total} added, {duplicated}/{total} duplicated, {failed}/{total} failed"
+    ));
+    if !new_rows.is_empty() {
+        push_undo(state);
+        state.targets.extend(new_rows);
+        state.row = state.targets.len().saturating_sub(1);
+    }
+    state.targets.len() != before_len || state.status != before_status
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn paste(state: &mut TargetsState, contents: &str) -> bool {
+        let (s, _i, _e, dirty) = update(TargetsMessage::Paste(contents.to_string()), std::mem::take(state));
+        *state = s;
+        dirty
+    }
+
+    #[test]
+    fn re_fed_identical_paste_is_de_duped() {
+        let mut s = TargetsState::with_default_targets();
+        let first = paste(&mut s, "db.example.com\t5432\n");
+        assert!(first);
+        let before = s.targets.len();
+        // Re-feeding the exact same payload (held Cmd+V) appends nothing: the
+        // list length is unchanged (the dirty flag is about status feedback,
+        // covered by `duplicate_paste_ignored_reports_status`).
+        paste(&mut s, "db.example.com\t5432\n");
+        assert_eq!(s.targets.len(), before);
+    }
+
+    #[test]
+    fn paste_drops_duplicate_targets() {
+        let mut s = TargetsState::with_default_targets();
+        // First paste adds db.example.com:5432.
+        paste(&mut s, "db.example.com\t5432\n");
+        assert!(s.targets.iter().any(|r| r.host == "db.example.com"));
+        let before = s.targets.len();
+        // A *different* payload that repeats db.example.com:5432 keeps only the
+        // new rows; the existing one is not appended again.
+        paste(&mut s, "db.example.com\t5432\nother.example.com\t5433\n");
+        assert!(s.targets.iter().any(|r| r.host == "other.example.com"));
+        assert_eq!(s.targets.len(), before + 1);
+    }
+
+    #[test]
+    fn paste_status_counts_added_duplicated_and_failed() {
+        let mut s = TargetsState::with_default_targets();
+        // 127.0.0.1 / 5432,5433-5440 is the default row, so repeating it
+        // de-duplicates; `bad host` fails validation; `db.example.com:5432` is
+        // added.
+        paste(
+            &mut s,
+            "127.0.0.1\t5432,5433-5440\nbad host\t5433\ndb.example.com:5432\n",
+        );
+        let status = s.status.as_deref().expect("paste sets a status");
+        assert!(status.contains("1/3 added"), "{status}");
+        assert!(status.contains("1/3 duplicated"), "{status}");
+        assert!(status.contains("1/3 failed"), "{status}");
+    }
+
+    #[test]
+    fn duplicate_paste_ignored_reports_status() {
+        let mut s = TargetsState::with_default_targets();
+        paste(&mut s, "db.example.com\t5432\n");
+        // The first re-fed identical payload shows "Duplicate paste ignored"
+        // and repaints once so the feedback is visible.
+        let dirty = paste(&mut s, "db.example.com\t5432\n");
+        assert!(dirty, "first duplicate paste must repaint to show the status");
+        assert_eq!(s.status.as_deref(), Some("Duplicate paste ignored"));
+        // A further held-Cmd+V repeat keeps the same status, so it must NOT
+        // repaint again (no redraw storm).
+        let dirty = paste(&mut s, "db.example.com\t5432\n");
+        assert!(!dirty);
+        assert_eq!(s.status.as_deref(), Some("Duplicate paste ignored"));
+    }
+
+    #[test]
+    fn paste_that_only_duplicates_still_marks_dirty_for_status() {
+        let mut s = TargetsState::with_default_targets();
+        paste(&mut s, "db.example.com\t5432\n");
+        // A non-paste action (cursor move) ends the held-Cmd+V run, so the same
+        // payload is treated as a fresh paste whose rows all already exist:
+        // nothing is added, but the status line must be refreshed so the
+        // feedback is visible.
+        let (s1, _i, _e, _d) = update(TargetsMessage::MoveDown, std::mem::take(&mut s));
+        s = s1;
+        let dirty = paste(&mut s, "db.example.com\t5432\n");
+        assert!(dirty, "a fresh paste that only duplicates must repaint the status");
+        let status = s.status.as_deref().expect("paste sets a status");
+        assert!(status.contains("0/1 added"), "{status}");
+        assert!(status.contains("1/1 duplicated"), "{status}");
+    }
+
+    #[test]
+    fn empty_undo_status_is_dirty_only_once() {
+        let mut s = TargetsState::with_default_targets();
+        // First undo on an empty stack shows "Nothing to undo" and repaints.
+        let (s1, _i, _e, dirty) = update(TargetsMessage::Undo, std::mem::take(&mut s));
+        s = s1;
+        assert!(dirty);
+        assert_eq!(s.status.as_deref(), Some("Nothing to undo"));
+        // Repeating undo keeps the same status, so it must not repaint.
+        let (_s2, _i, _e, dirty) = update(TargetsMessage::Undo, std::mem::take(&mut s));
+        assert!(!dirty);
+    }
+
+    #[test]
+    fn undo_and_redo_set_status_counts() {
+        let mut s = TargetsState::with_default_targets();
+        paste(&mut s, "db.example.com\t5432\n");
+        // Undo the paste -> back to one target.
+        let (s1, _i, _e, dirty) =
+            update(TargetsMessage::Undo, std::mem::take(&mut s));
+        s = s1;
+        assert!(dirty);
+        assert!(s.status.as_deref().is_some_and(|t| t.contains("Undone")));
+        // Redo -> target list grows again.
+        let (s2, _i, _e, dirty) =
+            update(TargetsMessage::Redo, std::mem::take(&mut s));
+        s = s2;
+        assert!(dirty);
+        assert!(s.status.as_deref().is_some_and(|t| t.contains("Redone")));
+    }
+
+    #[test]
+    fn repaste_after_deleting_pasted_rows_is_allowed() {
+        let mut s = TargetsState::with_default_targets();
+        let payload = "db.example.com\t5432\nother.example.com\t5433\n";
+        // First paste adds both rows.
+        assert!(paste(&mut s, payload));
+        assert_eq!(s.targets.len(), 3);
+        // Delete both pasted rows (from the end back to the top) — a non-paste
+        // action, which must reset the paste de-dup guard.
+        let (s1, _i, _e, _d) = update(TargetsMessage::DeleteRow, std::mem::take(&mut s));
+        s = s1;
+        let (s2, _i, _e, _d) = update(TargetsMessage::DeleteRow, std::mem::take(&mut s));
+        s = s2;
+        assert_eq!(s.targets.len(), 1);
+        // Re-pasting the identical payload is a fresh action now, not a held
+        // Cmd+V repeat, so both rows are added again.
+        assert!(paste(&mut s, payload));
+        assert_eq!(s.targets.len(), 3);
+    }
+
+    #[test]
+    fn repaste_after_deleting_some_rows_restores_only_missing_ones() {
+        let mut s = TargetsState::with_default_targets();
+        let payload = "db.example.com\t5432\nother.example.com\t5433\n";
+        // First paste adds both rows; the cursor moves to the last row
+        // (`other.example.com`), and the default loopback row stays.
+        paste(&mut s, payload);
+        assert_eq!(s.targets.len(), 3);
+        // Delete just one pasted row (the cursor is on `other.example.com`).
+        // Deleting a single row is a non-paste action, so it resets the de-dup
+        // guard; `db.example.com` remains in the list.
+        let (s1, _i, _e, _d) = update(TargetsMessage::DeleteRow, std::mem::take(&mut s));
+        s = s1;
+        assert_eq!(s.targets.len(), 2);
+        // Re-pasting the full payload restores only the missing row; the rows
+        // still in the list are de-duplicated, not appended again.
+        assert!(paste(&mut s, payload));
+        assert_eq!(s.targets.len(), 3);
+        let status = s.status.as_deref().expect("paste sets a status");
+        assert!(status.contains("1/2 added"), "{status}");
+        assert!(status.contains("1/2 duplicated"), "{status}");
+        assert!(status.contains("0/2 failed"), "{status}");
+    }
+
+    #[test]
+    fn empty_undo_and_redo_report_not_available() {
+        let mut s = TargetsState::with_default_targets();
+        let (s1, _i, _e, _dirty) = update(TargetsMessage::Undo, std::mem::take(&mut s));
+        s = s1;
+        assert_eq!(s.status.as_deref(), Some("Nothing to undo"));
+        let (s2, _i, _e, _dirty) = update(TargetsMessage::Redo, std::mem::take(&mut s));
+        s = s2;
+        assert_eq!(s.status.as_deref(), Some("Nothing to redo"));
+    }
 }

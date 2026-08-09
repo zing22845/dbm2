@@ -186,8 +186,10 @@ pub fn discover_engine_footer_text() -> String {
 }
 
 /// Footer for the discover targets editor pane, switching on edit state.
-/// `has_loopback` appends a note that loopback also runs local discovery.
-pub fn discover_targets_footer_text(editing: bool, has_loopback: bool) -> String {
+/// `has_loopback` appends a note that loopback also runs local discovery, and
+/// `status` (the last paste/undo/redo feedback, e.g. "Paste: 1/3 added …") is
+/// appended on a second line when non-empty.
+pub fn discover_targets_footer_text(editing: bool, has_loopback: bool, status: Option<&str>) -> String {
     if editing {
         return keys(&[("Commit", lit("ENTER")), ("Cancel", lit("ESC"))]);
     }
@@ -202,6 +204,10 @@ pub fn discover_targets_footer_text(editing: bool, has_loopback: bool) -> String
     if has_loopback {
         footer.push('\n');
         footer.push_str(DISCOVER_LOOPBACK_SCAN_NOTE);
+    }
+    if let Some(status) = status.filter(|s| !s.is_empty()) {
+        footer.push('\n');
+        footer.push_str(status);
     }
     footer
 }
@@ -450,18 +456,23 @@ mod tests {
         let with_status = discover_footer_text("scanning…");
         assert!(with_status.contains("\nscanning…"));
         // Targets footer shows edit keys when not editing, commit/cancel when editing.
-        let edit = discover_targets_footer_text(false, false);
+        let edit = discover_targets_footer_text(false, false, None);
         assert!(edit.contains("Edit: i/ENTER"));
         assert!(edit.contains("Insert: o"));
         assert!(edit.contains("Delete: d"));
         assert!(edit.contains("Paste TSV/host:ports"));
         // A loopback row appends the local-discovery note on a second line.
-        let loopback = discover_targets_footer_text(false, true);
+        let loopback = discover_targets_footer_text(false, true, None);
         assert!(loopback.contains(DISCOVER_LOOPBACK_SCAN_NOTE));
         assert!(loopback.contains('\n'));
-        let committing = discover_targets_footer_text(true, false);
+        // A status line is appended on a second line after the hints.
+        let with_status = discover_targets_footer_text(false, false, Some("Paste: 1/2 added"));
+        assert!(with_status.ends_with("Paste: 1/2 added"));
+        assert!(with_status.contains('\n'));
+        let committing = discover_targets_footer_text(true, false, Some("Paste: 1/2 added"));
         assert!(committing.contains("Commit: ENTER"));
         assert!(committing.contains("Cancel: ESC"));
+        assert!(!committing.contains("Paste: 1/2 added"));
         // Results footer lists selection / register / force-register / filter.
         let results = discover_results_footer_text();
         assert!(results.contains("Select: SPACE"));

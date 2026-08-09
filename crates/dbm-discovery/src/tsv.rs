@@ -26,6 +26,30 @@ pub fn parse_targets_tsv(input: &str) -> Result<Vec<(String, String)>, String> {
     Ok(targets)
 }
 
+/// Parse multi-line targets leniently: each line is parsed independently and
+/// reported as its own `Ok(host, ports)` / `Err(reason)` rather than rejecting
+/// the whole batch on the first bad line. Unlike [`parse_targets_tsv`], this is
+/// the input for the targets editor's per-row status feedback (how many lines
+/// succeeded, failed, or were de-duplicated) instead of a strict all-or-nothing
+/// import.
+pub fn parse_targets_lines_lenient(input: &str) -> Vec<Result<(String, String), String>> {
+    let mut rows = Vec::new();
+    for (index, line) in input.lines().enumerate() {
+        let line_number = index + 1;
+        let row = split_target_line(line)
+            .map_err(|error| format!("line {line_number}: {error}"))
+            .and_then(|(host, ports)| {
+                let host =
+                    validate_host(host).map_err(|error| format!("line {line_number}: {error}"))?;
+                parse_port_spec(ports)
+                    .map_err(|error| format!("line {line_number}: {error}"))?;
+                Ok((host, ports.trim().to_string()))
+            });
+        rows.push(row);
+    }
+    rows
+}
+
 fn split_target_line(line: &str) -> Result<(&str, &str), String> {
     if line.contains('\t') {
         let mut columns = line.split('\t');
@@ -122,6 +146,29 @@ mod tests {
 
         assert!(err.contains("line 2"), "{err}");
         assert!(err.contains("port"), "{err}");
+    }
+
+    #[test]
+    fn lenient_parse_reports_each_line_independently() {
+        let rows = parse_targets_lines_lenient(
+            "db.example.com\t5432\nbad host\t5433\nother.example.com:0\n[::1]\t5440\n",
+        );
+        assert_eq!(rows.len(), 4);
+        // Valid TSV row.
+        assert_eq!(rows[0].as_ref().unwrap(), &("db.example.com".to_string(), "5432".to_string()));
+        // Invalid host -> that line alone fails.
+        assert!(rows[1].is_err());
+        assert!(rows[1].as_ref().unwrap_err().contains("line 2"));
+        // Invalid port spec -> that line alone fails.
+        assert!(rows[2].is_err());
+        assert!(rows[2].as_ref().unwrap_err().contains("line 3"));
+        // Valid bracketed IPv6 row.
+        assert_eq!(rows[3].as_ref().unwrap(), &("::1".to_string(), "5440".to_string()));
+    }
+
+    #[test]
+    fn lenient_parse_empty_input_has_no_rows() {
+        assert!(parse_targets_lines_lenient("").is_empty());
     }
 
     #[test]

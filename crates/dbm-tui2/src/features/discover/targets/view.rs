@@ -25,11 +25,13 @@ pub fn render(
     let p = theme.palette();
     let focused = focus == crate::app_shell::nav::DiscoverPane::Targets;
 
-    let footer_text = discover_targets_footer_text(state.editing, state.has_loopback());
+    let footer_text = discover_targets_footer_text(state.editing, state.has_loopback(), state.status.as_deref());
+    // The footer may span the hints line plus a loopback note and/or the
+    // last paste/undo/redo status line, so size it to the actual line count.
     let footer_h = if footer_text.is_empty() {
         0
     } else {
-        footer_text.lines().count().clamp(1, 2) as u16
+        footer_text.lines().count() as u16
     };
 
     let block = Block::default()
