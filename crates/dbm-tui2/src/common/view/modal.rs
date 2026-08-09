@@ -130,11 +130,39 @@ pub struct ConfirmButtons {
     pub no_rect: Rect,
 }
 
-/// The centered rect of a confirm popup over `area` (pure geometry). Shared by
-/// the renderer and the mouse hit-tester so both agree on the popup position.
-pub fn confirm_popup_rect(area: Rect) -> Rect {
+/// The number of body rows a confirm modal renders, so the popup height (and
+/// therefore the Yes/No button row used for mouse hit-testing) matches what is
+/// drawn. Keep in sync with the body built in `render_popup_modal`.
+pub fn confirm_body_rows(modal: &ModalKind) -> usize {
+    match modal {
+        ModalKind::DeleteConnectionConfirm { .. } => 3,
+        ModalKind::UnregisterInstanceConfirm { .. } => 1,
+        ModalKind::ResultsEditCommitPreview { statements } => {
+            let shown = statements.len().min(6);
+            shown + if statements.len() > 6 { 1 } else { 0 }
+        }
+        _ => 1,
+    }
+}
+
+/// The Yes button label, including its keys (`Yes (y/Y)`).
+pub fn yes_button_label() -> &'static str {
+    " Yes (y/Y) "
+}
+
+/// The No button label, including its keys (`No (n/N)`).
+pub fn no_button_label() -> &'static str {
+    " No (n/N) "
+}
+
+/// The centered rect of a confirm popup over `area` (pure geometry). The height
+/// grows with the body so multi-line content (e.g. an unregister message) fits
+/// without overlapping the Yes/No button row. Shared by the renderer and the
+/// mouse hit-tester so both agree on the popup position.
+pub fn confirm_popup_rect(area: Rect, body_rows: usize) -> Rect {
     let popup_w = area.width.clamp(28, 44);
-    let popup_h = 5u16;
+    // border top + body rows + blank row + button row + border bottom.
+    let popup_h = (body_rows as u16).saturating_add(4).clamp(6, 14);
     Rect {
         x: area.x.saturating_add(area.width.saturating_sub(popup_w) / 2),
         y: area.y.saturating_add(area.height.saturating_sub(popup_h) / 2),
@@ -143,10 +171,11 @@ pub fn confirm_popup_rect(area: Rect) -> Rect {
     }
 }
 
-/// Compute the Yes/No button rects inside a confirm popup (pure layout).
+/// Compute the Yes/No button rects inside a confirm popup (pure layout). The
+/// labels include their keys, e.g. `Yes (y/Y)` / `No (n/N)`.
 pub fn confirm_buttons(popup: Rect) -> ConfirmButtons {
-    let yes_label = " Yes ";
-    let no_label = " No ";
+    let yes_label = yes_button_label();
+    let no_label = no_button_label();
     let gap = 3u16;
     let yes_w = yes_label.chars().count() as u16;
     let no_w = no_label.chars().count() as u16;
@@ -156,7 +185,8 @@ pub fn confirm_buttons(popup: Rect) -> ConfirmButtons {
         .saturating_add(popup.width.saturating_sub(total) / 2);
     let yes_rect = Rect {
         x: start_x,
-        y: popup.y.saturating_add(2), // block top(1) + one body row inside inner
+        // Bottom row of inner (leave 1 row for the bottom border).
+        y: popup.bottom().saturating_sub(2),
         width: yes_w.min(popup.width),
         height: 1,
     };
@@ -182,7 +212,7 @@ pub fn render_confirm_popup(
     highlight_yes: bool,
 ) -> ConfirmButtons {
     let p = theme.palette();
-    let popup = confirm_popup_rect(base);
+    let popup = confirm_popup_rect(base, body.len());
     if popup.width == 0 || popup.height == 0 {
         return ConfirmButtons::default();
     }
@@ -196,7 +226,9 @@ pub fn render_confirm_popup(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border))
+        // The confirm popup uses the accent (focused) border, matching the
+        // original dbm's popup chrome (a brighter border than regular panels).
+        .border_style(Style::default().fg(p.accent))
         .style(Style::default().bg(p.surface));
     let inner = block.inner(popup);
     frame.render_widget(&block, popup);
@@ -204,35 +236,39 @@ pub fn render_confirm_popup(
         return confirm_buttons(popup);
     }
 
+    // body rows, a blank spacer row, then the Yes/No button row.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .constraints([Constraint::Min(1), Constraint::Length(1), Constraint::Length(1)])
         .split(inner);
+    // Wrap long body lines so a wide message (e.g. many SQL statements) folds
+    // within the popup instead of being clipped.
     frame.render_widget(
-        Paragraph::new(body).style(Style::default().bg(p.surface)),
+        Paragraph::new(body)
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .style(Style::default().bg(p.surface)),
         chunks[0],
     );
 
     // Yes/No button row. Use the shared `confirm_buttons` geometry so rendering
-    // and mouse hit-testing always agree.
+    // and mouse hit-testing always agree. There is no focus switching between
+    // the two, so both buttons use the same accent "filled button" style —
+    // a high-contrast accent block that reads as a clickable button.
     let buttons = confirm_buttons(popup);
-    let yes_style = if highlight_yes {
-        Style::default()
-            .fg(p.selection)
-            .add_modifier(ratatui::style::Modifier::BOLD)
-    } else {
-        Style::default().bg(p.surface)
-    };
-    let no_style = if highlight_yes {
-        Style::default().bg(p.surface)
-    } else {
-        Style::default()
-            .fg(p.selection)
-            .add_modifier(ratatui::style::Modifier::BOLD)
-    };
-    frame.render_widget(Paragraph::new(" Yes ").style(yes_style), buttons.yes_rect);
+    let _ = highlight_yes; // both buttons are styled identically
+    let btn_style = Style::default()
+        .fg(p.bg)
+        .bg(p.accent)
+        .add_modifier(ratatui::style::Modifier::BOLD);
+    frame.render_widget(
+        Paragraph::new(yes_button_label()).style(btn_style),
+        buttons.yes_rect,
+    );
     if buttons.no_rect.right() <= popup.right() {
-        frame.render_widget(Paragraph::new(" No ").style(no_style), buttons.no_rect);
+        frame.render_widget(
+            Paragraph::new(no_button_label()).style(btn_style),
+            buttons.no_rect,
+        );
     }
     buttons
 }
@@ -310,18 +346,23 @@ mod tests {
     #[test]
     fn confirm_popup_is_centered_and_clamped() {
         let area = Rect::new(100, 0, 120, 30);
-        let popup = confirm_popup_rect(area);
-        // 28..=44 wide, 5 tall, horizontally centered.
+        let popup = confirm_popup_rect(area, 1);
+        // 28..=44 wide; a single-line body yields the min height (border + body
+        // + blank + button + border), horizontally centered.
         assert!(popup.width >= 28 && popup.width <= 44);
-        assert_eq!(popup.height, 5);
+        assert_eq!(popup.height, 6);
         let left_gap = popup.x - area.x;
         let right_gap = area.right() - popup.right();
         assert_eq!(left_gap, right_gap);
+
+        // A multi-line body grows the popup so buttons stay below the content.
+        let tall = confirm_popup_rect(area, 3);
+        assert_eq!(tall.height, 7);
     }
 
     #[test]
     fn confirm_buttons_are_side_by_side_centered() {
-        let popup = Rect::new(30, 10, 40, 5);
+        let popup = Rect::new(30, 10, 60, 5);
         let b = confirm_buttons(popup);
         // Yes then No, on the same row, not overlapping.
         assert_eq!(b.yes_rect.y, b.no_rect.y);
@@ -330,7 +371,16 @@ mod tests {
         // Centered: both fit within the popup width.
         assert!(b.yes_rect.x >= popup.x);
         assert!(b.no_rect.right() <= popup.right());
+        // Each rect is large enough for its (widened) label.
+        assert!(b.yes_rect.width >= yes_button_label().chars().count() as u16);
+        assert!(b.no_rect.width >= no_button_label().chars().count() as u16);
         assert!(b.yes_rect.contains(Position::new(b.yes_rect.x + 1, b.yes_rect.y)));
         assert!(b.no_rect.contains(Position::new(b.no_rect.x + 1, b.no_rect.y)));
+    }
+
+    #[test]
+    fn confirm_button_labels_include_their_keys() {
+        assert_eq!(yes_button_label(), " Yes (y/Y) ");
+        assert_eq!(no_button_label(), " No (n/N) ");
     }
 }

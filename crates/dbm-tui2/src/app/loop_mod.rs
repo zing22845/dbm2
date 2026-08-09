@@ -249,8 +249,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 size.width.saturating_sub(explorer_w),
                                 body_h,
                             );
-                            let popup =
-                                crate::common::view::modal::confirm_popup_rect(workspace);
+                            let popup = crate::common::view::modal::confirm_popup_rect(
+                                workspace,
+                                crate::common::view::modal::confirm_body_rows(
+                                    state.modal.as_ref().unwrap(),
+                                ),
+                            );
                             let buttons =
                                 crate::common::view::modal::confirm_buttons(popup);
                             let msg = if buttons.yes_rect.contains(point) {
@@ -295,8 +299,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 size.width.saturating_sub(explorer_w),
                                 body_h,
                             );
-                            let popup =
-                                crate::common::view::modal::confirm_popup_rect(workspace);
+                            // Discover's close-confirm body is a single line.
+                            let popup = crate::common::view::modal::confirm_popup_rect(
+                                workspace,
+                                1,
+                            );
                             let buttons =
                                 crate::common::view::modal::confirm_buttons(popup);
                             let msg = if buttons.yes_rect.contains(point) {

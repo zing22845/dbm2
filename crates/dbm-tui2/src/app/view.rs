@@ -122,13 +122,12 @@ fn render_popup_modal(
                     Line::from(Span::raw("This will remove the stored connection.")),
                 ]
             }
-            ModalKind::UnregisterInstanceConfirm { instance } => {
-                vec![
-                    Line::from(Span::raw(format!("Instance: {instance}"))),
-                    Line::from(Span::raw(
-                        "This will remove the instance and its connections.",
-                    )),
-                ]
+            // The instance is already shown in the title, so the body only
+            // states what unregistering does.
+            ModalKind::UnregisterInstanceConfirm { .. } => {
+                vec![Line::from(Span::raw(
+                    "This will remove the instance and its connections.",
+                ))]
             }
             ModalKind::ResultsEditCommitPreview { statements } => {
                 let shown: Vec<Line> = statements

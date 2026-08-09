@@ -202,6 +202,22 @@ pub fn paste_to_msg(contents: &str, state: &super::state::AppState) -> Option<Ap
     None
 }
 
+/// Shared key handling for a Yes/No confirm dialog: `y`/`Y` confirms (running
+/// `on_yes`), `n`/`N` cancels (running `on_no`), anything else is unhandled.
+/// Both the app-level confirm modals and the discover close-confirmation route
+/// their keys through this so the confirm shortcut is defined in one place.
+fn confirm_yes_no_key(
+    key: KeyEvent,
+    on_yes: impl FnOnce() -> Option<AppMsg>,
+    on_no: impl FnOnce() -> Option<AppMsg>,
+) -> Option<AppMsg> {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => on_yes(),
+        KeyCode::Char('n') | KeyCode::Char('N') => on_no(),
+        _ => None,
+    }
+}
+
 /// The action dispatched when a confirm modal's `Yes`/`y` is triggered (by key
 /// or by clicking the Yes button). The shell closes the modal itself when it
 /// sees the dispatched message (e.g. `DeleteConnection` / `UnregisterInstance`),
@@ -252,14 +268,6 @@ fn modal_key(key: KeyEvent, modal: &ModalKind, state: &super::state::AppState) -
     };
     match key.code {
         KeyCode::Esc => Some(close()),
-        KeyCode::Char('n') | KeyCode::Char('N') => {
-            if crate::common::view::modal::is_confirm_modal(modal) {
-                Some(close())
-            } else {
-                None
-            }
-        }
-        KeyCode::Char('y') | KeyCode::Char('Y') => confirm_yes_msg(modal, state),
         // Row-limit picker: up/down cycle the presets, enter applies.
         KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') | KeyCode::Enter => {
             if let ModalKind::ResultsRowLimitPicker { current, limits } = modal {
@@ -292,7 +300,18 @@ fn modal_key(key: KeyEvent, modal: &ModalKind, state: &super::state::AppState) -
             }
             None
         }
-        _ => None,
+        // Confirm modals: `y`/`Y` confirms, `n`/`N` cancels (shared handling).
+        _ => confirm_yes_no_key(
+            key,
+            || confirm_yes_msg(modal, state),
+            || {
+                if crate::common::view::modal::is_confirm_modal(modal) {
+                    Some(close())
+                } else {
+                    None
+                }
+            },
+        ),
     }
 }
 
@@ -313,16 +332,15 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
     let code = key.code;
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
+    // Close-confirmation uses the shared Yes/No confirm dialog: `y`/`Y`
+    // confirms, `n`/`N` cancels — the same confirm shortcut as every other
+    // confirm dialog (see `confirm_yes_no_key`).
     if state.close_confirm {
-        return match code {
-            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
-                Some(discover(DiscoverMessage::Close))
-            }
-            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
-                Some(discover(DiscoverMessage::CancelClose))
-            }
-            _ => None,
-        };
+        return confirm_yes_no_key(
+            key,
+            || Some(discover(DiscoverMessage::Close)),
+            || Some(discover(DiscoverMessage::CancelClose)),
+        );
     }
 
     // While editing a target cell, route every key to the targets editor so
