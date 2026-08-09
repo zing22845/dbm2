@@ -180,9 +180,15 @@ pub fn discover_footer_text(status: &str) -> String {
     }
 }
 
-/// Footer for the discover engine selector pane.
-pub fn discover_engine_footer_text() -> String {
-    keys(&[("Engine", lit("e/ENTER"))])
+/// Footer for the discover engine selector pane. `status` (e.g. the note that
+/// only Postgres is available) is appended on a second line when non-empty.
+pub fn discover_engine_footer_text(status: Option<&str>) -> String {
+    let mut footer = keys(&[("Engine", lit("e/ENTER"))]);
+    if let Some(status) = status.filter(|s| !s.is_empty()) {
+        footer.push('\n');
+        footer.push_str(status);
+    }
+    footer
 }
 
 /// Footer for the discover targets editor pane, switching on edit state.

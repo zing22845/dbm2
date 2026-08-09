@@ -12,6 +12,7 @@ use crate::app_shell::msg::ShellMsg;
 use crate::app_shell::nav::{DiscoverPane, IwPane};
 use crate::app_shell::pane::Pane;
 use crate::app_shell::nav::{pane_dir_from_key, PaneDir};
+use crate::features::discover::engine::msg::{EngineMessage, EngineMsg};
 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
 use crate::features::discover::results::msg::{ResultsMessage, ResultsMsg};
 use crate::features::discover::state::DiscoverState;
@@ -388,9 +389,14 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
         }
         _ => match sub {
             DiscoverPane::Engine => match code {
-                KeyCode::Enter | KeyCode::Char('e') => {
-                    Some(discover(DiscoverMessage::Focus(DiscoverPane::Engine)))
-                }
+                // `e`/`Enter` would switch the engine if there were more than
+                // one; today it is a no-op, so surface that note on the engine
+                // footer instead of silently doing nothing.
+                KeyCode::Enter | KeyCode::Char('e') => Some(discover(
+                    DiscoverMessage::Engine(EngineMsg::Message(
+                        EngineMessage::ShowOnlyEngineNote,
+                    )),
+                )),
                 _ => None,
             },
             DiscoverPane::Targets => targets_pane_key(key, state),
@@ -1357,6 +1363,36 @@ mod tests {
         assert!(matches!(
             up,
             AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Focus(DiscoverPane::Results)))
+        ));
+    }
+
+    #[test]
+    fn discover_engine_e_enter_shows_only_engine_note() {
+        use crate::features::discover::engine::msg::{EngineMessage, EngineMsg};
+        use crate::features::discover::state::DiscoverState;
+        let state = DiscoverState::opened();
+        // `e` on the engine pane is not a focus move (it is already focused);
+        // it surfaces the "only Postgres" note instead of silently doing nothing.
+        let e = discover_key(
+            key(KeyCode::Char('e'), KeyModifiers::NONE),
+            DiscoverPane::Engine,
+            &state,
+        )
+        .expect("e on engine pane should dispatch the engine note");
+        assert!(matches!(
+            e,
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Engine(
+                EngineMsg::Message(EngineMessage::ShowOnlyEngineNote)
+            )))
+        ));
+        // Enter behaves the same way.
+        let enter = discover_key(key(KeyCode::Enter, KeyModifiers::NONE), DiscoverPane::Engine, &state)
+            .expect("Enter on engine pane should dispatch the engine note");
+        assert!(matches!(
+            enter,
+            AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Engine(
+                EngineMsg::Message(EngineMessage::ShowOnlyEngineNote)
+            )))
         ));
     }
 

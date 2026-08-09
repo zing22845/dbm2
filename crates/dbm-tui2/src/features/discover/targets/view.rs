@@ -21,18 +21,12 @@ pub fn render(
     state: &TargetsState,
     focus: crate::app_shell::nav::DiscoverPane,
 ) {
+    use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::{discover_targets_footer_text, draw_pane_footer};
     let p = theme.palette();
     let focused = focus == crate::app_shell::nav::DiscoverPane::Targets;
 
     let footer_text = discover_targets_footer_text(state.editing, state.has_loopback(), state.status.as_deref());
-    // The footer may span the hints line plus a loopback note and/or the
-    // last paste/undo/redo status line, so size it to the actual line count.
-    let footer_h = if footer_text.is_empty() {
-        0
-    } else {
-        footer_text.lines().count() as u16
-    };
 
     let block = Block::default()
         .title(" targets ")
@@ -43,6 +37,18 @@ pub fn render(
     if inner.width == 0 || inner.height == 0 {
         return;
     }
+
+    // The footer may span the hints line plus a loopback note and/or the last
+    // paste/undo/redo status line. Size it to the actual wrapped line count at
+    // the pane's width (a long loopback note wraps under a narrow pane), but
+    // never let it crowd out the whole body.
+    let footer_h = if footer_text.is_empty() {
+        0
+    } else {
+        wrapped_line_count(&footer_text, inner.width)
+            .max(1)
+            .min(inner.height.saturating_sub(1).max(1))
+    };
 
     // Body is the inner area minus the footer strip. Rendered as a table with
     // `#` line-number, `Host` and `Ports` columns (matching the original dbm),

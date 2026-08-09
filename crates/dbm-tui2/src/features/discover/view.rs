@@ -24,7 +24,8 @@ pub fn render(
     state: &DiscoverState,
     focus: crate::app_shell::nav::DiscoverPane,
 ) {
-    use crate::common::view::hints::{discover_footer_text, draw_pane_footer};
+    use crate::common::utils::text_width::wrapped_line_count;
+    use crate::common::view::hints::{discover_engine_footer_text, discover_footer_text, draw_pane_footer};
     let p = theme.palette();
 
     // The discover parent pane wraps the three child panes (engine, targets,
@@ -46,12 +47,26 @@ pub fn render(
         footer_text.lines().count().clamp(1, 2) as u16
     };
 
+    // The engine pane is border (2) + a one-row label + its wrapped footer. Its
+    // footer can span a hints line plus the "only Postgres" status note, so the
+    // pane must grow to fit the wrapped status instead of being a fixed size
+    // (otherwise the second footer line is clipped away).
+    let engine_footer_text = discover_engine_footer_text(state.engine.status.as_deref());
+    let engine_footer_h = if engine_footer_text.is_empty() {
+        0
+    } else {
+        wrapped_line_count(&engine_footer_text, inner.width.saturating_sub(2).max(1))
+            .max(1)
+            .min(inner.height.saturating_sub(3).max(1))
+    };
+    let engine_h = 3u16.saturating_add(engine_footer_h);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4),            // engine selector + its footer
-            Constraint::Min(0),               // targets + results
-            Constraint::Length(footer_h),     // discover dialog footer
+            Constraint::Length(engine_h),    // engine selector + its footer
+            Constraint::Min(0),              // targets + results
+            Constraint::Length(footer_h),    // discover dialog footer
         ])
         .split(inner);
 
