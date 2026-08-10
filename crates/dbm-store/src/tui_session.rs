@@ -31,6 +31,18 @@ pub struct TuiTreeSnapshot {
     pub cursor: Option<TuiTreeSelection>,
     /// The node backing the active workspace (if any).
     pub active_workspace: Option<TuiTreeSelection>,
+    /// Expanded keys of the objects tree (database / database+schema /
+    /// database+schema+kind), preserved across restarts. Defaults to empty for
+    /// snapshots written before this field existed.
+    #[serde(default)]
+    pub expanded_objects: Vec<String>,
+    /// The connection the objects tree was bound to when saved (empty = tree
+    /// unbound). Used to re-apply `expanded_objects` only to the matching
+    /// connection after a restart.
+    #[serde(default)]
+    pub objects_bound_instance: String,
+    #[serde(default)]
+    pub objects_bound_connection: String,
 }
 
 /// Snapshot of the instance-workspace sub-pane state.

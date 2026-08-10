@@ -71,18 +71,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     };
 
     let mut state = AppState::default();
-    // Restore a previously persisted session (open tabs + focus) before the
-    // first frame so the shell comes up where the user left it.
-    if let Err(e) = crate::app::session::restore_session(&mut state) {
-        tracing::warn!("failed to restore TUI session: {e}");
-    }
     let mut reader = EventStream::new();
 
     // Populate the explorer tree on startup. Use `update_unchecked` so the
     // message is not dropped by the focus guard: at startup focus is still the
-    // header (or the restored session pane), so a guarded `Explorer(Load)`
-    // would be discarded and the tree would stay empty until the explorer
-    // gained focus.
+    // header, so a guarded `Explorer(Load)` would be discarded and the tree
+    // would stay empty until the explorer gained focus.
     let startup_load = crate::app::update::update_unchecked(
         AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
             crate::features::explorer::msg::ExplorerMessage::Instances(
@@ -96,11 +90,25 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     let mut startup_pending = std::collections::VecDeque::new();
     queue_result(&effect_runner, startup_load, &mut startup_pending);
     // Synchronously await the startup load's result so the explorer tree is
-    // populated *before* the first frame renders. Otherwise the tree shows
-    // empty on the first paint and only appears after a later event triggers a
-    // repaint (a start-of-session flicker).
+    // populated *before* restoring the session (and the first frame renders).
+    // Otherwise the tree shows empty on the first paint and the restored
+    // expansion/cursor state has no nodes to apply to.
     if let Some(action) = action_rx.recv().await {
         process_action_round(&effect_runner, &mut action_rx, action, &mut state);
+    }
+
+    // Restore a previously persisted session (open tabs + focus + tree
+    // expansion) after the explorer tree is populated, so the instance
+    // expansion and cursor from the last run can be reapplied. Restoring
+    // expansion may request lazy loads of the expanded instances' connections;
+    // submit those effects now so the subtrees are fetched right after startup.
+    match crate::app::session::restore_session(&mut state) {
+        Ok(effects) => {
+            for effect in effects {
+                effect_runner.submit(effect);
+            }
+        }
+        Err(e) => tracing::warn!("failed to restore TUI session: {e}"),
     }
 
     // Which SQL-tab splitter is being drag-resized, if any. This is transient

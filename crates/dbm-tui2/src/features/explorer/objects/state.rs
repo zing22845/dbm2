@@ -132,6 +132,12 @@ pub struct ObjectsState {
     pub bound_connection: String,
     /// Expansion keys (database / database+schema / database+group).
     pub expanded: HashSet<String>,
+    /// Expansion keys restored from a session snapshot, to be re-applied when
+    /// the tree is next bound to the matching connection. Empty when there is
+    /// nothing pending.
+    pub restore_expanded: Vec<String>,
+    /// The connection the restore keys belong to (empty = no pending restore).
+    pub restore_bound_connection: String,
 }
 
 impl ObjectsState {
@@ -266,14 +272,23 @@ impl ObjectsState {
     }
 
     /// Rebind the tree to a new instance/connection, reset navigation and
-    /// catalog.
+    /// catalog. If a session restore left expansion keys for this connection,
+    /// they are re-applied so the tree comes back expanded where the user left
+    /// it.
     pub fn rebind(&mut self, instance: String, connection: String) {
+        let matches_restore = self.restore_bound_connection == connection;
         self.bound_instance = instance;
         self.bound_connection = connection;
         self.cursor = 0;
         self.scroll = 0;
         self.h_scroll = 0;
         self.expanded.clear();
+        if matches_restore {
+            for key in std::mem::take(&mut self.restore_expanded) {
+                self.expanded.insert(key);
+            }
+            self.restore_bound_connection.clear();
+        }
         self.catalog = ObjectsCatalog::default();
         self.rows.clear();
     }
