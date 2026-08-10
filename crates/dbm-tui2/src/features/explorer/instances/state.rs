@@ -307,6 +307,8 @@ mod tests {
             env_label: None,
             created_at: "now".to_string(),
             updated_at: "now".to_string(),
+            test_succeeded_at: None,
+            test_failed_at: None,
         }
     }
 

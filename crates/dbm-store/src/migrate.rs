@@ -164,6 +164,11 @@ WHERE id = 1
 ON CONFLICT(key) DO NOTHING;
 "#;
 
+const MIGRATION_11: &str = r#"
+ALTER TABLE instance_connections ADD COLUMN test_succeeded_at TEXT;
+ALTER TABLE instance_connections ADD COLUMN test_failed_at TEXT;
+"#;
+
 pub fn migrate(conn: &Connection) -> StoreResult<()> {
     let current: i64 = conn
         .query_row(
@@ -221,6 +226,11 @@ pub fn migrate(conn: &Connection) -> StoreResult<()> {
     if current < 10 {
         conn.execute_batch(MIGRATION_10)?;
         conn.execute("INSERT INTO schema_migrations (version) VALUES (10)", [])?;
+    }
+
+    if current < 11 {
+        conn.execute_batch(MIGRATION_11)?;
+        conn.execute("INSERT INTO schema_migrations (version) VALUES (11)", [])?;
     }
 
     Ok(())

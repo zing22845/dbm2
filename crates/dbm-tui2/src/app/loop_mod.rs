@@ -926,16 +926,18 @@ fn iw_action_to_msg(action: crate::features::instance_workspace::effect::IwActio
             }
             CA::TestResult { ok, error } => {
                 // Match the original dbm's wording and color: "Test OK" in green
-                // on success, "Test failed: <reason>" in red on failure.
+                // on success, "Test failed: <reason>" in red on failure, with a
+                // timestamp prefix to limit waste on repeat tests.
+                let ts = crate::common::utils::time::utc_timestamp();
                 let (status, kind) = if ok {
                     (
-                        "Test OK".to_string(),
+                        format!("{ts} Test OK"),
                         crate::features::instance_workspace::connections::state::ConnectionStatusKind::Success,
                     )
                 } else {
                     (
                         format!(
-                            "Test failed: {}",
+                            "{ts} Test failed: {}",
                             error.unwrap_or_else(|| "could not connect".to_string())
                         ),
                         crate::features::instance_workspace::connections::state::ConnectionStatusKind::Failure,
@@ -944,6 +946,12 @@ fn iw_action_to_msg(action: crate::features::instance_workspace::effect::IwActio
                 IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::SetStatus {
                     status,
                     kind,
+                }))
+            }
+            CA::ListTestResult { ok, error } => {
+                IM::Connections(ConnectionsMsg::Message(ConnectionsMessage::TestComplete {
+                    ok,
+                    error,
                 }))
             }
         },

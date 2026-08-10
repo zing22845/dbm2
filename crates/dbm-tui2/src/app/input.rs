@@ -588,6 +588,18 @@ fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
                 // connection (no separate `e`/`Enter` binding).
                 KeyCode::Char('a') => ConnectionsMessage::BeginAdd,
                 KeyCode::Char('i') => ConnectionsMessage::BeginEdit,
+                // Test the selected connection (the list's `t`), matching dbm,
+                // at most once per second (cooldown set in the update).
+                KeyCode::Char('t') => {
+                    if state
+                        .connections
+                        .test_cooldown_until
+                        .is_some_and(|until| std::time::Instant::now() < until)
+                    {
+                        return None;
+                    }
+                    ConnectionsMessage::TestSelected
+                }
                 _ => return None,
             };
             Some(iw(IwMessage::Connections(ConnectionsMsg::Message(msg))))
@@ -620,8 +632,18 @@ fn iw_form_key(key: KeyEvent, state: &IwState) -> Option<AppMsg> {
             KeyCode::Down | KeyCode::Char('j') => ConnectionsMessage::FormField(form.field.next()),
             KeyCode::Enter => ConnectionsMessage::CommitForm,
             KeyCode::Esc => ConnectionsMessage::CancelForm,
-            // Test the form's current values against the database.
-            KeyCode::Char('t') | KeyCode::Char('T') => ConnectionsMessage::TestForm,
+            // Test the form's current values against the database, at most once
+            // per second (cooldown set in the update).
+            KeyCode::Char('t') | KeyCode::Char('T') => {
+                if state
+                    .connections
+                    .test_cooldown_until
+                    .is_some_and(|until| std::time::Instant::now() < until)
+                {
+                    return None;
+                }
+                ConnectionsMessage::TestForm
+            }
             // `dd` clears the current field and enters insert mode: the first
             // `d` arms a short window, a second `d` within it clears.
             KeyCode::Char('d') => {
@@ -1236,11 +1258,14 @@ mod tests {
                 env_label: None,
                 created_at: String::new(),
                 updated_at: String::new(),
+                test_succeeded_at: None,
+                test_failed_at: None,
             }],
             cursor: 0,
             form: None,
             status: None,
             status_kind: crate::features::instance_workspace::connections::state::ConnectionStatusKind::Idle,
+            test_cooldown_until: None,
         };
         let msg = key_to_msg(key(KeyCode::Char('d'), KeyModifiers::NONE), &state)
             .expect("d should open the delete-confirm modal");
@@ -1346,6 +1371,21 @@ mod tests {
         // Once the cooldown has passed -> `r` refreshes again.
         state.iw.overview.refresh_cooldown_until = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
         assert!(key_to_msg(key(KeyCode::Char('r'), KeyModifiers::NONE), &state).is_some());
+    }
+
+    #[test]
+    fn connections_t_honors_test_cooldown() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Connections);
+        state.iw.instance_name = "inst".to_string();
+        // Within the test cooldown -> `t` is ignored (no test).
+        state.iw.connections.test_cooldown_until =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
+        assert!(key_to_msg(key(KeyCode::Char('t'), KeyModifiers::NONE), &state).is_none());
+        // Once the cooldown has passed -> `t` dispatches the test.
+        state.iw.connections.test_cooldown_until =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        assert!(key_to_msg(key(KeyCode::Char('t'), KeyModifiers::NONE), &state).is_some());
     }
 
     #[test]

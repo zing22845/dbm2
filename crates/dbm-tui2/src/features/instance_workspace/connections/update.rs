@@ -41,17 +41,34 @@ pub fn update(
         }
         ConnectionsMessage::MoveUp => state.move_up(),
         ConnectionsMessage::MoveDown => state.move_down(),
-        ConnectionsMessage::BeginAdd => state.begin_add(),
+        ConnectionsMessage::BeginAdd => {
+            let changed = state.begin_add();
+            if changed {
+                // Opening the form clears any previous test status.
+                state.status = None;
+                state.status_kind = ConnectionStatusKind::Idle;
+            }
+            changed
+        }
         ConnectionsMessage::BeginEdit => {
-            if let Some(idx) = Some(state.cursor) {
+            let changed = if let Some(idx) = Some(state.cursor) {
                 state.begin_edit(idx)
             } else {
                 false
+            };
+            if changed {
+                state.status = None;
+                state.status_kind = ConnectionStatusKind::Idle;
             }
+            changed
         }
         ConnectionsMessage::CancelForm => {
             let changed = state.form.is_some();
             state.form = None;
+            if changed {
+                state.status = None;
+                state.status_kind = ConnectionStatusKind::Idle;
+            }
             changed
         }
         ConnectionsMessage::CommitForm => {
@@ -127,7 +144,35 @@ pub fn update(
             state.status_kind = kind;
             changed
         }
+        ConnectionsMessage::TestComplete { ok, error } => {
+            // Show the list-test result (with a timestamp) and reload so the
+            // row's test timestamps and whole-row color update. The status and
+            // the reloaded rows are both rendered by the `Loaded` repaint that
+            // follows, so do not mark this dirty here: repainting now would
+            // only change the footer status while the whole connection list
+            // stays identical, i.e. a ~66%-redundant redraw on every test.
+            let ts = crate::common::utils::time::utc_timestamp();
+            let (status, kind) = if ok {
+                (format!("{ts} Test OK"), ConnectionStatusKind::Success)
+            } else {
+                (
+                    format!(
+                        "{ts} Test failed: {}",
+                        error.unwrap_or_else(|| "could not connect".to_string())
+                    ),
+                    ConnectionStatusKind::Failure,
+                )
+            };
+            state.status = Some(status);
+            state.status_kind = kind;
+            let instance_name = state.instance_name.clone();
+            effects.push(ConnectionsEffect::LoadConnections { instance_name });
+            false
+        }
         ConnectionsMessage::TestForm => {
+            // Limit tests to once per second (shared with the list `t`).
+            state.test_cooldown_until =
+                Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
             // Test the form's current values against the database (no save).
             let Some(form) = state.form.as_ref() else {
                 return (state, intents, effects, false);
@@ -152,7 +197,30 @@ pub fn update(
                 instance_name,
                 connection,
             });
-            true
+            // Starting the async test does not change any rendered state: the
+            // result only lands when `TestResult`/`TestComplete` arrives. Marking
+            // this dirty would trigger a redundant repaint (a held `t` wastes a
+            // redraw every second with nothing visibly changed), so keep it false
+            // and let the completion message repaint with the actual result.
+            false
+        }
+        ConnectionsMessage::TestSelected => {
+            // Limit tests to once per second (shared with the form `t`).
+            state.test_cooldown_until =
+                Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
+            // Test the selected saved connection with its stored credentials.
+            let Some(connection_name) = state.selected_name() else {
+                return (state, intents, effects, false);
+            };
+            let instance_name = state.instance_name.clone();
+            effects.push(ConnectionsEffect::TestConnection {
+                instance_name,
+                connection_name,
+            });
+            // See `TestForm`: starting the async test renders nothing new, so a
+            // dirty repaint here would be pure waste on every cooldown expiry
+            // while `t` is held.
+            false
         }
         ConnectionsMessage::DeleteConnection {
             instance_name,
@@ -238,6 +306,8 @@ mod tests {
             env_label: None,
             created_at: "now".into(),
             updated_at: "now".into(),
+            test_succeeded_at: None,
+            test_failed_at: None,
         };
         let s = ConnectionsState::default();
         // First load with two connections repaints.
@@ -335,7 +405,9 @@ mod tests {
             ..Default::default()
         };
         let (s, _i, effects, dirty) = update(ConnectionsMessage::TestForm, std::mem::take(&mut s));
-        assert!(dirty);
+        // Starting the async test renders nothing new, so it must not mark the
+        // round dirty (a redundant repaint while `t` is held).
+        assert!(!dirty, "starting a form test must not trigger a redundant repaint");
         assert!(effects.iter().any(|e| matches!(
             e,
             ConnectionsEffect::TestFormConnection { instance_name, connection }
@@ -376,5 +448,124 @@ mod tests {
         assert!(!dirty);
         assert!(effects.is_empty(), "insert-mode Enter must not save the whole form");
         assert!(s.form.is_some());
+    }
+
+    #[test]
+    fn test_selected_emits_test_effect() {
+        let mut s = ConnectionsState {
+            instance_name: "inst".into(),
+            connections: vec![dbm_store::InstanceConnection {
+                id: "c1".into(),
+                instance_id: "inst".into(),
+                name: "main".into(),
+                username: "postgres".into(),
+                database: "postgres".into(),
+                has_password: false,
+                ssl_mode: "prefer".into(),
+                env_label: None,
+                created_at: "now".into(),
+                updated_at: "now".into(),
+                test_succeeded_at: None,
+                test_failed_at: None,
+            }],
+            ..Default::default()
+        };
+        let (_s, _i, effects, dirty) = update(
+            ConnectionsMessage::TestSelected,
+            std::mem::take(&mut s),
+        );
+        // Starting the async test renders nothing new, so it must not mark the
+        // round dirty (a redundant repaint while `t` is held).
+        assert!(!dirty, "starting a list test must not trigger a redundant repaint");
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            ConnectionsEffect::TestConnection { instance_name, connection_name }
+                if instance_name == "inst" && connection_name == "main"
+        )));
+    }
+
+    #[test]
+    fn test_complete_sets_status_and_reloads() {
+        let mut s = ConnectionsState {
+            instance_name: "inst".into(),
+            ..Default::default()
+        };
+        let (s, _i, effects, dirty) = update(
+            ConnectionsMessage::TestComplete {
+                ok: true,
+                error: None,
+            },
+            std::mem::take(&mut s),
+        );
+        // The status and reloaded rows are rendered together by the `Loaded`
+        // repaint, so `TestComplete` itself must not mark the round dirty (that
+        // would repaint the whole unchanged list -> ~66% waste on each test).
+        assert!(!dirty, "TestComplete must not trigger a redundant list repaint");
+        let status = s.status.as_deref().expect("status set");
+        assert!(status.ends_with("Test OK"), "{status}");
+        assert_eq!(s.status_kind, ConnectionStatusKind::Success);
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            ConnectionsEffect::LoadConnections { instance_name } if instance_name == "inst"
+        )));
+    }
+
+    #[test]
+    fn test_form_and_selected_set_cooldown() {
+        let mut s = ConnectionsState {
+            instance_name: "inst".into(),
+            form: Some(ConnectionForm {
+                name: "main".into(),
+                ..Default::default()
+            }),
+            connections: vec![dbm_store::InstanceConnection {
+                id: "c1".into(),
+                instance_id: "inst".into(),
+                name: "main".into(),
+                username: "postgres".into(),
+                database: "postgres".into(),
+                has_password: false,
+                ssl_mode: "prefer".into(),
+                env_label: None,
+                created_at: "now".into(),
+                updated_at: "now".into(),
+                test_succeeded_at: None,
+                test_failed_at: None,
+            }],
+            ..Default::default()
+        };
+        // The form test arms the 1s cooldown.
+        let (mut s, _i, _e, _) = update(ConnectionsMessage::TestForm, std::mem::take(&mut s));
+        assert!(s.test_cooldown_until.is_some());
+        // The list test also arms it.
+        let (s, _i, _e, _) = update(ConnectionsMessage::TestSelected, std::mem::take(&mut s));
+        assert!(s.test_cooldown_until.is_some());
+    }
+
+    #[test]
+    fn open_and_close_form_clear_test_status() {
+        // Opening the form clears any prior test status.
+        let mut s = ConnectionsState {
+            status: Some("[t] Test OK".into()),
+            status_kind: ConnectionStatusKind::Success,
+            ..Default::default()
+        };
+        let (mut s, _i, _e, _) = update(ConnectionsMessage::BeginAdd, std::mem::take(&mut s));
+        assert!(s.form.is_some());
+        assert!(s.status.is_none(), "opening the form clears test status");
+        assert_eq!(s.status_kind, ConnectionStatusKind::Idle);
+
+        // Cancelling the form also clears it.
+        let (mut s, _i, _e, _) = update(
+            ConnectionsMessage::SetStatus {
+                status: "[t] Test OK".into(),
+                kind: ConnectionStatusKind::Success,
+            },
+            std::mem::take(&mut s),
+        );
+        assert!(s.status.is_some());
+        let (s, _i, _e, _) = update(ConnectionsMessage::CancelForm, std::mem::take(&mut s));
+        assert!(s.form.is_none());
+        assert!(s.status.is_none(), "closing the form clears test status");
     }
 }

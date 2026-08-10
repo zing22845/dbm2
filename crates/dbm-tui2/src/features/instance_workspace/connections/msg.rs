@@ -34,8 +34,13 @@ pub enum ConnectionsMessage {
         status: String,
         kind: super::state::ConnectionStatusKind,
     },
+    /// A list test completed: show the result and reload so the row's test
+    /// timestamps and color update.
+    TestComplete { ok: bool, error: Option<String> },
     /// Test the form's current values against the database (the form's `t`).
     TestForm,
+    /// Test the selected saved connection (the list's `t`).
+    TestSelected,
     /// Move the form field cursor.
     FormField(FormField),
     /// Enter insert mode on the current form field (`i`), snapshotting its value

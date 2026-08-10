@@ -20,6 +20,10 @@ pub struct InstanceConnection {
     pub env_label: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Timestamp of the most recent successful connection test, if any.
+    pub test_succeeded_at: Option<String>,
+    /// Timestamp of the most recent failed connection test, if any.
+    pub test_failed_at: Option<String>,
 }
 
 impl InstanceConnection {
@@ -67,7 +71,7 @@ impl super::Store {
         let instance = self.get_managed_instance_by_name(instance_name)?;
         let mut stmt = self.sqlite().prepare(
             "SELECT id, instance_id, name, username, database_name, password_enc IS NOT NULL,
-                    ssl_mode, env_label, created_at, updated_at
+                    ssl_mode, env_label, created_at, updated_at, test_succeeded_at, test_failed_at
              FROM instance_connections
              WHERE instance_id = ?1
              ORDER BY name ASC",
@@ -93,7 +97,7 @@ impl super::Store {
         self.sqlite()
             .query_row(
                 "SELECT id, instance_id, name, username, database_name, password_enc IS NOT NULL,
-                        ssl_mode, env_label, created_at, updated_at
+                        ssl_mode, env_label, created_at, updated_at, test_succeeded_at, test_failed_at
                  FROM instance_connections
                  WHERE instance_id = ?1 AND name = ?2 COLLATE NOCASE",
                 params![instance.id, connection_name],
@@ -116,7 +120,7 @@ impl super::Store {
         self.sqlite()
             .query_row(
                 "SELECT id, instance_id, name, username, database_name, password_enc IS NOT NULL,
-                        ssl_mode, env_label, created_at, updated_at
+                        ssl_mode, env_label, created_at, updated_at, test_succeeded_at, test_failed_at
                  FROM instance_connections
                  WHERE instance_id = ?1 AND id = ?2",
                 params![instance.id, connection_id],
@@ -224,6 +228,31 @@ impl super::Store {
     {
         let input = self.new_instance_connection_from_saved(instance_name, connection_name)?;
         self.test_instance_connection(instance_name, &input, ping_fn)
+    }
+
+    /// Record the most recent connection test outcome: set `test_succeeded_at`
+    /// on success or `test_failed_at` on failure.
+    pub fn record_connection_test_result(
+        &self,
+        instance_name: &str,
+        connection_name: &str,
+        ok: bool,
+    ) -> StoreResult<()> {
+        let instance = self.get_managed_instance_by_name(instance_name)?;
+        let column = if ok {
+            "test_succeeded_at"
+        } else {
+            "test_failed_at"
+        };
+        self.sqlite().execute(
+            &format!(
+                "UPDATE instance_connections
+                 SET {column} = datetime('now')
+                 WHERE instance_id = ?1 AND name = ?2 COLLATE NOCASE"
+            ),
+            params![instance.id, connection_name],
+        )?;
+        Ok(())
     }
 
     pub fn add_instance_connection<F, Fut>(
@@ -609,6 +638,8 @@ fn map_instance_connection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Inst
         env_label: row.get(7)?,
         created_at: row.get(8)?,
         updated_at: row.get(9)?,
+        test_succeeded_at: row.get(10)?,
+        test_failed_at: row.get(11)?,
     })
 }
 
@@ -726,5 +757,35 @@ mod tests {
             .query_row("SELECT action FROM audit_log", [], |row| row.get(0))
             .unwrap();
         assert_eq!(action, "instance_connections.delete");
+    }
+
+    #[test]
+    fn record_test_result_sets_timestamps() {
+        let store = super::super::Store::open_in_memory().unwrap();
+        store
+            .sqlite()
+            .execute_batch(
+                "INSERT INTO managed_instances (id, fingerprint, name, engine, host, port, registered_at)
+                 VALUES ('inst_t', 'fp', 'pg', 'postgres', '127.0.0.1', 5432, datetime('now'));
+                 INSERT INTO instance_connections (
+                    id, instance_id, name, username, database_name, ssl_mode, updated_at
+                 ) VALUES ('ic_t', 'inst_t', 'main', 'u', 'postgres', 'prefer', '2000-01-01 00:00:00');",
+            )
+            .unwrap();
+
+        // A successful test records test_succeeded_at, not test_failed_at, and
+        // must not touch updated_at (a test is not an edit).
+        store.record_connection_test_result("pg", "main", true).unwrap();
+        let conns = store.list_instance_connections("pg").unwrap();
+        assert!(conns[0].test_succeeded_at.is_some());
+        assert!(conns[0].test_failed_at.is_none());
+        assert_eq!(conns[0].updated_at, "2000-01-01 00:00:00", "test must not update updated_at");
+
+        // A later failed test records test_failed_at, still not updated_at.
+        store.record_connection_test_result("pg", "main", false).unwrap();
+        let conns = store.list_instance_connections("pg").unwrap();
+        assert!(conns[0].test_failed_at.is_some());
+        assert!(conns[0].test_succeeded_at.is_some());
+        assert_eq!(conns[0].updated_at, "2000-01-01 00:00:00", "test must not update updated_at");
     }
 }

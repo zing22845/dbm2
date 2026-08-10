@@ -98,6 +98,9 @@ pub struct ConnectionsState {
     pub status: Option<String>,
     /// How `status` is colored (success green, failure red), matching dbm.
     pub status_kind: ConnectionStatusKind,
+    /// Cooldown deadline for `t` (connection test) — shared by the form and the
+    /// list, limiting tests to at most once per second to avoid waste.
+    pub test_cooldown_until: Option<std::time::Instant>,
 }
 
 impl ConnectionsState {

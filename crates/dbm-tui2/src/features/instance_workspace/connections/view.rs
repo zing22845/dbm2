@@ -41,6 +41,8 @@ pub fn render(
             Constraint::Length(8),
             Constraint::Length(10),
             Constraint::Length(19),
+            Constraint::Length(19), // Test Succeeded
+            Constraint::Length(19), // Test Failed
         ];
         let header = Row::new(vec![
             Cell::from("Name"),
@@ -48,6 +50,8 @@ pub fn render(
             Cell::from("SSL"),
             Cell::from("Password"),
             Cell::from("Updated"),
+            Cell::from("Test OK"),
+            Cell::from("Test Fail"),
         ])
         .style(Style::default().add_modifier(Modifier::BOLD));
 
@@ -57,23 +61,43 @@ pub fn render(
             .enumerate()
             .map(|(i, conn)| {
                 let selected = i == state.cursor;
+                // The whole row is green when the most recent test succeeded and
+                // red when it failed (the later timestamp wins); rows never
+                // tested use the normal fg.
+                let color = match (conn.test_succeeded_at.as_deref(), conn.test_failed_at.as_deref())
+                {
+                    (Some(s), Some(f)) => {
+                        if s > f {
+                            ratatui::style::Color::Green
+                        } else {
+                            ratatui::style::Color::Red
+                        }
+                    }
+                    (Some(_), None) => ratatui::style::Color::Green,
+                    (None, Some(_)) => ratatui::style::Color::Red,
+                    (None, None) => p.fg,
+                };
                 let style = if selected {
                     Style::default()
-                        .fg(p.selection)
+                        .fg(color)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(p.fg)
+                    Style::default().fg(color)
                 };
                 let name_body = conn.name.clone();
                 let password = if conn.has_password { "set" } else { "empty" };
                 let target =
                     instance.map_or_else(|| "?".to_string(), |inst| conn.display_target(inst));
+                let ok_at = conn.test_succeeded_at.clone().unwrap_or_else(|| "—".into());
+                let fail_at = conn.test_failed_at.clone().unwrap_or_else(|| "—".into());
                 Row::new(vec![
                     Cell::from(name_body),
                     Cell::from(target),
                     Cell::from(conn.ssl_mode.clone()),
                     Cell::from(password),
                     Cell::from(conn.updated_at.clone()),
+                    Cell::from(ok_at),
+                    Cell::from(fail_at),
                 ])
                 .style(style)
             })

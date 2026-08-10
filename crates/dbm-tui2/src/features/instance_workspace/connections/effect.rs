@@ -21,6 +21,9 @@ pub enum ConnectionsAction {
     /// A form test completed: `ok` reports whether the connection reached the
     /// database, `error` carries the reason when it did not.
     TestResult { ok: bool, error: Option<String> },
+    /// A list test completed: same as `TestResult`, but the list must reload so
+    /// the row's test timestamps and whole-row color update.
+    ListTestResult { ok: bool, error: Option<String> },
 }
 
 /// Effects emitted by the connections panel.
@@ -47,6 +50,9 @@ pub enum ConnectionsEffect {
         instance_name: String,
         connection: NewInstanceConnection,
     },
+    /// Test a saved connection from the list (the list's `t` action), recording
+    /// the outcome timestamp.
+    TestConnection { instance_name: String, connection_name: String },
 }
 
 impl Effect for ConnectionsEffect {
@@ -156,6 +162,49 @@ impl Effect for ConnectionsEffect {
                             error: Some(e.to_string()),
                         }],
                         Err(e) => vec![ConnectionsAction::TestResult {
+                            ok: false,
+                            error: Some(e.to_string()),
+                        }],
+                    }
+                }
+                ConnectionsEffect::TestConnection { instance_name, connection_name } => {
+                    // Test a saved connection with its stored credentials and
+                    // record the outcome timestamp on the row.
+                    let ping = services.connection_test_ping();
+                    let result = tokio::task::spawn_blocking(
+                        move || -> dbm_store::StoreResult<dbm_store::ConnectionPrecheck> {
+                            let store = store.lock().expect("iw store lock");
+                            let precheck = store.test_saved_instance_connection(
+                                &instance_name,
+                                &connection_name,
+                                ping,
+                            )?;
+                            store.record_connection_test_result(
+                                &instance_name,
+                                &connection_name,
+                                precheck.ok,
+                            )?;
+                            Ok(precheck)
+                        },
+                    )
+                    .await;
+                    match result {
+                        Ok(Ok(precheck)) => {
+                            let error = precheck
+                                .issues
+                                .iter()
+                                .find(|i| i.level == dbm_store::PrecheckLevel::Error)
+                                .map(|i| i.message.clone());
+                            vec![ConnectionsAction::ListTestResult {
+                                ok: error.is_none(),
+                                error,
+                            }]
+                        }
+                        Ok(Err(e)) => vec![ConnectionsAction::ListTestResult {
+                            ok: false,
+                            error: Some(e.to_string()),
+                        }],
+                        Err(e) => vec![ConnectionsAction::ListTestResult {
                             ok: false,
                             error: Some(e.to_string()),
                         }],
