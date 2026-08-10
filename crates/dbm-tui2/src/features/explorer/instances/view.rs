@@ -65,7 +65,8 @@ pub fn render(
         let focused = row == state.cursor;
         let style = if focused {
             Style::default()
-                .fg(p.selection)
+                .fg(p.fg)
+                .bg(p.selection_bg)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(p.fg)
@@ -84,6 +85,7 @@ pub fn render(
                 let cstyle = if conn_focused {
                     Style::default()
                         .fg(p.accent)
+                        .bg(p.selection_bg)
                         .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(p.fg_dim)

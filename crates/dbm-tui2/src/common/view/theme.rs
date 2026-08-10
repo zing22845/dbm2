@@ -33,8 +33,13 @@ pub struct Palette {
     pub border: Color,
     /// Border color of the focused/active panel.
     pub border_active: Color,
-    /// Highlighted list selection.
+    /// Highlighted list selection (foreground emphasis).
     pub selection: Color,
+    /// The background color used to highlight the cursor-selected row in lists
+    /// and trees. Kept separate from `selection` so every pane can render the
+    /// selected row with a unified, visible background (mirroring the original
+    /// dbm's connections selection) instead of relying on foreground alone.
+    pub selection_bg: Color,
     /// Success / positive status.
     pub success: Color,
     /// Warning status.
@@ -77,6 +82,7 @@ impl Palette {
             border: p.muted,
             border_active: p.accent,
             selection: p.selection,
+            selection_bg: p.selection,
             success: p.success,
             warning: p.warning,
             error: p.error,
@@ -117,11 +123,18 @@ impl Theme {
     /// pass the same name for both (the mode flag still flips, but both modes
     /// share the palette).
     pub fn from_ratatui(name: &'static str, dark_name: ThemeName, light_name: ThemeName) -> Self {
+        let mut dark = Palette::from_ratatui(&dark_name.palette());
+        let mut light = Palette::from_ratatui(&light_name.palette());
+        // A unified, visible row-selection background per mode: dark gets a
+        // mid-blue-grey a step up from the background, light mirrors the
+        // original dbm's connections selection (light blue-grey `228,234,245`).
+        dark.selection_bg = Color::Rgb(0x3b, 0x42, 0x52);
+        light.selection_bg = Color::Rgb(0xe4, 0xea, 0xf5);
         Theme {
             name,
             is_dark: true,
-            dark: Palette::from_ratatui(&dark_name.palette()),
-            light: Palette::from_ratatui(&light_name.palette()),
+            dark,
+            light,
         }
     }
 }
@@ -140,6 +153,7 @@ pub fn dracula() -> Theme {
             border: Color::Rgb(0x44, 0x47, 0x5a),
             border_active: Color::Rgb(0xbd, 0x93, 0xf9),
             selection: Color::Rgb(0x44, 0x47, 0x5a),
+            selection_bg: Color::Rgb(0x3d, 0x40, 0x52),
             success: Color::Rgb(0x50, 0xfa, 0x7b),   // green
             warning: Color::Rgb(0xf1, 0xfa, 0x8c),   // yellow
             error: Color::Rgb(0xff, 0x55, 0x55),     // red
@@ -155,6 +169,7 @@ pub fn dracula() -> Theme {
             border: Color::Rgb(0xcf, 0xc9, 0xc2),
             border_active: Color::Rgb(0xbd, 0x93, 0xf9),
             selection: Color::Rgb(0xcf, 0xc9, 0xc2),
+            selection_bg: Color::Rgb(0xe4, 0xea, 0xf5),
             success: Color::Rgb(0x1a, 0xb0, 0x4c),
             warning: Color::Rgb(0xa5, 0x8a, 0x00),
             error: Color::Rgb(0xd3, 0x2f, 0x2f),
@@ -178,6 +193,7 @@ pub fn nord() -> Theme {
             border: Color::Rgb(0x4c, 0x56, 0x6a),
             border_active: Color::Rgb(0x88, 0xc0, 0xd0),
             selection: Color::Rgb(0x43, 0x4c, 0x5e),
+            selection_bg: Color::Rgb(0x3b, 0x42, 0x52),
             success: Color::Rgb(0xa3, 0xbe, 0x8c),   // nord14
             warning: Color::Rgb(0xeb, 0xcb, 0x8b),   // nord13
             error: Color::Rgb(0xbf, 0x61, 0x6a),     // nord11
@@ -193,6 +209,7 @@ pub fn nord() -> Theme {
             border: Color::Rgb(0xd8, 0xde, 0xe9),
             border_active: Color::Rgb(0x88, 0xc0, 0xd0),
             selection: Color::Rgb(0xd8, 0xde, 0xe9),
+            selection_bg: Color::Rgb(0xd8, 0xde, 0xe9),
             success: Color::Rgb(0x5e, 0x81, 0xac),
             warning: Color::Rgb(0xdb, 0xa0, 0x0d),
             error: Color::Rgb(0xbf, 0x61, 0x6a),

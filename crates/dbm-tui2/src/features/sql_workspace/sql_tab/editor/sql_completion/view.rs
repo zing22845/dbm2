@@ -97,7 +97,7 @@ pub fn draw_completion_popup_at(
         .skip(start)
         .take(visible)
         .enumerate()
-        .map(|(row, item)| completion_line(item, start + row == state.selected, p.selection, p.muted))
+        .map(|(row, item)| completion_line(item, start + row == state.selected, p.fg, p.selection_bg, p.muted))
         .collect();
     frame.render_widget(Paragraph::new(lines), inner);
     popup
@@ -106,7 +106,8 @@ pub fn draw_completion_popup_at(
 fn completion_line(
     item: &CompletionItem,
     selected: bool,
-    selection: ratatui::style::Color,
+    selection_fg: ratatui::style::Color,
+    selection_bg: ratatui::style::Color,
     muted: ratatui::style::Color,
 ) -> Line<'static> {
     let tag = match item.kind {
@@ -118,7 +119,8 @@ fn completion_line(
     };
     let base = if selected {
         Style::default()
-            .fg(selection)
+            .fg(selection_fg)
+            .bg(selection_bg)
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default()

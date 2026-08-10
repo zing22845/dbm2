@@ -205,7 +205,8 @@ fn render_table(
                     // other rows share the default foreground.
                     let style = if selected {
                         Style::default()
-                            .fg(p.selection)
+                            .fg(p.fg)
+                            .bg(p.selection_bg)
                             .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(p.fg)

@@ -78,8 +78,11 @@ pub fn render(
                     (None, None) => p.fg,
                 };
                 let style = if selected {
+                    // A unified row-selection background (mirroring the original
+                    // dbm's connections selection) over the test-status fg.
                     Style::default()
                         .fg(color)
+                        .bg(p.selection_bg)
                         .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(color)

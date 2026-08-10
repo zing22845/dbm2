@@ -131,12 +131,12 @@ pub fn render(
     }
 }
 
-/// Style for the focused/selected target row (a subtle selection background).
+/// Style for the focused/selected target row (the unified selection background).
 fn row_style(theme: &Theme) -> Style {
     let p = theme.palette();
     Style::default()
         .fg(p.fg)
-        .bg(p.surface)
+        .bg(p.selection_bg)
         .add_modifier(Modifier::BOLD)
 }
 
@@ -150,7 +150,7 @@ fn cell_style(theme: &Theme, row_sel: bool, cell_focused: bool, editing: bool) -
     } else if cell_focused {
         row_style(theme)
     } else if row_sel {
-        Style::default().fg(p.selection)
+        Style::default().fg(p.fg).bg(p.selection_bg)
     } else {
         Style::default().fg(p.fg)
     }

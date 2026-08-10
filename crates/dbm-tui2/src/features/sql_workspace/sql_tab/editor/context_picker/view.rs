@@ -54,7 +54,8 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
     );
 
     let selected_style = Style::default()
-        .fg(p.selection)
+        .fg(p.fg)
+        .bg(p.selection_bg)
         .add_modifier(Modifier::BOLD);
 
     let db_block = Block::default()

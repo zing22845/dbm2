@@ -74,19 +74,29 @@ pub fn render(
             let checked = result_selection_glyph(item.already_registered, state.selected.contains(&idx));
             let style = if row_focused {
                 Style::default()
-                    .fg(p.selection)
+                    .fg(p.fg)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(p.fg)
             };
-            lines.push(Line::from(vec![
-                Span::styled(format!("[{checked}]"), Style::default().fg(p.accent)),
-                Span::styled(format!("  {}:{}", item.host, item.port), style),
-                Span::styled(
-                    format!("  ({})", item.confidence.as_str()),
-                    Style::default().fg(p.muted),
-                ),
-            ]));
+            // A focused row gets the unified row-selection background across the
+            // whole line (mirroring the original dbm's connections selection).
+            let line_style = if row_focused {
+                Style::default().bg(p.selection_bg)
+            } else {
+                Style::default()
+            };
+            lines.push(
+                Line::from(vec![
+                    Span::styled(format!("[{checked}]"), Style::default().fg(p.accent)),
+                    Span::styled(format!("  {}:{}", item.host, item.port), style),
+                    Span::styled(
+                        format!("  ({})", item.confidence.as_str()),
+                        Style::default().fg(p.muted),
+                    ),
+                ])
+                .style(line_style),
+            );
         }
     }
     frame.render_widget(Paragraph::new(lines), body);
