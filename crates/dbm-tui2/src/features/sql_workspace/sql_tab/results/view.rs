@@ -200,14 +200,18 @@ fn render_table(
                 .iter()
                 .enumerate()
                 .map(|(i, v)| {
-                    let selected = row_idx == state.row && i == state.col;
-                    // The selected cell is highlighted; the rest of the row and
-                    // other rows share the default foreground.
-                    let style = if selected {
+                    let in_selected_row = row_idx == state.row;
+                    let selected_cell = in_selected_row && i == state.col;
+                    // Every field in the selected row shares the unified
+                    // selection background; the active cell gets a stronger
+                    // `selection_cell_bg` so it stands out from its row-mates.
+                    let style = if selected_cell {
                         Style::default()
                             .fg(p.fg)
-                            .bg(p.selection_bg)
+                            .bg(p.selection_cell_bg)
                             .add_modifier(Modifier::BOLD)
+                    } else if in_selected_row {
+                        Style::default().fg(p.fg).bg(p.selection_bg)
                     } else {
                         Style::default().fg(p.fg)
                     };

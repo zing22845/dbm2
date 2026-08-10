@@ -40,6 +40,10 @@ pub struct Palette {
     /// selected row with a unified, visible background (mirroring the original
     /// dbm's connections selection) instead of relying on foreground alone.
     pub selection_bg: Color,
+    /// A stronger background for the active cell inside an already-selected
+    /// row (e.g. the cursor cell of a SQL results grid), so the focused field
+    /// stands out from its row-mates which share `selection_bg`.
+    pub selection_cell_bg: Color,
     /// Success / positive status.
     pub success: Color,
     /// Warning status.
@@ -83,6 +87,7 @@ impl Palette {
             border_active: p.accent,
             selection: p.selection,
             selection_bg: p.selection,
+            selection_cell_bg: p.selection,
             success: p.success,
             warning: p.warning,
             error: p.error,
@@ -130,6 +135,10 @@ impl Theme {
         // original dbm's connections selection (light blue-grey `228,234,245`).
         dark.selection_bg = Color::Rgb(0x3b, 0x42, 0x52);
         light.selection_bg = Color::Rgb(0xe4, 0xea, 0xf5);
+        // The active cell inside the selected row is one step stronger so it
+        // stands out from its row-mates.
+        dark.selection_cell_bg = Color::Rgb(0x4c, 0x56, 0x6a);
+        light.selection_cell_bg = Color::Rgb(0xc5, 0xcf, 0xe6);
         Theme {
             name,
             is_dark: true,
@@ -154,6 +163,7 @@ pub fn dracula() -> Theme {
             border_active: Color::Rgb(0xbd, 0x93, 0xf9),
             selection: Color::Rgb(0x44, 0x47, 0x5a),
             selection_bg: Color::Rgb(0x3d, 0x40, 0x52),
+            selection_cell_bg: Color::Rgb(0x55, 0x5a, 0x73),
             success: Color::Rgb(0x50, 0xfa, 0x7b),   // green
             warning: Color::Rgb(0xf1, 0xfa, 0x8c),   // yellow
             error: Color::Rgb(0xff, 0x55, 0x55),     // red
@@ -170,6 +180,7 @@ pub fn dracula() -> Theme {
             border_active: Color::Rgb(0xbd, 0x93, 0xf9),
             selection: Color::Rgb(0xcf, 0xc9, 0xc2),
             selection_bg: Color::Rgb(0xe4, 0xea, 0xf5),
+            selection_cell_bg: Color::Rgb(0xc5, 0xcf, 0xe6),
             success: Color::Rgb(0x1a, 0xb0, 0x4c),
             warning: Color::Rgb(0xa5, 0x8a, 0x00),
             error: Color::Rgb(0xd3, 0x2f, 0x2f),
@@ -194,6 +205,7 @@ pub fn nord() -> Theme {
             border_active: Color::Rgb(0x88, 0xc0, 0xd0),
             selection: Color::Rgb(0x43, 0x4c, 0x5e),
             selection_bg: Color::Rgb(0x3b, 0x42, 0x52),
+            selection_cell_bg: Color::Rgb(0x4c, 0x56, 0x6a),
             success: Color::Rgb(0xa3, 0xbe, 0x8c),   // nord14
             warning: Color::Rgb(0xeb, 0xcb, 0x8b),   // nord13
             error: Color::Rgb(0xbf, 0x61, 0x6a),     // nord11
@@ -210,6 +222,7 @@ pub fn nord() -> Theme {
             border_active: Color::Rgb(0x88, 0xc0, 0xd0),
             selection: Color::Rgb(0xd8, 0xde, 0xe9),
             selection_bg: Color::Rgb(0xd8, 0xde, 0xe9),
+            selection_cell_bg: Color::Rgb(0xc2, 0xcd, 0xde),
             success: Color::Rgb(0x5e, 0x81, 0xac),
             warning: Color::Rgb(0xdb, 0xa0, 0x0d),
             error: Color::Rgb(0xbf, 0x61, 0x6a),

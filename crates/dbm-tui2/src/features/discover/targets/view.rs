@@ -148,7 +148,12 @@ fn cell_style(theme: &Theme, row_sel: bool, cell_focused: bool, editing: bool) -
         // Inline edit: a distinct background so the live buffer stands out.
         Style::default().fg(p.accent).bg(p.surface).add_modifier(Modifier::BOLD)
     } else if cell_focused {
-        row_style(theme)
+        // The active cell gets a stronger background so it stands out from
+        // the selected row's other fields (which share selection_bg).
+        Style::default()
+            .fg(p.fg)
+            .bg(p.selection_cell_bg)
+            .add_modifier(Modifier::BOLD)
     } else if row_sel {
         Style::default().fg(p.fg).bg(p.selection_bg)
     } else {
