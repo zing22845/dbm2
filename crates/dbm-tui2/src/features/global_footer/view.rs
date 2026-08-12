@@ -1,8 +1,9 @@
 //! Global footer feature rendering.
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
-use ratatui::text::{Line, Span};
+use ratatui::text::Span;
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::common::utils::text_width;
@@ -13,11 +14,11 @@ use super::state::FooterState;
 
 /// Estimated number of terminal rows the footer occupies for `cols` columns.
 ///
-/// The footer is one line of hints plus (when present) one wrapped status line,
-/// so the hints line always reserves one row and the status may span several.
-/// This is the same CJK-aware estimate the old TUI used to size its footer.
+/// The footer is the hints line (wrapped to `cols`) plus (when present) one
+/// wrapped status line. Both use the same CJK-aware estimate the old TUI used
+/// to size its footer.
 pub fn footer_height(state: &FooterState, cols: u16) -> u16 {
-    let hints_rows = 1u16;
+    let hints_rows = text_width::wrapped_line_count(&global_footer_text(""), cols);
     let status_rows = if state.status.is_empty() {
         0
     } else {
@@ -26,19 +27,39 @@ pub fn footer_height(state: &FooterState, cols: u16) -> u16 {
     hints_rows + status_rows
 }
 
-/// Render the global footer bar: shortcut hints on the first line, followed by
-/// the optional status line (muted). The hints come from
-/// [`global_footer_text`] (the shared single source of truth); the status is
-/// the only dynamically changing content.
+/// Render the global footer bar: shortcut hints, followed by the optional
+/// status line (muted). The hints come from [`global_footer_text`] (the shared
+/// single source of truth); the status is the only dynamically changing
+/// content. Both wrap to the terminal width.
 pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &FooterState) {
-    // The hints line is static; the status line (if any) is muted via the
-    // current palette's muted slot.
-    let mut lines: Vec<Line<'_>> = vec![Line::from(global_footer_text(""))];
+    let hints_h = text_width::wrapped_line_count(&global_footer_text(""), area.width);
+    let (hints_area, status_area) = if state.status.is_empty() {
+        (area, Rect::default())
+    } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(hints_h),
+                Constraint::Min(0),
+            ])
+            .split(area);
+        (chunks[0], chunks[1])
+    };
+
+    // The hints line wraps to the terminal width instead of clipping.
+    frame.render_widget(
+        Paragraph::new(global_footer_text("")).wrap(Wrap { trim: false }),
+        hints_area,
+    );
+    // The status line (if any) is muted via the current palette's muted slot.
     if !state.status.is_empty() {
-        lines.push(Line::from(Span::styled(
-            state.status.clone(),
-            Style::default().fg(theme.palette().muted),
-        )));
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                state.status.clone(),
+                Style::default().fg(theme.palette().muted),
+            ))
+            .wrap(Wrap { trim: false }),
+            status_area,
+        );
     }
-    frame.render_widget(ratatui::text::Text::from(lines), area);
 }

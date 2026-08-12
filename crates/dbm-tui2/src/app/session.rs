@@ -43,13 +43,13 @@ fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
         .tabs
         .iter()
         .enumerate()
-        .map(|(idx, tab)| {
+        .map(|(_idx, tab)| {
             let session = &tab.session;
             let sql = crate::common::editor::editor_text(&tab.editor.editor);
             TuiTabSnapshot {
                 instance: session.instance.clone().unwrap_or_default(),
                 connection: session.connection.clone().unwrap_or_default(),
-                sequence: idx as u32,
+                sequence: session.sequence as u32,
                 sql,
                 split_ratio: tab.split_ratio,
                 history_pane_width: tab.history_pane_width,
@@ -116,11 +116,18 @@ fn tree_snapshot(explorer: &crate::features::explorer::state::ExplorerState) -> 
         })
     });
 
+    // Sort for a deterministic order (the underlying storage is a HashSet, whose
+    // iteration order is not stable) so the serialized session and tests are
+    // reproducible.
+    let mut expanded_objects: Vec<String> =
+        explorer.objects.expanded.iter().cloned().collect();
+    expanded_objects.sort();
+
     TuiTreeSnapshot {
         expanded_instances,
         cursor,
         active_workspace: None,
-        expanded_objects: explorer.objects.expanded.iter().cloned().collect(),
+        expanded_objects,
         objects_bound_instance: explorer.objects.bound_instance.clone(),
         objects_bound_connection: explorer.objects.bound_connection.clone(),
     }
@@ -151,6 +158,7 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
         .map(|t| crate::features::sql_workspace::sql_tab::state::SqlTab {
             session: crate::features::sql_workspace::sql_tab::session::TabSession {
                 id: t.sequence as usize,
+                sequence: t.sequence as usize,
                 instance: non_empty(t.instance.clone()),
                 connection: non_empty(t.connection.clone()),
                 connection_id: None,

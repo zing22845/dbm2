@@ -116,7 +116,6 @@ pub fn update(
                     connection,
                 }),
             }
-            intents.push(ConnectionsIntent::ConnectionsChanged);
             true
         }
         ConnectionsMessage::Saved => {
@@ -125,7 +124,13 @@ pub fn update(
             // list and the store).
             state.form = None;
             let instance_name = state.instance_name.clone();
-            effects.push(ConnectionsEffect::LoadConnections { instance_name });
+            effects.push(ConnectionsEffect::LoadConnections {
+                instance_name: instance_name.clone(),
+            });
+            // Notify the shell so the explorer tree for this instance refreshes
+            // and shows the change immediately (matching the original dbm's
+            // `load_instance_connections` on save).
+            intents.push(ConnectionsIntent::ConnectionsChanged { instance_name });
             state.status = None;
             state.status_kind = ConnectionStatusKind::Idle;
             true
@@ -228,10 +233,10 @@ pub fn update(
         } => {
             if !instance_name.is_empty() && !connection_name.is_empty() {
                 effects.push(ConnectionsEffect::DeleteConnection {
-                    instance_name,
+                    instance_name: instance_name.clone(),
                     connection_name,
                 });
-                intents.push(ConnectionsIntent::ConnectionsChanged);
+                intents.push(ConnectionsIntent::ConnectionsChanged { instance_name });
             }
             false
         }
@@ -339,13 +344,20 @@ mod tests {
             }),
             ..Default::default()
         };
-        let (s, _i, effects, dirty) = update(ConnectionsMessage::Saved, std::mem::take(&mut s));
+        let (s, i, effects, dirty) = update(ConnectionsMessage::Saved, std::mem::take(&mut s));
         // The form closes and the list reloads so the new row appears.
         assert!(dirty);
         assert!(s.form.is_none());
         assert!(effects
             .iter()
             .any(|e| matches!(e, ConnectionsEffect::LoadConnections { instance_name } if instance_name == "inst")));
+        // The shell is notified so the explorer tree for this instance refreshes.
+        assert!(i.iter().any(
+            |it| matches!(
+                it,
+                ConnectionsIntent::ConnectionsChanged { instance_name } if instance_name == "inst"
+            )
+        ));
     }
 
     #[test]

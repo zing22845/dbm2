@@ -52,13 +52,15 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
         || matches!(state.focus, Pane::InstanceWorkspace(_));
     header_view::render(frame, &state.theme, chunks[0], &state.header, header_focused);
     explorer_view::render(frame, &state.theme, body[0], &state.explorer, explorer_focused);
-    // The main workspace region shows the instance workspace when an instance
-    // is open, otherwise the SQL workspace. A future tab mechanism will make
-    // this explicit.
-    if state.iw.instance_name.is_empty() {
-        sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused);
-    } else {
+    // The workspace region shows whichever workspace was explicitly opened
+    // (`instance_name` non-empty means the instance workspace is open), matching
+    // the original dbm where the display is driven by an `active_workspace`
+    // state rather than by keyboard focus. Switching focus between panes must
+    // NOT change which workspace is shown.
+    if !state.iw.instance_name.is_empty() {
         iw_view::render(frame, &state.theme, workspace, &state.iw, workspace_focused);
+    } else {
+        sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused);
     }
     // The bottom row holds the global footer on the left and the performance
     // readout on the right.

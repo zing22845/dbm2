@@ -25,8 +25,16 @@ pub enum InstancesMessage {
     /// (dirty=false) when already at a scroll boundary.
     ScrollHorizontal { delta: i16, term_width: u16 },
     /// Activate the current row (instance -> instance workspace, connection ->
-    /// SQL workspace).
+    /// SQL workspace, focusing an existing tab when present).
     Select,
+    /// On a connection row, always open a fresh SQL editor (mirrors the
+    /// original dbm's `n` key, which forces a new tab regardless of any
+    /// already-open tabs for that connection).
+    NewConnectionTab,
+    /// Reload a specific instance's connections from the store (used after a
+    /// connection is added/edited/deleted inside the instance workspace, so the
+    /// tree reflects the change immediately).
+    RefreshConnections { instance_idx: usize },
 }
 
 /// Feature message envelope (central-router compatible).

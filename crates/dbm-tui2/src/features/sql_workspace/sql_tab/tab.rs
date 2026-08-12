@@ -1,7 +1,8 @@
-//! SQL tab bar: session-derived titles, themed rendering and click rects.
+//! SQL tab bar: per-connection tab titles, themed rendering and click rects.
 //!
-//! Each tab's title is derived from its session identity (connection / database
-//! name) with a stable `SQL {id}` fallback. Clickable rects are returned so the
+//! Each tab's title uses the original dbm `<SQL {sequence}>` format where
+//! `sequence` is a per-connection counter starting at 1. Only tabs belonging
+//! to the active connection are rendered. Clickable rects are returned so the
 //! shell can route mouse clicks to a tab.
 
 use ratatui::layout::Rect;
@@ -14,39 +15,45 @@ use crate::common::view::theme::Theme;
 
 use super::session::TabSession;
 
-/// A rendered tab: its clickable rect and the underlying tab index.
+/// A rendered tab: its clickable rect and the visible-tab offset (0-based
+/// within the active connection's tabs). This offset maps directly to
+/// `SqlTabMessage::Tab(idx)` / `SqlTabMessage::CloseTab(idx)`.
 #[derive(Debug, Clone)]
 pub struct TabRect {
     pub rect: Rect,
     pub tab_index: usize,
 }
 
-/// Derive a short title for a tab from its session identity.
-pub fn tab_title(session: &TabSession, tab_id: usize) -> String {
-    match (&session.connection, &session.database) {
-        (Some(conn), Some(db)) => format!("{conn}/{db}"),
-        (Some(conn), None) => conn.clone(),
-        (None, Some(db)) => db.clone(),
-        (None, None) => format!("SQL {tab_id}"),
-    }
+/// Derive a short tab title from the per-connection sequence, formatted in the
+/// original dbm `<SQL {sequence}>` style.
+pub fn tab_title(session: &TabSession) -> String {
+    format!("<SQL {}>", session.sequence)
 }
 
-/// Render the tab bar into `area`, returning clickable rects for each tab.
+/// Render the tab bar into `area`, showing only the tabs whose global indices
+/// are in `visible_indices`. Returns clickable rects for each rendered tab.
+///
+/// `active_global` is the global index of the currently active tab, used to
+/// highlight it in the tab bar.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
     tabs: &[TabSession],
-    active_tab: Option<usize>,
+    visible_indices: &[usize],
+    active_global: Option<usize>,
 ) -> Vec<TabRect> {
     let p = theme.palette();
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut rects: Vec<TabRect> = Vec::new();
     let mut x = area.x;
 
-    for (global_idx, session) in tabs.iter().enumerate() {
-        let active = active_tab == Some(global_idx);
-        let label = format!(" {} ", tab_title(session, global_idx));
+    for (visible_idx, &global_idx) in visible_indices.iter().enumerate() {
+        let Some(session) = tabs.get(global_idx) else {
+            continue;
+        };
+        let active = active_global == Some(global_idx);
+        let label = format!(" {} ", tab_title(session));
         let width = label.chars().count() as u16;
         rects.push(TabRect {
             rect: Rect {
@@ -55,7 +62,7 @@ pub fn render(
                 width,
                 height: area.height,
             },
-            tab_index: global_idx,
+            tab_index: visible_idx,
         });
         x = x.saturating_add(width);
         let style = if active {
@@ -77,26 +84,17 @@ pub fn render(
 mod tests {
     use super::*;
 
-    fn session(instance: &str, conn: &str, db: Option<&str>) -> TabSession {
+    fn session_with_sequence(seq: usize) -> TabSession {
         TabSession {
-            id: 0,
-            connection_id: Some("c1".into()),
-            instance: Some(instance.into()),
-            connection: Some(conn.into()),
-            database: db.map(Into::into),
-            schema: None,
+            sequence: seq,
+            ..TabSession::default()
         }
     }
 
     #[test]
-    fn title_combines_connection_and_database() {
-        let s = session("local", "app-db", Some("mydb"));
-        assert_eq!(tab_title(&s, 0), "app-db/mydb");
-    }
-
-    #[test]
-    fn title_falls_back_to_connection_then_sql_id() {
-        assert_eq!(tab_title(&session("local", "app-db", None), 2), "app-db");
-        assert_eq!(tab_title(&TabSession::default(), 7), "SQL 7");
+    fn title_uses_per_connection_sequence() {
+        assert_eq!(tab_title(&session_with_sequence(1)), "<SQL 1>");
+        assert_eq!(tab_title(&session_with_sequence(5)), "<SQL 5>");
+        assert_eq!(tab_title(&session_with_sequence(42)), "<SQL 42>");
     }
 }

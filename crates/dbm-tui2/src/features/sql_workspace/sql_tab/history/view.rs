@@ -8,7 +8,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::common::components::search::pane_search_title_line;
-use crate::common::view::hints::history_list_footer_text;
+use crate::common::view::hints::{draw_footer, footer_height, history_list_footer_text};
 use crate::common::view::pane_scrollbar::{draw_vertical_pane_scrollbar, pane_scroll_layout};
 use crate::common::view::theme::Theme;
 
@@ -24,12 +24,16 @@ pub fn render(
     instance: &str,
     connection: &str,
 ) {
-    // Reserve one row for the footer hints below the list.
+    // Reserve enough rows for the wrapped footer hints below the list, so a
+    // narrow terminal does not clip them.
+    let search_active = state.search.text_input_active();
+    let hint = history_list_footer_text(search_active, state.search.has_filter(), true);
+    let footer_h = footer_height(&hint, area.width).min(area.height.saturating_sub(1));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1), // history list
-            Constraint::Length(1), // footer hints
+            Constraint::Length(footer_h), // footer hints
         ])
         .split(area);
     let list_area = chunks[0];
@@ -117,13 +121,8 @@ pub fn render(
         }
     }
 
-    // History footer hints from the shared builder.
-    let search_active = state.search.text_input_active();
-    let hint = history_list_footer_text(search_active, state.search.has_filter(), true);
-    frame.render_widget(
-        Paragraph::new(Line::from(hint)).style(Style::default().fg(p.muted)),
-        chunks[1],
-    );
+    // History footer hints from the shared builder (wrapped to the pane width).
+    draw_footer(frame, theme, chunks[1], &hint);
 }
 
 impl HistoryState {

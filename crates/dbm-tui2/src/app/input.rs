@@ -499,7 +499,10 @@ fn instances_key(key: KeyEvent, term_width: u16) -> Option<AppMsg> {
     let msg = match key.code {
         KeyCode::Up | KeyCode::Char('k') => InstancesMessage::MoveUp,
         KeyCode::Down | KeyCode::Char('j') => InstancesMessage::MoveDown,
+        // Enter on a connection focuses its already-open tab (or opens one).
         KeyCode::Enter => InstancesMessage::Select,
+        // `n` on a connection always opens a fresh SQL editor.
+        KeyCode::Char('n') => InstancesMessage::NewConnectionTab,
         KeyCode::Char('l') => InstancesMessage::Expand,
         KeyCode::Char('h') => InstancesMessage::Collapse,
         KeyCode::Right => InstancesMessage::ScrollHorizontal { delta: 1, term_width },
@@ -903,24 +906,24 @@ fn history_key(
 /// Tab-bar navigation keys: switch / open / close tabs.
 fn sql_tab_navigation_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     use crate::features::sql_workspace::sql_tab::msg::SqlTabMessage;
-    let count = state.sql_tab.tabs.len();
+    let count = state.sql_tab.visible_tab_count();
     if count == 0 {
         return None;
     }
-    let active = state.sql_tab.active_tab;
+    let visible_active = state.sql_tab.global_to_visible().unwrap_or(0);
     let tab_msg = match key.code {
         KeyCode::Tab if key.modifiers.contains(KeyModifiers::CONTROL)
             && !key.modifiers.contains(KeyModifiers::SHIFT) =>
         {
-            SqlTabMessage::Tab((active + 1) % count)
+            SqlTabMessage::Tab((visible_active + 1) % count)
         }
         KeyCode::BackTab if key.modifiers.contains(KeyModifiers::CONTROL)
             || key.modifiers.contains(KeyModifiers::SHIFT) =>
         {
-            SqlTabMessage::Tab((active + count - 1) % count)
+            SqlTabMessage::Tab((visible_active + count - 1) % count)
         }
         KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            SqlTabMessage::CloseTab(active)
+            SqlTabMessage::CloseTab(visible_active)
         }
         KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             SqlTabMessage::OpenTab
@@ -973,13 +976,14 @@ mod tests {
 
     /// A `SqlState` with `count` tabs open. The default state opens no tabs, so
     /// we open `count` explicitly (for `count == 0`, an empty tab state).
+    /// All tabs share the same connection so they are all visible.
     fn state_with_tabs(count: usize) -> SqlState {
         let mut tab_state = SqlTabState::default();
-        for i in 0..count {
+        for _ in 0..count {
             tab_state.open_connection_tab(
                 "local".into(),
-                format!("conn-{i}"),
-                format!("c{i}"),
+                "main-db".into(),
+                "c1".into(),
                 None,
                 None,
             );
@@ -990,10 +994,17 @@ mod tests {
     }
 
     /// An `AppState` with one open SQL tab (the default has none, since tabs
-    /// are only created when a connection is selected).
+    /// are only created when a connection is selected). The tab is bound to a
+    /// connection so it appears in the tab bar.
     fn app_state_with_tab() -> crate::app::state::AppState {
         let mut state = crate::app::state::AppState::default();
-        state.sql.sql_tab.open_tab();
+        state.sql.sql_tab.open_connection_tab(
+            "local".into(),
+            "main-db".into(),
+            "c1".into(),
+            None,
+            None,
+        );
         state
     }
 
@@ -1117,12 +1128,15 @@ mod tests {
         let mut state = crate::app::state::AppState::default();
         state.focus = Pane::Explorer(ExplorerPane::Instances);
 
-        // `l` expands, `h` collapses, arrows scroll (original dbm bindings).
+        // `l` expands, `h` collapses, arrows scroll, Enter selects, `n` opens a
+        // fresh editor (original dbm bindings).
         for (code, expect) in [
             (KeyCode::Char('l'), InstancesMessage::Expand),
             (KeyCode::Char('h'), InstancesMessage::Collapse),
             (KeyCode::Right, InstancesMessage::ScrollHorizontal { delta: 1, term_width: 0 }),
             (KeyCode::Left, InstancesMessage::ScrollHorizontal { delta: -1, term_width: 0 }),
+            (KeyCode::Enter, InstancesMessage::Select),
+            (KeyCode::Char('n'), InstancesMessage::NewConnectionTab),
         ] {
             let msg = key_to_msg(key(code, KeyModifiers::NONE), &state).expect("explorer key");
             let got = match msg {
@@ -1134,7 +1148,9 @@ mod tests {
             let match_kind = match (&got, &expect) {
                 (InstancesMessage::Expand, InstancesMessage::Expand)
                 | (InstancesMessage::Collapse, InstancesMessage::Collapse)
-                | (InstancesMessage::ScrollHorizontal { .. }, InstancesMessage::ScrollHorizontal { .. }) => {
+                | (InstancesMessage::ScrollHorizontal { .. }, InstancesMessage::ScrollHorizontal { .. })
+                | (InstancesMessage::Select, InstancesMessage::Select)
+                | (InstancesMessage::NewConnectionTab, InstancesMessage::NewConnectionTab) => {
                     true
                 }
                 _ => false,

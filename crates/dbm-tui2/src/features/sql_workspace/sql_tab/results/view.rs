@@ -11,6 +11,7 @@ use crate::common::components::search::pane_search_title_line;
 use crate::common::view::action_bar::{
     RESULTS_ACTION_BAR_HEIGHT, ResultsToolbarModel, action_bar_width, draw_action_bar,
 };
+use crate::common::view::hints::{draw_footer, footer_height};
 use crate::common::view::theme::Theme;
 
 use super::state::ResultsState;
@@ -31,6 +32,11 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState
 
     let total_rows = result.total_rows;
     let row_count = state.row_count();
+    // The footer hint is sized to its wrapped height so a narrow terminal does
+    // not clip it; the table absorbs the remaining space.
+    let search_active = state.search.text_input_active();
+    let hint = crate::common::view::hints::results_pane_footer_text(search_active, true, "");
+    let footer_h = footer_height(&hint, area.width).min(area.height.saturating_sub(4));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -38,7 +44,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState
             Constraint::Length(RESULTS_ACTION_BAR_HEIGHT),     // action bar
             Constraint::Min(0),                                // table
             Constraint::Length(8),                             // detail
-            Constraint::Length(1),                             // footer hints
+            Constraint::Length(footer_h),                      // footer hints
         ])
         .split(area);
 
@@ -71,13 +77,9 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState
     detail_view::render(frame, theme, chunks[3], &state.detail, &body, title, true);
 
     // Results footer hints from the shared builder (the detail sub-pane is
-    // always shown in this layout, so it is treated as open).
-    let search_active = state.search.text_input_active();
-    let hint = crate::common::view::hints::results_pane_footer_text(search_active, true, "");
-    frame.render_widget(
-        Paragraph::new(Line::from(hint)).style(Style::default().fg(p.muted)),
-        chunks[4],
-    );
+    // always shown in this layout, so it is treated as open), wrapped to the
+    // pane width.
+    draw_footer(frame, theme, chunks[4], &hint);
 }
 
 /// Derive the toolbar enable/disable model from the current result/edit state.

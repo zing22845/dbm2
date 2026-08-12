@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::common::view::hints::{draw_pane_footer, instances_pane_footer_text};
+use crate::common::view::hints::{draw_pane_footer, footer_height, instances_pane_footer_text};
 use crate::common::view::pane_scrollbar::{draw_horizontal_pane_scrollbar, pane_scroll_layout};
 use crate::common::view::theme::Theme;
 
@@ -14,7 +14,7 @@ use super::state::InstancesState;
 
 /// Render the instances connection tree. `region_focused` controls the border
 /// color so the shell focus is visible (active border vs. muted border). A pane
-/// footer hint line occupies the bottom row.
+/// footer hint occupies the bottom rows, wrapping to the pane width.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
@@ -25,16 +25,23 @@ pub fn render(
     let p = theme.palette();
 
     // The block is drawn over `area`; its inner area is split into a body (the
-    // tree, with a horizontal scrollbar) and a footer hint line at the bottom,
-    // both *inside* the pane's border — matching the original dbm.
+    // tree, with a horizontal scrollbar) and a footer hint area at the bottom,
+    // both *inside* the pane's border — matching the original dbm. The footer
+    // is sized to its wrapped height so a narrow terminal does not clip it.
+    let instance_row = state
+        .cursor_selection()
+        .map(|(_, conn)| conn.is_none())
+        .unwrap_or(false);
+    let hint = instances_pane_footer_text(instance_row);
+    let footer_h = footer_height(&hint, area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
     let block = Block::default()
         .title(" instances ")
         .borders(Borders::ALL)
         .border_style(p.active_border(region_focused));
     frame.render_widget(&block, area);
     let inner = block.inner(area);
-    let (body, footer_area) = if inner.height > 1 {
-        let h = inner.height.saturating_sub(1);
+    let (body, footer_area) = if inner.height > footer_h {
+        let h = inner.height.saturating_sub(footer_h);
         (
             Rect {
                 x: inner.x,
@@ -46,7 +53,7 @@ pub fn render(
                 x: inner.x,
                 y: inner.y.saturating_add(h),
                 width: inner.width,
-                height: 1,
+                height: footer_h,
             },
         )
     } else {
@@ -140,14 +147,5 @@ pub fn render(
 
     // Pane footer (inside the border): hints differ for an instance row vs a
     // connection row.
-    let instance_row = state
-        .cursor_selection()
-        .map(|(_, conn)| conn.is_none())
-        .unwrap_or(false);
-    draw_pane_footer(
-        frame,
-        theme,
-        footer_area,
-        &instances_pane_footer_text(instance_row),
-    );
+    draw_pane_footer(frame, theme, footer_area, &hint);
 }

@@ -28,9 +28,13 @@ pub fn update(
     let mut effects = Vec::new();
     let mut dirty = false;
     match msg {
-        SqlTabMessage::Tab(idx) => {
+        SqlTabMessage::Tab(visible_idx) => {
+            // Map the visible-tab offset to a global index within the active
+            // connection's tabs, mirroring the original dbm's `switch_tab_index`.
             let before = state.active_tab;
-            state.active_tab = idx.min(state.tabs.len().saturating_sub(1));
+            if let Some(global) = state.visible_to_global(visible_idx) {
+                state.active_tab = global;
+            }
             dirty = before != state.active_tab;
         }
         SqlTabMessage::Focus(focus) => {
@@ -44,9 +48,12 @@ pub fn update(
             state.open_tab();
             dirty = true;
         }
-        SqlTabMessage::CloseTab(idx) => {
-            state.close_tab(idx);
-            dirty = true;
+        SqlTabMessage::CloseTab(visible_idx) => {
+            // Map the visible offset to a global index before closing.
+            if let Some(global) = state.visible_to_global(visible_idx) {
+                state.close_tab(global);
+                dirty = true;
+            }
         }
         SqlTabMessage::OpenConnectionTab {
             instance,
@@ -81,6 +88,46 @@ pub fn update(
                     schema: schema_name,
                 },
             });
+            dirty = true;
+        }
+        SqlTabMessage::FocusConnectionTab {
+            instance,
+            connection,
+            connection_id,
+            database,
+            schema,
+        } => {
+            // Focus an existing tab for this connection if one exists, else
+            // open a new one. Only a freshly created tab needs its completion
+            // catalog seeded.
+            let created = state.focus_or_open_connection_tab(
+                instance.clone(),
+                connection.clone(),
+                connection_id,
+                database.clone(),
+                schema.clone(),
+            );
+            if created {
+                let tab_id = state
+                    .tabs
+                    .last()
+                    .map(|t| t.session.id)
+                    .unwrap_or_default();
+                let schema_name = schema.clone().unwrap_or_else(|| "public".to_string());
+                effects.push(SqlTabEffect::Editor {
+                    tab_id,
+                    effect: editor::effect::EditorEffect::LoadCompletionCatalog {
+                        instance,
+                        connection,
+                        database,
+                        schema: schema_name,
+                    },
+                });
+            }
+            dirty = true;
+        }
+        SqlTabMessage::SetActiveConnection { instance, connection } => {
+            state.activate_connection(instance, connection);
             dirty = true;
         }
         SqlTabMessage::ApplyContext { tab_id, database, schema } => {

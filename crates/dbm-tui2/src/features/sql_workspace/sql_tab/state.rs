@@ -1,5 +1,11 @@
 //! `sql_tab` feature state: a collection of tabs, each with its own session
 //! and the three child module states (`editor`, `results`, `history`).
+//!
+//! Tabs are stored in a flat `Vec`, but only tabs belonging to the *active
+//! connection* are shown (via `visible_tab_indices`). Each connection counts
+//! its own tabs independently — `sequence` starts at 1 per connection.
+
+use std::collections::HashMap;
 
 use super::session::TabSession;
 use super::editor::state::EditorState;
@@ -70,23 +76,133 @@ impl SqlTab {
 /// starts with `tabs: Vec::new()` and shows an empty-state hint until then).
 #[derive(Debug, Clone, Default)]
 pub struct SqlTabState {
-    /// All open tabs. Tab indices are targets for routed messages; the stable
-    /// identity of a tab lives in its `session.id`.
+    /// All open tabs across all connections. Tab indices are targets for routed
+    /// messages; the stable identity of a tab lives in its `session.id`.
     pub tabs: Vec<SqlTab>,
-    /// Index into `tabs` of the currently active tab.
+    /// Index into `tabs` of the currently active tab (global index).
     pub active_tab: usize,
     /// Monotonic counter for allocating stable session ids to new tabs.
     next_tab_id: usize,
+    /// Per-connection monotonically increasing sequence counter. Keys are
+    /// `(instance, connection)` display-name pairs. Sequences start at 1.
+    connection_next_sequence: HashMap<(String, String), usize>,
+    /// Per-connection last-active tab global index, so switching connections
+    /// restores the previously active tab for that connection.
+    connection_last_tab: HashMap<(String, String), usize>,
+    /// Which connection's tabs are currently visible in the tab bar.
+    pub active_connection: Option<(String, String)>,
 }
 
 impl SqlTabState {
-    /// Open a fresh tab (new session + empty child states) and make it active.
+    /// Derive the `(instance, connection)` key from session identity fields.
+    fn connection_key(&self, session: &TabSession) -> (String, String) {
+        let instance = session.instance.clone().unwrap_or_default();
+        let connection = session
+            .connection
+            .clone()
+            .or_else(|| session.connection_id.clone())
+            .unwrap_or_default();
+        (instance, connection)
+    }
+
+    /// Increment and return the next per-connection sequence number, starting at 1.
+    fn next_sequence(&mut self, key: &(String, String)) -> usize {
+        let count = self.connection_next_sequence.get(key).copied().unwrap_or(0);
+        let next = count + 1;
+        self.connection_next_sequence.insert(key.clone(), next);
+        next
+    }
+
+    /// Returns global indices of tabs whose session matches `active_connection`.
+    pub fn visible_tab_indices(&self) -> Vec<usize> {
+        let Some(ref conn) = self.active_connection else {
+            return Vec::new();
+        };
+        self.tabs
+            .iter()
+            .enumerate()
+            .filter(|(_i, tab)| self.connection_key(&tab.session) == *conn)
+            .map(|(i, _tab)| i)
+            .collect()
+    }
+
+    /// Number of tabs visible for the active connection.
+    pub fn visible_tab_count(&self) -> usize {
+        let Some(ref conn) = self.active_connection else {
+            return 0;
+        };
+        self.tabs.iter().filter(|tab| self.connection_key(&tab.session) == *conn).count()
+    }
+
+    /// Map a visible-tab offset (0-based, within the active connection's tabs)
+    /// to a global `tabs` index. Returns `None` when the offset is out of range
+    /// or no active connection is set.
+    pub fn visible_to_global(&self, visible_idx: usize) -> Option<usize> {
+        let indices = self.visible_tab_indices();
+        indices.get(visible_idx).copied()
+    }
+
+    /// Map the current `active_tab` (global) to its visible offset. Returns
+    /// `None` when the active tab doesn't belong to the active connection.
+    pub fn global_to_visible(&self) -> Option<usize> {
+        let indices = self.visible_tab_indices();
+        indices.iter().position(|&i| i == self.active_tab)
+    }
+
+    /// Activate a connection: show only that connection's tabs, and restore the
+    /// last-active tab for it (or the first tab, falling back to 0).
+    pub fn activate_connection(&mut self, instance: String, connection: String) {
+        let key = (instance, connection);
+        if self.active_connection == Some(key.clone()) {
+            return; // already active, no change
+        }
+        self.active_connection = Some(key.clone());
+        // Restore the last-active tab for this connection, or pick the first
+        // visible tab.
+        if let Some(&global_idx) = self.connection_last_tab.get(&key) {
+            // Verify the stored tab still exists and belongs to this connection.
+            if global_idx < self.tabs.len()
+                && self.connection_key(&self.tabs[global_idx].session) == key
+            {
+                self.active_tab = global_idx;
+                return;
+            }
+        }
+        // Fall back to the first visible tab.
+        if let Some(&first) = self.visible_tab_indices().first() {
+            self.active_tab = first;
+        } else {
+            self.active_tab = 0;
+        }
+    }
+
+    /// Update `connection_last_tab` with the current active tab before
+    /// deactivating a connection.
+    fn save_connection_last_tab(&mut self) {
+        if let Some(ref key) = self.active_connection {
+            if self.active_tab < self.tabs.len() {
+                self.connection_last_tab.insert(key.clone(), self.active_tab);
+            }
+        }
+    }
+
+    /// Open a fresh tab for the currently active connection and make it active.
+    /// If no connection is active, this is a no-op (a tab without a connection
+    /// would be invisible and unreachable).
     pub fn open_tab(&mut self) {
+        let Some(key) = self.active_connection.clone() else {
+            return;
+        };
         let id = self.next_tab_id;
         self.next_tab_id += 1;
+        let sequence = self.next_sequence(&key);
+        let (instance, connection) = (Some(key.0), Some(key.1));
         self.tabs.push(SqlTab {
             session: TabSession {
                 id,
+                sequence,
+                instance,
+                connection,
                 ..TabSession::default()
             },
             focus: SqlFocus::default(),
@@ -99,8 +215,62 @@ impl SqlTabState {
         self.active_tab = self.tabs.len() - 1;
     }
 
+    /// Focus an existing tab bound to this connection if one exists (restoring
+    /// the last-active tab for it, else the last one), otherwise open a new one.
+    /// Mirrors the original dbm's `confirm_workspace_connection(force_new=false)`:
+    /// Enter on a connection row switches to that connection's already-open tab
+    /// instead of always opening a fresh editor. Returns `true` when a new tab
+    /// was created (so the caller can seed its completion catalog), `false`
+    /// when an existing tab was focused.
+    pub fn focus_or_open_connection_tab(
+        &mut self,
+        instance: String,
+        connection: String,
+        connection_id: String,
+        database: Option<String>,
+        schema: Option<String>,
+    ) -> bool {
+        let key = (instance.clone(), connection.clone());
+        // Save the previous connection's last tab before switching.
+        if self.active_connection.as_ref() != Some(&key) {
+            self.save_connection_last_tab();
+        }
+        // 1) Restore the last-active tab for this connection if it still exists.
+        if let Some(&global_idx) = self.connection_last_tab.get(&key) {
+            if global_idx < self.tabs.len()
+                && self.connection_key(&self.tabs[global_idx].session) == key
+            {
+                self.active_connection = Some(key);
+                self.active_tab = global_idx;
+                return false;
+            }
+        }
+        // 2) Otherwise focus the last existing tab for this connection.
+        let indices = self.visible_tab_indices_for(&key);
+        if let Some(&global_idx) = indices.last() {
+            self.active_connection = Some(key.clone());
+            self.active_tab = global_idx;
+            self.connection_last_tab.insert(key, global_idx);
+            return false;
+        }
+        // 3) No existing tab: open a new one.
+        self.open_connection_tab(instance, connection, connection_id, database, schema);
+        true
+    }
+
+    /// Global indices of tabs whose session matches `key`.
+    fn visible_tab_indices_for(&self, key: &(String, String)) -> Vec<usize> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .filter(|(_i, tab)| self.connection_key(&tab.session) == *key)
+            .map(|(i, _tab)| i)
+            .collect()
+    }
+
     /// Open a new tab bound to a connection, carrying its display identity so
-    /// history keys and query execution use real names.
+    /// history keys and query execution use real names. Sets this connection as
+    /// the active one.
     pub fn open_connection_tab(
         &mut self,
         instance: String,
@@ -109,11 +279,19 @@ impl SqlTabState {
         database: Option<String>,
         schema: Option<String>,
     ) {
+        let key = (instance.clone(), connection.clone());
+        // Save the previous connection's last tab before switching.
+        if self.active_connection.as_ref() != Some(&key) {
+            self.save_connection_last_tab();
+        }
+        self.active_connection = Some(key.clone());
         let id = self.next_tab_id;
         self.next_tab_id += 1;
+        let sequence = self.next_sequence(&key);
         self.tabs.push(SqlTab {
             session: TabSession {
                 id,
+                sequence,
                 connection_id: Some(connection_id),
                 instance: Some(instance),
                 connection: Some(connection),
@@ -130,18 +308,44 @@ impl SqlTabState {
         self.active_tab = self.tabs.len() - 1;
     }
 
-    /// Close the tab at `idx`. The active index is repaired; closing the last
-    /// remaining tab leaves an empty tab list.
+    /// Close the tab at global `idx`. The active index is repaired; closing the
+    /// last remaining tab for the active connection leaves no visible tabs.
     pub fn close_tab(&mut self, idx: usize) {
         if idx >= self.tabs.len() {
             return;
         }
+        // Capture the connection key before removing the tab so we can clean up
+        // the per-connection sequence counter when the last tab for that key is
+        // closed.
+        let key = self.connection_key(&self.tabs[idx].session);
         self.tabs.remove(idx);
+
+        // Reset the sequence counter if no remaining tabs belong to this
+        // connection, so that re-opening starts from 1 again.
+        if !self.tabs.iter().any(|tab| self.connection_key(&tab.session) == key) {
+            self.connection_next_sequence.remove(&key);
+            self.connection_last_tab.remove(&key);
+        }
+
         if self.tabs.is_empty() {
             self.active_tab = 0;
-        } else {
-            self.active_tab = self.active_tab.min(self.tabs.len() - 1);
+            return;
         }
+        // If we removed the active tab, try to pick another visible tab.
+        let visible = self.visible_tab_indices();
+        if visible.is_empty() {
+            self.active_tab = 0;
+            return;
+        }
+        // Find a visible tab closest to the removed index.
+        let target = if let Some(pos) = visible.iter().position(|&v| v >= idx) {
+            visible[pos]
+        } else {
+            *visible.last().unwrap()
+        };
+        self.active_tab = target;
+        // Persist the new active tab for this connection.
+        self.save_connection_last_tab();
     }
 
     /// Return the index of the tab whose stable `session.id` equals `tab_id`,
@@ -159,6 +363,7 @@ mod tests {
     fn starts_with_no_tabs() {
         let state = SqlTabState::default();
         assert!(state.tabs.is_empty(), "no tab should be auto-created");
+        assert!(state.active_connection.is_none());
     }
 
     #[test]
@@ -177,25 +382,170 @@ mod tests {
         assert_eq!(session.connection_id.as_deref(), Some("conn-42"));
         assert_eq!(session.database.as_deref(), Some("mydb"));
         assert_eq!(session.schema.as_deref(), Some("public"));
+        assert_eq!(session.sequence, 1); // first tab for this connection
+    }
+
+    #[test]
+    fn per_connection_sequence_increments() {
+        let mut state = SqlTabState::default();
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        assert_eq!(state.tabs.last().unwrap().session.sequence, 1);
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        assert_eq!(state.tabs.last().unwrap().session.sequence, 2);
+
+        // A different connection starts its own sequence at 1.
+        state.open_connection_tab("local".into(), "c2".into(), "id2".into(), None, None);
+        assert_eq!(state.tabs.last().unwrap().session.sequence, 1);
+    }
+
+    #[test]
+    fn visible_tab_indices_filters_by_active_connection() {
+        let mut state = SqlTabState::default();
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        state.open_connection_tab("local".into(), "c2".into(), "id2".into(), None, None);
+
+        // After the last open_connection_tab, active_connection is c2.
+        assert_eq!(state.visible_tab_indices(), vec![2]);
+        assert_eq!(state.visible_tab_count(), 1);
+
+        // Switch to c1.
+        state.activate_connection("local".into(), "c1".into());
+        assert_eq!(state.visible_tab_indices(), vec![0, 1]);
+        assert_eq!(state.visible_tab_count(), 2);
+    }
+
+    #[test]
+    fn activate_connection_restores_last_tab() {
+        let mut state = SqlTabState::default();
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        // Second tab is active (index 1).
+        assert_eq!(state.active_tab, 1);
+
+        // Switch to c2.
+        state.open_connection_tab("local".into(), "c2".into(), "id2".into(), None, None);
+
+        // Switch back to c1 — should restore tab 1.
+        state.activate_connection("local".into(), "c1".into());
+        assert_eq!(state.active_tab, 1);
+        assert_eq!(state.visible_tab_indices(), vec![0, 1]);
+    }
+
+    #[test]
+    fn visible_to_global_maps_correctly() {
+        let mut state = SqlTabState::default();
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        state.open_connection_tab("local".into(), "c2".into(), "id2".into(), None, None);
+
+        // Active connection is c2 (one visible tab at global idx 2).
+        assert_eq!(state.visible_to_global(0), Some(2));
+        assert_eq!(state.visible_to_global(1), None);
+
+        // Switch to c1 (two visible tabs at global idx 0, 1).
+        state.activate_connection("local".into(), "c1".into());
+        assert_eq!(state.visible_to_global(0), Some(0));
+        assert_eq!(state.visible_to_global(1), Some(1));
+        assert_eq!(state.visible_to_global(2), None);
+    }
+
+    #[test]
+    fn global_to_visible_maps_correctly() {
+        let mut state = SqlTabState::default();
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+
+        assert_eq!(state.global_to_visible(), Some(1)); // second tab active
+
+        // Open a tab for another connection.
+        state.open_connection_tab("local".into(), "c2".into(), "id2".into(), None, None);
+        // Active connection is now c2; the c2 tab is visible at offset 0.
+        assert_eq!(state.global_to_visible(), Some(0));
     }
 
     #[test]
     fn index_of_finds_tab_by_session_id() {
         let mut state = SqlTabState::default();
-        state.open_tab();
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
         let id = state.tabs[state.active_tab].session.id;
         assert_eq!(state.index_of(id), Some(state.active_tab));
         assert_eq!(state.index_of(999_999), None);
     }
-}
 
-impl SqlTabState {
-    /// Stable session id of the active tab (test helper).
-    #[allow(dead_code)]
-    fn active_tab_id(&self) -> usize {
-        self.tabs
-            .get(self.active_tab)
-            .map(|t| t.session.id)
-            .unwrap_or(0)
+    #[test]
+    fn sequence_resets_when_all_tabs_closed() {
+        let mut state = SqlTabState::default();
+        // Open two tabs for the same connection — sequences 1, 2.
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        assert_eq!(state.tabs[0].session.sequence, 1);
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        assert_eq!(state.tabs[1].session.sequence, 2);
+
+        // Close both tabs.
+        state.close_tab(1);
+        state.close_tab(0);
+        assert!(state.tabs.is_empty());
+
+        // Re-open — sequence should restart at 1.
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        assert_eq!(state.tabs[0].session.sequence, 1);
+    }
+
+    #[test]
+    fn focus_or_open_creates_tab_when_none_exists() {
+        let mut state = SqlTabState::default();
+        let created = state.focus_or_open_connection_tab(
+            "local".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+        );
+        assert!(created, "no existing tab should create one");
+        assert_eq!(state.tabs.len(), 1);
+        assert_eq!(
+            state.active_connection.as_ref(),
+            Some(&("local".to_string(), "c1".to_string()))
+        );
+    }
+
+    #[test]
+    fn focus_or_open_focuses_existing_tab_without_creating() {
+        let mut state = SqlTabState::default();
+        // Two tabs for c1, then a tab for c2 (so c1's last tab is recorded).
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        state.open_connection_tab("local".into(), "c2".into(), "id2".into(), None, None);
+        let before = state.tabs.len();
+
+        // Enter on c1 should focus its last tab (index 1) without a new tab.
+        let created = state.focus_or_open_connection_tab(
+            "local".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+        );
+        assert!(!created, "existing tab should be focused, not created");
+        assert_eq!(state.tabs.len(), before, "no new tab should be added");
+        assert_eq!(state.active_tab, 1);
+        assert_eq!(
+            state.active_connection.as_ref(),
+            Some(&("local".to_string(), "c1".to_string()))
+        );
+    }
+
+    #[test]
+    fn new_connection_tab_always_opens_fresh() {
+        let mut state = SqlTabState::default();
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        let before = state.tabs.len();
+
+        // `n` reuses the always-new open_connection_tab, so a third tab appears.
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None);
+        assert_eq!(state.tabs.len(), before + 1);
+        assert_eq!(state.tabs.last().unwrap().session.sequence, 3);
     }
 }

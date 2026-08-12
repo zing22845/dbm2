@@ -34,6 +34,24 @@ pub fn update(
                 false
             }
         }
+        InstancesMessage::RefreshConnections { instance_idx } => {
+            // Reload the instance's connections from the store so a change made
+            // inside the instance workspace (add/edit/delete) shows up in the
+            // left tree immediately (matching the original dbm's
+            // `load_instance_connections` on save).
+            let instance_name = state
+                .nodes
+                .get(instance_idx)
+                .and_then(|n| n.instance.as_ref())
+                .map(|i| i.name.clone());
+            if let Some(instance_name) = instance_name {
+                effects.push(InstancesEffect::LoadConnections {
+                    instance_idx,
+                    instance_name,
+                });
+            }
+            false
+        }
         InstancesMessage::MoveUp => state.move_up(),
         InstancesMessage::MoveDown => state.move_down(),
         InstancesMessage::Expand => {
@@ -114,6 +132,17 @@ pub fn update(
                     });
                 }
                 None => {}
+            }
+            false
+        }
+        InstancesMessage::NewConnectionTab => {
+            // `n` on a connection row always opens a fresh editor; an instance
+            // row is unchanged (falls through to no-op).
+            if let Some((instance_idx, Some(conn_idx))) = state.cursor_selection() {
+                intents.push(InstancesIntent::NewConnectionWorkspace {
+                    instance_idx,
+                    connection_idx: conn_idx,
+                });
             }
             false
         }

@@ -32,6 +32,22 @@ pub enum SqlTabMessage {
         database: Option<String>,
         schema: Option<String>,
     },
+    /// Focus an existing tab for the connection if one exists, else open a new
+    /// one (the connection-row Enter behavior, mirroring original dbm).
+    FocusConnectionTab {
+        instance: String,
+        connection: String,
+        connection_id: String,
+        database: Option<String>,
+        schema: Option<String>,
+    },
+    /// Switch to a connection's tabs without opening a new tab. When the
+    /// explorer tree selection changes to a different connection, the shell
+    /// sends this so the tab bar only shows that connection's tabs.
+    SetActiveConnection {
+        instance: String,
+        connection: String,
+    },
     /// Set the editor top-pane height as a percent of the body (horizontal
     /// splitter), e.g. from a mouse drag on the editor/results splitter.
     SetSplitRatio { tab_id: usize, ratio: u8 },

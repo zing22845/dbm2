@@ -6,9 +6,9 @@ use super::msg::ConnectionsMsg;
 /// Intents emitted by the connections panel.
 #[derive(Debug, Clone)]
 pub enum ConnectionsIntent {
-    /// A connection was added/edited/deleted; the explorer should refresh its
-    /// tree.
-    ConnectionsChanged,
+    /// A connection was added/edited/deleted; the explorer should refresh the
+    /// tree for `instance_name` so the change shows up on the left side.
+    ConnectionsChanged { instance_name: String },
 }
 
 impl Intent for ConnectionsIntent {
@@ -18,7 +18,7 @@ impl Intent for ConnectionsIntent {
         // One-way notification to the shell (refresh the explorer tree); it is
         // consumed at the shell layer, so it declines a message here.
         match self {
-            ConnectionsIntent::ConnectionsChanged => None,
+            ConnectionsIntent::ConnectionsChanged { .. } => None,
         }
     }
 }

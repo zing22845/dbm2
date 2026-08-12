@@ -42,9 +42,10 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState)
         ])
         .split(area);
 
-    // Tab bar: themed tabs with session-derived titles + click rects.
+    // Tab bar: only render tabs belonging to the active connection.
+    let visible = state.visible_tab_indices();
     let sessions: Vec<TabSession> = state.tabs.iter().map(|t| t.session.clone()).collect();
-    super::tab::render(frame, theme, chunks[0], &sessions, Some(state.active_tab));
+    super::tab::render(frame, theme, chunks[0], &sessions, &visible, Some(state.active_tab));
 
     let body_area = chunks[1];
     let Some(tab) = state.tabs.get(state.active_tab) else {

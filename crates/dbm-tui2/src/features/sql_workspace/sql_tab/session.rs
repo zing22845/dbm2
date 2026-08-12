@@ -17,6 +17,9 @@
 pub struct TabSession {
     /// Stable identity across app restarts (used for persistence and routing).
     pub id: usize,
+    /// Per-connection tab number, starting at 1 (mirrors original dbm's
+    /// `sequence` — each connection counts its own tabs independently).
+    pub sequence: usize,
     /// Identifier of the database connection this tab is bound to, if any
     /// (the store's string id).
     pub connection_id: Option<String>,

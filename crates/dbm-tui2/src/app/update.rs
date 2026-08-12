@@ -110,6 +110,11 @@ fn close_discover(state: &mut AppState) {
     state.modal = None;
 }
 
+/// Build a `FocusChanged` shell message for the given pane.
+fn focus_changed(pane: Pane) -> AppMsg {
+    AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged { pane })
+}
+
 /// An `AppMsg` that reloads the explorer instance tree from the store.
 ///
 /// Used by the shell after closing the discover modal so instances registered
@@ -297,6 +302,11 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         explorer_dirty |= d;
                         result.intents.extend(i.into_iter().map(box_intent));
                         result.effects.extend(e.into_iter().map(box_effect));
+                        // Switch focus to the instance workspace so the user
+                        // sees it immediately instead of staying on explorer.
+                        result.pending.push_back(focus_changed(Pane::InstanceWorkspace(
+                            crate::app_shell::nav::IwPane::Overview,
+                        )));
                     }
                 }
                 if let ExplorerIntent::Instances(
@@ -314,6 +324,45 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                             .map(|i| i.name.clone())
                             .unwrap_or_default();
                         if let Some(conn) = node.connections.get(*connection_idx) {
+                            // Enter on a connection focuses its existing tab (or
+                            // opens one if none), mirroring the original dbm's
+                            // `confirm_workspace_connection(force_new=false)`.
+                            let sql_msg = SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                                SqlTabMessage::FocusConnectionTab {
+                                    instance: instance_name,
+                                    connection: conn.name.clone(),
+                                    connection_id: conn.id.clone(),
+                                    database: None,
+                                    schema: None,
+                                },
+                            )));
+                            explorer_dirty = true;
+                            result.pending.push_back(AppMsg::Sql(sql_msg));
+                            // Switch focus to the workspace so the user sees the
+                            // active tab immediately, mirroring the original
+                            // dbm's `confirm_workspace_connection` → `focus_workspace`.
+                            result.pending.push_back(focus_changed(Pane::SQLWorkspace));
+                        }
+                    }
+                }
+                if let ExplorerIntent::Instances(
+                    crate::features::explorer::instances::intent::InstancesIntent::NewConnectionWorkspace {
+                        instance_idx,
+                        connection_idx,
+                    },
+                ) = intent
+                {
+                    let node = state.explorer.instances.nodes.get(*instance_idx);
+                    if let Some(node) = node {
+                        let instance_name = node
+                            .instance
+                            .as_ref()
+                            .map(|i| i.name.clone())
+                            .unwrap_or_default();
+                        if let Some(conn) = node.connections.get(*connection_idx) {
+                            // `n` on a connection always opens a fresh editor,
+                            // mirroring the original dbm's
+                            // `confirm_workspace_connection(force_new=true)`.
                             let sql_msg = SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                                 SqlTabMessage::OpenConnectionTab {
                                     instance: instance_name,
@@ -325,6 +374,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                             )));
                             explorer_dirty = true;
                             result.pending.push_back(AppMsg::Sql(sql_msg));
+                            result.pending.push_back(focus_changed(Pane::SQLWorkspace));
                         }
                     }
                 }
@@ -354,6 +404,10 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         )));
                         explorer_dirty = true;
                         result.pending.push_back(AppMsg::Sql(sql_msg));
+                        // Switch focus to the workspace so the user sees the
+                        // newly opened tab immediately, mirroring the original
+                        // dbm's `confirm_workspace_connection` → `focus_workspace`.
+                        result.pending.push_back(focus_changed(Pane::SQLWorkspace));
                     }
                 }
             }
@@ -435,6 +489,43 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             let (s, intents, effects, d) = iw_update(inner, iw);
             state.iw = s;
             result.dirty |= d;
+            // A connection was added/edited/deleted inside the instance
+            // workspace: refresh the explorer tree for that instance so the
+            // change shows up on the left immediately (matching the original
+            // dbm's `load_instance_connections` on save). This is shell-level
+            // orchestration between the iw and explorer features.
+            for intent in &intents {
+                if let crate::features::instance_workspace::intent::IwIntent::Connections(
+                    crate::features::instance_workspace::connections::intent::ConnectionsIntent::ConnectionsChanged {
+                        instance_name,
+                    },
+                ) = intent
+                {
+                    let instance_idx = state
+                        .explorer
+                        .instances
+                        .nodes
+                        .iter()
+                        .position(|n| {
+                            n.instance
+                                .as_ref()
+                                .is_some_and(|i| i.name == *instance_name)
+                        });
+                    if let Some(instance_idx) = instance_idx {
+                        result.pending.push_back(AppMsg::Explorer(
+                            crate::features::explorer::msg::ExplorerMsg::Message(
+                                crate::features::explorer::msg::ExplorerMessage::Instances(
+                                    crate::features::explorer::instances::msg::InstancesMsg::Message(
+                                        crate::features::explorer::instances::msg::InstancesMessage::RefreshConnections {
+                                            instance_idx,
+                                        },
+                                    ),
+                                ),
+                            ),
+                        ));
+                    }
+                }
+            }
             result.intents.extend(intents.into_iter().map(box_intent));
             result.effects.extend(effects.into_iter().map(box_effect));
         }
