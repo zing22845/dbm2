@@ -423,6 +423,53 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 dirty |= result.dirty;
                             }
 
+                            // A click inside the SQL workspace also routes to a
+                            // sub-pane (editor/history/results) or activates the
+                            // clicked tab, mirroring the mouse support of the
+                            // original dbm.
+                            if matches!(target_pane, Some(Pane::SQLWorkspace))
+                                && let Some(tab_area) = sql_tab_area_for_hit(size, &state)
+                            {
+                                if let Some(action) = crate::features::sql_workspace::sql_tab::view::sql_workspace_click(
+                                    &state.sql.sql_tab,
+                                    tab_area,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    let msg = match action {
+                                        crate::features::sql_workspace::sql_tab::view::SqlClickAction::FocusSubPane(focus) => {
+                                            AppMsg::Sql(
+                                                crate::features::sql_workspace::msg::SqlMsg::Message(
+                                                    crate::features::sql_workspace::msg::SqlMessage::SqlTab(
+                                                        crate::features::sql_workspace::sql_tab::msg::SqlTabMsg::Message(
+                                                            crate::features::sql_workspace::sql_tab::msg::SqlTabMessage::Focus(focus),
+                                                        ),
+                                                    ),
+                                                ),
+                                            )
+                                        }
+                                        crate::features::sql_workspace::sql_tab::view::SqlClickAction::ActivateTab(visible_idx) => {
+                                            AppMsg::Sql(
+                                                crate::features::sql_workspace::msg::SqlMsg::Message(
+                                                    crate::features::sql_workspace::msg::SqlMessage::SqlTab(
+                                                        crate::features::sql_workspace::sql_tab::msg::SqlTabMsg::Message(
+                                                            crate::features::sql_workspace::sql_tab::msg::SqlTabMessage::Tab(visible_idx),
+                                                        ),
+                                                    ),
+                                                ),
+                                            )
+                                        }
+                                    };
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
                             // Inside the discover popup: map the click's row to a
                             // discover child pane and switch focus to it. This is
                             // suppressed while the close-confirmation dialog is
@@ -686,6 +733,49 @@ fn sql_tab_layout_for_hit(
         return None;
     }
     Some((layout, tab.session.id))
+}
+
+/// Compute the SQL tab region (tab bar + child panes) for mouse hit-testing,
+/// mirroring `sql_workspace/view.rs` (workspace inner minus its tab footer).
+/// Returns `None` when the SQL workspace is not the region being shown.
+fn sql_tab_area_for_hit(
+    size: ratatui::layout::Size,
+    state: &AppState,
+) -> Option<ratatui::layout::Rect> {
+    if state.modal.is_some()
+        || matches!(state.focus, Pane::Discover(_))
+        || state.instance_workspace_open()
+        || state.sql.sql_tab.tabs.is_empty()
+    {
+        return None;
+    }
+    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let body_top = 3u16;
+    let body_h = size.height.saturating_sub(body_top).saturating_sub(footer_h);
+    if body_h < 3 {
+        return None;
+    }
+    let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+    let workspace_w = size.width.saturating_sub(explorer_w);
+    let workspace = Rect::new(explorer_w, body_top, workspace_w, body_h);
+    // Outer " SQL Workspace " border (1 col/row).
+    let inner = Rect::new(
+        workspace.x.saturating_add(1),
+        workspace.y.saturating_add(1),
+        workspace.width.saturating_sub(2),
+        workspace.height.saturating_sub(2),
+    );
+    // Workspace-level tab footer at the bottom of the inner region.
+    let footer_h = crate::common::view::hints::footer_height(
+        &crate::common::view::hints::sql_workspace_footer_text(),
+        inner.width,
+    );
+    Some(Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(footer_h),
+    ))
 }
 
 /// Build the split-resize message for a drag gesture at `point`, using the
