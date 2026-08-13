@@ -63,18 +63,25 @@ pub fn render(
     let mut lines = Vec::new();
     let inner_h = body.height as usize;
     let mut row = 0usize;
-    'outer: for node in &state.nodes {
+    'outer: for (inst_idx, node) in state.nodes.iter().enumerate() {
         let instance_name = node
             .instance
             .as_ref()
             .map(|i| i.name.clone())
             .unwrap_or_default();
         let focused = row == state.cursor;
+        let active = state.is_active_instance(inst_idx);
+        // The active workspace is distinguished by a dedicated `active_fg` color
+        // (shared by instance and connection rows). The cursor row only layers
+        // the selection highlight on top; when the active row is also the cursor
+        // row it keeps its selection background and the regular active color.
         let style = if focused {
             Style::default()
-                .fg(p.fg)
+                .fg(if active { p.active_fg } else { p.fg })
                 .bg(p.selection_bg)
                 .add_modifier(Modifier::BOLD)
+        } else if active {
+            Style::default().fg(p.active_fg).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(p.fg)
         };
@@ -87,13 +94,18 @@ pub fn render(
             break;
         }
         if node.expanded {
-            for conn in &node.connections {
+            for (ci, conn) in node.connections.iter().enumerate() {
                 let conn_focused = row == state.cursor;
+                let conn_active = state.is_active_connection(inst_idx, ci);
+                // Same unified active color as the instance row; the cursor row
+                // layers the selection highlight underneath.
                 let cstyle = if conn_focused {
                     Style::default()
-                        .fg(p.accent)
+                        .fg(if conn_active { p.active_fg } else { p.accent })
                         .bg(p.selection_bg)
                         .add_modifier(Modifier::BOLD)
+                } else if conn_active {
+                    Style::default().fg(p.active_fg).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(p.fg_dim)
                 };

@@ -22,6 +22,23 @@ pub fn sql_workspace_empty_hint() -> &'static str {
     "Select a connection in the tree — ENTER or double-click to open a workspace."
 }
 
+/// Workspace-level footer hint for SQL tab management (belongs to the SQL
+/// workspace, not to a single editor pane). (`Ctrl+T` is reserved for theme
+/// toggling, so there is no open-tab shortcut.)
+pub fn sql_workspace_footer_text() -> String {
+    format!(
+        "TAB Ops [{}]",
+        [
+            "New: Alt+t",
+            "Close: Ctrl+w",
+            "Switch: Alt+1-9",
+            "Next: Alt+n",
+            "Prev: Alt+p",
+        ]
+        .join("  ")
+    )
+}
+
 /// `"{desc}: {key_name}"`.
 pub fn key(desc: &str, key_name: &str) -> String {
     format!("{desc}: {key_name}")
@@ -83,8 +100,6 @@ pub fn sql_pane_footer_text(
             ("Context", lit("click title")),
             ("Normal", lit("ESC")),
             ("Run", "ALT+ENTER".into()),
-            ("Close", hint_ctrl("w")),
-            ("Tabs", "CTRL+TAB".into()),
         ]),
         "visual" => keys(&[("Context", lit(", / click")), ("Normal", lit("ESC"))]),
         _ => {
@@ -94,8 +109,6 @@ pub fn sql_pane_footer_text(
                 ("Insert", lit("i")),
                 ("Visual", lit("v")),
                 ("Run", "ALT+ENTER".into()),
-                ("Close", hint_ctrl("w")),
-                ("Tabs", "CTRL+TAB".into()),
             ]);
             if sql_search_has_filter {
                 hints = join(&[
@@ -412,13 +425,29 @@ mod tests {
     }
 
     #[test]
-    fn sql_pane_footer_shows_close_and_tabs() {
+    fn sql_pane_footer_excludes_workspace_level_tab_hints() {
+        // Tab management belongs to the SQL workspace, not to a single editor
+        // pane, so the editor footer must NOT advertise it.
         let normal = sql_pane_footer_text(false, false, "normal", false);
-        assert!(normal.contains("Close: CTRL+w"));
-        assert!(normal.contains("Tabs: CTRL+TAB"));
+        assert!(!normal.contains("Close tab:"));
+        assert!(!normal.contains("Switch tab:"));
         let insert = sql_pane_footer_text(false, false, "insert", false);
-        assert!(insert.contains("Close: CTRL+w"));
-        assert!(insert.contains("Tabs: CTRL+TAB"));
+        assert!(!insert.contains("Close tab:"));
+        assert!(!insert.contains("Switch tab:"));
+    }
+
+    #[test]
+    fn sql_workspace_footer_advertises_tab_management() {
+        let footer = sql_workspace_footer_text();
+        assert!(footer.contains("TAB Ops ["));
+        assert!(footer.contains("New: Alt+t"));
+        assert!(footer.contains("Close: Ctrl+w"));
+        assert!(footer.contains("Switch: Alt+1-9"));
+        assert!(footer.contains("Next: Alt+n"));
+        assert!(footer.contains("Prev: Alt+p"));
+        // `Ctrl+T` is reserved for theme toggling, so open-tab must not be shown.
+        assert!(!footer.contains("Open tab"));
+        assert!(!footer.contains("Open:"));
     }
 
     #[test]

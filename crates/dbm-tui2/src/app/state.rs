@@ -57,6 +57,17 @@ pub enum ModalKind {
     ResultsEditCommitPreview { statements: Vec<String> },
 }
 
+impl AppState {
+    /// Whether an instance workspace is currently active (its `◆` marker is
+    /// set in the explorer tree). This is the single source of truth for "is
+    /// the instance workspace shown", matching the original dbm's
+    /// `active_workspace` state. The workspace region renders the instance
+    /// workspace exactly when this is true.
+    pub fn instance_workspace_open(&self) -> bool {
+        self.explorer.instances.active_is_instance()
+    }
+}
+
 impl Default for AppState {
     fn default() -> Self {
         AppState {

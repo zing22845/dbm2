@@ -291,6 +291,10 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         .map(|i| i.name.clone())
                         .unwrap_or_default();
                     if !instance_name.is_empty() {
+                        // Mark this instance as the active workspace (the
+                        // `◆` marker + what the workspace region renders),
+                        // matching the original dbm's `set_active_instance`.
+                        state.explorer.instances.set_active_instance(*instance_idx);
                         let iw = std::mem::take(&mut state.iw);
                         let (iw2, i, e, d) = iw_update(
                             crate::features::instance_workspace::msg::IwMessage::OpenInstance {
@@ -324,14 +328,25 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                             .map(|i| i.name.clone())
                             .unwrap_or_default();
                         if let Some(conn) = node.connections.get(*connection_idx) {
+                            // Clone what the sql message needs before mutating
+                            // the tree (to release the immutable `node` borrow).
+                            let connection = conn.name.clone();
+                            let connection_id = conn.id.clone();
+                            // Mark this connection as the active workspace
+                            // (the `●` marker + what the workspace region
+                            // renders), matching the original dbm's
+                            // `set_active_connection`. This overwrites any
+                            // previously-open instance workspace so the display
+                            // switches to the SQL workspace.
+                            state.explorer.instances.set_active_connection(*instance_idx, *connection_idx);
                             // Enter on a connection focuses its existing tab (or
                             // opens one if none), mirroring the original dbm's
                             // `confirm_workspace_connection(force_new=false)`.
                             let sql_msg = SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                                 SqlTabMessage::FocusConnectionTab {
                                     instance: instance_name,
-                                    connection: conn.name.clone(),
-                                    connection_id: conn.id.clone(),
+                                    connection,
+                                    connection_id,
                                     database: None,
                                     schema: None,
                                 },
@@ -360,14 +375,21 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                             .map(|i| i.name.clone())
                             .unwrap_or_default();
                         if let Some(conn) = node.connections.get(*connection_idx) {
+                            let connection = conn.name.clone();
+                            let connection_id = conn.id.clone();
+                            // Mark this connection as the active workspace
+                            // (the `●` marker + what the workspace region
+                            // renders), matching the original dbm's
+                            // `set_active_connection`.
+                            state.explorer.instances.set_active_connection(*instance_idx, *connection_idx);
                             // `n` on a connection always opens a fresh editor,
                             // mirroring the original dbm's
                             // `confirm_workspace_connection(force_new=true)`.
                             let sql_msg = SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                                 SqlTabMessage::OpenConnectionTab {
                                     instance: instance_name,
-                                    connection: conn.name.clone(),
-                                    connection_id: conn.id.clone(),
+                                    connection,
+                                    connection_id,
                                     database: None,
                                     schema: None,
                                 },
@@ -670,6 +692,128 @@ mod tests {
         )));
         update(msg, &mut state);
         assert!(state.modal.is_none(), "confirm modal must close on delete");
+    }
+
+    fn explorer_instances_msg(m: crate::features::explorer::instances::msg::InstancesMessage) -> AppMsg {
+        AppMsg::Explorer(
+            crate::features::explorer::msg::ExplorerMsg::Message(
+                crate::features::explorer::msg::ExplorerMessage::Instances(
+                    crate::features::explorer::instances::msg::InstancesMsg::Message(m),
+                ),
+            ),
+        )
+    }
+
+    fn sample_managed_instance(name: &str) -> dbm_store::ManagedInstance {
+        dbm_store::ManagedInstance {
+            id: format!("id-{name}"),
+            fingerprint: format!("fp-{name}"),
+            name: name.to_string(),
+            engine: dbm_core::Engine::Postgres,
+            host: "127.0.0.1".to_string(),
+            port: 5432,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "now".to_string(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        }
+    }
+
+    fn sample_connection(name: &str) -> dbm_store::InstanceConnection {
+        dbm_store::InstanceConnection {
+            id: format!("c-{name}"),
+            instance_id: "id".to_string(),
+            name: name.to_string(),
+            username: "postgres".to_string(),
+            database: "postgres".to_string(),
+            has_password: false,
+            ssl_mode: String::new(),
+            env_label: None,
+            created_at: "now".to_string(),
+            updated_at: "now".to_string(),
+            test_succeeded_at: None,
+            test_failed_at: None,
+        }
+    }
+
+    #[test]
+    fn new_connection_tab_from_explorer_sequences_continuously() {
+        use crate::features::explorer::instances::msg::InstancesMessage;
+
+        let mut state = AppState::default();
+        state.explorer.instances.set_instances(vec![sample_managed_instance("inst")]);
+        // Expand the instance and load one connection so `cursor_selection`
+        // resolves to a connection row.
+        state.explorer.instances.nodes[0].expanded = true;
+        state.explorer.instances.nodes[0].loaded = true;
+        state.explorer.instances.nodes[0].connections = vec![sample_connection("c1")];
+        state.explorer.instances.cursor = 1; // on the connection row
+        state.focus = Pane::Explorer(crate::app_shell::nav::ExplorerPane::default());
+
+        // Apply a message and drain the resulting `pending` queue exactly like
+        // the event loop does, so intent-dispatched messages (e.g. opening a
+        // tab) take effect within the same logical round.
+        fn drain(state: &mut AppState, msg: AppMsg) {
+            let mut queue = std::collections::VecDeque::from([msg]);
+            while let Some(m) = queue.pop_front() {
+                let r = update_unchecked(m, state);
+                queue.extend(r.pending);
+            }
+        }
+
+        // Enter on the connection opens the first tab (<sql 1>).
+        drain(&mut state, explorer_instances_msg(InstancesMessage::Select));
+        assert_eq!(state.sql.sql_tab.tabs.len(), 1);
+        assert_eq!(state.sql.sql_tab.tabs[0].session.sequence, 1);
+
+        // `n` always opens a fresh tab -> <sql 2>, then <sql 3>.
+        drain(&mut state, explorer_instances_msg(InstancesMessage::NewConnectionTab));
+        assert_eq!(state.sql.sql_tab.tabs.len(), 2);
+        assert_eq!(state.sql.sql_tab.tabs[1].session.sequence, 2);
+
+        drain(&mut state, explorer_instances_msg(InstancesMessage::NewConnectionTab));
+        assert_eq!(state.sql.sql_tab.tabs.len(), 3);
+        assert_eq!(state.sql.sql_tab.tabs[2].session.sequence, 3);
+    }
+
+    #[test]
+    fn closing_all_tabs_leaves_sql_tab_empty() {
+        use crate::features::sql_workspace::sql_tab::msg::SqlTabMessage;
+        use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+
+        let mut state = AppState::default();
+        // Open one tab for the active connection.
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "c1-id".into(),
+            None,
+            None,
+        );
+        assert_eq!(state.sql.sql_tab.tabs.len(), 1);
+        assert_eq!(state.sql.sql_tab.visible_tab_count(), 1);
+
+        let close_tab_msg = |visible: usize| {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                crate::features::sql_workspace::sql_tab::msg::SqlTabMsg::Message(
+                    SqlTabMessage::CloseTab(visible),
+                ),
+            )))
+        };
+
+        // Close the only visible tab (offset 0).
+        let r = update_unchecked(close_tab_msg(0), &mut state);
+        assert!(r.dirty, "closing the last tab must mark the view dirty");
+        assert!(state.sql.sql_tab.tabs.is_empty(), "all tabs must be closed");
+        assert_eq!(state.sql.sql_tab.visible_tab_count(), 0);
+        // `sql_tab/view.rs` renders the empty-state hint when tabs are empty.
+        assert!(state.sql.sql_tab.tabs.is_empty());
     }
 
     #[test]

@@ -194,9 +194,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     use crossterm::event::KeyModifiers as KM;
                     let ctrl = key.modifiers.contains(KM::CONTROL);
                     let global = match (ctrl, key.code) {
-                        // `q` or `CTRL+D` quits through the standard message
-                        // flow so the handler sets the quit flag.
-                        (_, KeyCode::Char('q')) | (true, KeyCode::Char('d')) => {
+                        // `CTRL+D` quits through the standard message flow so
+                        // the handler sets the quit flag. (`q` is no longer a
+                        // global quit shortcut.)
+                        (true, KeyCode::Char('d')) => {
                             Some(AppMsg::Shell(ShellMsg::Quit))
                         }
                         // `CTRL+T` toggles the active theme (dark/light).
@@ -370,7 +371,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     body_top,
                                     body_h,
                                 )))
-                            } else if state.iw.instance_name.is_empty() {
+                            } else if !state.instance_workspace_open() {
                                 Some(Pane::SQLWorkspace)
                             } else {
                                 // The workspace region holds the instance pane
@@ -651,7 +652,7 @@ fn sql_tab_layout_for_hit(
 
     if state.modal.is_some()
         || matches!(state.focus, Pane::Discover(_))
-        || !state.iw.instance_name.is_empty()
+        || state.instance_workspace_open()
     {
         return None;
     }

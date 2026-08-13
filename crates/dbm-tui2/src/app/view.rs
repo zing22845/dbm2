@@ -52,12 +52,14 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
         || matches!(state.focus, Pane::InstanceWorkspace(_));
     header_view::render(frame, &state.theme, chunks[0], &state.header, header_focused);
     explorer_view::render(frame, &state.theme, body[0], &state.explorer, explorer_focused);
-    // The workspace region shows whichever workspace was explicitly opened
-    // (`instance_name` non-empty means the instance workspace is open), matching
-    // the original dbm where the display is driven by an `active_workspace`
-    // state rather than by keyboard focus. Switching focus between panes must
-    // NOT change which workspace is shown.
-    if !state.iw.instance_name.is_empty() {
+    // The workspace region shows whichever workspace is active, driven by the
+    // explorer tree's `active_workspace` marker (the original dbm's
+    // `is_instance_workspace()`), not by keyboard focus. Opening a connection
+    // sets the active marker to the connection, so the display switches from
+    // the instance workspace to the SQL workspace. With no active workspace we
+    // still show the SQL workspace (its empty-state hint) — the "connection
+    // zone" the original dbm keeps visible after the last tab closes.
+    if state.explorer.instances.active_is_instance() {
         iw_view::render(frame, &state.theme, workspace, &state.iw, workspace_focused);
     } else {
         sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused);

@@ -135,7 +135,7 @@ fn tree_snapshot(explorer: &crate::features::explorer::state::ExplorerState) -> 
 
 /// Persist the instance-workspace sub-pane focus and connections cursor.
 fn iw_snapshot(state: &AppState) -> Option<TuiInstanceWorkspaceSnapshot> {
-    if state.iw.instance_name.is_empty() {
+    if !state.instance_workspace_open() {
         return None;
     }
     Some(TuiInstanceWorkspaceSnapshot {
@@ -183,6 +183,25 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
             .unwrap_or(0);
         state.sql.sql_tab.tabs = tabs;
         state.sql.sql_tab.active_tab = active;
+        // Restore the active connection so the tab strip shows the restored
+        // tabs. `active_connection` gates `visible_tab_indices()`; without it
+        // the strip renders nothing and the previously-open tabs appear lost.
+        // Pick the active tab's connection, falling back to the first tab.
+        // Set the field directly (not via `activate_connection`) so the
+        // snapshot's `active_tab` is preserved exactly.
+        let active_session = state
+            .sql
+            .sql_tab
+            .tabs
+            .get(active)
+            .or_else(|| state.sql.sql_tab.tabs.first());
+        if let Some(s) = active_session {
+            if let (Some(instance), Some(connection)) = (&s.session.instance, &s.session.connection)
+            {
+                state.sql.sql_tab.active_connection =
+                    Some((instance.clone(), connection.clone()));
+            }
+        }
     }
 
     state.focus = pane_from_name(&snapshot.focus).unwrap_or(Pane::Header);
@@ -356,6 +375,14 @@ mod tests {
             state.sql.sql_tab.tabs[0].session.instance.as_deref(),
             Some("local")
         );
+        // The active connection must be restored so the tab strip shows the
+        // previously-open tabs (it gates `visible_tab_indices`). Without this
+        // the restored tabs render as empty and appear lost after a restart.
+        assert_eq!(
+            state.sql.sql_tab.active_connection.as_ref(),
+            Some(&("local".to_string(), "app".to_string()))
+        );
+        assert_eq!(state.sql.sql_tab.visible_tab_count(), 2);
         assert_eq!(state.focus, Pane::SQLWorkspace);
 
         // Sanity: focus round-trips through snapshot_from_app.
@@ -446,6 +473,8 @@ mod tests {
         state.explorer.instances.nodes[0].loaded = true;
         // Cursor on the "app" connection row (row 1).
         state.explorer.instances.cursor = 1;
+        // Instance workspace is active (drives `instance_workspace_open()`).
+        state.explorer.instances.set_active_instance(0);
         // Objects tree expansion keys.
         state.explorer.objects.expanded.insert("mydb".to_string());
         state.explorer.objects.expanded.insert("mydb\tpublic".to_string());

@@ -61,7 +61,7 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
     if state.modal.is_none()
         && let Some(dir) = pane_dir_from_key(&key)
     {
-        if let Some(msg) = switch_pane_by_dir(dir, state.focus, !state.iw.instance_name.is_empty())
+        if let Some(msg) = switch_pane_by_dir(dir, state.focus, state.instance_workspace_open())
         {
             return Some(msg);
         }
@@ -94,11 +94,11 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
 /// left to the explorer and up to the header.
 ///
 /// `instance_open` tells whether an instance workspace is currently shown in
-/// the workspace region (i.e. `state.iw.instance_name` is non-empty). Moving
-/// right from the explorer must land on the *displayed* workspace: the instance
-/// workspace when an instance is open, otherwise the SQL workspace — otherwise
-/// the focus (SQLWorkspace) no longer matches what is on screen, and Ctrl+nav
-/// inside the instance workspace stops working.
+/// the workspace region (driven by the explorer tree's active-workspace marker).
+/// Moving right from the explorer must land on the *displayed* workspace: the
+/// instance workspace when an instance is open, otherwise the SQL workspace —
+/// otherwise the focus (SQLWorkspace) no longer matches what is on screen, and
+/// Ctrl+nav inside the instance workspace stops working.
 fn switch_pane_by_dir(
     dir: crate::app_shell::nav::PaneDir,
     focus: Pane,
@@ -906,6 +906,13 @@ fn history_key(
 /// Tab-bar navigation keys: switch / open / close tabs.
 fn sql_tab_navigation_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     use crate::features::sql_workspace::sql_tab::msg::SqlTabMessage;
+    // `Alt+t` opens a new tab and must work even with no tabs yet, so it is
+    // handled before the empty guard below.
+    if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::ALT) {
+        return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+            SqlTabMessage::OpenTab,
+        )))));
+    }
     let count = state.sql_tab.visible_tab_count();
     if count == 0 {
         return None;
@@ -925,8 +932,24 @@ fn sql_tab_navigation_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             SqlTabMessage::CloseTab(visible_active)
         }
-        KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            SqlTabMessage::OpenTab
+        // `Alt+n` / `Alt+p` move to the next / previous visible tab.
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::ALT) => {
+            SqlTabMessage::Tab((visible_active + 1) % count)
+        }
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::ALT) => {
+            SqlTabMessage::Tab((visible_active + count - 1) % count)
+        }
+        // `Alt+1..9` jumps directly to the nth visible tab (1-based).
+        KeyCode::Char(c)
+            if key.modifiers.contains(KeyModifiers::ALT)
+                && c.is_ascii_digit()
+                && c != '0' =>
+        {
+            let idx = (c as u8 - b'1') as usize;
+            if idx >= count {
+                return None;
+            }
+            SqlTabMessage::Tab(idx)
         }
         _ => return None,
     };
@@ -1048,6 +1071,55 @@ mod tests {
         let msg = sql_tab_navigation_key(key(KeyCode::Tab, KeyModifiers::CONTROL), &state)
             .expect("ctrl+tab should be handled");
         assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab(0));
+    }
+
+    #[test]
+    fn alt_digit_switches_to_nth_tab() {
+        let state = state_with_tabs(3); // 3 visible tabs
+        // Alt+1 -> tab index 0, Alt+2 -> tab index 1, Alt+3 -> tab index 2.
+        let msg = sql_tab_navigation_key(key(KeyCode::Char('1'), KeyModifiers::ALT), &state)
+            .expect("alt+1 should be handled");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab(0));
+        let msg = sql_tab_navigation_key(key(KeyCode::Char('3'), KeyModifiers::ALT), &state)
+            .expect("alt+3 should be handled");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab(2));
+    }
+
+    #[test]
+    fn alt_digit_out_of_range_is_ignored() {
+        let state = state_with_tabs(2); // only 2 tabs
+        // Alt+9 exceeds the tab count, so it must not be handled.
+        assert!(
+            sql_tab_navigation_key(key(KeyCode::Char('9'), KeyModifiers::ALT), &state).is_none(),
+            "alt+9 with only 2 tabs must be ignored"
+        );
+    }
+
+    #[test]
+    fn alt_t_opens_new_tab_even_without_tabs() {
+        // `Alt+t` opens a tab and must work even when there are no tabs yet.
+        let state = state_with_tabs(0);
+        let msg = sql_tab_navigation_key(key(KeyCode::Char('t'), KeyModifiers::ALT), &state)
+            .expect("alt+t should be handled");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::OpenTab);
+    }
+
+    #[test]
+    fn alt_n_and_alt_p_cycle_tabs() {
+        let state = state_with_tabs(3);
+        let count = state.sql_tab.visible_tab_count();
+        assert_eq!(count, 3);
+        // The last opened tab is active, so `visible_active` is 2.
+        let visible_active = state.sql_tab.global_to_visible().unwrap_or(0);
+        assert_eq!(visible_active, 2);
+        // Alt+n -> next tab (wrap from last back to first).
+        let msg = sql_tab_navigation_key(key(KeyCode::Char('n'), KeyModifiers::ALT), &state)
+            .expect("alt+n should be handled");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab((visible_active + 1) % count));
+        // Alt+p -> previous tab.
+        let msg = sql_tab_navigation_key(key(KeyCode::Char('p'), KeyModifiers::ALT), &state)
+            .expect("alt+p should be handled");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab((visible_active + count - 1) % count));
     }
 
     #[test]
@@ -1211,7 +1283,8 @@ mod tests {
 
         let mut state = crate::app::state::AppState::default();
         state.focus = Pane::Explorer(ExplorerPane::default());
-        // An instance is open, so the workspace region shows the instance pane.
+        // An instance is active, so the workspace region shows the instance pane.
+        state.explorer.instances.set_active_instance(0);
         state.iw = IwState {
             instance_name: "inst".into(),
             ..Default::default()

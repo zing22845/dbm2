@@ -2,6 +2,22 @@
 
 use dbm_store::{InstanceConnection, ManagedInstance};
 
+/// Which workspace is currently active in the tree, matching the original dbm's
+/// mutually-exclusive `active_workspace`. At most one node is active: an
+/// instance (its instance workspace is shown) or a connection (its SQL
+/// workspace is shown). This is the single source of truth for the `◆`/`●`
+/// active markers in the tree and for what the workspace region renders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveWorkspaceKind {
+    /// The instance at `instance_idx` owns the instance workspace.
+    Instance(usize),
+    /// The connection at `conn_idx` under `instance_idx` owns the SQL workspace.
+    Connection {
+        instance_idx: usize,
+        conn_idx: usize,
+    },
+}
+
 /// A single instance node in the tree: the managed instance plus its loaded
 /// connections and expansion state.
 #[derive(Debug, Clone, Default)]
@@ -41,6 +57,10 @@ pub struct InstancesState {
     /// Horizontal scroll offset of the tree (`Left`/`Right`), matching the
     /// original dbm's tree horizontal scroll.
     pub h_scroll: u16,
+    /// The active workspace (instance or connection), matching the original
+    /// dbm's `ConnectionTreeState::active_workspace`. `None` when no workspace
+    /// has been opened yet. Drives the `◆`/`●` markers and the workspace render.
+    pub active_workspace: Option<ActiveWorkspaceKind>,
 }
 
 impl InstancesState {
@@ -105,10 +125,11 @@ impl InstancesState {
             .map(|n| {
                 let mut w: u16 = 0;
                 if let Some(inst) = &n.instance {
-                    // Instance row: " ▸/▾ name"
+                    // Instance row: " ▸/▾ name" — a leading space, the expand
+                    // marker, and a space.
                     let marker = if n.expanded { "▾" } else { "▸" };
                     w = w.max(
-                        (2
+                        (3
                             + unicode_width::UnicodeWidthStr::width(marker)
                             + unicode_width::UnicodeWidthStr::width(inst.name.as_str()))
                         .try_into()
@@ -117,9 +138,11 @@ impl InstancesState {
                 }
                 if n.expanded {
                     for c in &n.connections {
-                        // Connection row: "    └ name"
-                        let conn_w: usize = 4 + 1 // └
-                            + unicode_width::UnicodeWidthStr::width(c.name.as_str());
+                        // Connection row: "    └ name/db" — 4 spaces, "└ ", name
+                        // and "/" + db.
+                        let conn_w: usize = 6
+                            + unicode_width::UnicodeWidthStr::width(c.name.as_str())
+                            + unicode_width::UnicodeWidthStr::width(c.database.as_str());
                         w = w.max(conn_w.try_into().unwrap_or(u16::MAX));
                     }
                 }
@@ -158,6 +181,45 @@ impl InstancesState {
         None
     }
 
+    /// Whether the instance at `instance_idx` is the active workspace.
+    pub fn is_active_instance(&self, instance_idx: usize) -> bool {
+        self.active_workspace == Some(ActiveWorkspaceKind::Instance(instance_idx))
+    }
+
+    /// Whether the connection at `(instance_idx, conn_idx)` is the active
+    /// workspace.
+    pub fn is_active_connection(&self, instance_idx: usize, conn_idx: usize) -> bool {
+        self.active_workspace
+            == Some(ActiveWorkspaceKind::Connection {
+                instance_idx,
+                conn_idx,
+            })
+    }
+
+    /// Whether the active workspace is an instance (its instance workspace is
+    /// shown) rather than a connection.
+    pub fn active_is_instance(&self) -> bool {
+        matches!(self.active_workspace, Some(ActiveWorkspaceKind::Instance(_)))
+    }
+
+    /// Make the instance at `instance_idx` the active workspace.
+    pub fn set_active_instance(&mut self, instance_idx: usize) {
+        self.active_workspace = Some(ActiveWorkspaceKind::Instance(instance_idx));
+    }
+
+    /// Make the connection at `(instance_idx, conn_idx)` the active workspace.
+    pub fn set_active_connection(&mut self, instance_idx: usize, conn_idx: usize) {
+        self.active_workspace = Some(ActiveWorkspaceKind::Connection {
+            instance_idx,
+            conn_idx,
+        });
+    }
+
+    /// Clear the active workspace (e.g. the instance was unregistered).
+    pub fn clear_active_workspace(&mut self) {
+        self.active_workspace = None;
+    }
+
     /// Resolve the cursor's position to either an instance or a connection.
     /// Returns `(instance_idx, Option<conn_idx>)`.
     pub fn cursor_selection(&self) -> Option<(usize, Option<usize>)> {
@@ -186,6 +248,10 @@ impl InstancesState {
     /// instances were expanded (matching the original dbm's `reload_tree`, which
     /// re-expands and re-loads the previously selected instance). Connections
     /// are intentionally left unloaded here; they reload lazily on expand.
+    ///
+    /// The active workspace is re-resolved by name after the reload because
+    /// node indices may have changed (matching the original dbm, which re-maps
+    /// its active instance/connection after a reload).
     pub fn set_instances(&mut self, instances: Vec<ManagedInstance>) {
         let expanded_names: std::collections::HashSet<String> = self
             .nodes
@@ -194,6 +260,16 @@ impl InstancesState {
             .filter_map(|n| n.instance.as_ref())
             .map(|i| i.name.clone())
             .collect();
+        let prev_active = self.active_workspace;
+        // Resolve the previously active instance's name before the reload.
+        let prev_instance_name = match prev_active {
+            Some(ActiveWorkspaceKind::Instance(i))
+            | Some(ActiveWorkspaceKind::Connection {
+                instance_idx: i,
+                conn_idx: _,
+            }) => self.nodes.get(i).map(|n| n.display_name()),
+            None => None,
+        };
         self.nodes = instances
             .into_iter()
             .map(|i| {
@@ -206,6 +282,18 @@ impl InstancesState {
                 }
             })
             .collect();
+        // Re-map the active workspace onto the new node indices by name. When a
+        // connection was active, its connections are not loaded after a tree
+        // reload, so we fall back to the instance workspace for that instance;
+        // the connection row is re-resolved once its connections load.
+        self.active_workspace = match prev_instance_name {
+            Some(iname) => self
+                .nodes
+                .iter()
+                .position(|n| n.display_name() == iname)
+                .map(ActiveWorkspaceKind::Instance),
+            None => None,
+        };
         self.cursor = 0;
         self.scroll = 0;
     }
@@ -216,6 +304,20 @@ impl InstancesState {
     pub fn remove_instance(&mut self, idx: usize) -> bool {
         if idx >= self.nodes.len() {
             return false;
+        }
+        // If the removed instance owned the active workspace, clear it so we
+        // don't keep a stale marker / workspace for a node that no longer
+        // exists.
+        let removed_active = match self.active_workspace {
+            Some(ActiveWorkspaceKind::Instance(i)) => i == idx,
+            Some(ActiveWorkspaceKind::Connection {
+                instance_idx: i,
+                conn_idx: _,
+            }) => i == idx,
+            None => false,
+        };
+        if removed_active {
+            self.active_workspace = None;
         }
         self.nodes.remove(idx);
         let max = self.visible_count().saturating_sub(1);
@@ -357,5 +459,67 @@ mod tests {
 
         // Unknown instance name returns false.
         assert!(!s.set_single_instance(inst("nope")));
+    }
+
+    #[test]
+    fn active_workspace_tracks_instance_and_connection() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b")]);
+        s.nodes[0].expanded = true;
+        s.nodes[0].loaded = true;
+        s.nodes[0].connections = vec![conn("c1"), conn("c2")];
+
+        // Default: no active workspace, not instance-open.
+        assert!(!s.active_is_instance());
+
+        // Set an instance active (◆ marker).
+        s.set_active_instance(0);
+        assert!(s.is_active_instance(0));
+        assert!(!s.is_active_instance(1));
+        assert!(s.active_is_instance());
+
+        // Switch to a connection (● marker) — instance marker clears (mutually
+        // exclusive, matching the original dbm).
+        s.set_active_connection(0, 1);
+        assert!(s.is_active_connection(0, 1));
+        assert!(!s.is_active_connection(0, 0));
+        assert!(!s.is_active_instance(0));
+        assert!(!s.active_is_instance());
+
+        s.clear_active_workspace();
+        assert!(!s.is_active_instance(0));
+        assert!(!s.is_active_connection(0, 1));
+    }
+
+    #[test]
+    fn set_instances_preserves_active_instance_by_name() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b"), inst("c")]);
+        s.set_active_instance(1); // "b" is active
+
+        // Reload with a reordered/shorter list; the active marker follows the
+        // instance by name (now at index 0), and a connection active downgrades
+        // to its instance workspace.
+        s.set_instances(vec![inst("b"), inst("c")]);
+        assert!(s.active_is_instance());
+        assert!(s.is_active_instance(0), "active instance follows by name");
+
+        // Removing the active instance clears the marker.
+        s.remove_instance(0);
+        assert!(!s.active_is_instance());
+    }
+
+    #[test]
+    fn remove_instance_clears_active_workspace_when_owned() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b")]);
+        s.set_active_instance(1);
+        assert!(s.remove_instance(1));
+        assert!(s.active_workspace.is_none(), "removing active instance clears it");
+
+        // Removing a non-active instance keeps the marker.
+        s.set_active_instance(0);
+        assert!(s.remove_instance(0));
+        assert!(s.active_workspace.is_none());
     }
 }

@@ -34,6 +34,9 @@ pub const DEFAULT_HISTORY_WIDTH: u16 = 24;
 /// Min/max editor top-pane height as a percent of the body.
 pub const MIN_SPLIT_RATIO: u8 = 20;
 pub const MAX_SPLIT_RATIO: u8 = 80;
+/// Maximum number of open tabs per connection (and thus the highest sequence
+/// number, `<SQL N>` with `N <= 9`), matching the original dbm's tab limit.
+pub const MAX_TABS: usize = 9;
 /// Min/max history pane width in columns.
 pub const MIN_HISTORY_WIDTH: u16 = 16;
 pub const MAX_HISTORY_WIDTH: u16 = 200;
@@ -83,9 +86,6 @@ pub struct SqlTabState {
     pub active_tab: usize,
     /// Monotonic counter for allocating stable session ids to new tabs.
     next_tab_id: usize,
-    /// Per-connection monotonically increasing sequence counter. Keys are
-    /// `(instance, connection)` display-name pairs. Sequences start at 1.
-    connection_next_sequence: HashMap<(String, String), usize>,
     /// Per-connection last-active tab global index, so switching connections
     /// restores the previously active tab for that connection.
     connection_last_tab: HashMap<(String, String), usize>,
@@ -105,12 +105,32 @@ impl SqlTabState {
         (instance, connection)
     }
 
-    /// Increment and return the next per-connection sequence number, starting at 1.
-    fn next_sequence(&mut self, key: &(String, String)) -> usize {
-        let count = self.connection_next_sequence.get(key).copied().unwrap_or(0);
-        let next = count + 1;
-        self.connection_next_sequence.insert(key.clone(), next);
-        next
+    /// Return the next per-connection sequence number: one greater than the
+    /// largest sequence among the connection's currently-open tabs (or 1 if
+    /// none). This matches the original dbm, where numbering is derived from
+    /// the live tabs, so after closing `<sql 2>`..`<sql 6>` the next tab is
+    /// `<sql 2>` again rather than a monotonic counter continuing at 7.
+    fn next_sequence(&self, key: &(String, String)) -> usize {
+        self.tabs
+            .iter()
+            .filter(|tab| self.connection_key(&tab.session) == *key)
+            .map(|tab| tab.session.sequence)
+            .max()
+            .unwrap_or(0)
+            + 1
+    }
+
+    /// Whether the connection already has `MAX_TABS` open tabs. This is the
+    /// single source of the per-connection tab limit (max 9 tabs, so sequence
+    /// numbers stay within `<SQL 1>`..`<SQL 9>`), shared by every tab-creation
+    /// path (`open_connection_tab`, `open_tab`, and via those the explorer's
+    /// Enter / `n` and the workspace's `Alt+t`).
+    fn at_tab_limit(&self, key: &(String, String)) -> bool {
+        self.tabs
+            .iter()
+            .filter(|tab| self.connection_key(&tab.session) == *key)
+            .count()
+            >= MAX_TABS
     }
 
     /// Returns global indices of tabs whose session matches `active_connection`.
@@ -193,6 +213,10 @@ impl SqlTabState {
         let Some(key) = self.active_connection.clone() else {
             return;
         };
+        // Enforce the per-connection tab limit (shared `at_tab_limit` check).
+        if self.at_tab_limit(&key) {
+            return;
+        }
         let id = self.next_tab_id;
         self.next_tab_id += 1;
         let sequence = self.next_sequence(&key);
@@ -280,6 +304,10 @@ impl SqlTabState {
         schema: Option<String>,
     ) {
         let key = (instance.clone(), connection.clone());
+        // Enforce the per-connection tab limit (shared `at_tab_limit` check).
+        if self.at_tab_limit(&key) {
+            return;
+        }
         // Save the previous connection's last tab before switching.
         if self.active_connection.as_ref() != Some(&key) {
             self.save_connection_last_tab();
@@ -314,16 +342,14 @@ impl SqlTabState {
         if idx >= self.tabs.len() {
             return;
         }
-        // Capture the connection key before removing the tab so we can clean up
-        // the per-connection sequence counter when the last tab for that key is
-        // closed.
+        // Capture the connection key before removing the tab so we can drop the
+        // stale last-active-tab bookmark when the last tab for that key closes.
         let key = self.connection_key(&self.tabs[idx].session);
         self.tabs.remove(idx);
 
-        // Reset the sequence counter if no remaining tabs belong to this
-        // connection, so that re-opening starts from 1 again.
+        // Drop the last-active-tab bookmark when no tabs remain for this
+        // connection, so a later reopen restores it fresh.
         if !self.tabs.iter().any(|tab| self.connection_key(&tab.session) == key) {
-            self.connection_next_sequence.remove(&key);
             self.connection_last_tab.remove(&key);
         }
 
@@ -334,7 +360,29 @@ impl SqlTabState {
         // If we removed the active tab, try to pick another visible tab.
         let visible = self.visible_tab_indices();
         if visible.is_empty() {
-            self.active_tab = 0;
+            // The active connection's tabs are all gone, but other connections
+            // still have tabs: switch the active connection to the first tab of
+            // another connection so the workspace keeps showing a tab rather
+            // than a stale/phantom tab (matching the original dbm, where
+            // closing the active connection's tab falls back to any remaining
+            // tab).
+            let active_key = self.active_connection.clone();
+            if let Some((fallback_idx, fallback_key)) = self
+                .tabs
+                .iter()
+                .enumerate()
+                .find(|(i, tab)| {
+                    let k = self.connection_key(&tab.session);
+                    active_key.as_ref() != Some(&k) || *i != idx
+                })
+                .map(|(i, tab)| (i, self.connection_key(&tab.session)))
+            {
+                self.active_connection = Some(fallback_key);
+                self.active_tab = fallback_idx;
+                self.save_connection_last_tab();
+            } else {
+                self.active_tab = 0;
+            }
             return;
         }
         // Find a visible tab closest to the removed index.
@@ -534,6 +582,125 @@ mod tests {
             state.active_connection.as_ref(),
             Some(&("local".to_string(), "c1".to_string()))
         );
+    }
+
+    #[test]
+    fn next_sequence_is_max_existing_plus_one() {
+        let mut state = SqlTabState::default();
+        // Open <sql 1>..<sql 6>.
+        for _ in 0..6 {
+            state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None);
+        }
+        assert_eq!(state.tabs.len(), 6);
+        assert_eq!(state.tabs[5].session.sequence, 6);
+
+        // Close <sql 2>..<sql 6> (global indices 1..=5), leaving only <sql 1>.
+        // Closing a tab shifts the remaining ones left, so always close index 1
+        // (the tab after <sql 1>).
+        for _ in 0..5 {
+            state.close_tab(1);
+        }
+        assert_eq!(state.tabs.len(), 1);
+        assert_eq!(state.tabs[0].session.sequence, 1);
+
+        // Reopen: the max existing sequence is 1, so the next tab is <sql 2>,
+        // not a monotonic counter continuing at 7 (matching the original dbm).
+        state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None);
+        assert_eq!(state.tabs.len(), 2);
+        assert_eq!(state.tabs[1].session.sequence, 2);
+    }
+
+    #[test]
+    fn tab_limit_caps_at_max_tabs() {
+        let mut state = SqlTabState::default();
+        // Open up to MAX_TABS tabs.
+        for _ in 0..MAX_TABS {
+            state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None);
+        }
+        assert_eq!(state.tabs.len(), MAX_TABS);
+        assert_eq!(state.tabs[state.tabs.len() - 1].session.sequence, MAX_TABS);
+        // Attempting to open one more is a no-op at the limit.
+        state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None);
+        assert_eq!(state.tabs.len(), MAX_TABS, "must not exceed MAX_TABS tabs");
+        // No sequence ever exceeds 9.
+        assert!(state.tabs.iter().all(|t| t.session.sequence <= MAX_TABS));
+    }
+
+    #[test]
+    fn open_tab_also_respects_tab_limit() {
+        let mut state = SqlTabState::default();
+        // Open MAX_TABS tabs for c1, then make c1 active.
+        for _ in 0..MAX_TABS {
+            state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None);
+        }
+        state.active_connection = Some(("inst".to_string(), "c1".to_string()));
+        let before = state.tabs.len();
+        // `open_tab` (the workspace `Alt+t` path) must hit the same limit.
+        state.open_tab();
+        assert_eq!(state.tabs.len(), before, "open_tab must respect MAX_TABS");
+        assert!(state.tabs.iter().all(|t| t.session.sequence <= MAX_TABS));
+    }
+
+    #[test]
+    fn closing_active_connections_tab_falls_back_to_other_connection() {
+        let mut state = SqlTabState::default();
+        // A tab for c1 and a tab for c2.
+        state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None);
+        state.open_connection_tab("inst".into(), "c2".into(), "id2".into(), None, None);
+        // Activate c1 (the first connection's tab).
+        state.activate_connection("inst".into(), "c1".into());
+        assert_eq!(state.active_tab, 0);
+        assert_eq!(state.visible_tab_count(), 1);
+
+        // Close c1's only tab (visible offset 0). c2's tab remains, so the
+        // active connection should fall back to c2 rather than leave a stale
+        // active_tab.
+        if let Some(global) = state.visible_to_global(0) {
+            state.close_tab(global);
+        }
+        assert_eq!(state.tabs.len(), 1, "c2's tab must remain");
+        assert_eq!(
+            state.active_connection.as_ref(),
+            Some(&("inst".to_string(), "c2".to_string()))
+        );
+        assert_eq!(state.active_tab, 0, "active tab now points at c2's tab");
+        assert_eq!(state.visible_tab_count(), 1);
+    }
+
+    #[test]
+    fn closing_last_tab_empties_tabs() {
+        let mut state = SqlTabState::default();
+        state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None);
+        assert_eq!(state.tabs.len(), 1);
+        // Close the only visible tab (visible offset 0).
+        if let Some(global) = state.visible_to_global(0) {
+            state.close_tab(global);
+        }
+        assert!(state.tabs.is_empty(), "closing the last tab must empty tabs");
+        assert_eq!(state.active_tab, 0);
+    }
+
+    #[test]
+    fn enter_then_n_sequences_increment_continuously() {
+        let mut state = SqlTabState::default();
+        // Enter: focus-or-open creates the first tab (seq 1).
+        let created = state.focus_or_open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+        );
+        assert!(created);
+        assert_eq!(state.tabs[0].session.sequence, 1);
+        // n: always open fresh -> seq 2.
+        state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None);
+        assert_eq!(state.tabs.len(), 2);
+        assert_eq!(state.tabs[1].session.sequence, 2);
+        // n again -> seq 3.
+        state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None);
+        assert_eq!(state.tabs.len(), 3);
+        assert_eq!(state.tabs[2].session.sequence, 3);
     }
 
     #[test]

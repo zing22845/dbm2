@@ -33,6 +33,12 @@ pub struct Palette {
     pub border: Color,
     /// Border color of the focused/active panel.
     pub border_active: Color,
+    /// Dedicated foreground color for the *active* workspace marker in the
+    /// explorer tree (the node whose workspace is currently shown). Kept
+    /// separate from `accent`/`border_active` so it has its own color and is
+    /// chosen to not clash with `selection_bg` (the active row may also be the
+    /// cursor row, which layers a selection highlight underneath).
+    pub active_fg: Color,
     /// Highlighted list selection (foreground emphasis).
     pub selection: Color,
     /// The background color used to highlight the cursor-selected row in lists
@@ -85,6 +91,10 @@ impl Palette {
             // muted fg and become the accent when focused.
             border: p.muted,
             border_active: p.accent,
+            // A dedicated active-marker foreground derived from the info slot
+            // (typically a bright cyan/green) so it stands out and does not
+            // collide with the row-selection background.
+            active_fg: p.info,
             selection: p.selection,
             selection_bg: p.selection,
             selection_cell_bg: p.selection,
@@ -161,6 +171,8 @@ pub fn dracula() -> Theme {
             accent: Color::Rgb(0xbd, 0x93, 0xf9),    // purple
             border: Color::Rgb(0x44, 0x47, 0x5a),
             border_active: Color::Rgb(0xbd, 0x93, 0xf9),
+            // Bright green — readable on the blue-grey selection background.
+            active_fg: Color::Rgb(0x50, 0xfa, 0x7b),
             selection: Color::Rgb(0x44, 0x47, 0x5a),
             selection_bg: Color::Rgb(0x3d, 0x40, 0x52),
             selection_cell_bg: Color::Rgb(0x55, 0x5a, 0x73),
@@ -178,6 +190,8 @@ pub fn dracula() -> Theme {
             accent: Color::Rgb(0xbd, 0x93, 0xf9),
             border: Color::Rgb(0xcf, 0xc9, 0xc2),
             border_active: Color::Rgb(0xbd, 0x93, 0xf9),
+            // Deep green — readable on the light blue-grey selection background.
+            active_fg: Color::Rgb(0x1a, 0xb0, 0x4c),
             selection: Color::Rgb(0xcf, 0xc9, 0xc2),
             selection_bg: Color::Rgb(0xe4, 0xea, 0xf5),
             selection_cell_bg: Color::Rgb(0xc5, 0xcf, 0xe6),
@@ -203,6 +217,8 @@ pub fn nord() -> Theme {
             accent: Color::Rgb(0x88, 0xc0, 0xd0),    // nord8 (frost cyan)
             border: Color::Rgb(0x4c, 0x56, 0x6a),
             border_active: Color::Rgb(0x88, 0xc0, 0xd0),
+            // Aurora green (nord14) — readable on the nord1 selection bg.
+            active_fg: Color::Rgb(0xa3, 0xbe, 0x8c),
             selection: Color::Rgb(0x43, 0x4c, 0x5e),
             selection_bg: Color::Rgb(0x3b, 0x42, 0x52),
             selection_cell_bg: Color::Rgb(0x4c, 0x56, 0x6a),
@@ -220,6 +236,8 @@ pub fn nord() -> Theme {
             accent: Color::Rgb(0x88, 0xc0, 0xd0),
             border: Color::Rgb(0xd8, 0xde, 0xe9),
             border_active: Color::Rgb(0x88, 0xc0, 0xd0),
+            // Darker aurora green (nord10) — readable on the light selection bg.
+            active_fg: Color::Rgb(0x5e, 0x81, 0xac),
             selection: Color::Rgb(0xd8, 0xde, 0xe9),
             selection_bg: Color::Rgb(0xd8, 0xde, 0xe9),
             selection_cell_bg: Color::Rgb(0xc2, 0xcd, 0xde),
@@ -301,5 +319,28 @@ mod tests {
     fn catppuccin_has_dark_and_light_variants() {
         let theme = catppuccin();
         assert_ne!(theme.dark.bg, theme.light.bg);
+    }
+
+    #[test]
+    fn active_fg_does_not_clash_with_selection_bg() {
+        // The active-marker foreground must stay distinct from the row-selection
+        // background so an active row that is also the cursor row remains
+        // readable across every theme.
+        for theme in [
+            dracula(),
+            nord(),
+            solarized(),
+            catppuccin(),
+        ] {
+            for p in [theme.dark.clone(), theme.light.clone()] {
+                assert_ne!(
+                    p.active_fg, p.selection_bg,
+                    "theme {:?} active_fg clashes with selection_bg",
+                    theme.name
+                );
+                // active_fg must also be a real color, never Reset.
+                assert_ne!(p.active_fg, Color::Reset, "theme {:?} active_fg is Reset", theme.name);
+            }
+        }
     }
 }
