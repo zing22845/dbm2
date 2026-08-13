@@ -18,8 +18,13 @@ use crate::features::perf_monitor::view as perf_view;
 use crate::features::sql_workspace::view as sql_view;
 
 /// Top-level render: lays out the shell regions and delegates to each
-/// feature's `view::render`.
-pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
+/// feature's `view::render`. Returns the editor's hardware cursor (when the
+/// active SQL tab's editor sub-pane holds focus) so the run loop can place the
+/// terminal caret.
+pub fn render(
+    frame: &mut ratatui::Frame,
+    state: &AppState,
+) -> Option<crate::common::editor::EditorHardwareCursor> {
     // The footer height is dynamic: one line of hints plus the (wrapped) status
     // line when present.
     let footer_h = footer_view::footer_height(&state.footer, frame.area().width);
@@ -59,18 +64,22 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
     // the instance workspace to the SQL workspace. With no active workspace we
     // still show the SQL workspace (its empty-state hint) — the "connection
     // zone" the original dbm keeps visible after the last tab closes.
-    if state.explorer.instances.active_is_instance() {
+    let editor_cursor = if state.explorer.instances.active_is_instance() {
         iw_view::render(frame, &state.theme, workspace, &state.iw, workspace_focused);
+        None
     } else {
-        sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused);
-    }
+        sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused)
+    };
     // The bottom row holds the global footer on the left and the performance
     // readout on the right.
     render_footer_with_perf(frame, state, chunks[2]);
 
     // The discover parent pane renders as a centered overlay over the workspace
-    // region while it is focused.
+    // region while it is focused. Its inline-edit caret is captured here and
+    // takes precedence over the editor caret underneath.
+    let mut discover_caret = None;
     if let Pane::Discover(sub) = state.focus {
+        let discover_caret_ref = std::cell::RefCell::new(None);
         crate::common::view::modal::render_modal_popup(
             frame,
             &state.theme,
@@ -78,15 +87,24 @@ pub fn render(frame: &mut ratatui::Frame, state: &AppState) {
             75,
             75,
             &state.discover,
-            |f, t, a, s| discover_view::render(f, t, a, s, sub),
+            |f, t, a, s| {
+                let c = discover_view::render(f, t, a, s, sub);
+                *discover_caret_ref.borrow_mut() = c;
+            },
         );
+        discover_caret = discover_caret_ref.into_inner();
     }
 
     // Render any active modal (data popup) as a centered overlay.
     if let Some(modal) = &state.modal {
         // Generic titled popup for the picker/confirm/commit-preview modals.
         render_popup_modal(frame, &state.theme, workspace, modal);
+        // A modal overlays the workspace, so the editor caret is hidden.
+        return None;
     }
+    // The discover overlay's inline-edit caret wins over the editor caret
+    // underneath when discover is focused.
+    discover_caret.or(editor_cursor)
 }
 
 /// Render the footer row: the global footer hints on the left (flexible width)

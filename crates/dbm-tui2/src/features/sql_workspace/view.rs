@@ -18,14 +18,15 @@ use super::sql_tab::view as sql_tab_view;
 
 /// Render the SQL workspace parent pane: an outer " SQL Workspace " border
 /// wrapping the active tab's content (delegated to the `sql_tab` renderer),
-/// with a workspace-level tab-management footer below it.
+/// with a workspace-level tab-management footer below it. Returns the editor's
+/// hardware cursor when the active tab's editor sub-pane holds focus.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
     state: &SqlState,
     focused: bool,
-) {
+) -> Option<crate::common::editor::EditorHardwareCursor> {
     let p = theme.palette();
     let outer = Block::default()
         .title(" SQL Workspace ")
@@ -44,10 +45,11 @@ pub fn render(
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(footer_h)])
             .split(inner);
-        sql_tab_view::render(frame, theme, chunks[0], &state.sql_tab);
+        let cursor = sql_tab_view::render(frame, theme, chunks[0], &state.sql_tab, focused);
         draw_footer(frame, theme, chunks[1], &hint);
+        cursor
     } else {
         // No tabs: let sql_tab render its empty-state hint over the full area.
-        sql_tab_view::render(frame, theme, inner, &state.sql_tab);
+        sql_tab_view::render(frame, theme, inner, &state.sql_tab, focused)
     }
 }

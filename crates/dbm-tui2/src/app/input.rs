@@ -53,22 +53,36 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
     if let Pane::Discover(sub) = state.focus {
         return discover_key(key, sub, &state.discover);
     }
-    // Pane navigation (Ctrl+h/j/k/l / Ctrl+arrows) is shell-level: it
-    // moves the focus pane regardless of the currently focused pane. Check it
-    // before modal/focus routing, so it always works. Top-level pane movement
-    // wins (so Ctrl+h from the workspace leaves to the explorer); within-workspace
-    // sub-pane moves only apply to directions that do not leave the workspace.
+    // Uppercase letter jumps (`[S]`/`[I]`/`[O]`/`[H]`/`[R]` in the pane titles)
+    // move focus to the matching pane, mirroring the original dbm. They are
+    // blocked while typing in the SQL editor (insert mode), so `S`/`H`/`R` do
+    // not fire mid-edit; and never while a modal is open.
+    if state.modal.is_none()
+        && let Some(msg) = pane_jump_from_key(key, state)
+    {
+        return Some(msg);
+    }
+    // Pane navigation (Ctrl+h/j/k/l / Ctrl+arrows). Inside the SQL workspace a
+    // move that stays within its sub-panes (editor / results / history) is
+    // handled first — mirroring the original dbm's `resolve_move`, where the
+    // workspace's own neighbor map wins and only a move off the workspace
+    // boundary falls through to shell-level pane switching. So History → Left
+    // lands on the editor, and only editor → Left leaves to the explorer.
     if state.modal.is_none()
         && let Some(dir) = pane_dir_from_key(&key)
     {
-        if let Some(msg) = switch_pane_by_dir(dir, state.focus, state.instance_workspace_open())
+        if state.focus == Pane::SQLWorkspace
+            && let Some(msg) = switch_subpane(dir, &state.sql)
         {
             return Some(msg);
         }
-        // Inside the SQL workspace, Ctrl+nav moves the sub-pane focus
-        // (editor / results / history) when the move stays within the workspace.
-        if state.focus == Pane::SQLWorkspace {
-            return switch_subpane(dir, &state.sql);
+        if let Some(msg) = switch_pane_by_dir(
+            dir,
+            state.focus,
+            state.instance_workspace_open(),
+            state.explorer.pane,
+        ) {
+            return Some(msg);
         }
         return None;
     }
@@ -103,11 +117,12 @@ fn switch_pane_by_dir(
     dir: crate::app_shell::nav::PaneDir,
     focus: Pane,
     instance_open: bool,
+    explorer_pane: ExplorerPane,
 ) -> Option<AppMsg> {
     use crate::app_shell::nav::{ExplorerPane, IwPane, PaneDir as D};
     let pane = match (focus, dir) {
-        // Header moves down into the explorer (instances by default).
-        (Pane::Header, D::Down) => Pane::Explorer(ExplorerPane::default()),
+        // Header moves down into the explorer, restoring its last sub-pane.
+        (Pane::Header, D::Down) => Pane::Explorer(explorer_pane),
         // Inside the explorer, Up/Down cycle instances <-> objects; Up from
         // instances leaves to the header.
         (Pane::Explorer(ExplorerPane::Instances), D::Up) => Pane::Header,
@@ -126,7 +141,7 @@ fn switch_pane_by_dir(
             Pane::InstanceWorkspace(IwPane::Overview)
         }
         (Pane::InstanceWorkspace(IwPane::Overview), D::Left) => {
-            Pane::Explorer(ExplorerPane::default())
+            Pane::Explorer(explorer_pane)
         }
         (Pane::InstanceWorkspace(IwPane::Overview), D::Right) => {
             Pane::InstanceWorkspace(IwPane::Connections)
@@ -134,8 +149,9 @@ fn switch_pane_by_dir(
         (Pane::InstanceWorkspace(IwPane::Connections), D::Right) => {
             Pane::InstanceWorkspace(IwPane::Connections)
         }
-        // Workspace leaves left to the explorer and up to the header.
-        (Pane::SQLWorkspace, D::Left) => Pane::Explorer(ExplorerPane::default()),
+        // Workspace leaves left to the explorer (restoring its sub-pane) and up
+        // to the header.
+        (Pane::SQLWorkspace, D::Left) => Pane::Explorer(explorer_pane),
         (Pane::SQLWorkspace, D::Up) => Pane::Header,
         _ => return None,
     };
@@ -143,25 +159,96 @@ fn switch_pane_by_dir(
     Some(AppMsg::Shell(ShellMsg::FocusChanged { pane }))
 }
 
-/// Move the active tab's sub-pane focus one step in `dir`, according to the
-/// SQL tab's layout (editor on the left; results above history on the right):
-/// editor → results via right/down; results ↔ history via down/up; back to the
-/// editor via left/up from the right pane. Emits a `SqlTabMessage::Focus` so
-/// the change flows through `update`.
+/// Uppercase-letter pane jump, mirroring the original dbm's `[S]`/`[I]`/`[O]`/
+/// `[H]`/`[R]` title shortcuts:
+/// - `S` → SQL editor, `H` → History, `R` → Results (workspace sub-panes);
+/// - `I` → Instances, `O` → Objects (explorer sub-panes).
+///
+/// Matching the original dbm, these fire only for an *uppercase* letter (Shift
+/// or Caps Lock) with no Ctrl/Alt/Meta, and are suppressed while typing in the
+/// SQL editor (insert mode) so `S`/`H`/`R` do not interrupt a query mid-edit.
+fn pane_jump_from_key(key: KeyEvent, state: &super::state::AppState) -> Option<AppMsg> {
+    use crate::common::utils::shortcuts::{
+        caps_lock_active, effective_ascii_letter, pane_jump_modifiers_ok,
+    };
+    if !pane_jump_modifiers_ok(key.modifiers) {
+        return None;
+    }
+    let KeyCode::Char(c) = key.code else {
+        return None;
+    };
+    let upper = effective_ascii_letter(
+        c,
+        key.modifiers.contains(KeyModifiers::SHIFT),
+        caps_lock_active(&key, false),
+    );
+    if !upper.is_ascii_uppercase() {
+        return None;
+    }
+    // Suppress all letter jumps while typing in the SQL editor (insert mode),
+    // mirroring the original dbm's `workspace_text_input_active`.
+    if let Pane::SQLWorkspace = state.focus {
+        if let Some(tab) = state.sql.sql_tab.tabs.get(state.sql.sql_tab.active_tab) {
+            if tab.focus == SqlFocus::Editor
+                && matches!(tab.editor.editor.mode, edtui::EditorMode::Insert)
+            {
+                return None;
+            }
+        }
+    }
+    match upper {
+        // Workspace sub-panes.
+        'S' => Some(focus_subpane(SqlFocus::Editor)),
+        'H' => Some(focus_subpane(SqlFocus::History)),
+        'R' => Some(focus_subpane(SqlFocus::Results)),
+        // Explorer sub-panes.
+        'I' => Some(focus_explorer(crate::app_shell::nav::ExplorerPane::Instances)),
+        'O' => Some(focus_explorer(crate::app_shell::nav::ExplorerPane::Objects)),
+        _ => None,
+    }
+}
+
+/// Build a `SqlTabMessage::Focus` app message for the given workspace sub-pane.
+fn focus_subpane(focus: SqlFocus) -> AppMsg {
+    AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+        SqlTabMessage::Focus(focus),
+    ))))
+}
+
+/// Build a `ShellMsg::FocusChanged` app message moving focus to an explorer
+/// sub-pane (instances / objects).
+fn focus_explorer(sub: crate::app_shell::nav::ExplorerPane) -> AppMsg {
+    AppMsg::Shell(ShellMsg::FocusChanged {
+        pane: Pane::Explorer(sub),
+    })
+}
+
+/// Move the active tab's sub-pane focus one step in `dir`, mirroring the
+/// original dbm's `workspace_neighbor`:
+/// - editor → right: history; editor → down: results;
+/// - history → left: editor; history → down: results;
+/// - results → up: the previous editor/history pane (`upper_pane`).
+/// Returns `None` when the move would leave the workspace (e.g. editor → left,
+/// which goes to the explorer; results/history → up/left boundaries).
 fn switch_subpane(dir: crate::app_shell::nav::PaneDir, sql: &SqlState) -> Option<AppMsg> {
     use crate::app_shell::nav::PaneDir;
     use crate::features::sql_workspace::sql_tab::state::SqlFocus;
 
     let tab = sql.sql_tab.tabs.get(sql.sql_tab.active_tab)?;
     let focus = match (tab.focus, dir) {
-        // Editor: right or down enters the results pane (right, top).
-        (SqlFocus::Editor, PaneDir::Right | PaneDir::Down) => SqlFocus::Results,
-        // Results: down to history, up back to the editor.
-        (SqlFocus::Results, PaneDir::Down) => SqlFocus::History,
-        (SqlFocus::Results, PaneDir::Up | PaneDir::Left) => SqlFocus::Editor,
-        // History: up to results, left back to the editor.
-        (SqlFocus::History, PaneDir::Up) => SqlFocus::Results,
+        (SqlFocus::Editor, PaneDir::Right) => SqlFocus::History,
+        (SqlFocus::Editor, PaneDir::Down) => SqlFocus::Results,
         (SqlFocus::History, PaneDir::Left) => SqlFocus::Editor,
+        (SqlFocus::History, PaneDir::Down) => SqlFocus::Results,
+        // Up from results returns to the pane that was active before entering
+        // results (editor or history), matching the original dbm.
+        (SqlFocus::Results, PaneDir::Up) => {
+            if tab.upper_pane == SqlFocus::History {
+                SqlFocus::History
+            } else {
+                SqlFocus::Editor
+            }
+        }
         _ => return None,
     };
     Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
@@ -699,6 +786,13 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     let tab = state.sql_tab.tabs.get(state.sql_tab.active_tab)?;
     let tab_id = tab.session.id;
     let editor = &tab.editor;
+    tracing::debug!(
+        code = ?key.code,
+        modifiers = ?key.modifiers,
+        focus = ?tab.focus,
+        editor_mode = ?editor.editor.mode,
+        "sql_key received"
+    );
 
     // The context picker, when open, owns all keys.
     if editor.context_picker.open {
@@ -758,6 +852,31 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
             // Ctrl+Enter runs the current editor SQL.
             if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
                 return Some(sql_editor(EditorMessage::Run, tab_id));
+            }
+            // `Shift+Tab` forces the completion popup open in insert mode,
+            // matching the original dbm's `completion_trigger_key`: it accepts
+            // either a `BackTab` code or a `Tab` + SHIFT combination (some
+            // terminals report Shift+Tab as Tab+SHIFT), and always excludes
+            // CONTROL/ALT so it doesn't collide with other shortcuts.
+            // A tab-ish key code with the SHIFT modifier: some terminals report
+            // Shift+Tab as `BackTab`, others as `Tab`+SHIFT or even `Char('\t')`.
+            let is_tab_key = matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('\t'));
+            let is_shift_tab = is_tab_key
+                && key.modifiers.contains(KeyModifiers::SHIFT)
+                && key
+                    .modifiers
+                    .intersection(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                    .is_empty();
+            tracing::debug!(
+                is_shift_tab,
+                insert_mode = matches!(tab.editor.editor.mode, edtui::EditorMode::Insert),
+                "completion trigger check"
+            );
+            // The original dbm only triggers completion from insert mode.
+            if is_shift_tab
+                && matches!(tab.editor.editor.mode, edtui::EditorMode::Insert)
+            {
+                return Some(sql_editor(EditorMessage::ForceCompletion, tab_id));
             }
             // Otherwise forward the key to the editor buffer.
             editor_key(key, tab_id)
@@ -924,11 +1043,9 @@ fn sql_tab_navigation_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         {
             SqlTabMessage::Tab((visible_active + 1) % count)
         }
-        KeyCode::BackTab if key.modifiers.contains(KeyModifiers::CONTROL)
-            || key.modifiers.contains(KeyModifiers::SHIFT) =>
-        {
-            SqlTabMessage::Tab((visible_active + count - 1) % count)
-        }
+        // Plain `Shift+Tab` (BackTab) is not tab navigation — in the editor it
+        // forces the completion popup open (see `sql_workspace_key`). There is
+        // no `Ctrl+Shift+Tab` previous-tab binding; use `Alt+p` instead.
         KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             SqlTabMessage::CloseTab(visible_active)
         }
@@ -1047,14 +1164,117 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_shift_tab_wraps_to_previous_tab() {
-        let state = state_with_tabs(2); // active_tab = 1
-        let msg = sql_tab_navigation_key(
-            key(KeyCode::BackTab, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
-            &state,
-        )
-        .expect("ctrl+shift+tab should be handled");
-        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab(0));
+    fn ctrl_shift_tab_is_not_tab_navigation() {
+        // `Ctrl+Shift+Tab` is no longer bound to tab switching; use `Alt+p`
+        // for the previous tab instead.
+        let state = state_with_tabs(2);
+        assert!(
+            sql_tab_navigation_key(
+                key(KeyCode::BackTab, KeyModifiers::CONTROL | KeyModifiers::SHIFT),
+                &state,
+            )
+            .is_none(),
+            "Ctrl+Shift+Tab must not switch tabs anymore"
+        );
+    }
+
+    #[test]
+    fn alt_p_switches_to_previous_tab() {
+        let state = state_with_tabs(3);
+        let count = state.sql_tab.visible_tab_count();
+        let visible_active = state.sql_tab.global_to_visible().unwrap_or(0);
+        assert_eq!(visible_active, 2);
+        let msg = sql_tab_navigation_key(key(KeyCode::Char('p'), KeyModifiers::ALT), &state)
+            .expect("alt+p should be handled");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab((visible_active + count - 1) % count));
+    }
+
+    #[test]
+    fn plain_shift_tab_is_not_tab_navigation() {
+        // Plain Shift+Tab (BackTab without Ctrl) is no longer tab navigation:
+        // in the editor it forces completion. So it must be None here.
+        let state = state_with_tabs(2);
+        assert!(
+            sql_tab_navigation_key(key(KeyCode::BackTab, KeyModifiers::SHIFT), &state).is_none(),
+            "plain Shift+Tab must not switch tabs"
+        );
+    }
+
+    fn force_completion_msg(state: &SqlState, key: KeyEvent) -> AppMsg {
+        sql_key(key, state).expect("Shift+Tab in insert-mode editor should force completion")
+    }
+
+    #[test]
+    fn shift_tab_in_editor_forces_completion() {
+        let mut state = state_with_tabs(1);
+        // The completion trigger only fires in insert mode (original dbm).
+        state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        let msg = force_completion_msg(&state, key(KeyCode::BackTab, KeyModifiers::SHIFT));
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    msg: EditorMsg::Message(EditorMessage::ForceCompletion),
+                    ..
+                },
+            )))) => {}
+            other => panic!("expected ForceCompletion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tab_plus_shift_also_forces_completion() {
+        // Some terminals report Shift+Tab as `Tab` + SHIFT rather than BackTab;
+        // both forms must trigger completion (original dbm).
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        let msg = force_completion_msg(&state, key(KeyCode::Tab, KeyModifiers::SHIFT));
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    msg: EditorMsg::Message(EditorMessage::ForceCompletion),
+                    ..
+                },
+            )))) => {}
+            other => panic!("expected ForceCompletion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn char_tab_plus_shift_also_forces_completion() {
+        // Some terminals report Shift+Tab as `Char('\t')` + SHIFT; that form
+        // must also force completion in insert mode.
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        let msg = sql_key(key(KeyCode::Char('\t'), KeyModifiers::SHIFT), &state)
+            .expect("char-tab+shift should force completion");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    msg: EditorMsg::Message(EditorMessage::ForceCompletion),
+                    ..
+                },
+            )))) => {}
+            other => panic!("expected ForceCompletion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shift_tab_in_normal_mode_does_not_force_completion() {
+        // The original dbm only triggers completion from insert mode.
+        let state = state_with_tabs(1); // default editor mode is normal
+        let msg = sql_key(key(KeyCode::BackTab, KeyModifiers::SHIFT), &state);
+        assert!(
+            !matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Editor {
+                        msg: EditorMsg::Message(EditorMessage::ForceCompletion),
+                        ..
+                    },
+                )))))
+            ),
+            "Shift+Tab in normal mode must not force completion"
+        );
     }
 
     #[test]
@@ -1519,12 +1739,133 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_l_in_sql_workspace_moves_subpane_editor_to_results() {
-        // Default tab focus is Editor; Ctrl+l (right) moves editor → results.
+    fn uppercase_s_jumps_to_sql_editor() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::Explorer(ExplorerPane::default()); // jump from another pane
+        let msg = key_to_msg(key(KeyCode::Char('S'), KeyModifiers::SHIFT), &state)
+            .expect("uppercase S should jump to the SQL editor");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Focus(f),
+            )))) => assert_eq!(f, SqlFocus::Editor),
+            other => panic!("expected Focus(Editor), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn uppercase_h_and_r_jump_to_history_and_results() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        let msg = key_to_msg(key(KeyCode::Char('H'), KeyModifiers::SHIFT), &state)
+            .expect("uppercase H should jump to history");
+        assert!(matches!(
+            msg,
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Focus(f)
+            )))) if f == SqlFocus::History
+        ));
+        let msg = key_to_msg(key(KeyCode::Char('R'), KeyModifiers::SHIFT), &state)
+            .expect("uppercase R should jump to results");
+        assert!(matches!(
+            msg,
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Focus(f)
+            )))) if f == SqlFocus::Results
+        ));
+    }
+
+    #[test]
+    fn uppercase_i_and_o_jump_to_explorer_panes() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        let msg = key_to_msg(key(KeyCode::Char('I'), KeyModifiers::SHIFT), &state)
+            .expect("uppercase I should jump to instances");
+        assert!(matches!(
+            msg,
+            AppMsg::Shell(ShellMsg::FocusChanged { pane: Pane::Explorer(ExplorerPane::Instances) })
+        ));
+        let msg = key_to_msg(key(KeyCode::Char('O'), KeyModifiers::SHIFT), &state)
+            .expect("uppercase O should jump to objects");
+        assert!(matches!(
+            msg,
+            AppMsg::Shell(ShellMsg::FocusChanged { pane: Pane::Explorer(ExplorerPane::Objects) })
+        ));
+    }
+
+    #[test]
+    fn jump_suppressed_while_typing_in_sql_editor_insert_mode() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+        );
+        state.sql.sql_tab.tabs[0].focus = SqlFocus::Editor;
+        state.sql.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        // While typing (insert mode), uppercase S must NOT jump away (it becomes
+        // a normal keystroke), so the result must not be a Focus/pane-jump msg.
+        let msg = key_to_msg(key(KeyCode::Char('S'), KeyModifiers::SHIFT), &state);
+        assert!(
+            !matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::Focus(_))
+                ))))
+            ),
+            "S while typing in the editor must not jump to another pane"
+        );
+    }
+
+    #[test]
+    fn lowercase_letters_do_not_jump() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        // Plain lowercase s/i/o/h/r (no Shift/Caps) must not trigger a jump.
+        for c in ['s', 'i', 'o', 'h', 'r'] {
+            assert!(
+                key_to_msg(key(KeyCode::Char(c), KeyModifiers::NONE), &state).is_none(),
+                "plain lowercase {c} must not jump"
+            );
+        }
+    }
+
+    #[test]
+    fn ctrl_l_in_sql_workspace_moves_subpane_editor_to_history() {
+        // Default tab focus is Editor; Ctrl+l (right) moves editor → history,
+        // matching the original dbm's `workspace_neighbor`.
         let sql = state_with_tabs(1);
         let msg = switch_subpane(crate::app_shell::nav::PaneDir::Right, &sql)
-            .expect("editor right should move to results");
-        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Focus(SqlFocus::Results));
+            .expect("editor right should move to history");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Focus(SqlFocus::History));
+    }
+
+    #[test]
+    fn workspace_left_returns_to_explorer_remembered_subpane() {
+        use crate::app_shell::nav::{ExplorerPane, PaneDir};
+        // From the SQL workspace going Left, the explorer is restored at its
+        // remembered sub-pane (Objects) rather than resetting to Instances.
+        let msg = switch_pane_by_dir(PaneDir::Left, Pane::SQLWorkspace, false, ExplorerPane::Objects)
+            .expect("workspace left should return to the explorer");
+        match msg {
+            AppMsg::Shell(ShellMsg::FocusChanged { pane: Pane::Explorer(sub) }) => {
+                assert_eq!(sub, ExplorerPane::Objects)
+            }
+            other => panic!("expected explorer, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ctrl_l_from_editor_does_not_leave_workspace() {
+        // Editor → left leaves to the explorer (shell-level), so switch_subpane
+        // returns None for it.
+        let sql = state_with_tabs(1);
+        assert!(
+            switch_subpane(crate::app_shell::nav::PaneDir::Left, &sql).is_none(),
+            "editor left must fall through to the explorer"
+        );
     }
 
     #[test]
@@ -1537,13 +1878,31 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_j_from_results_moves_to_history() {
-        // Set focus to Results, then Down → history.
+    fn ctrl_j_from_results_does_not_move() {
+        // The original dbm has no Down neighbor for Results, so it returns None
+        // (falls through to shell-level switching).
         let mut sql = state_with_tabs(1);
         sql.sql_tab.tabs[0].focus = SqlFocus::Results;
-        let msg = switch_subpane(crate::app_shell::nav::PaneDir::Down, &sql)
-            .expect("results down should move to history");
+        assert!(
+            switch_subpane(crate::app_shell::nav::PaneDir::Down, &sql).is_none(),
+            "results down must not move within the workspace"
+        );
+    }
+
+    #[test]
+    fn ctrl_k_from_results_returns_to_upper_pane() {
+        // Results → Up returns to the previous editor/history pane (upper_pane).
+        let mut sql = state_with_tabs(1);
+        sql.sql_tab.tabs[0].focus = SqlFocus::Results;
+        sql.sql_tab.tabs[0].upper_pane = SqlFocus::History;
+        let msg = switch_subpane(crate::app_shell::nav::PaneDir::Up, &sql)
+            .expect("results up should return to history");
         assert_eq!(extract_tab_msg(msg), SqlTabMessage::Focus(SqlFocus::History));
+        // Default upper_pane is editor.
+        sql.sql_tab.tabs[0].upper_pane = SqlFocus::Editor;
+        let msg = switch_subpane(crate::app_shell::nav::PaneDir::Up, &sql)
+            .expect("results up should return to editor");
+        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Focus(SqlFocus::Editor));
     }
 
     #[test]

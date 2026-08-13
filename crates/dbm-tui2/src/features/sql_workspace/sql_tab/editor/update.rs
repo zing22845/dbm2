@@ -26,7 +26,7 @@ pub fn update(
         }
         EditorMessage::Paste { text } => {
             crate::common::editor::paste_text(&mut state.handler, &mut state.editor, &text);
-            refresh_completion(&mut state);
+            refresh_completion(&mut state, false);
             dirty = true;
         }
         EditorMessage::SetSql { sql } => {
@@ -37,6 +37,10 @@ pub fn update(
         EditorMessage::Run => {
             let sql = crate::common::editor::editor_text(&state.editor);
             intents.push(EditorIntent::RunQuery { sql });
+        }
+        EditorMessage::ForceCompletion => {
+            refresh_completion(&mut state, true);
+            dirty = true;
         }
         EditorMessage::CatalogLoaded {
             tables,
@@ -155,7 +159,7 @@ fn handle_key(state: &mut EditorState, key: KeyEvent, tracked_caps_lock: bool) -
     // Non-ASCII chars (IME commits) route through insert_text in Insert mode.
     if editor::try_insert_non_ascii_key(&mut state.handler, &mut state.editor, key, tracked_caps_lock)
     {
-        refresh_completion(state);
+        refresh_completion(state, false);
         return true;
     }
     if !editor::accepts_key_event(&key) {
@@ -163,10 +167,15 @@ fn handle_key(state: &mut EditorState, key: KeyEvent, tracked_caps_lock: bool) -
     }
     let before = editor::editor_text(&state.editor);
     let before_cursor = state.editor.cursor;
+    let before_mode = state.editor.mode;
     state.handler.on_key_event(key, &mut state.editor);
-    let changed = editor::editor_text(&state.editor) != before || state.editor.cursor != before_cursor;
+    // Redraw when the buffer text, cursor, or editor mode changed (mode toggles
+    // like `i`/`Esc` don't touch text or cursor, but must repaint the title).
+    let changed = editor::editor_text(&state.editor) != before
+        || state.editor.cursor != before_cursor
+        || state.editor.mode != before_mode;
     if changed {
-        refresh_completion(state);
+        refresh_completion(state, false);
     }
     changed
 }
@@ -177,7 +186,8 @@ fn handle_key(state: &mut EditorState, key: KeyEvent, tracked_caps_lock: bool) -
 /// completion, and columns are scoped to the tables referenced in the buffer
 /// before the cursor (so a query on one table does not suggest another's
 /// columns). Falls back to keyword-only completion when the catalog is empty.
-fn refresh_completion(state: &mut EditorState) {
+/// `explicit` forces the popup open (Shift+Tab), bypassing the auto-open gate.
+fn refresh_completion(state: &mut EditorState, explicit: bool) {
     let sql = crate::common::editor::editor_text(&state.editor);
     let cursor = editor_cursor(&state.editor);
     let tables = state.completion_catalog.tables.clone();
@@ -189,6 +199,7 @@ fn refresh_completion(state: &mut EditorState) {
             cursor,
             tables,
             columns,
+            explicit,
         },
         sc_state,
     );
@@ -289,6 +300,20 @@ mod tests {
         // After typing, the completion popup should be open (s → SELECT etc.).
         assert!(state.sql_completion.is_open());
         assert_eq!(editor::editor_text(&state.editor), "s");
+    }
+
+    #[test]
+    fn mode_toggle_marks_dirty_for_redraw() {
+        // Starting in normal mode, pressing `i` only changes the editor mode
+        // (no text/cursor change), but must still request a redraw so the title
+        // updates immediately.
+        let state = EditorState::with_sql("");
+        let (s, _i, _e, dirty) = update(
+            EditorMessage::KeyEvent { key: char_key('i'), tracked_caps_lock: false },
+            state,
+        );
+        assert!(s.editor.mode == edtui::EditorMode::Insert, "mode should switch to insert");
+        assert!(dirty, "mode toggle must mark the view dirty for redraw");
     }
 
     #[test]

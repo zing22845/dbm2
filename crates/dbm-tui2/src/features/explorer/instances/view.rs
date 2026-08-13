@@ -35,7 +35,7 @@ pub fn render(
     let hint = instances_pane_footer_text(instance_row);
     let footer_h = footer_height(&hint, area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
     let block = Block::default()
-        .title(" instances ")
+        .title(" [I] Instances ")
         .borders(Borders::ALL)
         .border_style(p.active_border(region_focused));
     frame.render_widget(&block, area);

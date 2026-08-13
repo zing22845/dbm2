@@ -166,6 +166,7 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
                 schema: non_empty(t.schema.clone()),
             },
             focus: crate::features::sql_workspace::sql_tab::state::SqlFocus::default(),
+            upper_pane: crate::features::sql_workspace::sql_tab::state::SqlFocus::Editor,
             split_ratio: t.split_ratio,
             history_pane_width: t.history_pane_width,
             editor: EditorState::with_sql(&t.sql),

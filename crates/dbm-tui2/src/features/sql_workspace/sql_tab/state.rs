@@ -48,6 +48,10 @@ pub struct SqlTab {
     pub session: TabSession,
     /// The sub-pane currently focused (routes keys within this tab).
     pub focus: SqlFocus,
+    /// The `Editor`/`History` sub-pane that was active before entering Results,
+    /// so Ctrl+Up from Results returns to the previous pane (mirroring the
+    /// original dbm's `workspace_upper_pane`). Defaults to `Editor`.
+    pub upper_pane: SqlFocus,
     /// Editor top-pane height as a percent of the body (horizontal splitter).
     pub split_ratio: u8,
     /// History pane width in columns (vertical splitter between editor/history).
@@ -230,6 +234,7 @@ impl SqlTabState {
                 ..TabSession::default()
             },
             focus: SqlFocus::default(),
+            upper_pane: SqlFocus::Editor,
             split_ratio: DEFAULT_SPLIT_RATIO,
             history_pane_width: DEFAULT_HISTORY_WIDTH,
             editor: EditorState::default(),
@@ -327,6 +332,7 @@ impl SqlTabState {
                 schema,
             },
             focus: SqlFocus::default(),
+            upper_pane: SqlFocus::Editor,
             split_ratio: DEFAULT_SPLIT_RATIO,
             history_pane_width: DEFAULT_HISTORY_WIDTH,
             editor: EditorState::default(),

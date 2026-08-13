@@ -31,7 +31,7 @@ pub fn render(
     let hint = objects_pane_footer_text();
     let footer_h = footer_height(&hint, area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
     let block = Block::default()
-        .title(" objects ")
+        .title(" [O] Objects ")
         .borders(Borders::ALL)
         .border_style(p.active_border(region_focused));
     frame.render_widget(&block, area);

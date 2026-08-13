@@ -23,7 +23,7 @@ pub fn render(
     area: Rect,
     state: &DiscoverState,
     focus: crate::app_shell::nav::DiscoverPane,
-) {
+) -> Option<crate::common::editor::EditorHardwareCursor> {
     use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::{discover_engine_footer_text, discover_footer_text, draw_pane_footer};
     let p = theme.palette();
@@ -37,7 +37,7 @@ pub fn render(
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     if inner.width == 0 || inner.height == 0 {
-        return;
+        return None;
     }
 
     let footer_text = discover_footer_text(&discover_status(state));
@@ -84,7 +84,7 @@ pub fn render(
         ])
         .split(chunks[1]);
 
-    targets_view::render(frame, theme, body[0], &state.targets, focus);
+    let caret = targets_view::render(frame, theme, body[0], &state.targets, focus);
     crate::common::view::splitter::draw(
         frame,
         body[1],
@@ -105,7 +105,9 @@ pub fn render(
     // keys are routed in the discover input layer.
     if state.close_confirm {
         render_close_confirm(frame, theme, area);
+        return None; // the confirm popup covers the edit cell
     }
+    caret
 }
 
 /// A one-line status for the discover dialog footer (scanning with live

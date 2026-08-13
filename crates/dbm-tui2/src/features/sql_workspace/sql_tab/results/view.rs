@@ -19,14 +19,22 @@ use super::detail::view as detail_view;
 use super::pagination::{RESULTS_PAGINATION_BAR_HEIGHT, pagination_toolbar_line};
 
 /// Render the results feature: table (or empty/error), toolbar, detail.
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState) {
+/// `focused` drives the border/title highlight so only the current SQL
+/// sub-pane is emphasized.
+pub fn render(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    state: &ResultsState,
+    focused: bool,
+) {
     if area.width == 0 || area.height == 0 {
         return;
     }
     let p = theme.palette();
 
     let Some(result) = state.result.as_ref() else {
-        render_empty(frame, theme, area);
+        render_empty(frame, theme, area, focused);
         return;
     };
 
@@ -68,7 +76,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ResultsState
     draw_action_bar(frame, chunks[1], &model, bar_scroll, p);
 
     // Table.
-    render_table(frame, theme, chunks[2], state, result);
+    render_table(frame, theme, chunks[2], state, result, focused);
 
     // Detail.
     let body = state.selected_cell().unwrap_or_default();
@@ -97,12 +105,12 @@ fn toolbar_model(state: &ResultsState) -> ResultsToolbarModel {
     }
 }
 
-fn render_empty(frame: &mut Frame, theme: &Theme, area: Rect) {
+fn render_empty(frame: &mut Frame, theme: &Theme, area: Rect, focused: bool) {
     let p = theme.palette();
     let block = Block::default()
-        .title(" Results ")
+        .title(" [R] Results ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border));
+        .border_style(p.active_border(focused));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(
@@ -120,10 +128,11 @@ fn render_table(
     area: Rect,
     state: &ResultsState,
     result: &super::state::QueryResultData,
+    focused: bool,
 ) {
     let p = theme.palette();
     let title = pane_search_title_line(
-        " Results",
+        " [R] Results",
         &state.search,
         true,
         false,
@@ -132,12 +141,12 @@ fn render_table(
         state.row_count(),
         None,
         None,
-        None,
+        Some(Style::default().fg(if focused { p.accent } else { p.muted })),
     );
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border_active));
+        .border_style(p.active_border(focused));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 

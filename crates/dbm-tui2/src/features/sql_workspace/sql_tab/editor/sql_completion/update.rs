@@ -12,7 +12,9 @@ use super::msg::SqlCompletionMessage;
 use super::state::SqlCompletionState;
 use super::intent::SqlCompletionIntent;
 use super::effect::SqlCompletionEffect;
-use super::context::{CompletionIntent, get_completion_context, should_offer_completion_explicit};
+use super::context::{
+    CompletionIntent, get_completion_context, should_auto_open, should_offer_completion_explicit,
+};
 use super::engine::SqlEngine;
 use super::provider::{CompletionInput, build_completion_items};
 
@@ -33,8 +35,9 @@ pub fn update(
             cursor,
             tables,
             columns,
+            explicit,
         } => {
-            refresh(&mut state, &sql, cursor, &tables, &columns);
+            refresh(&mut state, &sql, cursor, &tables, &columns, explicit);
             true
         }
         SqlCompletionMessage::Close => {
@@ -71,26 +74,46 @@ pub fn update(
 }
 
 /// Recompute completion items and update the popup open/closed state.
+///
+/// `explicit` mirrors the original dbm's `completion_trigger_key` (Shift+Tab):
+/// an explicit request forces the popup open even where the auto-open gate
+/// would keep it closed (e.g. after `,`/`(`), but still never shows a popup in
+/// a suppressed context.
 fn refresh(
     state: &mut SqlCompletionState,
     sql: &str,
     cursor: Cursor,
     tables: &[String],
     columns: &[ColumnInfo],
+    explicit: bool,
 ) {
     let context = get_completion_context(sql, cursor);
 
-    // Suppressed contexts never show a popup.
+    // Suppressed contexts never show a popup, explicit or not.
     if matches!(context.intent, CompletionIntent::Suppressed) {
         state.close();
         return;
     }
 
-    // Only offer keyword completion with a prefix (or when explicit); the
-    // editor triggers an explicit refresh with Shift+Tab. We conservatively
-    // require a prefix for keyword intent to avoid an empty popup.
+    // Auto-open gating, matching the original dbm: a *closed* popup only opens
+    // after an auto-open trigger (after `from `/`on `, an identifier char, or a
+    // qualifier / trigger char like `.`/`$`/`@`), and never right after
+    // `,`/`;`/`(`. An already-open popup stays open while typing so the user
+    // can keep selecting candidates without it flickering closed. An explicit
+    // request (Shift+Tab) bypasses this gate.
+    if !explicit && !state.is_open() && !should_auto_open(sql, cursor) {
+        state.close();
+        return;
+    }
+
+    // Only offer keyword completion with a prefix — except on an explicit
+    // request (Shift+Tab), which forces the keyword list open even with an
+    // empty prefix / empty buffer (matching the original dbm's
+    // `completion_trigger_key`). We conservatively require a prefix for the
+    // automatic keyword popup to avoid an empty one.
     if matches!(context.intent, CompletionIntent::Keyword)
         && context.prefix.is_empty()
+        && !explicit
         && !should_offer_completion_explicit(&context, sql)
     {
         state.close();
@@ -146,6 +169,7 @@ mod tests {
                 cursor: cursor_at("select * from users wh"),
                 tables: vec![],
                 columns: vec![],
+                explicit: false,
             },
             SqlCompletionState::default(),
         );
@@ -161,10 +185,80 @@ mod tests {
                 cursor: cursor_at("SELECT 'foo"),
                 tables: vec![],
                 columns: vec![],
+                explicit: false,
             },
             SqlCompletionState::default(),
         );
         assert!(!s.is_open());
+    }
+
+    #[test]
+    fn refresh_does_not_auto_open_after_punctuation() {
+        // Right after a comma the auto-open gate stays closed (matching the
+        // original dbm): a keyword/column popup must not pop up after `,`.
+        let (s, _i, _e, _d) = update(
+            SqlCompletionMessage::Refresh {
+                sql: "select a,".into(),
+                cursor: cursor_at("select a,"),
+                tables: vec!["users".into()],
+                columns: vec![],
+                explicit: false,
+            },
+            SqlCompletionState::default(),
+        );
+        assert!(!s.is_open(), "must not auto-open after a comma");
+    }
+
+    #[test]
+    fn refresh_auto_opens_after_from_whitespace() {
+        // After `from ` the table popup auto-opens (original dbm behavior).
+        let (s, _i, _e, _d) = update(
+            SqlCompletionMessage::Refresh {
+                sql: "select * from ".into(),
+                cursor: cursor_at("select * from "),
+                tables: vec!["users".into(), "orders".into()],
+                columns: vec![],
+                explicit: false,
+            },
+            SqlCompletionState::default(),
+        );
+        assert!(s.is_open());
+        assert!(s.items.iter().any(|i| i.label == "users"));
+    }
+
+    #[test]
+    fn explicit_refresh_forces_open_on_empty_buffer() {
+        // Shift+Tab on an empty buffer must still force the keyword popup open
+        // (matching the original dbm), even though an empty buffer would not
+        // auto-open or pass the keyword-prefix gate.
+        let (s, _i, _e, _d) = update(
+            SqlCompletionMessage::Refresh {
+                sql: String::new(),
+                cursor: Cursor::new(0, 0),
+                tables: vec![],
+                columns: vec![],
+                explicit: true,
+            },
+            SqlCompletionState::default(),
+        );
+        assert!(s.is_open(), "explicit refresh on empty buffer must open the popup");
+    }
+
+    #[test]
+    fn explicit_refresh_forces_open_after_punctuation() {
+        // Shift+Tab (explicit) forces the popup open even right after a comma,
+        // bypassing the auto-open gate (matching the original dbm).
+        let (s, _i, _e, _d) = update(
+            SqlCompletionMessage::Refresh {
+                sql: "select a,".into(),
+                cursor: cursor_at("select a,"),
+                tables: vec!["users".into()],
+                columns: vec![],
+                explicit: true,
+            },
+            SqlCompletionState::default(),
+        );
+        assert!(s.is_open(), "explicit refresh must force the popup open");
     }
 
     #[test]
@@ -175,6 +269,7 @@ mod tests {
                 cursor: cursor_at("sel"),
                 tables: vec![],
                 columns: vec![],
+                explicit: false,
             },
             SqlCompletionState::default(),
         );
@@ -194,6 +289,7 @@ mod tests {
                 cursor: cursor_at("sel"),
                 tables: vec![],
                 columns: vec![],
+                explicit: false,
             },
             SqlCompletionState::default(),
         );

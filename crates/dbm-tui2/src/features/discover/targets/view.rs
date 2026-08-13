@@ -14,13 +14,16 @@ use super::state::{TargetCol, TargetsState};
 /// focused cell highlighted and an inline edit shown when editing. The border
 /// highlights only when the targets pane owns focus, and a footer line shows
 /// the active target keys.
+/// Render the targets editor. Returns the inline-edit caret position when an
+/// editable cell is focused and being edited, so the shell can place the
+/// terminal hardware cursor.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
     state: &TargetsState,
     focus: crate::app_shell::nav::DiscoverPane,
-) {
+) -> Option<crate::common::editor::EditorHardwareCursor> {
     use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::{discover_targets_footer_text, draw_pane_footer};
     let p = theme.palette();
@@ -35,7 +38,7 @@ pub fn render(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
-        return;
+        return None;
     }
 
     // The footer may span the hints line plus a loopback note and/or the last
@@ -59,6 +62,7 @@ pub fn render(
         inner.width,
         inner.height.saturating_sub(footer_h),
     );
+    let mut caret: Option<crate::common::editor::EditorHardwareCursor> = None;
     if body.width > 0 && body.height > 0 {
         let selected = focused && state.row < state.targets.len();
         let header = ratatui::widgets::Row::new(["#", "Host", "Ports"])
@@ -123,12 +127,41 @@ pub fn render(
             let max_scroll = state.targets.len().saturating_sub(viewport);
             draw_vertical_pane_scrollbar(frame, bar, start, viewport, max_scroll, p, false);
         }
+
+        // Inline-edit caret: while editing a host/ports cell, report the caret's
+        // on-screen position so the shell shows the terminal caret inside the
+        // cell.
+        if state.editing && state.row < state.targets.len() {
+            let row_in_content = state.row.saturating_sub(start);
+            if (row_in_content as u16) < content.height.saturating_sub(1) {
+                // Column x positions: `#`(3) + spacing(1) + host(45%) + spacing(1).
+                let spacing: u16 = 1;
+                let num_w: u16 = 3;
+                let remaining = content.width.saturating_sub(num_w + spacing + spacing);
+                let host_w = (remaining as u16 * 45) / 100;
+                let cell_x = match state.col {
+                    TargetCol::Host => content.x + num_w + spacing,
+                    TargetCol::Ports => content.x + num_w + spacing + host_w + spacing,
+                };
+                // Caret column within the cell: display width of the edit prefix.
+                let prefix = &state.edit_buf[..state.edit_cursor.min(state.edit_buf.len())];
+                let caret_offset = unicode_width::UnicodeWidthStr::width(prefix) as u16;
+                let x = cell_x.saturating_add(1 + caret_offset);
+                let y = content.y.saturating_add(1 /* header */ + row_in_content as u16);
+                caret = Some(crate::common::editor::EditorHardwareCursor {
+                    position: ratatui::layout::Position::new(x, y),
+                    style: crate::common::editor::hardware_cursor_style(edtui::EditorMode::Insert),
+                });
+            }
+        }
     }
 
     if footer_h > 0 {
         let footer_area = Rect::new(inner.x, inner.y + body.height, inner.width, footer_h);
         draw_pane_footer(frame, theme, footer_area, &footer_text);
     }
+
+    caret
 }
 
 /// Style for the focused/selected target row (the unified selection background).

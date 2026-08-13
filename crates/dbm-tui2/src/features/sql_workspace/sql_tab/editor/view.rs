@@ -18,8 +18,16 @@ use super::context_picker::view as cp_view;
 use super::sql_completion::view as sc_view;
 
 /// Render the editor feature. Returns the hardware cursor position if the
-/// editor is visible (the caller places the terminal cursor).
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &EditorState) {
+/// editor is visible (the caller places the terminal cursor). `focused` drives
+/// the border/title highlight (the current SQL sub-pane is emphasized, others
+/// muted), matching the other panes.
+pub fn render(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    state: &EditorState,
+    focused: bool,
+) -> Option<crate::common::editor::EditorHardwareCursor> {
     let p = theme.palette();
 
     // The editor gets a titled border like the results / history panes, with
@@ -31,21 +39,21 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &EditorState)
         edtui::EditorMode::Normal => "normal",
     };
     let title = pane_search_title_line(
-        &format!(" [E] SQL ({mode})"),
+        &format!(" [S] SQL ({mode})"),
         &state.sql_search.search,
         false,
         true,
-        Style::default().fg(p.muted),
+        Style::default().fg(if focused { p.border_active } else { p.muted }),
         0,
         0,
         None,
-        Some(Style::default().fg(p.accent)),
-        Some(Style::default().fg(p.accent)),
+        Some(Style::default().fg(if focused { p.accent } else { p.muted })),
+        Some(Style::default().fg(if focused { p.accent } else { p.muted })),
     );
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border_active));
+        .border_style(p.active_border(focused));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -71,10 +79,23 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &EditorState)
         .split(chunks[0]);
 
     let mut editor = state.editor.clone();
-    let _cursor = editor::render_editor(&mut editor, body[0], frame.buffer_mut());
+    let cursor = editor::render_editor(&mut editor, body[0], frame.buffer_mut());
     cp_view::render(frame, theme, body[1], &state.context_picker);
-    sc_view::render(frame, theme, body[0], &state.sql_completion);
+    // Anchor the completion popup to the editor cursor (its screen position) so
+    // it follows the caret, matching the original dbm. `cursor.position` is the
+    // absolute terminal position of the caret after rendering.
+    sc_view::render(
+        frame,
+        theme,
+        body[0],
+        &state.sql_completion,
+        cursor.as_ref().map(|c| c.position),
+    );
 
     // Editor footer hints from the shared builder (wrapped to the pane width).
     draw_footer(frame, theme, chunks[1], &hint);
+
+    // Hand the hardware cursor up so the shell can place the terminal caret at
+    // the editor cursor (it also drives the completion popup anchor above).
+    cursor
 }

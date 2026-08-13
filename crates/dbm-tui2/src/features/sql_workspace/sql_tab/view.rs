@@ -11,15 +11,25 @@ use crate::common::view::theme::Theme;
 
 use super::layout::sql_tab_layout;
 use super::session::TabSession;
-use super::state::SqlTabState;
+use super::state::{SqlFocus, SqlTabState};
 use super::editor::view as editor_view;
 use super::history::view as history_view;
 use super::results::view as results_view;
 
 /// Render the `sql_tab` feature: a tab bar plus the active tab's child panes.
 /// The area is already inside the SQL workspace parent pane's border (the outer
-/// " SQL Workspace " block is drawn by `sql_workspace/view.rs`).
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState) {
+/// " SQL Workspace " block is drawn by `sql_workspace/view.rs`). `focused`
+/// tells whether the shell focus is on the SQL workspace; the active sub-pane's
+/// border/title only lights up while the workspace itself is focused (matching
+/// the original dbm). Returns the editor's hardware cursor when the editor
+/// sub-pane holds focus (so the shell can place the terminal caret), else `None`.
+pub fn render(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    state: &SqlTabState,
+    focused: bool,
+) -> Option<crate::common::editor::EditorHardwareCursor> {
     // No connection tab open: show an empty-state hint and no tab bar, mirroring
     // the original dbm's `workspace_empty_hint` (no phantom "sql 0" tab, no
     // editor / history / results panes).
@@ -31,7 +41,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState)
             Style::default().fg(p.muted),
         ));
         frame.render_widget(para, area);
-        return;
+        return None;
     }
 
     let chunks = Layout::default()
@@ -51,29 +61,49 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlTabState)
     let Some(tab) = state.tabs.get(state.active_tab) else {
         // No tab is open: render an empty placeholder in the body.
         frame.render_widget(Block::default().title("No open SQL tab"), body_area);
-        return;
+        return None;
     };
 
     // Layout mirrors the original dbm `sql_tab_layout` (ui.rs §11): editor +
     // history on the top row, results below; the pane/splitter rects come from
-    // the shared pure layout so the renderer and the run loop agree.
+    // the shared pure layout so the renderer and the run loop agree. A sub-pane
+    // lights up only while the SQL workspace itself has shell focus.
+    let editor_focused = focused && tab.focus == SqlFocus::Editor;
+    let history_focused = focused && tab.focus == SqlFocus::History;
+    let results_focused = focused && tab.focus == SqlFocus::Results;
     let layout = sql_tab_layout(body_area, tab.split_ratio, tab.history_pane_width);
     if layout.editor.width == 0 {
         // Area too small to split: show a single results pane.
-        results_view::render(frame, theme, body_area, &tab.results);
-        return;
+        results_view::render(frame, theme, body_area, &tab.results, results_focused);
+        return None;
     }
 
-    editor_view::render(frame, theme, layout.editor, &tab.editor);
+    // Only the focused editor sub-pane exposes its caret to the shell.
+    let cursor = if editor_focused {
+        editor_view::render(frame, theme, layout.editor, &tab.editor, editor_focused)
+    } else {
+        editor_view::render(frame, theme, layout.editor, &tab.editor, editor_focused);
+        None
+    };
 
     let (instance, connection) = session_view_key(&tab.session);
-    history_view::render(frame, theme, layout.history, &tab.history, &instance, &connection);
+    history_view::render(
+        frame,
+        theme,
+        layout.history,
+        &tab.history,
+        &instance,
+        &connection,
+        history_focused,
+    );
 
-    results_view::render(frame, theme, layout.results, &tab.results);
+    results_view::render(frame, theme, layout.results, &tab.results, results_focused);
 
     // Draw the two draggable splitter strips.
     draw(frame, layout.h_splitter, SplitOrientation::Horizontal, false, false);
     draw(frame, layout.v_splitter, SplitOrientation::Vertical, false, false);
+
+    if editor_focused { cursor } else { None }
 }
 
 /// Derive the `(instance, connection)` history key for rendering (mirrors the

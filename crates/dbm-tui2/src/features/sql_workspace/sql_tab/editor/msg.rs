@@ -21,6 +21,10 @@ pub enum EditorMessage {
     SetSql { sql: String },
     /// Run the current editor SQL (emits a RunQuery intent resolved by sql_tab).
     Run,
+    /// Force the SQL-completion popup open at the current buffer/cursor,
+    /// bypassing the auto-open gate (Shift+Tab; mirrors the original dbm's
+    /// `completion_trigger_key`).
+    ForceCompletion,
     /// The SQL-completion catalog for the tab's connection/schema was loaded.
     CatalogLoaded {
         tables: Vec<String>,

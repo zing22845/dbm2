@@ -9,7 +9,7 @@
 //! cascade lands back on the originating tab.
 
 use super::msg::SqlTabMessage;
-use super::state::SqlTabState;
+use super::state::{SqlFocus, SqlTabState};
 use super::intent::SqlTabIntent;
 use super::effect::SqlTabEffect;
 use super::editor;
@@ -40,6 +40,14 @@ pub fn update(
         SqlTabMessage::Focus(focus) => {
             if let Some(tab) = state.tabs.get_mut(state.active_tab) {
                 let changed = tab.focus != focus;
+                // Track the sub-pane that was active before entering Results, so
+                // Ctrl+Up from Results returns to the previous editor/history
+                // pane (mirroring the original dbm's `workspace_upper_pane`).
+                if focus == SqlFocus::Results
+                    && matches!(tab.focus, SqlFocus::Editor | SqlFocus::History)
+                {
+                    tab.upper_pane = tab.focus;
+                }
                 tab.focus = focus;
                 dirty = changed;
             }

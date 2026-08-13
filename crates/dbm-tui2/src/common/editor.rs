@@ -416,6 +416,26 @@ pub fn reset_hardware_cursor() -> io::Result<()> {
         .map(|_| ())
 }
 
+/// Move the terminal hardware caret to the editor cursor and set its style.
+/// `None` (editor not focused / not visible) hides the caret so it does not
+/// linger on the wrong cell after switching away from the editor.
+pub fn apply_hardware_cursor(cursor: Option<EditorHardwareCursor>) -> io::Result<()> {
+    use crossterm::cursor::{Hide, MoveTo, Show};
+    let mut out = io::stdout();
+    match cursor {
+        Some(c) => {
+            let pos = c.position;
+            out.execute(Show)?;
+            out.execute(MoveTo(pos.x, pos.y))?;
+            out.execute(c.style)?;
+        }
+        None => {
+            out.execute(Hide)?;
+        }
+    }
+    Ok(())
+}
+
 /// Wrapped display rows across all logical editor lines at `area_width`.
 pub fn editor_display_row_count(editor: &EditorState, area_width: u16) -> usize {
     let text_width = editor_wrap_width(editor, area_width);

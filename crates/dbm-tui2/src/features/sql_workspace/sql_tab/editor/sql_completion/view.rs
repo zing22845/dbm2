@@ -18,17 +18,24 @@ use super::provider::{CompletionItem, CompletionKind};
 const MAX_VISIBLE: usize = 8;
 const POPUP_WIDTH: u16 = 48;
 
-/// Entry point used by the editor: draws the popup anchored at the top-left of
-/// the provided `area` (the editor will pass a cursor-anchored position once
-/// the editor buffer is wired). Renders nothing when closed.
-pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &SqlCompletionState) {
-    draw_completion_popup_at(
-        frame,
-        theme,
-        area,
-        Position::new(area.x, area.y),
-        state,
+/// Entry point used by the editor: draws the popup anchored to the editor
+/// cursor. `cursor_pos` is the caret's absolute terminal position (from
+/// `render_editor`); the popup is placed one row below the caret so it follows
+/// the caret as the user types, matching the original dbm. Falls back to the
+/// top-left of `area` when no caret position is available. Renders nothing when
+/// closed.
+pub fn render(
+    frame: &mut Frame,
+    theme: &Theme,
+    area: Rect,
+    state: &SqlCompletionState,
+    cursor_pos: Option<Position>,
+) {
+    let anchor = cursor_pos.map_or_else(
+        || Position::new(area.x, area.y),
+        |p| Position::new(p.x, p.y.saturating_add(1)),
     );
+    draw_completion_popup_at(frame, theme, area, anchor, state);
 }
 
 /// Height of the popup (0 when closed).

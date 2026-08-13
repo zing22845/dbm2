@@ -553,6 +553,17 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
         }
         AppMsg::Sql(m) => {
             let SqlMsg::Message(inner) = m;
+            // A `SqlTabMessage::Focus` (from the uppercase S/H/R pane-jump
+            // shortcuts) also moves the shell focus into the SQL workspace, so
+            // jumping from the explorer/header lands on the editor/results/
+            // history sub-pane rather than leaving the shell focus behind.
+            if matches!(
+                inner,
+                SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Focus(_)))
+            ) {
+                state.focus = Pane::SQLWorkspace;
+                result.dirty = true;
+            }
             // The sql feature's update is a pure by-value transition: move the
             // state out, update it, move the result back. No deep clone.
             let sql = std::mem::take(&mut state.sql);
@@ -628,6 +639,42 @@ mod tests {
     fn focus_changed_msg(pane: Pane) -> AppMsg {
         AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged { pane })
     }
+
+    #[test]
+    fn sql_subpane_focus_survives_round_trip_to_explorer() {
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+        let mut state = AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        // Open a tab and focus History inside the workspace.
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+        );
+        state.sql.sql_tab.tabs[0].focus = SqlFocus::History;
+
+        // Leave to the explorer, then come back to the SQL workspace.
+        update_unchecked(
+            focus_changed_msg(Pane::Explorer(
+                crate::app_shell::nav::ExplorerPane::default(),
+            )),
+            &mut state,
+        );
+        update_unchecked(focus_changed_msg(Pane::SQLWorkspace), &mut state);
+
+        // The sub-pane focus is remembered per tab (shell FocusChanged only
+        // moves `state.focus`, never `tab.focus`), so History is still active.
+        assert_eq!(state.focus, Pane::SQLWorkspace);
+        assert_eq!(
+            state.sql.sql_tab.tabs[0].focus,
+            SqlFocus::History,
+            "sub-pane focus must survive leaving and re-entering the workspace"
+        );
+    }
+
+
 
     #[test]
     fn focus_changed_rejected_while_discover_owns_focus() {

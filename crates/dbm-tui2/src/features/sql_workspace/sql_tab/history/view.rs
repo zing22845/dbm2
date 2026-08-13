@@ -15,7 +15,8 @@ use crate::common::view::theme::Theme;
 use super::state::HistoryState;
 use super::store::history_one_line;
 
-/// Render the history list pane for a tab's connection.
+/// Render the history list pane for a tab's connection. `focused` drives the
+/// border/title highlight so only the current SQL sub-pane is emphasized.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
@@ -23,20 +24,13 @@ pub fn render(
     state: &HistoryState,
     instance: &str,
     connection: &str,
+    focused: bool,
 ) {
-    // Reserve enough rows for the wrapped footer hints below the list, so a
-    // narrow terminal does not clip them.
     let search_active = state.search.text_input_active();
     let hint = history_list_footer_text(search_active, state.search.has_filter(), true);
-    let footer_h = footer_height(&hint, area.width).min(area.height.saturating_sub(1));
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1), // history list
-            Constraint::Length(footer_h), // footer hints
-        ])
-        .split(area);
-    let list_area = chunks[0];
+    // The footer lives inside the pane's border (like results), so the block
+    // wraps the whole area and the inner rect is split into list + footer.
+    let footer_h = footer_height(&hint, area.width.saturating_sub(2)).min(area.height.saturating_sub(3));
 
     let p = theme.palette();
     let entries = state.store.entries(instance, connection);
@@ -51,17 +45,27 @@ pub fn render(
         Style::default().fg(p.muted),
         cursor,
         visible.len(),
-        Some(list_area.width.saturating_sub(4)),
+        Some(area.width.saturating_sub(6)),
         None,
-        Some(Style::default().fg(p.accent)),
+        Some(Style::default().fg(if focused { p.accent } else { p.muted })),
     );
 
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border_active));
-    let inner = block.inner(list_area);
-    frame.render_widget(block, list_area);
+        .border_style(p.active_border(focused));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Split the bordered inner area into the list (top) and the footer (bottom).
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1), // history list
+            Constraint::Length(footer_h), // footer hints (inside the border)
+        ])
+        .split(inner);
+    let list_area = chunks[0];
 
     if visible.is_empty() {
         let hint = if state.search.has_filter() {
@@ -74,12 +78,12 @@ pub fn render(
                 hint,
                 Style::default().fg(p.muted),
             ))),
-            inner,
+            list_area,
         );
     } else {
         // Reserve a scrollbar column when the list overflows its viewport.
-        let viewport_rows = inner.height as usize;
-        let layout = pane_scroll_layout(inner, inner.width, visible.len(), viewport_rows);
+        let viewport_rows = list_area.height as usize;
+        let layout = pane_scroll_layout(list_area, list_area.width, visible.len(), viewport_rows);
         let content = layout.content_area;
         let viewport = content.height.max(1) as usize;
         let start = cursor.saturating_sub(viewport / 2);

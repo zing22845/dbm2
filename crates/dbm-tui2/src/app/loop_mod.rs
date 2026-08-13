@@ -162,7 +162,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             // Draw the current frame. The perf_monitor feature is passive: the
             // run loop samples each frame here and feeds the smoothed FPS and
             // redundant-redraw ratio from the wrapped backend.
-            terminal.draw(|frame| render(frame, &state))?;
+            // `render` reports the focused SQL editor's caret; capture it out of
+            // the draw closure (which returns `()`), then place the terminal
+            // hardware cursor accordingly (edtui hides its own in-buffer caret).
+            let editor_cursor = std::cell::RefCell::new(None);
+            terminal.draw(|frame| {
+                let c = render(frame, &state);
+                *editor_cursor.borrow_mut() = c;
+            })?;
+            crate::common::editor::apply_hardware_cursor(editor_cursor.into_inner())?;
             let changed_cells = terminal.backend_mut().last_changed_cells();
             if real_redraw {
                 // Debug assertion (non-fatal): a real redraw (one asked for by
