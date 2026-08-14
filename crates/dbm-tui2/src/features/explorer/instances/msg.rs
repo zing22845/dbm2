@@ -35,6 +35,8 @@ pub enum InstancesMessage {
     /// connection is added/edited/deleted inside the instance workspace, so the
     /// tree reflects the change immediately).
     RefreshConnections { instance_idx: usize },
+    /// Move the cursor to a specific visible row (mouse click).
+    JumpTo { row: usize },
 }
 
 /// Feature message envelope (central-router compatible).

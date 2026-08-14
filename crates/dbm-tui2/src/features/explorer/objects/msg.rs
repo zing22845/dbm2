@@ -9,6 +9,8 @@ pub enum ObjectsMessage {
     MoveUp,
     /// Move the cursor down.
     MoveDown,
+    /// Move the cursor to a specific row (mouse click).
+    JumpTo { row: usize },
     /// Collapse the current row (`h`), matching the original dbm.
     Collapse,
     /// Scroll the tree horizontally by `delta` columns (`Left`/`Right`),

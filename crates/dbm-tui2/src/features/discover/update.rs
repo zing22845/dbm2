@@ -159,9 +159,15 @@ pub fn update(
             state.last_error = Some(error);
             true
         }
-        DiscoverMessage::RegisterComplete { count } => {
-            tracing::info!("registered {count} discovered instance(s)");
-            state.register_message = Some(format!("registered {count} instance(s)"));
+        DiscoverMessage::RegisterComplete { items } => {
+            tracing::info!("registered {} discovered instance(s)", items.len());
+            state.register_message = Some(format!("registered {} instance(s)", items.len()));
+            // Refresh the results with the store's current discovered list. The
+            // registered rows now carry `already_registered`, so they vanish
+            // under the default unregistered-only filter (or re-render as
+            // registered when the filter is off). Resetting the selection also
+            // drops the now-stale selected rows.
+            state.results.set_items(items);
             true
         }
         DiscoverMessage::RegisterError { error } => {
@@ -480,12 +486,35 @@ mod tests {
     }
 
     #[test]
-    fn register_complete_records_message_and_is_dirty() {
-        let state = DiscoverState::opened();
-        let (state, _intents, _effects, dirty) =
-            update(DiscoverMessage::RegisterComplete { count: 2 }, state);
-        assert_eq!(state.register_message.as_deref(), Some("registered 2 instance(s)"));
+    fn register_complete_refreshes_results_and_is_dirty() {
+        let mut state = DiscoverState::opened();
+        // Two unregistered rows are scanned in.
+        state.results.items = vec![inst("a", false), inst("b", false)];
+        state.results.selected = vec![0];
+        // Registration succeeds; the store's fresh list marks "a" as registered.
+        let (state, _intents, _effects, dirty) = update(
+            DiscoverMessage::RegisterComplete {
+                items: vec![inst("a", true), inst("b", false)],
+            },
+            state,
+        );
         assert!(dirty);
+        // The message reports the refreshed list length (2 rows), matching the
+        // store's re-read in `run_register`.
+        assert_eq!(
+            state.register_message.as_deref(),
+            Some("registered 2 instance(s)")
+        );
+        // The refreshed list replaced the results and cleared the stale
+        // selection. Under the default unregistered-only filter the registered
+        // row is no longer visible.
+        assert_eq!(state.results.items.len(), 2);
+        assert!(state.results.selected.is_empty(), "stale selection cleared");
+        assert_eq!(
+            state.results.visible_indices(),
+            vec![1],
+            "registered row drops out of the unregistered-only view"
+        );
     }
 
     #[test]

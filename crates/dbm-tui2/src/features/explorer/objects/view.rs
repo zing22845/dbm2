@@ -12,6 +12,40 @@ use crate::common::view::theme::Theme;
 
 use super::state::ObjectsState;
 
+/// Hit-test a click inside the objects tree area to a visible row (absolute,
+/// including scroll offset), mirroring `render`'s body geometry. Returns `None`
+/// when the click is on the border, title, footer, or beyond the row count.
+pub fn row_at(area: Rect, state: &ObjectsState, y: u16) -> Option<usize> {
+    let footer_h =
+        footer_height(&objects_pane_footer_text(), area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
+    let inner_h = area.height.saturating_sub(2); // borders
+    let body_h = inner_h.saturating_sub(footer_h);
+    let body_top = area.y.saturating_add(1); // top border
+    if y >= body_top && y < body_top.saturating_add(body_h) {
+        let row = (y - body_top) as usize + state.scroll;
+        if row < state.rows.len() {
+            return Some(row);
+        }
+    }
+    None
+}
+
+/// Like [`row_at`], but also require the click x to land on the row's
+/// expand/collapse marker (`▸`/`▾`). Returns the visible row when the marker
+/// was clicked, so the caller can toggle expansion. The marker column accounts
+/// for the row's depth indentation and the horizontal scroll.
+pub fn toggle_at(area: Rect, state: &ObjectsState, x: u16, y: u16) -> Option<usize> {
+    let row = row_at(area, state, y)?;
+    let depth = state.rows.get(row).map(|r| r.depth).unwrap_or(0) as u16;
+    // Rows render as " {indent}{marker} label" with indent = 2 cols per depth.
+    let body_x = area.x.saturating_add(1); // top border
+    let marker_col = body_x
+        .saturating_add(1) // leading space
+        .saturating_add(depth.saturating_mul(2))
+        .saturating_sub(state.h_scroll);
+    (x >= marker_col && x < marker_col.saturating_add(2)).then_some(row)
+}
+
 /// Render the object tree with indentation and expansion markers.
 /// `region_focused` controls the border color so the shell focus is visible.
 /// A pane footer hint occupies the bottom rows, wrapping to the pane width.
@@ -64,11 +98,15 @@ pub fn render(
         }
         let row = &state.rows[idx];
         let focused = idx == state.cursor;
+        // The active schema row is highlighted (dedicated active color + bold);
+        // the cursor row keeps its selection highlight underneath.
         let style = if focused {
             Style::default()
-                .fg(p.fg)
+                .fg(if row.active { p.active_fg } else { p.fg })
                 .bg(p.selection_bg)
                 .add_modifier(Modifier::BOLD)
+        } else if row.active {
+            Style::default().fg(p.active_fg).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(p.fg)
         };
@@ -84,7 +122,9 @@ pub fn render(
     }
     if lines.is_empty() {
         let msg = if state.bound_connection.is_empty() {
-            "(select a connection to browse objects)"
+            // No active connection (active workspace is an instance or nothing):
+            // prompt to open a connection, matching the original dbm.
+            "Open a connection to browse objects"
         } else {
             "(no objects — press Enter on a connection to load the catalog)"
         };
@@ -124,4 +164,29 @@ pub fn render(
 
     // Pane footer (inside the border).
     draw_pane_footer(frame, theme, footer_area, &hint);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::explorer::objects::state::{ObjectsNode, ObjectsRow, ObjectsState};
+
+    #[test]
+    fn toggle_at_hits_the_marker_column_only() {
+        let mut s = ObjectsState::default();
+        s.rows = vec![ObjectsRow {
+            depth: 0,
+            expanded: false,
+            expandable: true,
+            active: false,
+            node: ObjectsNode::Database { name: "db".into() },
+            label: "db".into(),
+        }];
+        let area = Rect::new(0, 5, 40, 20);
+        // depth 0: marker is the 2nd char, at body.x+1 = 2.
+        assert_eq!(toggle_at(area, &s, 2, 6), Some(0), "marker column hits");
+        // Clicking the leading space (x=1) or the label (x=5) is not the marker.
+        assert_eq!(toggle_at(area, &s, 1, 6), None);
+        assert_eq!(toggle_at(area, &s, 5, 6), None);
+    }
 }

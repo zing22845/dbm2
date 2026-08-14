@@ -31,8 +31,9 @@ pub enum DiscoverMessage {
     ScanCancelled,
     /// The scan failed.
     ScanError { error: String },
-    /// Instances were registered.
-    RegisterComplete { count: usize },
+    /// Instances were registered. Carries the refreshed discovered list so the
+    /// results pane can drop (or re-mark) the now-registered rows.
+    RegisterComplete { items: Vec<dbm_discovery::DiscoveredInstance> },
     /// Registering failed.
     RegisterError { error: String },
     /// Forwarded engine selector message.

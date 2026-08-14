@@ -99,6 +99,10 @@ pub struct ObjectsRow {
     pub expanded: bool,
     /// Whether the row can be expanded (a database/schema/group).
     pub expandable: bool,
+    /// Whether the row is the active schema (the schema of the currently-open
+    /// SQL tab for the bound connection). Active schemas and their parent
+    /// databases are highlighted and cannot be collapsed.
+    pub active: bool,
     /// The row's node in the tree.
     pub node: ObjectsNode,
     /// The row's display label.
@@ -138,6 +142,11 @@ pub struct ObjectsState {
     pub restore_expanded: Vec<String>,
     /// The connection the restore keys belong to (empty = no pending restore).
     pub restore_bound_connection: String,
+    /// The active schema of the currently-open SQL tab for the bound connection,
+    /// and its parent database. Active schemas (and their parent database) are
+    /// highlighted and forced expanded; they cannot be collapsed.
+    pub active_db: Option<String>,
+    pub active_schema: Option<String>,
 }
 
 impl ObjectsState {
@@ -147,6 +156,58 @@ impl ObjectsState {
 
     fn expand_key_schema(database: &str, schema: &str) -> String {
         format!("{database}\t{schema}")
+    }
+
+    /// Whether an expansion key belongs to the active path (the active database
+    /// or the active schema), which is forced expanded (original dbm's
+    /// `active_path_forces_expanded`).
+    pub fn active_path_forces_expanded(
+        key: &str,
+        active_db: Option<&str>,
+        active_schema: Option<&str>,
+    ) -> bool {
+        if let Some(db) = active_db {
+            if key == Self::expand_key_database(db) {
+                return true;
+            }
+        }
+        if let (Some(db), Some(schema)) = (active_db, active_schema) {
+            if key == Self::expand_key_schema(db, schema) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Whether collapsing a node is blocked because it is on the active path
+    /// (active database or active schema). Groups/objects are never blocked,
+    /// matching the original dbm.
+    pub fn collapse_blocked_by_active(
+        node: &ObjectsNode,
+        active_db: Option<&str>,
+        active_schema: Option<&str>,
+    ) -> bool {
+        match node {
+            ObjectsNode::Database { name } => active_db == Some(name.as_str()),
+            ObjectsNode::Schema { database, name } => {
+                active_db == Some(database.as_str()) && active_schema == Some(name.as_str())
+            }
+            _ => false,
+        }
+    }
+
+    /// Set the active schema (and its parent database) for the bound connection.
+    /// Empty strings clear the active state. After a change the tree is
+    /// rebuilt so the active path is forced expanded.
+    pub fn set_active(&mut self, database: Option<String>, schema: Option<String>) {
+        let db = database.filter(|d| !d.is_empty());
+        let sc = schema.filter(|s| !s.is_empty());
+        if self.active_db == db && self.active_schema == sc {
+            return;
+        }
+        self.active_db = db;
+        self.active_schema = sc;
+        self.rebuild_rows();
     }
 
     fn expand_key_group(database: &str, schema: Option<&str>, kind: ObjectKind) -> String {
@@ -196,6 +257,18 @@ impl ObjectsState {
         self.cursor != before
     }
 
+    /// Jump the cursor to a specific row (mouse click), clamped to the visible
+    /// rows. Returns whether the cursor moved.
+    pub fn jump_to(&mut self, row: usize) -> bool {
+        if self.rows.is_empty() {
+            return false;
+        }
+        let target = row.min(self.rows.len() - 1);
+        let before = self.cursor;
+        self.cursor = target;
+        self.cursor != before
+    }
+
     /// Move the cursor down (clamped). Returns whether the cursor actually
     /// moved, so callers can avoid repainting a no-op navigation.
     pub fn move_down(&mut self) -> bool {
@@ -209,7 +282,8 @@ impl ObjectsState {
 
     /// Toggle the expansion of the row under the cursor. Returns the node that
     /// was toggled (so the caller can decide which catalog fetch to trigger);
-    /// `None` when the row is not expandable.
+    /// `None` when the row is not expandable or collapsing would violate the
+    /// active-path constraint.
     pub fn toggle_expand(&mut self) -> Option<ObjectsNode> {
         let node = self.node_at_cursor()?.clone();
         if matches!(node, ObjectsNode::Object { .. }) {
@@ -217,6 +291,15 @@ impl ObjectsState {
         }
         let key = self.expand_key_of(&node);
         if self.expanded.contains(&key) {
+            // Collapsing an active database/schema is blocked (it is forced
+            // expanded), matching the original dbm.
+            if Self::collapse_blocked_by_active(
+                &node,
+                self.active_db.as_deref(),
+                self.active_schema.as_deref(),
+            ) {
+                return None;
+            }
             self.expanded.remove(&key);
         } else {
             self.expanded.insert(key);
@@ -227,10 +310,18 @@ impl ObjectsState {
 
     /// Collapse the row under the cursor (if it is expanded), matching the
     /// original dbm's `h` key. Returns whether anything was collapsed.
+    /// Collapsing an active database/schema is a no-op (it is forced expanded).
     pub fn collapse(&mut self) -> bool {
         let Some(node) = self.node_at_cursor().cloned() else {
             return false;
         };
+        if Self::collapse_blocked_by_active(
+            &node,
+            self.active_db.as_deref(),
+            self.active_schema.as_deref(),
+        ) {
+            return false;
+        }
         let key = self.expand_key_of(&node);
         if key.is_empty() {
             return false;
@@ -271,6 +362,35 @@ impl ObjectsState {
         self.h_scroll != before
     }
 
+    /// Keep the tree bound to the active connection. This is idempotent: when
+    /// the binding is already up to date nothing is reset (so catalog/rows
+    /// survive), otherwise it rebinds. Returns whether the binding changed.
+    pub fn sync_binding(&mut self, instance: String, connection: String) -> bool {
+        if self.bound_instance == instance && self.bound_connection == connection {
+            return false;
+        }
+        self.rebind(instance, connection);
+        true
+    }
+
+    /// Unbind the tree (active workspace is an instance, not a connection), so
+    /// the objects pane shows the "open a connection to browse objects" prompt.
+    /// Returns whether the binding changed.
+    pub fn clear_binding(&mut self) -> bool {
+        if self.bound_instance.is_empty() && self.bound_connection.is_empty() {
+            return false;
+        }
+        self.bound_instance.clear();
+        self.bound_connection.clear();
+        self.cursor = 0;
+        self.scroll = 0;
+        self.h_scroll = 0;
+        self.expanded.clear();
+        self.catalog = ObjectsCatalog::default();
+        self.rows.clear();
+        true
+    }
+
     /// Rebind the tree to a new instance/connection, reset navigation and
     /// catalog. If a session restore left expansion keys for this connection,
     /// they are re-applied so the tree comes back expanded where the user left
@@ -299,8 +419,8 @@ impl ObjectsState {
         self.rows = build_rows(
             &self.catalog,
             &self.expanded,
-            &self.bound_instance,
-            &self.bound_connection,
+            self.active_db.as_deref(),
+            self.active_schema.as_deref(),
         );
         if self.rows.is_empty() {
             self.cursor = 0;
@@ -316,11 +436,15 @@ impl ObjectsState {
 /// Build the flat list of visible tree rows from the catalog and the expansion
 /// set. Pure function: it reads the catalog and returns new rows without
 /// mutating any state.
+///
+/// `active_db`/`active_schema` (the active SQL tab's database/schema for the
+/// bound connection) force their path open and mark the active schema row,
+/// matching the original dbm.
 pub fn build_rows(
     catalog: &ObjectsCatalog,
     expanded: &HashSet<String>,
-    _instance: &str,
-    _connection: &str,
+    active_db: Option<&str>,
+    active_schema: Option<&str>,
 ) -> Vec<ObjectsRow> {
     let mut rows = Vec::new();
     match &catalog.databases {
@@ -330,11 +454,15 @@ pub fn build_rows(
         CatalogList::Ready(databases) => {
             for database in databases {
                 let db_key = ObjectsState::expand_key_database(database);
-                let db_expanded = expanded.contains(&db_key);
+                // The active database is forced expanded even if not in the set.
+                let db_expanded = ObjectsState::active_path_forces_expanded(
+                    &db_key, active_db, active_schema,
+                ) || expanded.contains(&db_key);
                 rows.push(ObjectsRow {
                     depth: 0,
                     expanded: db_expanded,
                     expandable: true,
+                    active: false,
                     node: ObjectsNode::Database {
                         name: database.clone(),
                     },
@@ -361,11 +489,20 @@ pub fn build_rows(
                     Some(CatalogList::Ready(schemas)) => {
                         for schema in schemas {
                             let schema_key = ObjectsState::expand_key_schema(database, schema);
-                            let schema_expanded = expanded.contains(&schema_key);
+                            // The active schema is forced expanded and highlighted.
+                            let schema_active =
+                                active_db == Some(database.as_str())
+                                    && active_schema == Some(schema.as_str());
+                            let schema_expanded = schema_active
+                                || ObjectsState::active_path_forces_expanded(
+                                    &schema_key, active_db, active_schema,
+                                )
+                                || expanded.contains(&schema_key);
                             rows.push(ObjectsRow {
                                 depth: 1,
                                 expanded: schema_expanded,
                                 expandable: true,
+                                active: schema_active,
                                 node: ObjectsNode::Schema {
                                     database: database.clone(),
                                     name: schema.clone(),
@@ -400,6 +537,7 @@ fn status_row(depth: usize, label: &str) -> ObjectsRow {
         depth,
         expanded: false,
         expandable: false,
+        active: false,
         node: ObjectsNode::Database {
             name: String::new(),
         },
@@ -437,6 +575,7 @@ fn push_group_rows(
         depth,
         expanded: group_expanded,
         expandable: true,
+        active: false,
         node: ObjectsNode::Group {
             database: database.to_string(),
             schema: schema.map(str::to_string),
@@ -453,6 +592,7 @@ fn push_group_rows(
                 depth: depth + 1,
                 expanded: false,
                 expandable: false,
+                active: false,
                 node: ObjectsNode::Object {
                     database: database.to_string(),
                     schema: schema.map(str::to_string),
@@ -462,5 +602,107 @@ fn push_group_rows(
                 label: name.clone(),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalog_with(schemas: &[&str]) -> ObjectsCatalog {
+        let mut c = ObjectsCatalog::default();
+        c.databases = CatalogList::Ready(vec!["db".to_string()]);
+        c.schemas.insert(
+            "db".to_string(),
+            CatalogList::Ready(schemas.iter().map(|s| s.to_string()).collect()),
+        );
+        c
+    }
+
+    #[test]
+    fn build_rows_marks_active_schema_and_forces_expansion() {
+        let c = catalog_with(&["public", "other"]);
+        // Empty expansion set; active path db/public is forced open.
+        let rows = build_rows(&c, &HashSet::new(), Some("db"), Some("public"));
+        let schema_rows: Vec<&ObjectsRow> = rows.iter().filter(|r| matches!(r.node, ObjectsNode::Schema { .. })).collect();
+        assert_eq!(schema_rows.len(), 2);
+        let public = schema_rows.iter().find(|r| r.label == "public").unwrap();
+        assert!(public.active, "public must be the active schema");
+        assert!(public.expanded, "active schema is forced expanded");
+        let other = schema_rows.iter().find(|r| r.label == "other").unwrap();
+        assert!(!other.active);
+        assert!(!other.expanded, "inactive schema stays collapsed");
+    }
+
+    #[test]
+    fn collapse_blocked_for_active_path_not_groups() {
+        // Active database and schema cannot be collapsed.
+        assert!(ObjectsState::collapse_blocked_by_active(
+            &ObjectsNode::Database { name: "db".into() },
+            Some("db"),
+            Some("public"),
+        ));
+        assert!(ObjectsState::collapse_blocked_by_active(
+            &ObjectsNode::Schema { database: "db".into(), name: "public".into() },
+            Some("db"),
+            Some("public"),
+        ));
+        // A group under the active schema is NOT blocked.
+        assert!(!ObjectsState::collapse_blocked_by_active(
+            &ObjectsNode::Group {
+                database: "db".into(),
+                schema: Some("public".into()),
+                kind: ObjectKind::Tables,
+            },
+            Some("db"),
+            Some("public"),
+        ));
+    }
+
+    #[test]
+    fn jump_to_moves_and_clamps_cursor() {
+        let mut s = ObjectsState::default();
+        s.rows = vec![
+            ObjectsRow { depth: 0, expanded: false, expandable: true, active: false, node: ObjectsNode::Database { name: "a".into() }, label: "a".into() },
+            ObjectsRow { depth: 0, expanded: false, expandable: true, active: false, node: ObjectsNode::Database { name: "b".into() }, label: "b".into() },
+        ];
+        s.jump_to(1);
+        assert_eq!(s.cursor, 1);
+        // Clamp to the last row (index 1) — no movement since already there.
+        assert!(!s.jump_to(100));
+        assert_eq!(s.cursor, 1);
+        assert!(!s.jump_to(1));
+        // Empty rows -> no-op.
+        let mut e = ObjectsState::default();
+        assert!(!e.jump_to(0));
+    }
+
+    #[test]
+    fn sync_binding_is_idempotent_and_clear_unbinds() {
+        let mut s = ObjectsState::default();
+        // First sync rebinds and reports a change.
+        assert!(s.sync_binding("inst".into(), "conn".into()));
+        assert_eq!(s.bound_instance, "inst");
+        assert_eq!(s.bound_connection, "conn");
+        // Same binding -> no change (catalog/rows preserved).
+        assert!(!s.sync_binding("inst".into(), "conn".into()));
+        // Different binding -> change.
+        assert!(s.sync_binding("inst".into(), "other".into()));
+        // Clear unbinds.
+        assert!(s.clear_binding());
+        assert!(s.bound_connection.is_empty());
+        // Clear again -> no change.
+        assert!(!s.clear_binding());
+    }
+
+    #[test]
+    fn set_active_clears_when_empty() {
+        let mut s = ObjectsState::default();
+        s.set_active(Some("db".into()), Some("public".into()));
+        assert_eq!(s.active_db.as_deref(), Some("db"));
+        assert_eq!(s.active_schema.as_deref(), Some("public"));
+        s.set_active(None, None);
+        assert!(s.active_db.is_none());
+        assert!(s.active_schema.is_none());
     }
 }

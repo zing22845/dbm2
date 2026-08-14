@@ -21,6 +21,7 @@ pub fn update(
     match msg {
         ObjectsMessage::MoveUp => dirty |= state.move_up(),
         ObjectsMessage::MoveDown => dirty |= state.move_down(),
+        ObjectsMessage::JumpTo { row } => dirty |= state.jump_to(row),
         ObjectsMessage::Collapse => {
             dirty |= state.collapse();
         }
@@ -37,22 +38,42 @@ pub fn update(
             dirty |= state.scroll_horizontal(delta, max);
         }
         ObjectsMessage::Select => {
-            // `Enter` mirrors the original dbm: expand/collapse an expandable
-            // row (fetching children on expand), otherwise open an object.
-            if let Some(node) = state.toggle_expand() {
-                maybe_fetch_on_expand(&node, &state, &mut effects);
+            // `Enter` mirrors the original dbm: activating a schema row sets it
+            // as the active schema (highlighted + forced expanded); database /
+            // group rows toggle expand/collapse (fetching children on expand);
+            // a table row opens its data view.
+            // Clone the schema row's identity before mutating state (the cursor
+            // node is a borrow of `state`).
+            let schema_active = match state.node_at_cursor() {
+                Some(ObjectsNode::Schema { database, name }) => {
+                    Some((database.clone(), name.clone()))
+                }
+                _ => None,
+            };
+            if let Some((database, name)) = schema_active {
+                state.set_active(Some(database.clone()), Some(name.clone()));
+                intents.push(ObjectsIntent::ApplySchema { database, name });
                 dirty = true;
-            } else if let Some(target) = state.selected_target() {
-                // Opening an object notifies the SQL workspace; the objects
-                // state itself is unchanged (the shell marks the workspace
-                // dirty when it opens the object).
-                intents.push(ObjectsIntent::OpenObject { target });
+            } else {
+                if let Some(node) = state.toggle_expand() {
+                    maybe_fetch_on_expand(&node, &state, &mut effects);
+                    dirty = true;
+                } else if let Some(target) = state.selected_target() {
+                    intents.push(ObjectsIntent::OpenObject { target });
+                }
             }
         }
         ObjectsMessage::Bind { instance, connection } => {
-            state.rebind(instance.clone(), connection.clone());
-            dirty = true;
-            effects.push(ObjectsEffect::LoadDatabases { instance, connection });
+            // Idempotent: only rebind (and re-fetch databases) when the binding
+            // actually changes. The shell's binding sync may emit duplicate
+            // `Bind` messages before the first one is applied; an unconditional
+            // `rebind` would reset the catalog and re-fetch databases every
+            // time, so a no-change bind is skipped.
+            let changed = state.sync_binding(instance.clone(), connection.clone());
+            dirty = changed;
+            if changed {
+                effects.push(ObjectsEffect::LoadDatabases { instance, connection });
+            }
         }
         ObjectsMessage::DatabasesLoaded { databases } => {
             state.catalog.databases = CatalogList::Ready(databases);
@@ -184,6 +205,7 @@ mod tests {
             depth: 0,
             expanded: false,
             expandable: true,
+            active: false,
             node: ObjectsNode::Database { name: name.to_string() },
             label: name.to_string(),
         }
@@ -194,6 +216,7 @@ mod tests {
             depth: 1,
             expanded: false,
             expandable: false,
+            active: false,
             node: ObjectsNode::Object {
                 database: "db".to_string(),
                 schema: Some("public".to_string()),
@@ -202,6 +225,36 @@ mod tests {
             },
             label: name.to_string(),
         }
+    }
+
+    #[test]
+    fn select_on_schema_activates_instead_of_toggling() {
+        // Enter on a schema row activates it (sets active_db/active_schema and
+        // emits ApplySchema) rather than toggling expansion, matching the
+        // original dbm.
+        let mut s = ObjectsState::default();
+        s.rows = vec![super::super::state::ObjectsRow {
+            depth: 1,
+            expanded: false,
+            expandable: true,
+            active: false,
+            node: ObjectsNode::Schema {
+                database: "db".to_string(),
+                name: "public".to_string(),
+            },
+            label: "public".to_string(),
+        }];
+        s.cursor = 0;
+        let (s, intents, _effects, dirty) = update(ObjectsMessage::Select, s);
+        assert!(dirty);
+        assert_eq!(s.active_db.as_deref(), Some("db"));
+        assert_eq!(s.active_schema.as_deref(), Some("public"));
+        // It must NOT toggle-expand (expansion is derived from the active path).
+        assert!(intents.iter().any(|i| matches!(
+            i,
+            ObjectsIntent::ApplySchema { database, name }
+                if database == "db" && name == "public"
+        )));
     }
 
     #[test]

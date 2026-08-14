@@ -12,6 +12,46 @@ use crate::common::view::theme::Theme;
 
 use super::state::InstancesState;
 
+/// Hit-test a click inside the instances tree area to a visible row (absolute,
+/// including scroll offset), mirroring `render`'s body geometry. Returns `None`
+/// when the click is on the border, title, footer, or beyond the row count.
+pub fn row_at(area: Rect, state: &InstancesState, y: u16) -> Option<usize> {
+    let hint = instances_pane_footer_text(
+        state.cursor_selection().map(|(_, c)| c.is_none()).unwrap_or(false),
+    );
+    let footer_h =
+        footer_height(&hint, area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
+    let inner_h = area.height.saturating_sub(2); // borders
+    let body_h = inner_h.saturating_sub(footer_h);
+    let body_top = area.y.saturating_add(1); // top border
+    if y >= body_top && y < body_top.saturating_add(body_h) {
+        let row = (y - body_top) as usize + state.scroll;
+        if row < state.visible_count() {
+            return Some(row);
+        }
+    }
+    None
+}
+
+/// Like [`row_at`], but also require the click x to land on the row's
+/// expand/collapse marker (`▸`/`▾`). Returns the visible row when the marker
+/// was clicked, so the caller can toggle expansion. Marker columns account for
+/// the connection indentation and the horizontal scroll.
+pub fn toggle_at(area: Rect, state: &InstancesState, x: u16, y: u16) -> Option<usize> {
+    let row = row_at(area, state, y)?;
+    // Only instance rows have an expand/collapse marker; connection rows do not.
+    let (is_connection, _) = state.visible_row_is_connection(row);
+    if is_connection {
+        return None;
+    }
+    // Recompute the body origin (mirrors `render`): top border at area.y+1.
+    let body_x = area.x.saturating_add(1);
+    // Instance rows render as " {marker}": marker is the 2nd char of the body.
+    let marker_col = body_x.saturating_add(1).saturating_sub(state.h_scroll);
+    // Marker is a single wide char; a couple of columns of tolerance.
+    (x >= marker_col && x < marker_col.saturating_add(2)).then_some(row)
+}
+
 /// Render the instances connection tree. `region_focused` controls the border
 /// color so the shell focus is visible (active border vs. muted border). A pane
 /// footer hint occupies the bottom rows, wrapping to the pane width.
@@ -98,16 +138,21 @@ pub fn render(
                 let conn_focused = row == state.cursor;
                 let conn_active = state.is_active_connection(inst_idx, ci);
                 // Same unified active color as the instance row; the cursor row
-                // layers the selection highlight underneath.
+                // layers the selection highlight underneath. A non-active
+                // connection keeps its normal foreground (no purple tint) even
+                // when the cursor is on it — only the active connection is
+                // highlighted.
                 let cstyle = if conn_focused {
                     Style::default()
-                        .fg(if conn_active { p.active_fg } else { p.accent })
+                        .fg(if conn_active { p.active_fg } else { p.fg })
                         .bg(p.selection_bg)
                         .add_modifier(Modifier::BOLD)
                 } else if conn_active {
                     Style::default().fg(p.active_fg).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(p.fg_dim)
+                    // Inactive connections share the instance row's foreground
+                    // color (the active one is highlighted separately).
+                    Style::default().fg(p.fg)
                 };
                 lines.push(Line::from(vec![
                     Span::styled(format!("    └ {}/{}", conn.name, conn.database), cstyle),
@@ -160,4 +205,69 @@ pub fn render(
     // Pane footer (inside the border): hints differ for an instance row vs a
     // connection row.
     draw_pane_footer(frame, theme, footer_area, &hint);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn row_at_maps_click_to_visible_row() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![dbm_store::ManagedInstance {
+            id: "a".into(),
+            fingerprint: "a".into(),
+            name: "a".into(),
+            engine: dbm_core::Engine::Postgres,
+            host: "h".into(),
+            port: 1,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "now".into(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        }]);
+        // area at y=5: body starts at y=6 (top border). Clicking row 6 -> row 0.
+        let area = Rect::new(0, 5, 40, 20);
+        assert_eq!(row_at(area, &s, 6), Some(0));
+        // Clicking on the border/title (y=5) -> none.
+        assert_eq!(row_at(area, &s, 5), None);
+    }
+
+    #[test]
+    fn toggle_at_hits_the_marker_column_only() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![dbm_store::ManagedInstance {
+            id: "a".into(),
+            fingerprint: "a".into(),
+            name: "a".into(),
+            engine: dbm_core::Engine::Postgres,
+            host: "h".into(),
+            port: 1,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "now".into(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        }]);
+        let area = Rect::new(0, 5, 40, 20);
+        // Body x starts at area.x+1 = 1; instance marker is the 2nd char, at
+        // body.x+1 = 2.
+        assert_eq!(toggle_at(area, &s, 2, 6), Some(0), "marker column hits");
+        // Clicking the leading space (x=1) or the label (x=5) is not the marker.
+        assert_eq!(toggle_at(area, &s, 1, 6), None);
+        assert_eq!(toggle_at(area, &s, 5, 6), None);
+        // Clicking the border/title row is not a marker.
+        assert_eq!(toggle_at(area, &s, 2, 5), None);
+    }
 }

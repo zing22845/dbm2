@@ -117,6 +117,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // `update` via split-resize messages).
     let mut split_drag: Option<crate::features::sql_workspace::sql_tab::layout::SqlSplitter> = None;
 
+    // The position+time of the most recent left-button press, used to detect a
+    // double click (a second press at the same cell within a short window). This
+    // lives outside `AppState` because it is transient interaction state, like
+    // `split_drag`.
+    let mut last_click: Option<(ratatui::layout::Position, std::time::Instant)> = None;
+
     // Event-driven, on-demand redraw (mirrors the original dbm "Route B"): the
     // screen is only repainted when a real event/action changed state, or when
     // a timed refresh is actually due. With no timed work pending the app
@@ -349,6 +355,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
                         }
                         MouseEventKind::Down(MouseButton::Left) if state.modal.is_none() => {
+                            // Double-click detection: a second press at the same
+                            // cell within the window is treated as a double click.
+                            let is_double_click = last_click
+                                .as_ref()
+                                .is_some_and(|(p, t)| {
+                                    *p == point && t.elapsed() < std::time::Duration::from_millis(400)
+                                });
+                            last_click = Some((point, std::time::Instant::now()));
+
                             // Map the click to a focus pane by region. The layout
                             // mirrors `app/view.rs`: header (top 3 rows), explorer
                             // (left 20% of the body), workspace (right 80%).
@@ -420,6 +435,51 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     msg,
                                     &mut state,
                                 );
+                                dirty |= result.dirty;
+                            }
+
+                            // A single click inside the explorer's instances or
+                            // objects tree moves the selection (cursor) to the
+                            // clicked row.
+                            if mouse.column < explorer_w
+                                && let Some(click_msgs) =
+                                    explorer_row_click_msgs(size, body_top, body_h, mouse.column, mouse.row, &state)
+                            {
+                                for click_msg in click_msgs {
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        click_msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
+                            // A double click in the explorer activates the clicked
+                            // node (Select), like pressing Enter on it.
+                            if is_double_click && mouse.column < explorer_w {
+                                let select = AppMsg::Explorer(
+                                    crate::features::explorer::msg::ExplorerMsg::Message(
+                                        match explorer_pane_for_click(mouse.row, body_top, body_h) {
+                                            crate::app_shell::nav::ExplorerPane::Instances => {
+                                                crate::features::explorer::msg::ExplorerMessage::Instances(
+                                                    crate::features::explorer::instances::msg::InstancesMsg::Message(
+                                                        crate::features::explorer::instances::msg::InstancesMessage::Select,
+                                                    ),
+                                                )
+                                            }
+                                            crate::app_shell::nav::ExplorerPane::Objects => {
+                                                crate::features::explorer::msg::ExplorerMessage::Objects(
+                                                    crate::features::explorer::objects::msg::ObjectsMsg::Message(
+                                                        crate::features::explorer::objects::msg::ObjectsMessage::Select,
+                                                    ),
+                                                )
+                                            }
+                                        },
+                                    ),
+                                );
+                                let result = process_message_round(&effect_runner, &mut action_rx, select, &mut state);
                                 dirty |= result.dirty;
                             }
 
@@ -990,7 +1050,7 @@ fn discover_action_to_msg(action: crate::features::discover::effect::DiscoverAct
         A::ScanComplete { items } => M::ScanComplete { items },
         A::ScanCancelled => M::ScanCancelled,
         A::ScanError { error } => M::ScanError { error },
-        A::RegisterComplete { count } => M::RegisterComplete { count },
+        A::RegisterComplete { items } => M::RegisterComplete { items },
         A::RegisterError { error } => M::RegisterError { error },
     }
 }
@@ -1064,6 +1124,93 @@ fn iw_action_to_msg(action: crate::features::instance_workspace::effect::IwActio
         },
         IA::Unregistered { instance } => IM::Unregistered { instance },
     }
+}
+
+/// Compute the two explorer child tree areas (instances top / objects bottom)
+/// from the explorer's outer rect, mirroring `explorer/view.rs` (50% + 1-row
+/// splitter + 50%, inside the outer border).
+fn explorer_child_areas(explorer: ratatui::layout::Rect) -> (ratatui::layout::Rect, ratatui::layout::Rect) {
+    let inner = Rect::new(
+        explorer.x.saturating_add(1),
+        explorer.y.saturating_add(1),
+        explorer.width.saturating_sub(2),
+        explorer.height.saturating_sub(2),
+    );
+    let half = inner.height / 2;
+    let instances = Rect::new(inner.x, inner.y, inner.width, half);
+    let objects = Rect::new(inner.x, inner.y + half + 1, inner.width, inner.height.saturating_sub(half + 1));
+    (instances, objects)
+}
+
+/// Build the explorer messages for a single click on a visible tree row.
+/// Clicking the expand/collapse marker toggles that node's expansion (and moves
+/// the selection to it); clicking elsewhere just moves the selection. Returns
+/// `None` for clicks on borders/titles/footers.
+fn explorer_row_click_msgs(
+    size: ratatui::layout::Size,
+    body_top: u16,
+    body_h: u16,
+    x: u16,
+    y: u16,
+    state: &AppState,
+) -> Option<Vec<AppMsg>> {
+    use crate::features::explorer::instances::msg::InstancesMessage;
+    use crate::features::explorer::objects::msg::ObjectsMessage;
+    let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+    if x >= explorer_w {
+        return None;
+    }
+    let explorer = Rect::new(0, body_top, explorer_w, body_h);
+    let (instances_area, objects_area) = explorer_child_areas(explorer);
+    let pane = explorer_pane_for_click(y, body_top, body_h);
+    match pane {
+        crate::app_shell::nav::ExplorerPane::Instances => {
+            let inst = &state.explorer.instances;
+            let row = crate::features::explorer::instances::view::row_at(instances_area, inst, y)?;
+            let jump = instances_msg(InstancesMessage::JumpTo { row });
+            // Clicking the expand/collapse marker on an instance row toggles its
+            // expansion (not Select, which would open the workspace). Need the
+            // row's instance index and current state.
+            if crate::features::explorer::instances::view::toggle_at(instances_area, inst, x, y).is_some() {
+                let (_, inst_idx) = inst.visible_row_is_connection(row);
+                let expanded = inst.nodes.get(inst_idx).is_some_and(|n| n.expanded);
+                let toggle = if expanded {
+                    instances_msg(InstancesMessage::Collapse)
+                } else {
+                    instances_msg(InstancesMessage::Expand)
+                };
+                return Some(vec![jump, toggle]);
+            }
+            Some(vec![jump])
+        }
+        crate::app_shell::nav::ExplorerPane::Objects => {
+            let objs = &state.explorer.objects;
+            let row = crate::features::explorer::objects::view::row_at(objects_area, objs, y)?;
+            let jump = objects_msg(ObjectsMessage::JumpTo { row });
+            // Objects' Select toggles expansion on database/group rows (and
+            // activates a schema), so the marker click reuses it.
+            if crate::features::explorer::objects::view::toggle_at(objects_area, objs, x, y).is_some() {
+                return Some(vec![jump, objects_msg(ObjectsMessage::Select)]);
+            }
+            Some(vec![jump])
+        }
+    }
+}
+
+fn instances_msg(m: crate::features::explorer::instances::msg::InstancesMessage) -> AppMsg {
+    AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
+        crate::features::explorer::msg::ExplorerMessage::Instances(
+            crate::features::explorer::instances::msg::InstancesMsg::Message(m),
+        ),
+    ))
+}
+
+fn objects_msg(m: crate::features::explorer::objects::msg::ObjectsMessage) -> AppMsg {
+    AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
+        crate::features::explorer::msg::ExplorerMessage::Objects(
+            crate::features::explorer::objects::msg::ObjectsMsg::Message(m),
+        ),
+    ))
 }
 
 /// Map a click row inside the explorer column to an explorer child sub-pane
@@ -1274,6 +1421,17 @@ mod tests {
     use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
     use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
     use crate::features::sql_workspace::sql_tab::results::state::QueryResultData;
+
+    #[test]
+    fn explorer_child_areas_stack_trees() {
+        let explorer = Rect::new(0, 3, 40, 21);
+        let (instances, objects) = explorer_child_areas(explorer);
+        // Outer border: inner is (1,4,38,19); half = 9.
+        assert_eq!(instances, Rect::new(1, 4, 38, 9));
+        // Objects start after the 1-row splitter.
+        assert_eq!(objects.y, instances.y + instances.height + 1);
+        assert_eq!(objects.width, 38);
+    }
 
     #[test]
     fn explorer_click_maps_rows_to_instances_objects() {

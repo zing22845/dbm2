@@ -123,13 +123,46 @@ fn tree_snapshot(explorer: &crate::features::explorer::state::ExplorerState) -> 
         explorer.objects.expanded.iter().cloned().collect();
     expanded_objects.sort();
 
+    // The active workspace node (instance or connection), so restarting restores
+    // the active-row highlight and the workspace shown.
+    let active_workspace = explorer.instances.active_workspace.and_then(|aw| {
+        use crate::features::explorer::instances::state::ActiveWorkspaceKind;
+        match aw {
+            ActiveWorkspaceKind::Instance(instance_idx) => {
+                let instance = explorer.instances.instance_name(instance_idx);
+                if instance.is_empty() {
+                    None
+                } else {
+                    Some(TuiTreeSelection::Instance { instance })
+                }
+            }
+            ActiveWorkspaceKind::Connection { instance_idx, conn_idx } => {
+                let instance = explorer.instances.instance_name(instance_idx);
+                let connection = explorer
+                    .instances
+                    .nodes
+                    .get(instance_idx)
+                    .and_then(|n| n.connections.get(conn_idx))
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default();
+                if instance.is_empty() || connection.is_empty() {
+                    None
+                } else {
+                    Some(TuiTreeSelection::Connection { instance, connection })
+                }
+            }
+        }
+    });
+
     TuiTreeSnapshot {
         expanded_instances,
         cursor,
-        active_workspace: None,
+        active_workspace,
         expanded_objects,
         objects_bound_instance: explorer.objects.bound_instance.clone(),
         objects_bound_connection: explorer.objects.bound_connection.clone(),
+        objects_active_db: explorer.objects.active_db.clone(),
+        objects_active_schema: explorer.objects.active_schema.clone(),
     }
 }
 
@@ -220,6 +253,71 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
     apply_instances_tree(state, snapshot, &mut restore_effects);
     apply_objects_expansion(state, snapshot);
 
+    // Restore the active workspace (the active-row highlight for an instance or
+    // connection). Connections load lazily, so a saved connection-active
+    // degrades to its instance workspace here (the instance node is the
+    // authoritative marker); it is refined once the connection rows load.
+    // Opening the instance workspace context (`iw.instance_name`) prevents the
+    // overview from showing the "select an instance" empty hint after a restart.
+    if let Some(aw) = &snapshot.tree.active_workspace {
+        let instance_name = match aw {
+            TuiTreeSelection::Instance { instance } => instance,
+            TuiTreeSelection::Connection { instance, .. } => instance,
+        };
+        if let Some(idx) = state
+            .explorer
+            .instances
+            .nodes
+            .iter()
+            .position(|n| n.instance.as_ref().is_some_and(|i| &i.name == instance_name))
+        {
+            // For a saved connection-active, don't eagerly downgrade to the
+            // instance. Instead remember the connection and wait for the
+            // connections to load; `ConnectionsLoaded` then activates the
+            // connection if found, else falls back to its parent instance.
+            // An instance-active is restored directly.
+            match aw {
+                TuiTreeSelection::Connection { connection, .. } => {
+                    state.explorer.instances.restore_active_connection =
+                        Some((instance_name.clone(), connection.clone()));
+                }
+                TuiTreeSelection::Instance { .. } => {
+                    state.explorer.instances.set_active_instance(idx);
+                }
+            }
+            // Restore the instance-workspace context so the overview renders
+            // the instance instead of an empty prompt. The overview keys off
+            // `iw.instance` (the ManagedInstance), not just the name, so mirror
+            // the node's instance data onto it.
+            state.iw.instance_name = instance_name.clone();
+            if let Some(node) = state.explorer.instances.nodes.get(idx)
+                && let Some(inst) = &node.instance
+            {
+                state.iw.overview.instance = Some(inst.clone());
+            }
+            // Load the connections list so the instance workspace's connections
+            // panel shows them (the overview connection count comes from here),
+            // not just the expanded explorer rows.
+            restore_effects.push(Box::new(
+                crate::features::instance_workspace::connections::effect::ConnectionsEffect::LoadConnections {
+                    instance_name: instance_name.clone(),
+                },
+            ) as Box<dyn ErasedEffect<Action>>);
+            // Eagerly load the explorer tree's connections for the active
+            // instance too. This fires `ConnectionsLoaded`, which refines the
+            // restored active workspace from the instance onto the saved
+            // connection (so the active highlight ends up on the connection,
+            // not its parent)
+            // without waiting for the user to expand the node manually.
+            restore_effects.push(Box::new(
+                crate::features::explorer::instances::effect::InstancesEffect::LoadConnections {
+                    instance_idx: idx,
+                    instance_name: instance_name.clone(),
+                },
+            ) as Box<dyn ErasedEffect<Action>>);
+        }
+    }
+
     // Restore the instance-workspace sub-pane and connections cursor.
     if let Some(iw) = &snapshot.instance_workspace {
         state.iw.pane = match iw.section.as_str() {
@@ -288,11 +386,21 @@ fn apply_instances_tree(
 /// re-applied and the catalog is re-fetched.
 fn apply_objects_expansion(state: &mut AppState, snapshot: &TuiSessionSnapshot) {
     if snapshot.tree.expanded_objects.is_empty() {
+        // Even without expansion keys, restore the active schema (so the
+        // highlighted/forced-expanded schema survives a restart).
+        state.explorer.objects.set_active(
+            snapshot.tree.objects_active_db.clone(),
+            snapshot.tree.objects_active_schema.clone(),
+        );
         return;
     }
     state.explorer.objects.restore_expanded = snapshot.tree.expanded_objects.clone();
     state.explorer.objects.restore_bound_connection =
         snapshot.tree.objects_bound_connection.clone();
+    state.explorer.objects.set_active(
+        snapshot.tree.objects_active_db.clone(),
+        snapshot.tree.objects_active_schema.clone(),
+    );
 }
 
 fn non_empty(s: String) -> Option<String> {
@@ -331,6 +439,8 @@ mod tests {
                 expanded_objects: Vec::new(),
                 objects_bound_instance: String::new(),
                 objects_bound_connection: String::new(),
+                objects_active_db: None,
+                objects_active_schema: None,
             },
             tabs: vec![
                 TuiTabSnapshot {
@@ -405,6 +515,8 @@ mod tests {
                 expanded_objects: Vec::new(),
                 objects_bound_instance: String::new(),
                 objects_bound_connection: String::new(),
+                objects_active_db: None,
+                objects_active_schema: None,
             },
             tabs: Vec::new(),
             active_tab: None,
@@ -476,9 +588,11 @@ mod tests {
         state.explorer.instances.cursor = 1;
         // Instance workspace is active (drives `instance_workspace_open()`).
         state.explorer.instances.set_active_instance(0);
-        // Objects tree expansion keys.
+        // Objects tree expansion keys + active schema.
         state.explorer.objects.expanded.insert("mydb".to_string());
         state.explorer.objects.expanded.insert("mydb\tpublic".to_string());
+        state.explorer.objects.active_db = Some("mydb".into());
+        state.explorer.objects.active_schema = Some("public".into());
         // Explorer focuses the objects sub-pane.
         state.explorer.pane = ExplorerPane::Objects;
         // Instance workspace on the connections pane with a cursor.
@@ -500,6 +614,14 @@ mod tests {
             snap.tree.expanded_objects,
             vec!["mydb".to_string(), "mydb\tpublic".to_string()]
         );
+        // The active workspace (instance 0) is persisted.
+        assert_eq!(
+            snap.tree.active_workspace,
+            Some(TuiTreeSelection::Instance { instance: "local".into() })
+        );
+        // The objects tree's active schema is persisted too.
+        assert_eq!(snap.tree.objects_active_db.as_deref(), Some("mydb"));
+        assert_eq!(snap.tree.objects_active_schema.as_deref(), Some("public"));
         assert_eq!(snap.explorer_pane, "objects");
         let iw = snap.instance_workspace.expect("iw snapshot present");
         assert_eq!(iw.section, "connections");
@@ -528,6 +650,8 @@ mod tests {
                 expanded_objects: vec!["mydb".into()],
                 objects_bound_instance: "local".into(),
                 objects_bound_connection: "app".into(),
+                objects_active_db: None,
+                objects_active_schema: None,
             },
             tabs: Vec::new(),
             active_tab: None,
@@ -557,6 +681,46 @@ mod tests {
     }
 
     #[test]
+    fn restore_applies_active_workspace() {
+        use crate::features::explorer::instances::state::ActiveWorkspaceKind;
+        let mut state = sample_state();
+        state.explorer.instances.set_instances(vec![
+            managed_instance("local"),
+            managed_instance("remote"),
+        ]);
+
+        let snap = TuiSessionSnapshot {
+            version: TUI_SESSION_VERSION,
+            focus: "explorer".into(),
+            tree_width: 20,
+            tree: TuiTreeSnapshot {
+                expanded_instances: Vec::new(),
+                cursor: None,
+                active_workspace: Some(TuiTreeSelection::Instance {
+                    instance: "remote".into(),
+                }),
+                expanded_objects: Vec::new(),
+                objects_bound_instance: String::new(),
+                objects_bound_connection: String::new(),
+                objects_active_db: None,
+                objects_active_schema: None,
+            },
+            tabs: Vec::new(),
+            active_tab: None,
+            instance_workspace: None,
+            discover_targets_ratio: 35,
+            explorer_split_ratio: 20,
+            explorer_pane: "instances".into(),
+        };
+        apply_snapshot(&mut state, &snap);
+        assert_eq!(
+            state.explorer.instances.active_workspace,
+            Some(ActiveWorkspaceKind::Instance(1)),
+            "active workspace must be restored onto the matching instance by name"
+        );
+    }
+
+    #[test]
     fn restore_skips_load_when_instance_already_loaded() {
         let mut state = sample_state();
         state.explorer.instances.set_instances(vec![managed_instance("remote")]);
@@ -574,6 +738,8 @@ mod tests {
                 expanded_objects: Vec::new(),
                 objects_bound_instance: String::new(),
                 objects_bound_connection: String::new(),
+                objects_active_db: None,
+                objects_active_schema: None,
             },
             tabs: Vec::new(),
             active_tab: None,

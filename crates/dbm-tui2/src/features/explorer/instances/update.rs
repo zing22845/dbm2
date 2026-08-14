@@ -23,12 +23,54 @@ pub fn update(
         }
         InstancesMessage::Loaded { instances } => {
             state.set_instances(instances);
+            // Re-load connections for every instance that is expanded after the
+            // reload. `set_instances` rebuilds the tree with empty connection
+            // lists (they load lazily), so an instance that was already expanded
+            // must be refreshed here or its connections would disappear.
+            let expanded: Vec<(usize, String)> = state
+                .nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| n.expanded)
+                .filter_map(|(i, n)| {
+                    n.instance.as_ref().map(|inst| (i, inst.name.clone()))
+                })
+                .collect();
+            for (instance_idx, instance_name) in expanded {
+                effects.push(InstancesEffect::LoadConnections {
+                    instance_idx,
+                    instance_name,
+                });
+            }
             true
         }
         InstancesMessage::ConnectionsLoaded { instance_idx, connections } => {
             if let Some(node) = state.nodes.get_mut(instance_idx) {
                 node.connections = connections;
                 node.loaded = true;
+                // Activate a restored connection-active once this instance's
+                // connections are loaded: if the saved connection is present,
+                // highlight it; if this is the target instance but the connection
+                // no longer exists, fall back to its parent instance. A restore
+                // belonging to a different instance stays pending for its load.
+                if let Some((inst_name, conn_name)) = state.restore_active_connection.take() {
+                    let this_instance = node.instance.as_ref().is_some_and(|i| i.name == inst_name);
+                    if let Some(conn_idx) = node
+                        .connections
+                        .iter()
+                        .position(|c| c.name == conn_name)
+                        && this_instance
+                    {
+                        state.set_active_connection(instance_idx, conn_idx);
+                    } else if this_instance {
+                        // Target instance loaded but the connection is gone:
+                        // degrade to the parent instance.
+                        state.set_active_instance(instance_idx);
+                    } else {
+                        // Not this instance yet; keep the pending restore.
+                        state.restore_active_connection = Some((inst_name, conn_name));
+                    }
+                }
                 true
             } else {
                 false
@@ -54,6 +96,7 @@ pub fn update(
         }
         InstancesMessage::MoveUp => state.move_up(),
         InstancesMessage::MoveDown => state.move_down(),
+        InstancesMessage::JumpTo { row } => state.jump_to(row),
         InstancesMessage::Expand => {
             // Only instance rows expand; connection rows ignore the key. On a
             // fresh expand, lazily load the instance's connections so the
@@ -173,6 +216,107 @@ mod tests {
             lifecycle_checked_at: None,
             lifecycle_detail: None,
         }
+    }
+
+    #[test]
+    fn connections_loaded_refines_restored_active_connection() {
+        use crate::features::explorer::instances::state::ActiveWorkspaceKind;
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a")]);
+        // A connection-active was saved but its rows were not loaded yet.
+        s.set_active_instance(0);
+        s.restore_active_connection = Some(("a".to_string(), "c1".to_string()));
+
+        // Loading the instance's connections refines the active workspace to c1.
+        let (s, _i, _e, _d) = update(
+            InstancesMessage::ConnectionsLoaded {
+                instance_idx: 0,
+                connections: vec![dbm_store::InstanceConnection {
+                    id: "c1".into(),
+                    instance_id: "a".into(),
+                    name: "c1".into(),
+                    username: "u".into(),
+                    database: "d".into(),
+                    has_password: false,
+                    ssl_mode: String::new(),
+                    env_label: None,
+                    created_at: "now".into(),
+                    updated_at: "now".into(),
+                    test_succeeded_at: None,
+                    test_failed_at: None,
+                }],
+            },
+            s,
+        );
+        assert_eq!(
+            s.active_workspace,
+            Some(ActiveWorkspaceKind::Connection { instance_idx: 0, conn_idx: 0 }),
+            "loading connections must refine the active workspace to the connection"
+        );
+        assert!(s.restore_active_connection.is_none(), "pending restore consumed");
+    }
+
+    #[test]
+    fn connections_loaded_falls_back_to_instance_when_connection_missing() {
+        use crate::features::explorer::instances::state::ActiveWorkspaceKind;
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a")]);
+        s.restore_active_connection = Some(("a".to_string(), "gone".to_string()));
+
+        // The target instance loads but the saved connection no longer exists:
+        // the active workspace degrades to the parent instance.
+        let (s, _i, _e, _d) = update(
+            InstancesMessage::ConnectionsLoaded {
+                instance_idx: 0,
+                connections: vec![dbm_store::InstanceConnection {
+                    id: "c1".into(),
+                    instance_id: "a".into(),
+                    name: "c1".into(),
+                    username: "u".into(),
+                    database: "d".into(),
+                    has_password: false,
+                    ssl_mode: String::new(),
+                    env_label: None,
+                    created_at: "now".into(),
+                    updated_at: "now".into(),
+                    test_succeeded_at: None,
+                    test_failed_at: None,
+                }],
+            },
+            s,
+        );
+        assert_eq!(
+            s.active_workspace,
+            Some(ActiveWorkspaceKind::Instance(0)),
+            "missing connection must fall back to the parent instance"
+        );
+        assert!(s.restore_active_connection.is_none(), "pending restore consumed");
+    }
+
+    #[test]
+    fn loaded_reloads_connections_for_expanded_instances() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b")]);
+        s.nodes[0].expanded = true; // A is expanded (its connections load lazily)
+
+        // A full reload (e.g. adding a new instance) rebuilds the tree with
+        // empty connection lists; the already-expanded instance must re-load.
+        let (s, _i, effects, _d) = update(
+            InstancesMessage::Loaded {
+                instances: vec![inst("a"), inst("b")],
+            },
+            s,
+        );
+        assert!(s.nodes[0].expanded, "A stays expanded after reload");
+        assert!(effects.iter().any(|e| matches!(
+            e,
+            InstancesEffect::LoadConnections { instance_idx: 0, .. }
+        )), "expanded instance must re-load connections after a reload");
+        // B (not expanded) must not reload.
+        assert!(!effects.iter().any(|e| matches!(
+            e,
+            InstancesEffect::LoadConnections { instance_idx: 1, .. }
+        )));
     }
 
     #[test]

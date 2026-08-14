@@ -9,17 +9,20 @@ use super::state::ObjectsTarget;
 pub enum ObjectsIntent {
     /// The user activated an object; open it in the SQL workspace.
     OpenObject { target: ObjectsTarget },
+    /// The user activated a schema row; apply it as the active database/schema
+    /// of the bound SQL tab (mirroring the original dbm's `apply_objects_schema`).
+    ApplySchema { database: String, name: String },
 }
 
 impl Intent for ObjectsIntent {
     type Message = ObjectsMsg;
 
     fn into_message(self) -> Option<Self::Message> {
-        // Cross-feature one-way notification to the shell; the shell
-        // (`app/update.rs`) intercepts `OpenObject` and opens a SQL tab, so it
-        // declines a message and the router skips it.
+        // Cross-feature one-way notifications to the shell; the shell
+        // (`app/update.rs`) intercepts them, so they decline a message and the
+        // router skips them.
         match self {
-            ObjectsIntent::OpenObject { .. } => None,
+            ObjectsIntent::OpenObject { .. } | ObjectsIntent::ApplySchema { .. } => None,
         }
     }
 }

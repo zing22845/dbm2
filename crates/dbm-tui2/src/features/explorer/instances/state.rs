@@ -5,8 +5,8 @@ use dbm_store::{InstanceConnection, ManagedInstance};
 /// Which workspace is currently active in the tree, matching the original dbm's
 /// mutually-exclusive `active_workspace`. At most one node is active: an
 /// instance (its instance workspace is shown) or a connection (its SQL
-/// workspace is shown). This is the single source of truth for the `◆`/`●`
-/// active markers in the tree and for what the workspace region renders.
+/// workspace is shown). This is the single source of truth for the active-row
+/// highlight in the tree and for what the workspace region renders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveWorkspaceKind {
     /// The instance at `instance_idx` owns the instance workspace.
@@ -59,8 +59,14 @@ pub struct InstancesState {
     pub h_scroll: u16,
     /// The active workspace (instance or connection), matching the original
     /// dbm's `ConnectionTreeState::active_workspace`. `None` when no workspace
-    /// has been opened yet. Drives the `◆`/`●` markers and the workspace render.
+    /// has been opened yet. Drives the active-row highlight and the workspace render.
     pub active_workspace: Option<ActiveWorkspaceKind>,
+    /// A saved connection-active restored from a session whose connection rows
+    /// were not loaded yet. `(instance_name, connection_name)`; once the
+    /// instance's connections load, the active workspace is refined to that
+    /// connection (so a restart keeps the active highlight on the connection,
+    /// not its parent instance).
+    pub restore_active_connection: Option<(String, String)>,
 }
 
 impl InstancesState {
@@ -91,6 +97,16 @@ impl InstancesState {
         self.cursor != before
     }
 
+    /// Jump the cursor to a specific visible row (mouse click), clamped to the
+    /// visible list. Returns whether the cursor moved.
+    pub fn jump_to(&mut self, row: usize) -> bool {
+        let max = self.visible_count().saturating_sub(1);
+        let target = row.min(max);
+        let before = self.cursor;
+        self.cursor = target;
+        self.cursor != before
+    }
+
     /// Expand the instance the cursor is on (if the cursor is on an instance
     /// row and it isn't already expanded). Returns whether expansion changed.
     pub fn expand(&mut self) -> bool {
@@ -105,8 +121,13 @@ impl InstancesState {
     }
 
     /// Collapse the instance the cursor is on (if the cursor is on an instance
-    /// row and it is currently expanded). Returns whether collapse changed.
+    /// row and it is currently expanded). Collapsing an active instance — or an
+    /// active connection's parent instance — is blocked (it is forced expanded),
+    /// matching the original dbm. Returns whether collapse changed.
     pub fn collapse(&mut self) -> bool {
+        if self.cursor_collapse_blocked() {
+            return false;
+        }
         if let Some((node, _)) = self.node_at_cursor_mut()
             && node.expanded
         {
@@ -202,22 +223,70 @@ impl InstancesState {
         matches!(self.active_workspace, Some(ActiveWorkspaceKind::Instance(_)))
     }
 
-    /// Make the instance at `instance_idx` the active workspace.
+    /// Make the instance at `instance_idx` the active workspace. Its node is
+    /// forced expanded so the active workspace stays visible.
     pub fn set_active_instance(&mut self, instance_idx: usize) {
         self.active_workspace = Some(ActiveWorkspaceKind::Instance(instance_idx));
+        if let Some(node) = self.nodes.get_mut(instance_idx) {
+            node.expanded = true;
+        }
     }
 
     /// Make the connection at `(instance_idx, conn_idx)` the active workspace.
+    /// Its parent instance node is forced expanded so the active connection
+    /// stays visible.
     pub fn set_active_connection(&mut self, instance_idx: usize, conn_idx: usize) {
         self.active_workspace = Some(ActiveWorkspaceKind::Connection {
             instance_idx,
             conn_idx,
         });
+        if let Some(node) = self.nodes.get_mut(instance_idx) {
+            node.expanded = true;
+        }
+    }
+
+    /// Whether collapsing is blocked because the cursor's node is on the active
+    /// path (an active instance, or an active connection's parent instance).
+    pub fn cursor_collapse_blocked(&self) -> bool {
+        let Some((instance_idx, _)) = self.cursor_selection() else {
+            return false;
+        };
+        self.is_active_instance(instance_idx)
+            || matches!(
+                self.active_workspace,
+                Some(ActiveWorkspaceKind::Connection {
+                    instance_idx: ai,
+                    ..
+                }) if ai == instance_idx
+            )
     }
 
     /// Clear the active workspace (e.g. the instance was unregistered).
     pub fn clear_active_workspace(&mut self) {
         self.active_workspace = None;
+    }
+
+    /// Whether the given visible row is a connection row (`true`) or an
+    /// instance row (`false`). Used by mouse hit-testing to find the expand/
+    /// collapse marker column.
+    pub fn visible_row_is_connection(&self, target_row: usize) -> (bool, usize) {
+        let mut row = 0usize;
+        for (i, node) in self.nodes.iter().enumerate() {
+            if row == target_row {
+                return (false, i);
+            }
+            row += 1;
+            if node.expanded {
+                row += node.connections.len();
+                if target_row < row {
+                    return (true, i);
+                }
+            }
+            if target_row < row {
+                break;
+            }
+        }
+        (false, usize::MAX)
     }
 
     /// Resolve the cursor's position to either an instance or a connection.
@@ -462,6 +531,33 @@ mod tests {
     }
 
     #[test]
+    fn visible_row_is_connection_distinguishes_rows() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b")]);
+        s.nodes[0].expanded = true;
+        s.nodes[0].loaded = true;
+        s.nodes[0].connections = vec![conn("c1")];
+        // Row 0 = instance a, row 1 = connection c1, row 2 = instance b.
+        assert_eq!(s.visible_row_is_connection(0), (false, 0));
+        assert_eq!(s.visible_row_is_connection(1), (true, 0));
+        assert_eq!(s.visible_row_is_connection(2), (false, 1));
+    }
+
+    #[test]
+    fn jump_to_moves_and_clamps_cursor() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b"), inst("c")]);
+        assert_eq!(s.visible_count(), 3);
+        s.jump_to(1);
+        assert_eq!(s.cursor, 1);
+        // Clamp to the visible count.
+        assert!(s.jump_to(100));
+        assert_eq!(s.cursor, 2);
+        // Same row -> no movement.
+        assert!(!s.jump_to(2));
+    }
+
+    #[test]
     fn active_workspace_tracks_instance_and_connection() {
         let mut s = InstancesState::default();
         s.set_instances(vec![inst("a"), inst("b")]);
@@ -472,13 +568,13 @@ mod tests {
         // Default: no active workspace, not instance-open.
         assert!(!s.active_is_instance());
 
-        // Set an instance active (◆ marker).
+        // Set an instance active.
         s.set_active_instance(0);
         assert!(s.is_active_instance(0));
         assert!(!s.is_active_instance(1));
         assert!(s.active_is_instance());
 
-        // Switch to a connection (● marker) — instance marker clears (mutually
+        // Switch to a connection — the instance highlight clears (mutually
         // exclusive, matching the original dbm).
         s.set_active_connection(0, 1);
         assert!(s.is_active_connection(0, 1));
@@ -489,6 +585,29 @@ mod tests {
         s.clear_active_workspace();
         assert!(!s.is_active_instance(0));
         assert!(!s.is_active_connection(0, 1));
+    }
+
+    #[test]
+    fn set_active_forces_expand_parent_and_blocks_collapse() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a")]);
+        s.nodes[0].expanded = false;
+
+        // Activating an instance (or a connection under it) forces its node open.
+        s.set_active_instance(0);
+        assert!(s.nodes[0].expanded, "active instance is forced expanded");
+
+        // Collapsing the active instance is blocked.
+        s.cursor = 0;
+        assert!(!s.collapse(), "active instance must not collapse");
+
+        // A connection active also keeps the parent instance forced open.
+        s.nodes[0].expanded = true;
+        s.nodes[0].loaded = true;
+        s.nodes[0].connections = vec![conn("c1")];
+        s.set_active_connection(0, 0);
+        s.cursor = 0; // on the instance row
+        assert!(!s.collapse(), "active connection's parent must not collapse");
     }
 
     #[test]

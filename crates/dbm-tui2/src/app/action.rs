@@ -65,6 +65,16 @@ impl From<IwAction> for Action {
         Action::Iw(a)
     }
 }
+impl From<crate::features::instance_workspace::connections::effect::ConnectionsAction> for Action {
+    fn from(a: crate::features::instance_workspace::connections::effect::ConnectionsAction) -> Self {
+        Action::Iw(IwAction::Connections(a))
+    }
+}
+impl From<crate::features::explorer::instances::effect::InstancesAction> for Action {
+    fn from(a: crate::features::explorer::instances::effect::InstancesAction) -> Self {
+        Action::Explorer(crate::features::explorer::effect::ExplorerAction::Instances(a))
+    }
+}
 impl From<SqlAction> for Action {
     fn from(a: SqlAction) -> Self {
         Action::Sql(a)

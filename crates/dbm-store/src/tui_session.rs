@@ -43,6 +43,13 @@ pub struct TuiTreeSnapshot {
     pub objects_bound_instance: String,
     #[serde(default)]
     pub objects_bound_connection: String,
+    /// The active schema of the bound connection's objects tree (and its parent
+    /// database) when saved. Restored so the active schema stays highlighted and
+    /// forced-expanded after a restart. Defaults to `None` for older snapshots.
+    #[serde(default)]
+    pub objects_active_db: Option<String>,
+    #[serde(default)]
+    pub objects_active_schema: Option<String>,
 }
 
 /// Snapshot of the instance-workspace sub-pane state.

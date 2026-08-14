@@ -24,8 +24,9 @@ pub enum DiscoverAction {
     ScanCancelled,
     /// The scan failed.
     ScanError { error: String },
-    /// A batch of instances was registered.
-    RegisterComplete { count: usize },
+    /// A batch of instances was registered. Carries the refreshed discovered
+    /// list so the results pane can drop (or re-mark) the now-registered rows.
+    RegisterComplete { items: Vec<dbm_discovery::DiscoveredInstance> },
     /// Registering failed.
     RegisterError { error: String },
 }
@@ -158,9 +159,26 @@ async fn run_register(
                 count = reg.instances.len(),
                 "run_register: register_discovered succeeded"
             );
-            vec![DiscoverAction::RegisterComplete {
-                count: reg.instances.len(),
-            }]
+            // Re-read the fresh discovered list so the results pane can drop
+            // (unregistered-only filter) or re-mark the now-registered rows
+            // without the user re-running the scan. The store marks the newly
+            // registered instances with `already_registered` /
+            // `registered_instance_id`.
+            let store = services.store.clone();
+            let listed = tokio::task::spawn_blocking(move || {
+                let store = store.lock().expect("discover store lock");
+                store.list_discovered(false)
+            })
+            .await;
+            match listed {
+                Ok(Ok(items)) => vec![DiscoverAction::RegisterComplete { items }],
+                Ok(Err(e)) => vec![DiscoverAction::RegisterError {
+                    error: e.to_string(),
+                }],
+                Err(e) => vec![DiscoverAction::RegisterError {
+                    error: e.to_string(),
+                }],
+            }
         }
         Ok(Err(e)) => {
             // A plain register (`r`) stops on precheck warnings; tell the user
