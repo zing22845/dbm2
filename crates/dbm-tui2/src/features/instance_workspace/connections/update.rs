@@ -32,12 +32,36 @@ pub fn update(
             false
         }
         ConnectionsMessage::Loaded { connections } => {
-            // Repaint only when the list (or the cursor reset) actually changed,
-            // so a refresh that reloads identical data does not redraw.
-            let dirty = state.connections != connections || state.cursor != 0;
+            // Preserve the cursor across a reload by re-resolving the currently
+            // selected connection by name. A refresh (e.g. after testing a saved
+            // connection) must keep the selection on the row the user was on,
+            // not snap back to the first connection. On an initial load (no
+            // prior selection) the cursor stays clamped where it was; when the
+            // old selection no longer exists (deleted) it clamps into the new
+            // list.
+            let list_changed = state.connections != connections;
+            let prev_name = state
+                .connections
+                .get(state.cursor)
+                .map(|c| c.name.clone());
+            let old_cursor = state.cursor;
             state.connections = connections;
-            state.cursor = 0;
-            dirty
+            let clamp = |c: usize| c.min(state.connections.len().saturating_sub(1));
+            let new_cursor = match prev_name {
+                // Initial load (or an empty previous list): keep the cursor
+                // where it was, clamped.
+                None => clamp(old_cursor),
+                Some(name) => state
+                    .connections
+                    .iter()
+                    .position(|c| c.name == name)
+                    .unwrap_or_else(|| clamp(old_cursor)),
+            };
+            let cursor_changed = new_cursor != old_cursor;
+            state.cursor = new_cursor;
+            // Repaint only when the list (or the cursor) actually changed, so a
+            // refresh that reloads identical data does not redraw.
+            list_changed || cursor_changed
         }
         ConnectionsMessage::MoveUp => state.move_up(),
         ConnectionsMessage::MoveDown => state.move_down(),
@@ -332,6 +356,54 @@ mod tests {
             s,
         );
         assert!(!dirty);
+    }
+
+    #[test]
+    fn loaded_preserves_cursor_on_the_selected_connection() {
+        fn conn(name: &str) -> dbm_store::InstanceConnection {
+            dbm_store::InstanceConnection {
+                id: name.into(),
+                instance_id: "inst".into(),
+                name: name.into(),
+                username: "postgres".into(),
+                database: "postgres".into(),
+                has_password: false,
+                ssl_mode: "prefer".into(),
+                env_label: None,
+                created_at: "now".into(),
+                updated_at: "now".into(),
+                test_succeeded_at: None,
+                test_failed_at: None,
+            }
+        }
+        // Three connections, cursor on the middle one ("b").
+        let (mut s, _i, _e, _d) = update(
+            ConnectionsMessage::Loaded {
+                connections: vec![conn("a"), conn("b"), conn("c")],
+            },
+            ConnectionsState::default(),
+        );
+        assert_eq!(s.cursor, 0, "initial load keeps the cursor on the first row");
+        s.cursor = 1;
+
+        // Testing "b" reloads the list; the cursor must stay on "b", not reset
+        // to the first connection.
+        let (s, _i, _e, _d) = update(
+            ConnectionsMessage::Loaded {
+                connections: vec![conn("a"), conn("b"), conn("c")],
+            },
+            s,
+        );
+        assert_eq!(s.cursor, 1, "cursor stays on the tested connection");
+
+        // If the selected connection disappears (deleted), clamp into the list.
+        let (s, _i, _e, _d) = update(
+            ConnectionsMessage::Loaded {
+                connections: vec![conn("a"), conn("c")],
+            },
+            s,
+        );
+        assert_eq!(s.cursor, 1, "cursor clamps when the selection is gone");
     }
 
     #[test]
