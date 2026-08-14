@@ -11,6 +11,9 @@ pub enum ObjectsMessage {
     MoveDown,
     /// Move the cursor to a specific row (mouse click).
     JumpTo { row: usize },
+    /// Toggle expand/collapse the expandable row at the given visible row
+    /// (mouse marker click) without moving the cursor.
+    ToggleExpandAt { row: usize },
     /// Collapse the current row (`h`), matching the original dbm.
     Collapse,
     /// Scroll the tree horizontally by `delta` columns (`Left`/`Right`),

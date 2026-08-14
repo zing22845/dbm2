@@ -37,10 +37,12 @@ pub fn row_at(area: Rect, state: &ObjectsState, y: u16) -> Option<usize> {
 pub fn toggle_at(area: Rect, state: &ObjectsState, x: u16, y: u16) -> Option<usize> {
     let row = row_at(area, state, y)?;
     let depth = state.rows.get(row).map(|r| r.depth).unwrap_or(0) as u16;
-    // Rows render as " {indent}{marker} label" with indent = 2 cols per depth.
-    let body_x = area.x.saturating_add(1); // top border
+    // Rows render as "{indent}{marker} label" with indent = 2 cols per depth
+    // and NO leading space, so the marker sits at body_x + depth*2 (matching
+    // `render`'s `format!("{indent}{marker} {label}")`). No +1 leading-space
+    // offset here, unlike the instances pane (which does emit a leading space).
+    let body_x = area.x.saturating_add(1); // left border
     let marker_col = body_x
-        .saturating_add(1) // leading space
         .saturating_add(depth.saturating_mul(2))
         .saturating_sub(state.h_scroll);
     (x >= marker_col && x < marker_col.saturating_add(2)).then_some(row)
@@ -183,10 +185,10 @@ mod tests {
             label: "db".into(),
         }];
         let area = Rect::new(0, 5, 40, 20);
-        // depth 0: marker is the 2nd char, at body.x+1 = 2.
-        assert_eq!(toggle_at(area, &s, 2, 6), Some(0), "marker column hits");
-        // Clicking the leading space (x=1) or the label (x=5) is not the marker.
-        assert_eq!(toggle_at(area, &s, 1, 6), None);
-        assert_eq!(toggle_at(area, &s, 5, 6), None);
+        // depth 0 renders as "{marker} label", marker at body.x = area.x+1 = 1.
+        assert_eq!(toggle_at(area, &s, 1, 6), Some(0), "marker column hits");
+        // Clicking the border (x=0) or the label (x=3) is not the marker.
+        assert_eq!(toggle_at(area, &s, 0, 6), None);
+        assert_eq!(toggle_at(area, &s, 3, 6), None);
     }
 }

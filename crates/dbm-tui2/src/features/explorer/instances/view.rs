@@ -270,4 +270,60 @@ mod tests {
         // Clicking the border/title row is not a marker.
         assert_eq!(toggle_at(area, &s, 2, 5), None);
     }
+
+    #[test]
+    fn render_places_first_instance_row_at_row_at_body_top() {
+        // Render an instances pane and confirm the first instance row is drawn
+        // at the same y that `row_at` treats as row 0 (body_top = area.y+1), so
+        // a click lands on the visually correct row.
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let theme = crate::common::view::theme::dracula();
+        let mut s = InstancesState::default();
+        s.set_instances(vec![dbm_store::ManagedInstance {
+            id: "a".into(),
+            fingerprint: "a".into(),
+            name: "a".into(),
+            engine: dbm_core::Engine::Postgres,
+            host: "h".into(),
+            port: 1,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "now".into(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        }]);
+        let area = Rect::new(0, 5, 40, 20);
+        let mut terminal = Terminal::new(TestBackend::new(40, 25)).unwrap();
+        terminal
+            .draw(|frame| {
+                let theme = theme.clone();
+                render(frame, &theme, area, &s, true);
+            })
+            .unwrap();
+        // Find the y of the first non-border row containing the instance name.
+        let buf = terminal.backend().buffer();
+        let mut found_y = None;
+        for y in 0..25 {
+            let mut line = String::new();
+            for x in 0..40 {
+                line.push_str(buf[(x, y)].symbol());
+            }
+            if line.contains("a") && !line.contains("Instances") {
+                found_y = Some(y as u16);
+                break;
+            }
+        }
+        // row_at treats body_top = area.y+1 = 6 as row 0, so the first instance
+        // row must render at y=6 (not 5).
+        assert_eq!(found_y, Some(6), "first instance row is at body_top (area.y+1)");
+        assert_eq!(row_at(area, &s, 6), Some(0));
+        // A click one row higher hits the border/title, not a row.
+        assert_eq!(row_at(area, &s, 5), None);
+    }
 }

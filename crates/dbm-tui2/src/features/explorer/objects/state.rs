@@ -147,6 +147,12 @@ pub struct ObjectsState {
     /// highlighted and forced expanded; they cannot be collapsed.
     pub active_db: Option<String>,
     pub active_schema: Option<String>,
+    /// A schema active-marking deferred until the parent database's schemas
+    /// load, mirroring how a connection is only re-activated after its
+    /// connections load. `(database, schema)`. Set by [`Self::defer_active`],
+    /// validated (and degraded if absent) by `resolve_pending_active_schema`
+    /// once `SchemasLoaded` arrives.
+    pub pending_active_schema: Option<(String, String)>,
 }
 
 impl ObjectsState {
@@ -208,6 +214,64 @@ impl ObjectsState {
         self.active_db = db;
         self.active_schema = sc;
         self.rebuild_rows();
+    }
+
+    /// Set the active database immediately (so its row is forced expanded) but
+    /// defer marking the active schema until the database's schemas load —
+    /// mirroring the wait-then-activate (else degrade) pattern used for
+    /// connections (`restore_active_connection`). Returns `true` when the active
+    /// database's schemas still need to be fetched. When the schemas are already
+    /// cached, the schema is validated immediately instead.
+    pub fn defer_active(&mut self, database: Option<String>, schema: Option<String>) -> bool {
+        let db = database.filter(|d| !d.is_empty());
+        let sc = schema.filter(|s| !s.is_empty());
+        let schemas_ready = db
+            .as_deref()
+            .is_some_and(|d| self.catalog.schemas.contains_key(d));
+        // `db` / `sc` are moved below, so decide the pending + return early.
+        let pending = match (&db, &sc) {
+            (Some(d), Some(s)) => Some((d.clone(), s.clone())),
+            _ => None,
+        };
+        let has_db = db.is_some();
+
+        if self.active_db != db {
+            self.active_db = db;
+            self.rebuild_rows();
+        }
+        self.pending_active_schema = pending;
+
+        if schemas_ready {
+            // Schemas are available: validate now, which marks the schema or
+            // degrades to no active schema if it no longer exists.
+            self.resolve_pending_active_schema();
+            false
+        } else {
+            // Schemas not loaded yet: hold the database active and clear the
+            // schema until the load resolves.
+            if self.active_schema.is_some() {
+                self.active_schema = None;
+                self.rebuild_rows();
+            }
+            has_db
+        }
+    }
+
+    /// Validate a deferred active schema against the now-loaded schemas: mark
+    /// it active when present, otherwise degrade to no active schema (the parent
+    /// database stays active). Called once the relevant database's schemas load.
+    pub(crate) fn resolve_pending_active_schema(&mut self) {
+        let Some((db, schema)) = self.pending_active_schema.take() else {
+            return;
+        };
+        let mark = match self.catalog.schemas.get(&db) {
+            Some(CatalogList::Ready(schemas)) if schemas.contains(&schema) => Some(schema),
+            _ => None,
+        };
+        if self.active_schema != mark {
+            self.active_schema = mark;
+            self.rebuild_rows();
+        }
     }
 
     fn expand_key_group(database: &str, schema: Option<&str>, kind: ObjectKind) -> String {
@@ -293,6 +357,32 @@ impl ObjectsState {
         if self.expanded.contains(&key) {
             // Collapsing an active database/schema is blocked (it is forced
             // expanded), matching the original dbm.
+            if Self::collapse_blocked_by_active(
+                &node,
+                self.active_db.as_deref(),
+                self.active_schema.as_deref(),
+            ) {
+                return None;
+            }
+            self.expanded.remove(&key);
+        } else {
+            self.expanded.insert(key);
+        }
+        self.rebuild_rows();
+        Some(node)
+    }
+
+    /// Toggle expand/collapse the expandable row at the given visible `row` (a
+    /// mouse marker click) without moving the cursor. Returns the toggled node
+    /// so the caller can fetch its children on expand, or `None` for an object
+    /// row (no marker) or a blocked collapse (active path).
+    pub fn toggle_expand_at(&mut self, row: usize) -> Option<ObjectsNode> {
+        let node = self.rows.get(row)?.node.clone();
+        if matches!(node, ObjectsNode::Object { .. }) {
+            return None;
+        }
+        let key = self.expand_key_of(&node);
+        if self.expanded.contains(&key) {
             if Self::collapse_blocked_by_active(
                 &node,
                 self.active_db.as_deref(),
@@ -704,5 +794,30 @@ mod tests {
         s.set_active(None, None);
         assert!(s.active_db.is_none());
         assert!(s.active_schema.is_none());
+    }
+
+    #[test]
+    fn defer_active_holds_db_until_schemas_load_then_validates() {
+        // Schemas not loaded yet: `defer_active` holds the database active,
+        // defers the schema, and reports that a load is needed.
+        let mut s = ObjectsState::default();
+        assert!(s.defer_active(Some("db".into()), Some("public".into())));
+        assert_eq!(s.active_db.as_deref(), Some("db"));
+        assert_eq!(s.active_schema, None, "schema is deferred until schemas load");
+        assert_eq!(s.pending_active_schema, Some(("db".to_string(), "public".to_string())));
+
+        // Schemas arrive and contain the deferred schema: it is now marked.
+        s.catalog.schemas.insert("db".into(), CatalogList::Ready(vec!["public".into(), "other".into()]));
+        s.resolve_pending_active_schema();
+        assert_eq!(s.active_schema.as_deref(), Some("public"));
+        assert_eq!(s.pending_active_schema, None);
+
+        // A schema that no longer exists degrades to no active schema.
+        let mut s2 = ObjectsState::default();
+        assert!(s2.defer_active(Some("db".into()), Some("gone".into())));
+        s2.catalog.schemas.insert("db".into(), CatalogList::Ready(vec!["public".into()]));
+        s2.resolve_pending_active_schema();
+        assert_eq!(s2.active_db.as_deref(), Some("db"));
+        assert_eq!(s2.active_schema, None, "absent schema degrades to no active schema");
     }
 }

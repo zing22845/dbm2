@@ -132,6 +132,28 @@ pub fn update(
                 _ => false,
             }
         }
+        InstancesMessage::ToggleExpandAt { row } => {
+            // A mouse marker click toggles the instance at that visible row
+            // without moving the cursor. Lazily load connections on a fresh
+            // expand (matching `Expand`).
+            let (_, inst_idx) = state.visible_row_is_connection(row);
+            let changed = state.toggle_expand_at(row);
+            if changed
+                && inst_idx != usize::MAX
+                && state.nodes.get(inst_idx).is_some_and(|n| n.expanded && !n.loaded)
+            {
+                let instance_name = state.nodes[inst_idx]
+                    .instance
+                    .as_ref()
+                    .map(|i| i.name.clone())
+                    .unwrap_or_default();
+                effects.push(InstancesEffect::LoadConnections {
+                    instance_idx: inst_idx,
+                    instance_name,
+                });
+            }
+            changed
+        }
         InstancesMessage::ScrollHorizontal { delta, term_width } => {
             // The explorer takes ~20% of terminal width, minus the 2 border
             // columns, matching the view's text viewport.  Clamp so `h_scroll`

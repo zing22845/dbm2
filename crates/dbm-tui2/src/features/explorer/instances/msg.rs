@@ -18,6 +18,9 @@ pub enum InstancesMessage {
     Expand,
     /// Collapse the current instance, matching the original dbm's `h` key.
     Collapse,
+    /// Expand/collapse the instance at the given visible row (mouse marker
+    /// click) without moving the cursor.
+    ToggleExpandAt { row: usize },
     /// Scroll the tree horizontally by `delta` columns (`Left`/`Right`),
     /// matching the original dbm's tree horizontal scroll. `term_width` is the
     /// current terminal width in columns (used to approximate the explorer

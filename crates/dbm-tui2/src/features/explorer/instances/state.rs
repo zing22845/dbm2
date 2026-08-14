@@ -120,6 +120,41 @@ impl InstancesState {
         }
     }
 
+    /// Expand/collapse the instance at the given visible `row` (a mouse marker
+    /// click) without moving the cursor. Connection rows are ignored (they have
+    /// no marker). Collapsing an active instance — or an active connection's
+    /// parent instance — is blocked (it is forced expanded), matching the
+    /// original dbm. Returns whether expansion changed.
+    pub fn toggle_expand_at(&mut self, row: usize) -> bool {
+        let (is_connection, idx) = self.visible_row_is_connection(row);
+        if is_connection || idx == usize::MAX {
+            return false;
+        }
+        // Resolve the collapse-block before the mutable borrow so the immutable
+        // reads of `active_workspace` do not overlap it.
+        let expanded = self.nodes.get(idx).is_some_and(|n| n.expanded);
+        let collapse_blocked = expanded
+            && (self.is_active_instance(idx)
+                || matches!(
+                    self.active_workspace,
+                    Some(ActiveWorkspaceKind::Connection { instance_idx: ai, .. })
+                        if ai == idx
+                ));
+        if let Some(node) = self.nodes.get_mut(idx) {
+            if node.expanded {
+                if collapse_blocked {
+                    return false;
+                }
+                node.expanded = false;
+            } else {
+                node.expanded = true;
+            }
+            true
+        } else {
+            false
+        }
+    }
+
     /// Collapse the instance the cursor is on (if the cursor is on an instance
     /// row and it is currently expanded). Collapsing an active instance — or an
     /// active connection's parent instance — is blocked (it is forced expanded),
@@ -675,6 +710,32 @@ mod tests {
             Some(("a".to_string(), "c2".to_string())),
             "connection-active is queued for re-resolution"
         );
+    }
+
+    #[test]
+    fn toggle_expand_at_toggles_that_row_without_moving_cursor() {
+        // Two instances; the cursor is on row 0. Row 1 (the second instance) is
+        // the marker click target.
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b")]);
+        s.cursor = 0;
+        assert_eq!(s.nodes[1].expanded, false);
+        assert!(s.toggle_expand_at(1), "marker click expands row 1");
+        assert_eq!(s.nodes[1].expanded, true);
+        assert_eq!(s.cursor, 0, "cursor must not move");
+        // Toggle again collapses it.
+        assert!(s.toggle_expand_at(1), "marker click collapses row 1");
+        assert_eq!(s.nodes[1].expanded, false);
+        assert_eq!(s.cursor, 0, "cursor still must not move");
+    }
+
+    #[test]
+    fn toggle_expand_at_blocks_collapsing_an_active_instance() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a")]);
+        s.set_active_instance(0); // forced expanded
+        assert!(!s.toggle_expand_at(0), "active instance cannot be collapsed");
+        assert!(s.nodes[0].expanded);
     }
 
     #[test]

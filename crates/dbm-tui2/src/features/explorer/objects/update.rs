@@ -63,6 +63,15 @@ pub fn update(
                 }
             }
         }
+        ObjectsMessage::ToggleExpandAt { row } => {
+            // A mouse marker click toggles the database/group at that visible
+            // row without moving the cursor (and without activating a schema or
+            // opening an object). Fetch children on a fresh expand.
+            if let Some(node) = state.toggle_expand_at(row) {
+                maybe_fetch_on_expand(&node, &state, &mut effects);
+                dirty = true;
+            }
+        }
         ObjectsMessage::Bind { instance, connection } => {
             // Idempotent: only rebind (and re-fetch databases) when the binding
             // actually changes. The shell's binding sync may emit duplicate
@@ -79,6 +88,21 @@ pub fn update(
             state.catalog.databases = CatalogList::Ready(databases);
             state.rebuild_rows();
             dirty = true;
+            // The active database (restored from the active SQL tab's schema) is
+            // forced expanded, so fetch its schemas just like a manually-
+            // expanded database. Without this, re-binding to a connection shows
+            // only the Extensions group and never the schemas.
+            if !state.bound_instance.is_empty()
+                && !state.bound_connection.is_empty()
+                && let Some(db) = state.active_db.clone()
+                && !state.catalog.schemas.contains_key(&db)
+            {
+                effects.push(ObjectsEffect::LoadSchemas {
+                    instance: state.bound_instance.clone(),
+                    connection: state.bound_connection.clone(),
+                    database: db,
+                });
+            }
         }
         ObjectsMessage::DatabasesError { error } => {
             state.catalog.databases = CatalogList::Error(error);
@@ -90,6 +114,10 @@ pub fn update(
                 .catalog
                 .schemas
                 .insert(database, CatalogList::Ready(schemas));
+            // A deferred active schema (from session restore or connection
+            // activation) can now be validated: mark it active if present,
+            // otherwise degrade to no active schema.
+            state.resolve_pending_active_schema();
             state.rebuild_rows();
             dirty = true;
         }
@@ -255,6 +283,112 @@ mod tests {
             ObjectsIntent::ApplySchema { database, name }
                 if database == "db" && name == "public"
         )));
+    }
+
+    #[test]
+    fn databases_loaded_fetches_schemas_for_the_active_database() {
+        // After re-binding to a connection, `DatabasesLoaded` arrives while the
+        // active schema (restored from the SQL tab) points at a database whose
+        // schemas are not cached. The active database is force-expanded, so it
+        // must fetch its schemas — otherwise only the Extensions group shows.
+        let mut s = ObjectsState::default();
+        s.bound_instance = "inst".into();
+        s.bound_connection = "c1".into();
+        s.active_db = Some("postgres".into());
+        s.active_schema = Some("public".into());
+        let (_s, _intents, effects, _dirty) = update(
+            ObjectsMessage::DatabasesLoaded {
+                databases: vec!["postgres".into()],
+            },
+            s,
+        );
+        assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                ObjectsEffect::LoadSchemas {
+                    instance,
+                    connection,
+                    database,
+                } if instance == "inst" && connection == "c1" && database == "postgres"
+            )),
+            "expected LoadSchemas for the active database, got {effects:?}"
+        );
+    }
+
+    #[test]
+    fn schemas_loaded_marks_or_degrades_a_deferred_active_schema() {
+        // Session restore / connection activation defers the active schema until
+        // its database's schemas load. `SchemasLoaded` must mark it active when
+        // present, and degrade to no active schema when it no longer exists.
+        let mut s = ObjectsState::default();
+        s.bound_instance = "inst".into();
+        s.bound_connection = "c1".into();
+        s.active_db = Some("postgres".into());
+        s.pending_active_schema = Some(("postgres".into(), "public".into()));
+
+        let (s, _i, _e, _d) = update(
+            ObjectsMessage::SchemasLoaded {
+                database: "postgres".into(),
+                schemas: vec!["public".into(), "extensions".into()],
+            },
+            s,
+        );
+        assert_eq!(s.active_schema.as_deref(), Some("public"));
+
+        // A deferred schema that is not in the loaded list degrades to no
+        // active schema (the database stays active).
+        let mut s2 = ObjectsState::default();
+        s2.active_db = Some("postgres".into());
+        s2.pending_active_schema = Some(("postgres".into(), "dropped".into()));
+        let (s2, _i, _e, _d) = update(
+            ObjectsMessage::SchemasLoaded {
+                database: "postgres".into(),
+                schemas: vec!["public".into()],
+            },
+            s2,
+        );
+        assert_eq!(s2.active_db.as_deref(), Some("postgres"));
+        assert_eq!(s2.active_schema, None);
+    }
+
+    #[test]
+    fn toggle_expand_at_toggles_that_row_without_moving_cursor() {
+        // A database row at row 1; cursor is on row 0.
+        let mut s = ObjectsState::default();
+        s.rows = vec![
+            super::super::state::ObjectsRow {
+                depth: 0,
+                expanded: false,
+                expandable: false,
+                active: false,
+                node: ObjectsNode::Database { name: "db".into() },
+                label: "db".into(),
+            },
+            super::super::state::ObjectsRow {
+                depth: 1,
+                expanded: false,
+                expandable: true,
+                active: false,
+                node: ObjectsNode::Group {
+                    database: "db".into(),
+                    schema: Some("public".into()),
+                    kind: ObjectKind::Tables,
+                },
+                label: "Tables".into(),
+            },
+        ];
+        s.cursor = 0;
+        // Capture the group's expand key before the update (rebuild_rows inside
+        // toggle_expand_at regenerates rows from the catalog).
+        let group_key = s.expand_key_of(&s.rows[1].node);
+        let (s, _intents, _effects, dirty) =
+            update(ObjectsMessage::ToggleExpandAt { row: 1 }, s);
+        assert!(dirty);
+        assert!(
+            s.expanded.contains(&group_key),
+            "the clicked group is toggled expanded"
+        );
+        assert_eq!(s.cursor, 0, "marker click must not move the cursor");
     }
 
     #[test]

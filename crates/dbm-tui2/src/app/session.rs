@@ -402,22 +402,22 @@ fn apply_instances_tree(
 /// to the saved connection (`ObjectsState::rebind`), at which point they are
 /// re-applied and the catalog is re-fetched.
 fn apply_objects_expansion(state: &mut AppState, snapshot: &TuiSessionSnapshot) {
+    // Restore the active database immediately (so its row is forced expanded)
+    // but defer the active schema: the tree is unbound at startup and its
+    // schemas load lazily, so the schema is validated (and degraded if it no
+    // longer exists) once `SchemasLoaded` arrives — the same wait-then-activate
+    // pattern used for connections. `databases_loaded` handles fetching schemas
+    // for the active database after the tree binds.
+    state.explorer.objects.defer_active(
+        snapshot.tree.objects_active_db.clone(),
+        snapshot.tree.objects_active_schema.clone(),
+    );
     if snapshot.tree.expanded_objects.is_empty() {
-        // Even without expansion keys, restore the active schema (so the
-        // highlighted/forced-expanded schema survives a restart).
-        state.explorer.objects.set_active(
-            snapshot.tree.objects_active_db.clone(),
-            snapshot.tree.objects_active_schema.clone(),
-        );
         return;
     }
     state.explorer.objects.restore_expanded = snapshot.tree.expanded_objects.clone();
     state.explorer.objects.restore_bound_connection =
         snapshot.tree.objects_bound_connection.clone();
-    state.explorer.objects.set_active(
-        snapshot.tree.objects_active_db.clone(),
-        snapshot.tree.objects_active_schema.clone(),
-    );
 }
 
 fn non_empty(s: String) -> Option<String> {

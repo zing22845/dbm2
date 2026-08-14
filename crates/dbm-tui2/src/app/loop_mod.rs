@@ -457,8 +457,20 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
 
                             // A double click in the explorer activates the clicked
-                            // node (Select), like pressing Enter on it.
-                            if is_double_click && mouse.column < explorer_w {
+                            // node (Select), like pressing Enter on it — except on
+                            // an expand/collapse marker, where a double click must
+                            // still only expand/collapse (no cursor move, no open).
+                            if is_double_click
+                                && mouse.column < explorer_w
+                                && !is_explorer_toggle_click(
+                                    explorer_w,
+                                    body_top,
+                                    body_h,
+                                    mouse.column,
+                                    mouse.row,
+                                    &state,
+                                )
+                            {
                                 let select = AppMsg::Explorer(
                                     crate::features::explorer::msg::ExplorerMsg::Message(
                                         match explorer_pane_for_click(mouse.row, body_top, body_h) {
@@ -1143,8 +1155,47 @@ fn explorer_child_areas(explorer: ratatui::layout::Rect) -> (ratatui::layout::Re
 }
 
 /// Build the explorer messages for a single click on a visible tree row.
-/// Clicking the expand/collapse marker toggles that node's expansion (and moves
-/// the selection to it); clicking elsewhere just moves the selection. Returns
+/// Whether the click at `(x, y)` landed on an expand/collapse marker in the
+/// explorer's instances/objects tree. Used to suppress the double-click "open"
+/// (Select) action on a marker click: clicking the arrow, single or double,
+/// must only expand/collapse.
+fn is_explorer_toggle_click(
+    explorer_w: u16,
+    body_top: u16,
+    body_h: u16,
+    x: u16,
+    y: u16,
+    state: &AppState,
+) -> bool {
+    if x >= explorer_w {
+        return false;
+    }
+    let explorer = Rect::new(0, body_top, explorer_w, body_h);
+    let (instances_area, objects_area) = explorer_child_areas(explorer);
+    match explorer_pane_for_click(y, body_top, body_h) {
+        crate::app_shell::nav::ExplorerPane::Instances => {
+            crate::features::explorer::instances::view::toggle_at(
+                instances_area,
+                &state.explorer.instances,
+                x,
+                y,
+            )
+            .is_some()
+        }
+        crate::app_shell::nav::ExplorerPane::Objects => {
+            crate::features::explorer::objects::view::toggle_at(
+                objects_area,
+                &state.explorer.objects,
+                x,
+                y,
+            )
+            .is_some()
+        }
+    }
+}
+
+/// Clicking the expand/collapse marker toggles that node's expansion without
+/// moving the selection; clicking elsewhere just moves the selection. Returns
 /// `None` for clicks on borders/titles/footers.
 fn explorer_row_click_msgs(
     size: ratatui::layout::Size,
@@ -1172,14 +1223,9 @@ fn explorer_row_click_msgs(
             // expansion (not Select, which would open the workspace). Need the
             // row's instance index and current state.
             if crate::features::explorer::instances::view::toggle_at(instances_area, inst, x, y).is_some() {
-                let (_, inst_idx) = inst.visible_row_is_connection(row);
-                let expanded = inst.nodes.get(inst_idx).is_some_and(|n| n.expanded);
-                let toggle = if expanded {
-                    instances_msg(InstancesMessage::Collapse)
-                } else {
-                    instances_msg(InstancesMessage::Expand)
-                };
-                return Some(vec![jump, toggle]);
+                // Clicking the expand/collapse marker toggles that instance's
+                // expansion without moving the cursor (no `jump`).
+                return Some(vec![instances_msg(InstancesMessage::ToggleExpandAt { row })]);
             }
             Some(vec![jump])
         }
@@ -1187,10 +1233,10 @@ fn explorer_row_click_msgs(
             let objs = &state.explorer.objects;
             let row = crate::features::explorer::objects::view::row_at(objects_area, objs, y)?;
             let jump = objects_msg(ObjectsMessage::JumpTo { row });
-            // Objects' Select toggles expansion on database/group rows (and
-            // activates a schema), so the marker click reuses it.
+            // Clicking the expand/collapse marker toggles that database/group's
+            // expansion without moving the cursor (no `jump`).
             if crate::features::explorer::objects::view::toggle_at(objects_area, objs, x, y).is_some() {
-                return Some(vec![jump, objects_msg(ObjectsMessage::Select)]);
+                return Some(vec![objects_msg(ObjectsMessage::ToggleExpandAt { row })]);
             }
             Some(vec![jump])
         }
@@ -1442,6 +1488,96 @@ mod tests {
         assert_eq!(explorer_pane_for_click(13, 3, 20), ExplorerPane::Instances);
         assert_eq!(explorer_pane_for_click(14, 3, 20), ExplorerPane::Objects);
         assert_eq!(explorer_pane_for_click(21, 3, 20), ExplorerPane::Objects);
+    }
+
+    #[test]
+    fn explorer_marker_click_toggles_without_moving_the_cursor() {
+        use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
+        use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+
+        // One instance row (cursor on it) so the marker click hits an instance.
+        let mut state = AppState::default();
+        state.explorer.instances.set_instances(vec![dbm_store::ManagedInstance {
+            id: "a".into(),
+            fingerprint: "a".into(),
+            name: "a".into(),
+            engine: dbm_core::Engine::Postgres,
+            host: "h".into(),
+            port: 1,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "now".into(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        }]);
+        state.explorer.instances.cursor = 0;
+
+        // Layout: size 100x50, body_top=3, explorer_w=20.
+        // explorer_child_areas(Rect(0,3,20,50)) -> instances_area = Rect(1,4,...).
+        // Instance marker is the 2nd body char: x = instances_area.x+2 = 3.
+        // Row 0 is the first body row: y = instances_area.y+1 = 5.
+        let msgs = explorer_row_click_msgs(
+            ratatui::layout::Size::new(100, 50),
+            3,
+            50,
+            3,
+            5,
+            &state,
+        )
+        .expect("marker click maps to a row");
+        let has_toggle = msgs.iter().any(|m| matches!(
+            m,
+            AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                InstancesMsg::Message(InstancesMessage::ToggleExpandAt { row: 0 })
+            )))
+        ));
+        assert!(has_toggle, "marker click toggles expansion: {msgs:?}");
+        let has_jump = msgs.iter().any(|m| matches!(
+            m,
+            AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                InstancesMsg::Message(InstancesMessage::JumpTo { .. })
+            )))
+        ));
+        assert!(
+            !has_jump,
+            "marker click must not move the cursor: {msgs:?}"
+        );
+    }
+
+    #[test]
+    fn is_explorer_toggle_click_detects_the_marker_column() {
+        // Same layout as the marker test: size 100x50, explorer_w=20, body_top=3,
+        // instances_area = Rect(1,4,...). Instance marker = x=3, row0 y=5.
+        let mut state = AppState::default();
+        state.explorer.instances.set_instances(vec![dbm_store::ManagedInstance {
+            id: "a".into(),
+            fingerprint: "a".into(),
+            name: "a".into(),
+            engine: dbm_core::Engine::Postgres,
+            host: "h".into(),
+            port: 1,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "now".into(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        }]);
+        // Marker column (x=3) counts as a toggle click.
+        assert!(is_explorer_toggle_click(20, 3, 50, 3, 5, &state));
+        // The label/text column (x=8) does not.
+        assert!(!is_explorer_toggle_click(20, 3, 50, 8, 5, &state));
+        // Outside the explorer is never a toggle click.
+        assert!(!is_explorer_toggle_click(20, 3, 50, 25, 5, &state));
     }
 
     #[test]

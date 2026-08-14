@@ -16,8 +16,10 @@ use crate::app_shell::nav::DiscoverPane;
 use crate::app_shell::pane::Pane;
 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
 use crate::features::discover::update::update as discover_update;
+use crate::features::explorer::effect::ExplorerEffect;
 use crate::features::explorer::intent::ExplorerIntent;
 use crate::features::explorer::msg::ExplorerMsg;
+use crate::features::explorer::objects::effect::ObjectsEffect;
 use crate::features::explorer::update::update as explorer_update;
 use crate::features::global_footer::msg::FooterMsg;
 use crate::features::global_footer::update::update as footer_update;
@@ -110,10 +112,17 @@ fn sync_objects_binding(
 /// objects tree shows. The active schema (and its parent database) is forced
 /// expanded and cannot be collapsed (original dbm). With no matching tab the
 /// active state is cleared.
+/// Sync the objects tree's active database/schema with the active SQL tab. The
+/// active database is set immediately (force-expanded), but the active schema
+/// is deferred until the database's schemas load — if the schema no longer
+/// exists, it is degraded to no active schema. Returns an optional
+/// [`ObjectsEffect::LoadSchemas`] when the newly active database's schemas
+/// still need to be fetched. Callers must push the returned effect (so a
+/// force-expanded active database behaves like a manually-expanded one).
 fn sync_objects_active(
     objects: &mut crate::features::explorer::objects::state::ObjectsState,
     sql: &crate::features::sql_workspace::state::SqlState,
-) {
+) -> Option<ObjectsEffect> {
     let mut db = None;
     let mut schema = None;
     if let Some(tab) = sql.sql_tab.tabs.get(sql.sql_tab.active_tab) {
@@ -134,7 +143,21 @@ fn sync_objects_active(
             schema = tab.session.schema.clone();
         }
     }
-    objects.set_active(db, schema);
+    let needs_load = objects.defer_active(db, schema);
+    // If the active database's schemas still need to be fetched, request them
+    // so the deferred schema can be validated once they load.
+    if needs_load
+        && !objects.bound_instance.is_empty()
+        && !objects.bound_connection.is_empty()
+        && let Some(db) = objects.active_db.clone()
+    {
+        return Some(ObjectsEffect::LoadSchemas {
+            instance: objects.bound_instance.clone(),
+            connection: objects.bound_connection.clone(),
+            database: db,
+        });
+    }
+    None
 }
 
 /// Map a feature message to the `Pane` that must be active for its keyboard
@@ -324,7 +347,14 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                 ) {
                     result.pending.push_back(bind);
                 }
-                sync_objects_active(&mut state.explorer.objects, &state.sql);
+                if let Some(effect) = sync_objects_active(
+                    &mut state.explorer.objects,
+                    &state.sql,
+                ) {
+                    // Lift the objects effect into an explorer effect so it can
+                    // be type-erased against the global action type.
+                    result.effects.push(box_effect(ExplorerEffect::Objects(effect)));
+                }
             }
             crate::app_shell::msg::ShellMsg::ToggleTheme => {
                 // Flip between the theme's dark and light palettes; the next
@@ -565,7 +595,12 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             ) {
                 result.pending.push_back(bind);
             }
-            sync_objects_active(&mut state.explorer.objects, &state.sql);
+            if let Some(effect) = sync_objects_active(
+                &mut state.explorer.objects,
+                &state.sql,
+            ) {
+                result.effects.push(box_effect(ExplorerEffect::Objects(effect)));
+            }
         }
         AppMsg::Discover(m) => {
             // The discover parent pane's child-pane focus lives on `state.focus`,
@@ -724,7 +759,12 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             ) {
                 result.pending.push_back(bind);
             }
-            sync_objects_active(&mut state.explorer.objects, &state.sql);
+            if let Some(effect) = sync_objects_active(
+                &mut state.explorer.objects,
+                &state.sql,
+            ) {
+                result.effects.push(box_effect(ExplorerEffect::Objects(effect)));
+            }
         }
         AppMsg::Footer(m) => {
             let FooterMsg::Message(inner) = m;
