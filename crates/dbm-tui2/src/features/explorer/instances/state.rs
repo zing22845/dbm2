@@ -339,6 +339,19 @@ impl InstancesState {
             }) => self.nodes.get(i).map(|n| n.display_name()),
             None => None,
         };
+        // If a connection was active, capture its name so the connection row can
+        // be re-resolved once the instance's connections reload. Without this a
+        // tree reload (e.g. after closing discover, which re-fetches instances)
+        // would permanently degrade a connection-active to its parent instance.
+        let prev_connection_name = match prev_active {
+            Some(ActiveWorkspaceKind::Connection { instance_idx, conn_idx }) => {
+                self.nodes
+                    .get(instance_idx)
+                    .and_then(|n| n.connections.get(conn_idx))
+                    .map(|c| c.name.clone())
+            }
+            _ => None,
+        };
         self.nodes = instances
             .into_iter()
             .map(|i| {
@@ -355,14 +368,25 @@ impl InstancesState {
         // connection was active, its connections are not loaded after a tree
         // reload, so we fall back to the instance workspace for that instance;
         // the connection row is re-resolved once its connections load.
-        self.active_workspace = match prev_instance_name {
+        self.active_workspace = match &prev_instance_name {
             Some(iname) => self
                 .nodes
                 .iter()
-                .position(|n| n.display_name() == iname)
+                .position(|n| n.display_name() == *iname)
                 .map(ActiveWorkspaceKind::Instance),
             None => None,
         };
+        // Re-resolve a connection-active through the SAME mechanism session
+        // restore (`apply_snapshot`) uses: queue its name in
+        // `restore_active_connection`, leave the workspace on the parent
+        // instance meanwhile, and let the single `ConnectionsLoaded` refinement
+        // in the update layer do the wait-then-activate (or degrade) once the
+        // instance's connections reload. The `Loaded` handler re-fetches
+        // connections for every expanded instance, and the active instance is
+        // always expanded, so the reload always fires `ConnectionsLoaded`.
+        if let (Some(iname), Some(conn_name)) = (prev_instance_name, prev_connection_name) {
+            self.restore_active_connection = Some((iname, conn_name));
+        }
         self.cursor = 0;
         self.scroll = 0;
     }
@@ -626,6 +650,31 @@ mod tests {
         // Removing the active instance clears the marker.
         s.remove_instance(0);
         assert!(!s.active_is_instance());
+    }
+
+    #[test]
+    fn set_instances_preserves_connection_active_via_restore() {
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a")]);
+        s.nodes[0].expanded = true;
+        s.nodes[0].loaded = true;
+        s.nodes[0].connections = vec![conn("c1"), conn("c2")];
+        s.set_active_connection(0, 1); // connection "c2" is active
+
+        // A tree reload (e.g. after closing discover) re-fetches instances. The
+        // connection is temporarily downgraded to its parent instance, but the
+        // connection name is queued so `ConnectionsLoaded` can re-activate it.
+        s.set_instances(vec![inst("a")]);
+        assert_eq!(
+            s.active_workspace,
+            Some(ActiveWorkspaceKind::Instance(0)),
+            "reload falls back to the parent instance"
+        );
+        assert_eq!(
+            s.restore_active_connection,
+            Some(("a".to_string(), "c2".to_string())),
+            "connection-active is queued for re-resolution"
+        );
     }
 
     #[test]
