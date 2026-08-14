@@ -175,13 +175,25 @@ fn open_discover(state: &mut AppState) {
     if !preserved_targets.is_empty() {
         state.discover.targets.targets = preserved_targets;
     }
+    // Focus moves to Discover. The explorer sub-pane + cursor (and the sql /
+    // iw states) are left untouched; closing discover returns to the Explorer
+    // via `set_focus`, so the sub-pane and cursor the user had before opening
+    // discover come back unchanged.
     state.focus = Pane::Discover(DiscoverPane::Engine);
     state.modal = None;
 }
 
-/// Close the discover modal and restore focus to the workspace parent pane.
+/// Close the discover modal and restore focus to wherever the user was before
+/// it opened (falling back to the SQL workspace if nothing was captured).
 fn close_discover(state: &mut AppState) {
-    state.focus = Pane::SQLWorkspace;
+    // Match the original dbm: closing discover hands focus to the Explorer.
+    // The explorer sub-pane (instances/objects) and its cursor live in the
+    // explorer feature state, which the discover modal never touches, so they
+    // are preserved automatically — the user lands back on the same
+    // sub-pane + cursor they had before opening discover. This is
+    // deterministic and avoids the desync/overview issues of trying to
+    // reconstruct the pre-discover focus.
+    state.set_focus(Pane::Explorer(state.explorer.pane));
     state.modal = None;
 }
 
@@ -938,6 +950,46 @@ mod tests {
         // Focus stays on discover: the single choke point blocks leaving it.
         assert_eq!(state.focus, before);
         assert!(!result.dirty, "rejected focus change must not mark dirty");
+    }
+
+    #[test]
+    fn discover_close_returns_to_explorer_preserving_subpane_and_cursor() {
+        use crate::app_shell::nav::ExplorerPane;
+
+        let mut state = AppState::default();
+        // User works on the explorer's objects sub-pane (cursor moved down).
+        state.set_focus(Pane::Explorer(ExplorerPane::Objects));
+        state.explorer.instances.cursor = 3;
+
+        // Open discover (matches the header-activation path); the explorer
+        // sub-pane and cursor are left untouched.
+        open_discover(&mut state);
+        assert_eq!(state.focus, Pane::Discover(DiscoverPane::Engine));
+
+        // Closing discover hands focus back to the Explorer (as the original
+        // dbm does), preserving the sub-pane and cursor — not resetting to an
+        // overview or the header.
+        close_discover(&mut state);
+        assert_eq!(
+            state.focus,
+            Pane::Explorer(ExplorerPane::Objects),
+            "closing discover returns to the explorer sub-pane the user left"
+        );
+        assert_eq!(state.explorer.pane, ExplorerPane::Objects);
+        assert_eq!(state.explorer.instances.cursor, 3);
+    }
+
+    #[test]
+    fn discover_close_returns_to_explorer_instances_by_default() {
+        use crate::app_shell::nav::ExplorerPane;
+
+        // Even if discover is closed without ever focusing a workspace pane
+        // (e.g. right after startup on the header), focus lands on the
+        // Explorer's instances sub-pane rather than the SQL workspace.
+        let mut state = AppState::default();
+        state.focus = Pane::Discover(DiscoverPane::Engine);
+        close_discover(&mut state);
+        assert_eq!(state.focus, Pane::Explorer(ExplorerPane::Instances));
     }
 
     #[test]
