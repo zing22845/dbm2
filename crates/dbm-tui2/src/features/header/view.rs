@@ -1,7 +1,7 @@
 //! Header feature rendering.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Style, Modifier};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -29,22 +29,32 @@ pub fn discover_button_rect(area: Rect) -> Option<Rect> {
 
 /// Render the header: a bordered app title bar with an action-button row.
 ///
-/// The header currently has a single `Discover` button; when it is the focused
-/// button it is highlighted with the accent/selection slot. This is a pure
+/// The header currently has a single `Discover` button; its foreground always
+/// matches the explorer instance text color, and focus is shown only by the
+/// cursor-row selection background (see [`render`]'s body). This is a pure
 /// `state -> view` function: it never mutates state (mouse hit-testing calls
 /// the standalone [`discover_button_rect`], not a field written here).
 pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &HeaderState, focused: bool) {
     let p = theme.palette();
 
-    // The `Discover` button is focused when the header cursor points at it.
-    let discover_focused = state.button == 0;
-    let discover_style = if discover_focused {
-        Style::default()
-            .fg(p.selection)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(p.fg)
-    };
+    // The Discover button's foreground always matches the explorer instance
+    // text color (`p.fg`), whether or not the header owns the shell focus; the
+    // only distinction is the background. When the header is focused (and the
+    // cursor is on the button) the background becomes the instances cursor-row
+    // `selection_bg`, mirroring how a focused instance row is highlighted.
+    let discover_focused = state.button == 0 && focused;
+    let discover_style = Style::default()
+        .fg(p.fg)
+        .bg(if discover_focused {
+            p.selection_bg
+        } else {
+            Color::Reset
+        })
+        .add_modifier(if discover_focused {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        });
 
     // Draw the bordered title bar (no text: the button and hint are placed
     // explicitly below, using the same single source of truth as hit-testing).
@@ -148,5 +158,40 @@ mod tests {
             })
             .collect();
         assert!(hint.contains("ENTER: activate"), "got: {hint:?}");
+    }
+
+    #[test]
+    fn discover_button_fg_is_instance_color_and_focus_uses_selection_bg() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let area = Rect::new(0, 0, 40, 3);
+        let mut terminal = Terminal::new(TestBackend::new(40, 3)).unwrap();
+        let theme = crate::common::view::theme::dracula();
+        let p = theme.palette();
+
+        // Not focused: foreground is the instance text color, no background.
+        terminal
+            .draw(|frame| {
+                render(frame, &theme, area, &HeaderState::default(), false)
+            })
+            .unwrap();
+        let r = discover_button_rect(area).unwrap();
+        let cell = &terminal.backend().buffer()[(r.x, r.y)];
+        assert_eq!(cell.fg, p.fg, "button fg matches the instance font color");
+        assert_eq!(cell.bg, ratatui::style::Color::Reset, "no bg when unfocused");
+
+        // Focused: same foreground, but the instances cursor-row selection
+        // background is applied.
+        terminal
+            .draw(|frame| {
+                render(frame, &theme, area, &HeaderState::default(), true)
+            })
+            .unwrap();
+        let cell = &terminal.backend().buffer()[(r.x, r.y)];
+        assert_eq!(cell.fg, p.fg, "fg stays the instance color when focused");
+        assert_eq!(
+            cell.bg, p.selection_bg,
+            "focused button bg matches the instances cursor background"
+        );
     }
 }
