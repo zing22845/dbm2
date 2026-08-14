@@ -91,6 +91,10 @@ pub struct ConnectionsState {
     pub connections: Vec<InstanceConnection>,
     /// Cursor row within the connection list.
     pub cursor: usize,
+    /// A cursor to apply once the connections load. Used by session restore,
+    /// which must remember the saved row because the list is still empty at
+    /// that point (connections load lazily). Consumed by `Loaded`.
+    pub restore_cursor: Option<usize>,
     /// Whether an add/edit form is open.
     pub form: Option<ConnectionForm>,
     /// Status text shown on the connections footer (e.g. a test result).

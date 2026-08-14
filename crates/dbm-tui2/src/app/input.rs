@@ -1571,6 +1571,7 @@ mod tests {
                 test_failed_at: None,
             }],
             cursor: 0,
+            restore_cursor: None,
             form: None,
             status: None,
             status_kind: crate::features::instance_workspace::connections::state::ConnectionStatusKind::Idle,

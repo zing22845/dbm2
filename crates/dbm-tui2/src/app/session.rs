@@ -318,14 +318,26 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
         }
     }
 
-    // Restore the instance-workspace sub-pane and connections cursor.
+    // Restore the instance-workspace sub-pane and connections cursor. The
+    // sub-pane must also be mirrored back onto `state.focus`: the view renders
+    // from `state.iw.pane` while keyboard input is routed from `state.focus`'s
+    // sub-pane, so a desync here would route `j`/`k`/Ctrl+h to the overview
+    // handler even though the connections panel is displayed.
     if let Some(iw) = &snapshot.instance_workspace {
-        state.iw.pane = match iw.section.as_str() {
+        let pane = match iw.section.as_str() {
             "connections" => IwPane::Connections,
             _ => IwPane::Overview,
         };
-        let max = state.iw.connections.connections.len().saturating_sub(1);
-        state.iw.connections.cursor = iw.connections_cursor.min(max);
+        state.iw.pane = pane;
+        // Keep the focus sub-pane in lockstep with the restored iw sub-pane so
+        // keyboard routing matches what is on screen.
+        if let Pane::InstanceWorkspace(focus_sub) = &mut state.focus {
+            *focus_sub = pane;
+        }
+        // The connections list is still empty here (it loads lazily), so don't
+        // clamp the saved cursor against it — remember it and apply it once
+        // `Loaded` populates the list.
+        state.iw.connections.restore_cursor = Some(iw.connections_cursor);
     }
 
     restore_effects
@@ -750,5 +762,51 @@ mod tests {
         };
         let effects = apply_snapshot(&mut state, &snap);
         assert!(effects.is_empty(), "loaded instance must not be reloaded");
+    }
+
+    #[test]
+    fn restore_keeps_iw_focus_subpane_and_queues_connections_cursor() {
+        let mut state = sample_state();
+        state.explorer.instances.set_instances(vec![managed_instance("local")]);
+        state.explorer.instances.set_active_instance(0);
+
+        let snap = TuiSessionSnapshot {
+            version: TUI_SESSION_VERSION,
+            focus: "instance_workspace".into(),
+            tree_width: 20,
+            tree: TuiTreeSnapshot {
+                expanded_instances: Vec::new(),
+                cursor: None,
+                active_workspace: None,
+                expanded_objects: Vec::new(),
+                objects_bound_instance: String::new(),
+                objects_bound_connection: String::new(),
+                objects_active_db: None,
+                objects_active_schema: None,
+            },
+            tabs: Vec::new(),
+            active_tab: None,
+            instance_workspace: Some(TuiInstanceWorkspaceSnapshot {
+                section: "connections".into(),
+                connections_cursor: 1,
+            }),
+            discover_targets_ratio: 35,
+            explorer_split_ratio: 20,
+            explorer_pane: "instances".into(),
+        };
+        apply_snapshot(&mut state, &snap);
+        // The view renders from `state.iw.pane`; keyboard input is routed from
+        // `state.focus`'s sub-pane. Both must be Connections or `j`/`k`/Ctrl+h
+        // would be routed to the overview handler.
+        assert_eq!(state.iw.pane, IwPane::Connections);
+        assert_eq!(
+            state.focus,
+            Pane::InstanceWorkspace(IwPane::Connections),
+            "focus sub-pane must mirror the restored iw sub-pane"
+        );
+        // The connections list is empty at restore time (it loads lazily), so
+        // the saved cursor is queued and applied once connections arrive.
+        assert_eq!(state.iw.connections.restore_cursor, Some(1));
+        assert_eq!(state.iw.connections.cursor, 0);
     }
 }

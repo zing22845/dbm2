@@ -47,15 +47,22 @@ pub fn update(
             let old_cursor = state.cursor;
             state.connections = connections;
             let clamp = |c: usize| c.min(state.connections.len().saturating_sub(1));
-            let new_cursor = match prev_name {
-                // Initial load (or an empty previous list): keep the cursor
-                // where it was, clamped.
-                None => clamp(old_cursor),
-                Some(name) => state
-                    .connections
-                    .iter()
-                    .position(|c| c.name == name)
-                    .unwrap_or_else(|| clamp(old_cursor)),
+            let new_cursor = if let Some(saved) = state.restore_cursor.take() {
+                // A session-restore cursor is pending: it was saved while the
+                // list was still empty (connections load lazily), so apply it
+                // now that the rows are present, clamped into range.
+                clamp(saved)
+            } else {
+                match prev_name {
+                    // Initial load (or an empty previous list): keep the cursor
+                    // where it was, clamped.
+                    None => clamp(old_cursor),
+                    Some(name) => state
+                        .connections
+                        .iter()
+                        .position(|c| c.name == name)
+                        .unwrap_or_else(|| clamp(old_cursor)),
+                }
             };
             let cursor_changed = new_cursor != old_cursor;
             state.cursor = new_cursor;
@@ -404,6 +411,53 @@ mod tests {
             s,
         );
         assert_eq!(s.cursor, 1, "cursor clamps when the selection is gone");
+    }
+
+    #[test]
+    fn loaded_applies_a_queued_restore_cursor_then_clears_it() {
+        fn conn(name: &str) -> dbm_store::InstanceConnection {
+            dbm_store::InstanceConnection {
+                id: name.into(),
+                instance_id: "inst".into(),
+                name: name.into(),
+                username: "postgres".into(),
+                database: "postgres".into(),
+                has_password: false,
+                ssl_mode: "prefer".into(),
+                env_label: None,
+                created_at: "now".into(),
+                updated_at: "now".into(),
+                test_succeeded_at: None,
+                test_failed_at: None,
+            }
+        }
+        // Session restore queues the saved cursor (the list was empty then).
+        let s = ConnectionsState {
+            restore_cursor: Some(1),
+            ..ConnectionsState::default()
+        };
+        let (mut s, _i, _e, _d) = update(
+            ConnectionsMessage::Loaded {
+                connections: vec![conn("a"), conn("b"), conn("c")],
+            },
+            s,
+        );
+        assert_eq!(s.cursor, 1, "restored cursor is applied to the loaded rows");
+        assert_eq!(
+            s.restore_cursor, None,
+            "restore cursor is consumed after the first load"
+        );
+
+        // Once consumed, a later load reuses the normal by-name preservation.
+        s.cursor = 2;
+        let (s, _i, _e, _d) = update(
+            ConnectionsMessage::Loaded {
+                connections: vec![conn("a"), conn("b"), conn("c")],
+            },
+            s,
+        );
+        assert_eq!(s.cursor, 2, "normal reload keeps the selected connection");
+        assert_eq!(s.restore_cursor, None);
     }
 
     #[test]
