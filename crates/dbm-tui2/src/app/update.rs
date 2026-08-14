@@ -295,24 +295,14 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                     );
                     return result;
                 }
-                // Keep the explorer feature's own sub-pane in sync with the
-                // shell focus so rendering and key dispatch agree. Unlike an
-                // eager reload on focus, the instance tree is only loaded at
-                // startup and reloaded after registration (mirroring the
-                // original dbm), so connections cached in the tree are not
+                // Route the focus change through the single choke point so the
+                // feature sub-panes stay in lockstep with the shell focus.
+                // Unlike an eager reload on focus, the instance tree is only
+                // loaded at startup and reloaded after registration (mirroring
+                // the original dbm), so connections cached in the tree are not
                 // discarded on every focus switch.
-                state.focus = pane;
+                state.set_focus(pane);
                 result.dirty = true;
-                if let Pane::Explorer(sub) = pane
-                    && state.explorer.pane != sub
-                {
-                    state.explorer.pane = sub;
-                }
-                if let Pane::InstanceWorkspace(sub) = pane
-                    && state.iw.pane != sub
-                {
-                    state.iw.pane = sub;
-                }
                 // Keep the objects tree's binding + active schema synced to the
                 // active SQL tab on focus changes too (not just SQL edits), so
                 // entering or leaving the workspace reflects the current state.

@@ -238,13 +238,31 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
         }
     }
 
-    state.focus = pane_from_name(&snapshot.focus).unwrap_or(Pane::Header);
-
-    // Restore the explorer sub-pane focus (instances / objects).
-    state.explorer.pane = match snapshot.explorer_pane.as_str() {
-        "objects" => ExplorerPane::Objects,
-        _ => ExplorerPane::Instances,
-    };
+    // Resolve the saved parent pane, then fold the persisted sub-pane
+    // (explorer instances/objects, iw overview/connections) back in and route
+    // everything through the single focus choke point. `pane_from_name`
+    // discards the sub-pane, so the sub-pane is re-attached here from the
+    // snapshot before `set_focus` — that keeps `state.focus` and the feature
+    // sub-panes in lockstep instead of letting them drift apart (the restore
+    // bug that mis-routed `j`/`k`/Ctrl+h when closing on the connections or
+    // objects pane).
+    let mut focus = pane_from_name(&snapshot.focus).unwrap_or(Pane::Header);
+    match snapshot.explorer_pane.as_str() {
+        "objects" if matches!(focus, Pane::Explorer(_)) => {
+            focus = Pane::Explorer(ExplorerPane::Objects);
+        }
+        _ => {}
+    }
+    if let Some(iw) = &snapshot.instance_workspace
+        && matches!(focus, Pane::InstanceWorkspace(_))
+    {
+        let sub = match iw.section.as_str() {
+            "connections" => IwPane::Connections,
+            _ => IwPane::Overview,
+        };
+        focus = Pane::InstanceWorkspace(sub);
+    }
+    state.set_focus(focus);
 
     // Restore instance expansion + cursor by name. Expansion is applied to the
     // freshly-loaded tree nodes; the cursor resolves to the owning instance row
@@ -318,25 +336,12 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
         }
     }
 
-    // Restore the instance-workspace sub-pane and connections cursor. The
-    // sub-pane must also be mirrored back onto `state.focus`: the view renders
-    // from `state.iw.pane` while keyboard input is routed from `state.focus`'s
-    // sub-pane, so a desync here would route `j`/`k`/Ctrl+h to the overview
-    // handler even though the connections panel is displayed.
+    // Restore the connections cursor. The list is still empty here (it loads
+    // lazily), so don't clamp the saved cursor against it — remember it and
+    // apply it once `Loaded` populates the list. The sub-pane itself was
+    // already restored through `set_focus` above, which keeps `state.focus`
+    // and `state.iw.pane` in lockstep.
     if let Some(iw) = &snapshot.instance_workspace {
-        let pane = match iw.section.as_str() {
-            "connections" => IwPane::Connections,
-            _ => IwPane::Overview,
-        };
-        state.iw.pane = pane;
-        // Keep the focus sub-pane in lockstep with the restored iw sub-pane so
-        // keyboard routing matches what is on screen.
-        if let Pane::InstanceWorkspace(focus_sub) = &mut state.focus {
-            *focus_sub = pane;
-        }
-        // The connections list is still empty here (it loads lazily), so don't
-        // clamp the saved cursor against it — remember it and apply it once
-        // `Loaded` populates the list.
         state.iw.connections.restore_cursor = Some(iw.connections_cursor);
     }
 
@@ -683,8 +688,18 @@ mod tests {
         assert!(!state.explorer.instances.nodes[0].expanded);
         // Cursor moved onto the "remote" instance row (row 1).
         assert_eq!(state.explorer.instances.cursor, 1);
+        // The saved explorer sub-pane (objects) is folded into the focus and
+        // mirrored onto the feature sub-pane so input routing matches rendering.
+        assert_eq!(
+            state.focus,
+            Pane::Explorer(ExplorerPane::Objects),
+            "focus carries the restored explorer sub-pane"
+        );
         assert_eq!(state.explorer.pane, ExplorerPane::Objects);
-        assert_eq!(state.iw.pane, IwPane::Connections);
+        // The saved iw section only applies when the saved focus was the
+        // instance workspace; here focus was the explorer, so the iw sub-pane
+        // stays at its default (it is not the focused pane).
+        assert_eq!(state.iw.pane, IwPane::Overview);
         // Objects expansion is staged for the saved bound connection, not yet
         // applied (the tree is unbound right after startup).
         assert!(state.explorer.objects.expanded.is_empty());
@@ -808,5 +823,49 @@ mod tests {
         // the saved cursor is queued and applied once connections arrive.
         assert_eq!(state.iw.connections.restore_cursor, Some(1));
         assert_eq!(state.iw.connections.cursor, 0);
+    }
+
+    #[test]
+    fn restore_keeps_explorer_subpane_in_lockstep_with_focus() {
+        let mut state = sample_state();
+        state.explorer.instances.set_instances(vec![managed_instance("local")]);
+        state.explorer.instances.set_active_instance(0);
+
+        // Close on the objects sub-pane. This is the exact same latent desync
+        // the connections pane had: restore used to set focus to the default
+        // instances sub-pane while separately restoring `explorer.pane` to
+        // objects, mis-routing j/k/Ctrl+j to instances.
+        let snap = TuiSessionSnapshot {
+            version: TUI_SESSION_VERSION,
+            focus: "explorer".into(),
+            tree_width: 20,
+            tree: TuiTreeSnapshot {
+                expanded_instances: Vec::new(),
+                cursor: None,
+                active_workspace: None,
+                expanded_objects: Vec::new(),
+                objects_bound_instance: String::new(),
+                objects_bound_connection: String::new(),
+                objects_active_db: None,
+                objects_active_schema: None,
+            },
+            tabs: Vec::new(),
+            active_tab: None,
+            instance_workspace: None,
+            discover_targets_ratio: 35,
+            explorer_split_ratio: 20,
+            explorer_pane: "objects".into(),
+        };
+        apply_snapshot(&mut state, &snap);
+        assert_eq!(
+            state.focus,
+            Pane::Explorer(ExplorerPane::Objects),
+            "restored explorer focus carries the saved objects sub-pane"
+        );
+        assert_eq!(
+            state.explorer.pane,
+            ExplorerPane::Objects,
+            "feature sub-pane mirrors the restored focus"
+        );
     }
 }

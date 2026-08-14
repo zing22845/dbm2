@@ -39,6 +39,31 @@ pub struct AppState {
     pub perf: PerfState,
 }
 
+impl AppState {
+    /// The single choke point for changing the active pane. Keeps the focus
+    /// (used to route keyboard input) and each feature's displayed sub-pane
+    /// (`explorer.pane`, `iw.pane`) in lockstep, so rendering and input can
+    /// never disagree about which sub-pane is active.
+    ///
+    /// Every focus change — the shell `FocusChanged` message, session restore,
+    /// and intent-driven jumps — must go through this method. Setting
+    /// `state.focus` directly while separately assigning a feature sub-pane
+    /// (as session restore once did) is what lets the two drift apart.
+    pub fn set_focus(&mut self, pane: Pane) {
+        self.focus = pane;
+        if let Pane::Explorer(sub) = pane
+            && self.explorer.pane != sub
+        {
+            self.explorer.pane = sub;
+        }
+        if let Pane::InstanceWorkspace(sub) = pane
+            && self.iw.pane != sub
+        {
+            self.iw.pane = sub;
+        }
+    }
+}
+
 /// The kind of modal currently displayed. Each variant carries the minimal
 /// payload its popup needs to render (the live results/tree state that owns the
 /// values lives in the owning feature; the modal stores a snapshot for the
