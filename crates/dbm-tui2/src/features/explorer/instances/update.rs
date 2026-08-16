@@ -45,6 +45,11 @@ pub fn update(
             true
         }
         InstancesMessage::ConnectionsLoaded { instance_idx, connections } => {
+            // Remember the cursor's node before the rows change (loading
+            // connections adds rows above the cursor). Unless an active restore
+            // repositions the cursor, it is re-resolved to stay on the same node.
+            let cursor_node = state.cursor_selection();
+            let mut active_restored = false;
             if let Some(node) = state.nodes.get_mut(instance_idx) {
                 node.connections = connections;
                 node.loaded = true;
@@ -62,19 +67,28 @@ pub fn update(
                         && this_instance
                     {
                         state.set_active_connection(instance_idx, conn_idx);
+                        active_restored = true;
                     } else if this_instance {
                         // Target instance loaded but the connection is gone:
                         // degrade to the parent instance.
                         state.set_active_instance(instance_idx);
+                        active_restored = true;
                     } else {
                         // Not this instance yet; keep the pending restore.
                         state.restore_active_connection = Some((inst_name, conn_name));
                     }
                 }
-                true
-            } else {
-                false
             }
+            // Keep the cursor on the same node when the loaded connections added
+            // rows (e.g. the first instance's connections finishing a lazy load
+            // shifts the active/cursor rows below it). The active restore already
+            // placed the cursor, so skip it then.
+            if !active_restored
+                && let Some((ci, cconn)) = cursor_node
+            {
+                state.preserve_cursor(ci, cconn);
+            }
+            true
         }
         InstancesMessage::RefreshConnections { instance_idx } => {
             // Reload the instance's connections from the store so a change made
@@ -313,6 +327,47 @@ mod tests {
             "missing connection must fall back to the parent instance"
         );
         assert!(s.restore_active_connection.is_none(), "pending restore consumed");
+    }
+
+    #[test]
+    fn connections_loaded_preserves_cursor_below_a_lazy_loaded_instance() {
+        // Instance a is expanded but its connections were not loaded yet (a lazy
+        // load right after startup). The cursor is on instance b (row 1), below
+        // a. When a's connections finish loading, rows are added above the
+        // cursor, so it must follow b to its new row rather than drift.
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b")]);
+        s.nodes[0].expanded = true;
+        s.nodes[0].loaded = false; // expanded but unloaded
+        s.cursor = 1; // instance b
+
+        let c = |name: &str| dbm_store::InstanceConnection {
+            id: name.into(),
+            instance_id: "a".into(),
+            name: name.into(),
+            username: "u".into(),
+            database: "d".into(),
+            has_password: false,
+            ssl_mode: String::new(),
+            env_label: None,
+            created_at: "now".into(),
+            updated_at: "now".into(),
+            test_succeeded_at: None,
+            test_failed_at: None,
+        };
+        let (s, _i, _e, _d) = update(
+            InstancesMessage::ConnectionsLoaded {
+                instance_idx: 0,
+                connections: vec![c("c1"), c("c2")],
+            },
+            s,
+        );
+        assert_eq!(s.nodes[0].connections.len(), 2);
+        assert_eq!(
+            s.cursor, 3,
+            "cursor follows instance b (now row 3) instead of drifting"
+        );
+        assert_eq!(s.cursor_selection(), Some((1, None)));
     }
 
     #[test]

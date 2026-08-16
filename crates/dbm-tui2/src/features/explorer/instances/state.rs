@@ -108,28 +108,38 @@ impl InstancesState {
     }
 
     /// Expand the instance the cursor is on (if the cursor is on an instance
-    /// row and it isn't already expanded). Returns whether expansion changed.
+    /// row and it isn't already expanded). The cursor stays on that instance
+    /// (its row is unchanged by expansion). Returns whether expansion changed.
     pub fn expand(&mut self) -> bool {
+        let cursor_node = self.cursor_selection();
+        let mut changed = false;
         if let Some((node, _)) = self.node_at_cursor_mut()
             && !node.expanded
         {
             node.expanded = true;
-            true
-        } else {
-            false
+            changed = true;
         }
+        if let Some((i, cconn)) = cursor_node {
+            self.preserve_cursor(i, cconn);
+        }
+        changed
     }
 
     /// Expand/collapse the instance at the given visible `row` (a mouse marker
-    /// click) without moving the cursor. Connection rows are ignored (they have
-    /// no marker). Collapsing an active instance — or an active connection's
-    /// parent instance — is blocked (it is forced expanded), matching the
-    /// original dbm. Returns whether expansion changed.
+    /// click) without moving the cursor to a different node. Connection rows are
+    /// ignored (they have no marker). Collapsing an active instance — or an
+    /// active connection's parent instance — is blocked (it is forced expanded),
+    /// matching the original dbm. The cursor is re-resolved to stay on the same
+    /// logical node if the toggle shifts rows below it. Returns whether
+    /// expansion changed.
     pub fn toggle_expand_at(&mut self, row: usize) -> bool {
         let (is_connection, idx) = self.visible_row_is_connection(row);
         if is_connection || idx == usize::MAX {
             return false;
         }
+        // Capture the cursor's node before the toggle so it can be re-resolved
+        // after the visible rows change.
+        let cursor_node = self.cursor_selection();
         // Resolve the collapse-block before the mutable borrow so the immutable
         // reads of `active_workspace` do not overlap it.
         let expanded = self.nodes.get(idx).is_some_and(|n| n.expanded);
@@ -140,37 +150,92 @@ impl InstancesState {
                     Some(ActiveWorkspaceKind::Connection { instance_idx: ai, .. })
                         if ai == idx
                 ));
+        let mut changed = false;
         if let Some(node) = self.nodes.get_mut(idx) {
             if node.expanded {
-                if collapse_blocked {
-                    return false;
+                if !node.loaded {
+                    // Expanded but its connections have not been fetched yet
+                    // (e.g. right after startup). Clicking the arrow should load
+                    // the connections rather than collapse the node — otherwise
+                    // the tree would collapse an expanded-but-empty row and the
+                    // caller would never fetch. Keep it expanded and signal the
+                    // caller to load.
+                    changed = true;
+                } else if !collapse_blocked {
+                    node.expanded = false;
+                    changed = true;
                 }
-                node.expanded = false;
             } else {
                 node.expanded = true;
+                changed = true;
             }
-            true
+        }
+        if let Some((ci, cconn)) = cursor_node {
+            self.preserve_cursor(ci, cconn);
+        }
+        changed
+    }
+
+    /// The visible row of a node identified by instance index and optional
+    /// connection index, or `None` if it is not currently visible (e.g. its
+    /// parent instance is collapsed).
+    pub fn visible_row_of(&self, instance_idx: usize, connection: Option<usize>) -> Option<usize> {
+        let mut row = 0usize;
+        for (i, node) in self.nodes.iter().enumerate() {
+            if i == instance_idx {
+                return match connection {
+                    None => Some(row),
+                    Some(ci) if node.expanded && ci < node.connections.len() => {
+                        Some(row + 1 + ci)
+                    }
+                    _ => None,
+                };
+            }
+            row += 1;
+            if node.expanded {
+                row += node.connections.len();
+            }
+        }
+        None
+    }
+
+    /// Re-resolve the cursor onto the node it was on after an expand/collapse
+    /// changed the visible row layout. Keeps the cursor on the same logical node
+    /// instead of letting its row index drift. If the node is no longer visible
+    /// (its parent was collapsed), the cursor clamps to the last row. Returns
+    /// whether the cursor changed.
+    pub(crate) fn preserve_cursor(&mut self, instance_idx: usize, connection: Option<usize>) -> bool {
+        if let Some(row) = self.visible_row_of(instance_idx, connection) {
+            self.jump_to(row)
         } else {
-            false
+            let before = self.cursor;
+            self.cursor = self.visible_count().saturating_sub(1);
+            self.cursor != before
         }
     }
 
     /// Collapse the instance the cursor is on (if the cursor is on an instance
     /// row and it is currently expanded). Collapsing an active instance — or an
     /// active connection's parent instance — is blocked (it is forced expanded),
-    /// matching the original dbm. Returns whether collapse changed.
+    /// matching the original dbm. The cursor stays on that instance (which stays
+    /// visible after collapsing its own children). Returns whether collapse
+    /// changed.
     pub fn collapse(&mut self) -> bool {
+        let cursor_node = self.cursor_selection();
         if self.cursor_collapse_blocked() {
             return false;
         }
+        let mut changed = false;
         if let Some((node, _)) = self.node_at_cursor_mut()
             && node.expanded
         {
             node.expanded = false;
-            true
-        } else {
-            false
+            changed = true;
         }
+        if let Some((i, cconn)) = cursor_node {
+            self.preserve_cursor(i, cconn);
+        }
+        changed
     }
 
     /// The display width (in columns) of the widest rendered row. Used to
@@ -723,6 +788,8 @@ mod tests {
         assert!(s.toggle_expand_at(1), "marker click expands row 1");
         assert_eq!(s.nodes[1].expanded, true);
         assert_eq!(s.cursor, 0, "cursor must not move");
+        // Mark node 1 loaded so a second click can collapse it.
+        s.nodes[1].loaded = true;
         // Toggle again collapses it.
         assert!(s.toggle_expand_at(1), "marker click collapses row 1");
         assert_eq!(s.nodes[1].expanded, false);
@@ -730,9 +797,55 @@ mod tests {
     }
 
     #[test]
+    fn toggle_expand_at_preserves_cursor_below_the_toggled_node() {
+        // Instance a expanded with a connection; cursor is on instance b
+        // (row 2), i.e. BELOW the node being toggled (instance a).
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b")]);
+        s.nodes[0].expanded = true;
+        s.nodes[0].loaded = true;
+        s.nodes[0].connections = vec![conn("c1")];
+        s.cursor = 2; // instance b
+
+        // Collapsing instance a (row 0) hides c1, so b shifts up to row 1.
+        assert!(s.toggle_expand_at(0), "collapses instance a");
+        assert_eq!(s.nodes[0].expanded, false);
+        assert_eq!(
+            s.cursor, 1,
+            "cursor stays on instance b at its new row, not its old index"
+        );
+
+        // Expanding instance a again puts c1 back; b shifts back down to row 2.
+        assert!(s.toggle_expand_at(0), "expands instance a");
+        assert_eq!(s.nodes[0].expanded, true);
+        assert_eq!(
+            s.cursor, 2,
+            "cursor follows instance b back to its original row"
+        );
+    }
+
+    #[test]
+    fn toggle_expand_at_on_expanded_unloaded_loads_instead_of_collapsing() {
+        // Right after startup an expanded instance may not have its connections
+        // fetched yet (loaded=false). Clicking its arrow must keep it expanded
+        // (so the caller fetches connections) rather than collapse an empty row.
+        let mut s = InstancesState::default();
+        s.set_instances(vec![inst("a"), inst("b")]);
+        s.nodes[0].expanded = true;
+        s.nodes[0].loaded = false; // expanded but connections not loaded
+        assert!(s.toggle_expand_at(0), "expanded-unloaded click signals a change");
+        assert!(
+            s.nodes[0].expanded,
+            "expanded-unloaded arrow click keeps the node expanded (to load)"
+        );
+        assert_eq!(s.nodes[0].loaded, false, "loading happens via the effect");
+    }
+
+    #[test]
     fn toggle_expand_at_blocks_collapsing_an_active_instance() {
         let mut s = InstancesState::default();
         s.set_instances(vec![inst("a")]);
+        s.nodes[0].loaded = true;
         s.set_active_instance(0); // forced expanded
         assert!(!s.toggle_expand_at(0), "active instance cannot be collapsed");
         assert!(s.nodes[0].expanded);

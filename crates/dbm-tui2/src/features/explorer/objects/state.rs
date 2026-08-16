@@ -369,18 +369,24 @@ impl ObjectsState {
             self.expanded.insert(key);
         }
         self.rebuild_rows();
+        self.preserve_cursor(&node);
         Some(node)
     }
 
     /// Toggle expand/collapse the expandable row at the given visible `row` (a
-    /// mouse marker click) without moving the cursor. Returns the toggled node
-    /// so the caller can fetch its children on expand, or `None` for an object
-    /// row (no marker) or a blocked collapse (active path).
+    /// mouse marker click) without moving the cursor to a different node.
+    /// Returns the toggled node so the caller can fetch its children on expand,
+    /// or `None` for an object row (no marker) or a blocked collapse (active
+    /// path). The cursor is re-resolved to stay on the same logical node if the
+    /// toggle shifts rows below it.
     pub fn toggle_expand_at(&mut self, row: usize) -> Option<ObjectsNode> {
         let node = self.rows.get(row)?.node.clone();
         if matches!(node, ObjectsNode::Object { .. }) {
             return None;
         }
+        // Capture the cursor's node before the toggle so it can be re-resolved
+        // after the rows change.
+        let cursor_node = self.node_at_cursor().cloned();
         let key = self.expand_key_of(&node);
         if self.expanded.contains(&key) {
             if Self::collapse_blocked_by_active(
@@ -395,12 +401,16 @@ impl ObjectsState {
             self.expanded.insert(key);
         }
         self.rebuild_rows();
+        if let Some(cursor_node) = cursor_node {
+            self.preserve_cursor(&cursor_node);
+        }
         Some(node)
     }
 
     /// Collapse the row under the cursor (if it is expanded), matching the
     /// original dbm's `h` key. Returns whether anything was collapsed.
     /// Collapsing an active database/schema is a no-op (it is forced expanded).
+    /// The cursor stays on the collapsed node (which stays visible).
     pub fn collapse(&mut self) -> bool {
         let Some(node) = self.node_at_cursor().cloned() else {
             return false;
@@ -418,9 +428,22 @@ impl ObjectsState {
         }
         if self.expanded.remove(&key) {
             self.rebuild_rows();
+            self.preserve_cursor(&node);
             true
         } else {
             false
+        }
+    }
+
+    /// Re-resolve the cursor onto the node it was on after `rebuild_rows`
+    /// changed the visible row layout. Keeps the cursor on the same logical node
+    /// instead of letting its row index drift (e.g. when expanding/collapsing a
+    /// node above it). If the node is no longer visible, clamps to the last row.
+    fn preserve_cursor(&mut self, node: &ObjectsNode) {
+        if let Some(pos) = self.rows.iter().position(|r| &r.node == node) {
+            self.cursor = pos;
+        } else {
+            self.cursor = self.rows.len().saturating_sub(1);
         }
     }
 
@@ -722,6 +745,31 @@ mod tests {
         let other = schema_rows.iter().find(|r| r.label == "other").unwrap();
         assert!(!other.active);
         assert!(!other.expanded, "inactive schema stays collapsed");
+    }
+
+    #[test]
+    fn toggle_expand_preserves_cursor_on_the_same_node_below() {
+        // Catalog: database "db" with schemas ["public", "other"]. Expand db so
+        // rows are: db(0), public-group(1), other-group(2). Cursor on "other".
+        let mut s = ObjectsState::default();
+        s.catalog = catalog_with(&["public", "other"]);
+        s.rebuild_rows();
+        s.toggle_expand(); // cursor is on db(0); expand it
+        // db row: 0, public group: 1, other group: 2.
+        let other_row = s.rows.iter().position(|r| r.label == "other").unwrap();
+        s.cursor = other_row;
+
+        // Collapse db (above the cursor); the cursor's node ("other") is hidden,
+        // so the cursor clamps to the collapsed db row rather than drifting to a
+        // stale index.
+        s.cursor = 0; // toggle db
+        assert!(s.toggle_expand().is_some(), "collapses db");
+        assert_eq!(s.rows.len(), 1, "only the collapsed db row remains");
+        assert_eq!(
+            s.rows[0].node,
+            ObjectsNode::Database { name: "db".into() }
+        );
+        assert_eq!(s.cursor, 0, "cursor clamps to the collapsed node");
     }
 
     #[test]
