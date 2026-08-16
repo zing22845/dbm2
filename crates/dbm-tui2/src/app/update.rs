@@ -17,6 +17,7 @@ use crate::app_shell::pane::Pane;
 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
 use crate::features::discover::update::update as discover_update;
 use crate::features::explorer::effect::ExplorerEffect;
+use crate::features::explorer::instances::effect::InstancesEffect;
 use crate::features::explorer::intent::ExplorerIntent;
 use crate::features::explorer::msg::ExplorerMsg;
 use crate::features::explorer::objects::effect::ObjectsEffect;
@@ -411,8 +412,21 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         // Mark this instance as the active workspace (the
                         // active-row highlight + what the workspace region
                         // renders), matching the original dbm's
-                        // `set_active_instance`.
+                        // `set_active_instance`. This force-expands the node, so
+                        // keep the expanded state consistent with the
+                        // connection-load state: if the instance was collapsed
+                        // and its connections are not loaded yet, fetch them now.
                         state.explorer.instances.set_active_instance(*instance_idx);
+                        if state.explorer.instances.nodes.get(*instance_idx).is_some_and(|n| {
+                            n.expanded && !n.loaded
+                        }) {
+                            result.effects.push(box_effect(ExplorerEffect::Instances(
+                                InstancesEffect::LoadConnections {
+                                    instance_idx: *instance_idx,
+                                    instance_name: instance_name.clone(),
+                                },
+                            )));
+                        }
                         let iw = std::mem::take(&mut state.iw);
                         let (iw2, i, e, d) = iw_update(
                             crate::features::instance_workspace::msg::IwMessage::OpenInstance {
@@ -1167,6 +1181,36 @@ mod tests {
         drain(&mut state, explorer_instances_msg(InstancesMessage::NewConnectionTab));
         assert_eq!(state.sql.sql_tab.tabs.len(), 3);
         assert_eq!(state.sql.sql_tab.tabs[2].session.sequence, 3);
+    }
+
+    #[test]
+    fn opening_a_collapsed_unloaded_instance_loads_its_connections() {
+        use crate::features::explorer::instances::msg::InstancesMessage;
+        use crate::features::explorer::instances::state::ActiveWorkspaceKind;
+
+        let mut state = AppState::default();
+        state.explorer.instances.set_instances(vec![sample_managed_instance("inst")]);
+        // Collapsed and not loaded (right after startup).
+        state.explorer.instances.nodes[0].expanded = false;
+        state.explorer.instances.nodes[0].loaded = false;
+        state.focus = Pane::Explorer(crate::app_shell::nav::ExplorerPane::default());
+
+        // Selecting the collapsed instance force-expands it (active workspace)
+        // and must keep the expanded/loaded state consistent by requesting its
+        // connections (a LoadConnections effect).
+        let r = update_unchecked(
+            explorer_instances_msg(InstancesMessage::Select),
+            &mut state,
+        );
+        assert_eq!(
+            state.explorer.instances.active_workspace,
+            Some(ActiveWorkspaceKind::Instance(0))
+        );
+        assert!(state.explorer.instances.nodes[0].expanded);
+        assert!(
+            !r.effects.is_empty(),
+            "force-expanding an unloaded instance must request its connections"
+        );
     }
 
     #[test]

@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{Event as CEvent, EventStream, KeyCode};
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
@@ -456,12 +456,19 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 }
                             }
 
-                            // A double click in the explorer activates the clicked
-                            // node (Select), like pressing Enter on it — except on
-                            // an expand/collapse marker, where a double click must
-                            // still only expand/collapse (no cursor move, no open).
+                            // A double click in the explorer activates the node
+                            // (Select), like pressing Enter on it — except on an
+                            // expand/collapse marker (toggle only) or on blank
+                            // space (no node: do nothing, not act on the cursor).
                             if is_double_click
                                 && mouse.column < explorer_w
+                                && explorer_click_hits_row(
+                                    explorer_w,
+                                    body_top,
+                                    body_h,
+                                    mouse.row,
+                                    &state,
+                                )
                                 && !is_explorer_toggle_click(
                                     explorer_w,
                                     body_top,
@@ -1142,16 +1149,27 @@ fn iw_action_to_msg(action: crate::features::instance_workspace::effect::IwActio
 /// from the explorer's outer rect, mirroring `explorer/view.rs` (50% + 1-row
 /// splitter + 50%, inside the outer border).
 fn explorer_child_areas(explorer: ratatui::layout::Rect) -> (ratatui::layout::Rect, ratatui::layout::Rect) {
+    // Mirror the explorer render exactly: the two child panes are laid out with
+    // `Layout::Vertical([Percentage(50), Length(1), Percentage(50)])` inside the
+    // outer border. Computing them the same way here guarantees the click
+    // hit-testing uses the same child-pane rectangles the render draws, so a
+    // click on a row maps to the same row (no off-by-one from `height/2` vs
+    // `Layout` rounding).
     let inner = Rect::new(
         explorer.x.saturating_add(1),
         explorer.y.saturating_add(1),
         explorer.width.saturating_sub(2),
         explorer.height.saturating_sub(2),
     );
-    let half = inner.height / 2;
-    let instances = Rect::new(inner.x, inner.y, inner.width, half);
-    let objects = Rect::new(inner.x, inner.y + half + 1, inner.width, inner.height.saturating_sub(half + 1));
-    (instances, objects)
+    let panes = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(50),
+            Constraint::Length(1),
+            Constraint::Percentage(50),
+        ])
+        .split(inner);
+    (panes[0], panes[2])
 }
 
 /// Build the explorer messages for a single click on a visible tree row.
@@ -1187,6 +1205,42 @@ fn is_explorer_toggle_click(
                 objects_area,
                 &state.explorer.objects,
                 x,
+                y,
+            )
+            .is_some()
+        }
+    }
+}
+
+/// Whether the click at `(x, y)` lands on a visible node row in the explorer's
+/// instances/objects tree (as opposed to a blank area, a border, or the footer).
+/// Used to suppress the double-click "open" (Select) action on blank space:
+/// double-clicking a blank region must do nothing, not act on the cursor's node.
+fn explorer_click_hits_row(
+    explorer_w: u16,
+    body_top: u16,
+    body_h: u16,
+    y: u16,
+    state: &AppState,
+) -> bool {
+    if y < body_top {
+        return false;
+    }
+    let explorer = Rect::new(0, body_top, explorer_w, body_h);
+    let (instances_area, objects_area) = explorer_child_areas(explorer);
+    match explorer_pane_for_click(y, body_top, body_h) {
+        crate::app_shell::nav::ExplorerPane::Instances => {
+            crate::features::explorer::instances::view::row_at(
+                instances_area,
+                &state.explorer.instances,
+                y,
+            )
+            .is_some()
+        }
+        crate::app_shell::nav::ExplorerPane::Objects => {
+            crate::features::explorer::objects::view::row_at(
+                objects_area,
+                &state.explorer.objects,
                 y,
             )
             .is_some()
@@ -1269,13 +1323,12 @@ fn explorer_pane_for_click(
     body_h: u16,
 ) -> crate::app_shell::nav::ExplorerPane {
     use crate::app_shell::nav::ExplorerPane;
-    // The outer " Explorer " border occupies the top row; child panes sit below
-    // it. Instances fill the upper half, objects the lower half (splitter row
-    // between them).
-    let inner_y = body_top + 1;
-    let inner_h = body_h.saturating_sub(2); // minus the outer border
-    let half = inner_h / 2;
-    if row <= inner_y + half {
+    // Use the same `Layout` as the render and `explorer_child_areas` so the
+    // instances/objects boundary matches exactly (no `height/2` vs `Layout`
+    // rounding drift).
+    let explorer = Rect::new(0, body_top, 1, body_h);
+    let (instances, _objects) = explorer_child_areas(explorer);
+    if row <= instances.y.saturating_add(instances.height) {
         ExplorerPane::Instances
     } else {
         ExplorerPane::Objects
@@ -1482,11 +1535,19 @@ mod tests {
     #[test]
     fn explorer_click_maps_rows_to_instances_objects() {
         use crate::app_shell::nav::ExplorerPane;
-        // body_top=3, body_h=20 -> inner_y=4, inner_h=18, half=9.
-        // Instances: rows <= 13; Objects: rows > 13.
+        // body_top=3, body_h=20. The boundary derives from the same `Layout` the
+        // render uses, so it is exact (no `height/2` vs `Layout` rounding drift).
+        let (instances, _objects) = explorer_child_areas(Rect::new(0, 3, 1, 20));
+        let boundary = instances.y.saturating_add(instances.height);
         assert_eq!(explorer_pane_for_click(5, 3, 20), ExplorerPane::Instances);
-        assert_eq!(explorer_pane_for_click(13, 3, 20), ExplorerPane::Instances);
-        assert_eq!(explorer_pane_for_click(14, 3, 20), ExplorerPane::Objects);
+        assert_eq!(
+            explorer_pane_for_click(boundary, 3, 20),
+            ExplorerPane::Instances
+        );
+        assert_eq!(
+            explorer_pane_for_click(boundary.saturating_add(1), 3, 20),
+            ExplorerPane::Objects
+        );
         assert_eq!(explorer_pane_for_click(21, 3, 20), ExplorerPane::Objects);
     }
 
@@ -1578,6 +1639,190 @@ mod tests {
         assert!(!is_explorer_toggle_click(20, 3, 50, 8, 5, &state));
         // Outside the explorer is never a toggle click.
         assert!(!is_explorer_toggle_click(20, 3, 50, 25, 5, &state));
+    }
+
+    #[test]
+    fn explorer_click_hits_row_distinguishes_nodes_from_blank() {
+        // One instance row (row 0) at y=5 (body_top=3, explorer_w=20).
+        let mut state = AppState::default();
+        state.explorer.instances.set_instances(vec![dbm_store::ManagedInstance {
+            id: "a".into(),
+            fingerprint: "a".into(),
+            name: "a".into(),
+            engine: dbm_core::Engine::Postgres,
+            host: "h".into(),
+            port: 1,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "now".into(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        }]);
+        // y=5 is row 0 (A): a real node row.
+        assert!(explorer_click_hits_row(20, 3, 50, 5, &state));
+        // Blank area below the only node (y=6+) is not a node row.
+        assert!(!explorer_click_hits_row(20, 3, 50, 8, &state));
+        // The explorer border/title row (y=3) is not a node row.
+        assert!(!explorer_click_hits_row(20, 3, 50, 3, &state));
+    }
+
+    #[test]
+    fn instances_arrow_click_targets_the_collapsed_node_not_the_active_one() {
+        use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
+        use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+        // The user's repro: after restart, instance A is collapsed-unloaded and
+        // the active workspace is on instance B. A click on A's arrow must
+        // toggle A (row 0), not drift to B (row 1).
+        let mut state = AppState::default();
+        state.explorer.instances.set_instances(vec![
+            dbm_store::ManagedInstance {
+                id: "a".into(),
+                fingerprint: "a".into(),
+                name: "a".into(),
+                engine: dbm_core::Engine::Postgres,
+                host: "h".into(),
+                port: 1,
+                socket_path: None,
+                data_dir: None,
+                env_label: None,
+                registered_at: "now".into(),
+                version_full: None,
+                version_short: None,
+                version_checked_at: None,
+                lifecycle_status: None,
+                lifecycle_checked_at: None,
+                lifecycle_detail: None,
+            },
+            dbm_store::ManagedInstance {
+                id: "b".into(),
+                fingerprint: "b".into(),
+                name: "b".into(),
+                engine: dbm_core::Engine::Postgres,
+                host: "h".into(),
+                port: 1,
+                socket_path: None,
+                data_dir: None,
+                env_label: None,
+                registered_at: "now".into(),
+                version_full: None,
+                version_short: None,
+                version_checked_at: None,
+                lifecycle_status: None,
+                lifecycle_checked_at: None,
+                lifecycle_detail: None,
+            },
+        ]);
+        state.explorer.instances.nodes[0].expanded = false; // A collapsed
+        state.explorer.instances.set_active_instance(1); // active on B
+        state.explorer.instances.cursor = 0; // cursor on A
+        // Layout: size 100x50, body_top=3, body_h=45, explorer_w=20.
+        // instances_area.y=4 -> first row (A) at y=5; marker x=3.
+        let msgs = explorer_row_click_msgs(
+            ratatui::layout::Size::new(100, 50),
+            3,
+            45,
+            3,
+            5,
+            &state,
+        )
+        .expect("click on A's arrow maps to a row");
+        assert!(
+            msgs.iter().any(|m| matches!(
+                m,
+                AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                    InstancesMsg::Message(InstancesMessage::ToggleExpandAt { row: 0 })
+                )))
+            )),
+            "expected ToggleExpandAt row 0 (A), got {msgs:?}"
+        );
+    }
+
+    #[test]
+    fn instances_arrow_renders_at_the_row_click_math_expects() {
+        use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
+        use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        // Render the real explorer at the same geometry the click handler uses,
+        // then confirm the rendered first instance row is at the y that maps to
+        // row 0. This catches any render/row_at drift for the restart scenario
+        // (A collapsed-unloaded, active B).
+        let mut state = AppState::default();
+        state.explorer.instances.set_instances(vec![dbm_store::ManagedInstance {
+            id: "a".into(),
+            fingerprint: "a".into(),
+            name: "a".into(),
+            engine: dbm_core::Engine::Postgres,
+            host: "h".into(),
+            port: 1,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "now".into(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        }]);
+        state.explorer.instances.nodes[0].expanded = false;
+        state.explorer.instances.set_active_instance(0);
+        state.explorer.instances.cursor = 0;
+        let theme = crate::common::view::theme::dracula();
+        let mut terminal = Terminal::new(TestBackend::new(100, 50)).unwrap();
+        terminal
+            .draw(|frame| {
+                let theme = theme.clone();
+                // Explorer area: Rect(0, 3, 20, 45) matches body_top=3, body_h=45.
+                crate::features::explorer::view::render(
+                    frame,
+                    &theme,
+                    ratatui::layout::Rect::new(0, 3, 20, 45),
+                    &state.explorer,
+                    true,
+                );
+            })
+            .unwrap();
+        // Find the y of the first instance row (contains "a" in the instances
+        // column, not the "Explorer" title).
+        let buf = terminal.backend().buffer();
+        let mut first_y = None;
+        for y in 0..50 {
+            let mut line = String::new();
+            for x in 0..20 {
+                line.push_str(buf[(x, y)].symbol());
+            }
+            if line.contains("a") && !line.contains("Explorer") && !line.contains("Instances") {
+                first_y = Some(y as u16);
+                break;
+            }
+        }
+        let y = first_y.expect("first instance row rendered");
+        // The click handler maps this rendered y (with marker x=3) to row 0.
+        let msgs = explorer_row_click_msgs(
+            ratatui::layout::Size::new(100, 50),
+            3,
+            45,
+            3,
+            y,
+            &state,
+        )
+        .expect("click on rendered arrow maps to a row");
+        assert!(
+            msgs.iter().any(|m| matches!(
+                m,
+                AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                    InstancesMsg::Message(InstancesMessage::ToggleExpandAt { row: 0 })
+                )))
+            )),
+            "rendered row {y} must map to ToggleExpandAt row 0, got {msgs:?}"
+        );
     }
 
     #[test]
