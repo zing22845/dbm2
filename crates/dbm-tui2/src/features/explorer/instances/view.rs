@@ -25,7 +25,11 @@ pub fn row_at(area: Rect, state: &InstancesState, y: u16) -> Option<usize> {
     let body_h = inner_h.saturating_sub(footer_h);
     let body_top = area.y.saturating_add(1); // top border
     if y >= body_top && y < body_top.saturating_add(body_h) {
-        let row = (y - body_top) as usize + state.scroll;
+        // The instances tree renders ALL nodes from the top (it does not
+        // vertically scroll), so the visible row is just `y - body_top`. `scroll`
+        // is not added here: session restore sets a stale nonzero `scroll`, and
+        // adding it would offset every mouse click by that amount.
+        let row = (y - body_top) as usize;
         if row < state.visible_count() {
             return Some(row);
         }
@@ -237,6 +241,36 @@ mod tests {
         assert_eq!(row_at(area, &s, 6), Some(0));
         // Clicking on the border/title (y=5) -> none.
         assert_eq!(row_at(area, &s, 5), None);
+    }
+
+    #[test]
+    fn row_at_ignores_stale_scroll_for_the_non_scrolling_tree() {
+        // The instances tree renders all nodes from the top (no vertical
+        // scroll), so a stale nonzero `scroll` (e.g. set by session restore)
+        // must NOT offset `row_at` — otherwise every click is off by `scroll`.
+        let mut s = InstancesState::default();
+        s.set_instances(vec![dbm_store::ManagedInstance {
+            id: "a".into(),
+            fingerprint: "a".into(),
+            name: "a".into(),
+            engine: dbm_core::Engine::Postgres,
+            host: "h".into(),
+            port: 1,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "now".into(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        }]);
+        s.scroll = 1; // stale value from a prior restore
+        let area = Rect::new(0, 5, 40, 20);
+        assert_eq!(row_at(area, &s, 6), Some(0), "row 0 must not be offset by scroll");
+        assert_eq!(row_at(area, &s, 7), None, "row 1 does not exist, stays None");
     }
 
     #[test]

@@ -386,7 +386,9 @@ fn apply_instances_tree(
         if let Some(inst) = &node.instance {
             if &inst.name == instance_name {
                 state.explorer.instances.cursor = row;
-                state.explorer.instances.scroll = row;
+                // Note: the instances tree does not vertically scroll (it renders
+                // all nodes from the top), so `scroll` stays 0. Setting it to the
+                // restored row here would make `row_at` offset every mouse click.
                 return;
             }
         }
