@@ -854,9 +854,38 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     // Route the key to the focused sub-pane.
     match tab.focus {
         SqlFocus::Editor => {
+            // `,` opens the database/schema context picker in Normal/Visual mode,
+            // matching the original dbm. The picker focuses the schema column.
+            if key.code == KeyCode::Char(',')
+                && key.modifiers.is_empty()
+                && matches!(tab.editor.editor.mode, edtui::EditorMode::Normal | edtui::EditorMode::Visual)
+            {
+                return Some(sql_editor(
+                    EditorMessage::ContextPicker(ContextPickerMsg::Message(
+                        ContextPickerMessage::Open {
+                            column: PickerColumn::Schema,
+                            instance: tab.session.instance.clone().unwrap_or_default(),
+                            connection: tab
+                                .session
+                                .connection
+                                .clone()
+                                .unwrap_or_default(),
+                            database: tab.session.database.clone().unwrap_or_default(),
+                        },
+                    )),
+                    tab_id,
+                ));
+            }
             // Ctrl+Enter runs the current editor SQL.
             if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
                 return Some(sql_editor(EditorMessage::Run, tab_id));
+            }
+            // Ctrl+T toggles table-name completion (TblCmp) in insert mode,
+            // matching the original dbm (the editor header shows the status).
+            if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::ToggleTableCompletion { tab_id }),
+                ))));
             }
             // `Shift+Tab` forces the completion popup open in insert mode,
             // matching the original dbm's `completion_trigger_key`: it accepts
@@ -1131,6 +1160,7 @@ mod tests {
                 "c1".into(),
                 None,
                 None,
+                None,
             );
         }
         SqlState {
@@ -1147,6 +1177,7 @@ mod tests {
             "local".into(),
             "main-db".into(),
             "c1".into(),
+            None,
             None,
             None,
         );
@@ -1280,6 +1311,34 @@ mod tests {
             ),
             "Shift+Tab in normal mode must not force completion"
         );
+    }
+
+    #[test]
+    fn ctrl_t_in_editor_emits_toggle_table_completion() {
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        let msg = sql_key(key(KeyCode::Char('t'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+t should be handled in the editor");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::ToggleTableCompletion { .. },
+            )))) => {}
+            other => panic!("expected ToggleTableCompletion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn comma_in_normal_mode_opens_the_context_picker() {
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Normal;
+        let msg = sql_key(key(KeyCode::Char(','), KeyModifiers::NONE), &state)
+            .expect("comma should open the context picker in normal mode");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor { .. },
+            )))) => {}
+            other => panic!("expected an editor message (context picker open), got {other:?}"),
+        }
     }
 
     #[test]
@@ -1808,6 +1867,7 @@ mod tests {
             "inst".into(),
             "c1".into(),
             "id1".into(),
+            None,
             None,
             None,
         );

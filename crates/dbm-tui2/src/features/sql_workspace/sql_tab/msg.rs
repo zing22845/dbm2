@@ -24,6 +24,9 @@ pub enum SqlTabMessage {
     Focus(SqlFocus),
     /// Run `sql` from the tab's editor (dispatched to results with session context).
     RunQueryFromEditor { tab_id: usize, sql: String },
+    /// Toggle table-name completion (TblCmp) for the tab, in INSERT mode
+    /// (Ctrl+T), matching the original dbm.
+    ToggleTableCompletion { tab_id: usize },
     /// Open a new tab bound to a connection with its display identity.
     OpenConnectionTab {
         instance: String,
@@ -31,6 +34,9 @@ pub enum SqlTabMessage {
         connection_id: String,
         database: Option<String>,
         schema: Option<String>,
+        /// The connection's configured default database, used as the fallback
+        /// context when the connection has no existing tab (case A).
+        default_database: Option<String>,
     },
     /// Focus an existing tab for the connection if one exists, else open a new
     /// one (the connection-row Enter behavior, mirroring original dbm).
@@ -40,6 +46,9 @@ pub enum SqlTabMessage {
         connection_id: String,
         database: Option<String>,
         schema: Option<String>,
+        /// The connection's configured default database, used as the fallback
+        /// context when the connection has no existing tab (case A).
+        default_database: Option<String>,
     },
     /// Switch to a connection's tabs without opening a new tab. When the
     /// explorer tree selection changes to a different connection, the shell

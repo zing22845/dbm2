@@ -464,6 +464,13 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                             // the tree (to release the immutable `node` borrow).
                             let connection = conn.name.clone();
                             let connection_id = conn.id.clone();
+                            // The connection's configured default database is the
+                            // fallback context when the connection has no tab yet.
+                            let default_database = if conn.database.is_empty() {
+                                Some("postgres".to_string())
+                            } else {
+                                Some(conn.database.clone())
+                            };
                             // Mark this connection as the active workspace
                             // (the active-row highlight + what the workspace
                             // region renders), matching the original dbm's
@@ -481,6 +488,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                                     connection_id,
                                     database: None,
                                     schema: None,
+                                    default_database,
                                 },
                             )));
                             explorer_dirty = true;
@@ -509,6 +517,13 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         if let Some(conn) = node.connections.get(*connection_idx) {
                             let connection = conn.name.clone();
                             let connection_id = conn.id.clone();
+                            // The connection's configured default database is the
+                            // fallback context when the connection has no tab yet.
+                            let default_database = if conn.database.is_empty() {
+                                Some("postgres".to_string())
+                            } else {
+                                Some(conn.database.clone())
+                            };
                             // Mark this connection as the active workspace
                             // (the active-row highlight + what the workspace
                             // region renders), matching the original dbm's
@@ -524,6 +539,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                                     connection_id,
                                     database: None,
                                     schema: None,
+                                    default_database,
                                 },
                             )));
                             explorer_dirty = true;
@@ -554,6 +570,9 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                                 connection_id,
                                 database: Some(target.database.clone()),
                                 schema: target.schema.clone(),
+                                // An explicit database is passed, so the
+                                // default fallback is never used.
+                                default_database: None,
                             },
                         )));
                         explorer_dirty = true;
@@ -966,6 +985,7 @@ mod tests {
             "id1".into(),
             None,
             None,
+            None,
         );
         state.sql.sql_tab.tabs[0].focus = SqlFocus::History;
 
@@ -1224,6 +1244,7 @@ mod tests {
             "inst".into(),
             "c1".into(),
             "c1-id".into(),
+            None,
             None,
             None,
         );

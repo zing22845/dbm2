@@ -374,6 +374,24 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 size.height.saturating_sub(body_top).saturating_sub(footer_h);
                             let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
 
+                            // A click outside the open context picker closes it
+                            // (mirroring the original dbm), regardless of which
+                            // pane the click lands in. The SQL workspace click
+                            // handler also closes for clicks in its body, so this
+                            // only fires for clicks outside the picker area.
+                            if let Some(picker_area) = sql_picker_area_for_hit(size, &state)
+                                && !picker_area.contains(point)
+                            {
+                                let msg = sql_click_msgs(
+                                    &state.sql.sql_tab,
+                                    crate::features::sql_workspace::sql_tab::view::SqlClickAction::CloseContextPicker,
+                                );
+                                for m in msg {
+                                    let result = process_message_round(&effect_runner, &mut action_rx, m, &mut state);
+                                    dirty |= result.dirty;
+                                }
+                            }
+
                             // Map the click to a focus pane by region. While the
                             // discover parent pane owns focus, any attempt to
                             // move focus away is rejected by the shell's
@@ -514,38 +532,17 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     tab_area,
                                     mouse.column,
                                     mouse.row,
+                                    is_double_click,
                                 ) {
-                                    let msg = match action {
-                                        crate::features::sql_workspace::sql_tab::view::SqlClickAction::FocusSubPane(focus) => {
-                                            AppMsg::Sql(
-                                                crate::features::sql_workspace::msg::SqlMsg::Message(
-                                                    crate::features::sql_workspace::msg::SqlMessage::SqlTab(
-                                                        crate::features::sql_workspace::sql_tab::msg::SqlTabMsg::Message(
-                                                            crate::features::sql_workspace::sql_tab::msg::SqlTabMessage::Focus(focus),
-                                                        ),
-                                                    ),
-                                                ),
-                                            )
-                                        }
-                                        crate::features::sql_workspace::sql_tab::view::SqlClickAction::ActivateTab(visible_idx) => {
-                                            AppMsg::Sql(
-                                                crate::features::sql_workspace::msg::SqlMsg::Message(
-                                                    crate::features::sql_workspace::msg::SqlMessage::SqlTab(
-                                                        crate::features::sql_workspace::sql_tab::msg::SqlTabMsg::Message(
-                                                            crate::features::sql_workspace::sql_tab::msg::SqlTabMessage::Tab(visible_idx),
-                                                        ),
-                                                    ),
-                                                ),
-                                            )
-                                        }
-                                    };
-                                    let result = process_message_round(
-                                        &effect_runner,
-                                        &mut action_rx,
-                                        msg,
-                                        &mut state,
-                                    );
-                                    dirty |= result.dirty;
+                                    for msg in sql_click_msgs(&state.sql.sql_tab, action) {
+                                        let result = process_message_round(
+                                            &effect_runner,
+                                            &mut action_rx,
+                                            msg,
+                                            &mut state,
+                                        );
+                                        dirty |= result.dirty;
+                                    }
                                 }
                             }
 
@@ -855,6 +852,70 @@ fn sql_tab_area_for_hit(
         inner.width,
         inner.height.saturating_sub(footer_h),
     ))
+}
+
+/// Compute the context picker overlay rect (in the active tab's editor) for
+/// mouse hit-testing, or `None` when the picker is closed / not shown.
+fn sql_picker_area_for_hit(
+    size: ratatui::layout::Size,
+    state: &AppState,
+) -> Option<ratatui::layout::Rect> {
+    if state.modal.is_some()
+        || matches!(state.focus, Pane::Discover(_))
+        || state.instance_workspace_open()
+        || state.sql.sql_tab.tabs.is_empty()
+    {
+        return None;
+    }
+    let tab = state.sql.sql_tab.tabs.get(state.sql.sql_tab.active_tab)?;
+    if !tab.editor.context_picker.open {
+        return None;
+    }
+    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let body_top = 3u16;
+    let body_h = size.height.saturating_sub(body_top).saturating_sub(footer_h);
+    if body_h < 3 {
+        return None;
+    }
+    let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+    let workspace_w = size.width.saturating_sub(explorer_w);
+    let workspace = Rect::new(explorer_w, body_top, workspace_w, body_h);
+    // Outer " SQL Workspace " border (1 col/row).
+    let inner = Rect::new(
+        workspace.x.saturating_add(1),
+        workspace.y.saturating_add(1),
+        workspace.width.saturating_sub(2),
+        workspace.height.saturating_sub(2),
+    );
+    let footer_h = crate::common::view::hints::footer_height(
+        &crate::common::view::hints::sql_workspace_footer_text(),
+        inner.width,
+    );
+    let sql_tab_area = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(footer_h),
+    );
+    if sql_tab_area.height < 1 {
+        return None;
+    }
+    // The SQL tab's body sits below its 1-row tab bar.
+    let sql_body = Rect::new(
+        sql_tab_area.x,
+        sql_tab_area.y.saturating_add(1),
+        sql_tab_area.width,
+        sql_tab_area.height.saturating_sub(1),
+    );
+    let layout = crate::features::sql_workspace::sql_tab::layout::sql_tab_layout(
+        sql_body,
+        tab.split_ratio,
+        tab.history_pane_width,
+    );
+    crate::features::sql_workspace::sql_tab::editor::view::context_picker_area(
+        layout.editor,
+        true,
+    )
 }
 
 /// Build the split-resize message for a drag gesture at `point`, using the
@@ -1378,6 +1439,86 @@ fn discover_subpane_for_click(
         Some(DiscoverPane::Targets)
     } else {
         Some(DiscoverPane::Results)
+    }
+}
+
+/// Build the workspace messages for a SQL click action. A double-click on a
+/// picker row yields both a cursor jump and an apply, so a `Vec` is returned.
+fn sql_click_msgs(
+    sql: &crate::features::sql_workspace::sql_tab::state::SqlTabState,
+    action: crate::features::sql_workspace::sql_tab::view::SqlClickAction,
+) -> Vec<AppMsg> {
+    use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+    use crate::features::sql_workspace::sql_tab::editor::context_picker::msg::{
+        ContextPickerMessage, ContextPickerMsg,
+    };
+    use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
+    use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+    use crate::features::sql_workspace::sql_tab::view::SqlClickAction;
+
+    let tab_id = |active: usize| sql.tabs.get(active).map(|t| t.session.id);
+    let editor_msg = |tab_id: usize, m: EditorMessage| {
+        AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+            SqlTabMessage::Editor {
+                tab_id,
+                msg: EditorMsg::Message(m),
+            },
+        ))))
+    };
+    let picker = |tab_id: usize, m: ContextPickerMessage| {
+        editor_msg(tab_id, EditorMessage::ContextPicker(ContextPickerMsg::Message(m)))
+    };
+    let close = |tab_id: usize| picker(tab_id, ContextPickerMessage::Close);
+
+    match action {
+        SqlClickAction::FocusSubPane(focus) => {
+            vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Focus(focus),
+            ))))]
+        }
+        SqlClickAction::ActivateTab(visible_idx) => vec![AppMsg::Sql(SqlMsg::Message(
+            SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Tab(visible_idx))),
+        ))],
+        SqlClickAction::CloseContextPicker => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            vec![close(tab_id)]
+        }
+        SqlClickAction::OpenContextPicker(column) => {
+            let Some(tab) = sql.tabs.get(sql.active_tab) else {
+                return Vec::new();
+            };
+            let tab_id = tab.session.id;
+            vec![picker(
+                tab_id,
+                ContextPickerMessage::Open {
+                    column,
+                    instance: tab.session.instance.clone().unwrap_or_default(),
+                    connection: tab.session.connection.clone().unwrap_or_default(),
+                    database: tab.session.database.clone().unwrap_or_default(),
+                },
+            )]
+        }
+        SqlClickAction::ContextPickerHit { column, cursor, double } => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            let mut msgs = vec![picker(
+                tab_id,
+                ContextPickerMessage::SetCursor { column, cursor },
+            )];
+            if double {
+                msgs.push(picker(tab_id, ContextPickerMessage::Apply));
+            }
+            msgs
+        }
+        SqlClickAction::ContextPickerColumn(column) => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            vec![picker(tab_id, ContextPickerMessage::MoveColumn(column))]
+        }
     }
 }
 

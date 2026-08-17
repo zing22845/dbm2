@@ -15,6 +15,9 @@ pub enum ContextPickerMessage {
     Close,
     /// Move the cursor in the active column by `delta` (`-1`/`+1`).
     MoveCursor { delta: i32 },
+    /// Jump the cursor in `column` to a specific (filtered-list) index and
+    /// focus that column. Emitted by a mouse click on a picker row.
+    SetCursor { column: PickerColumn, cursor: usize },
     /// Switch the focused column.
     MoveColumn(PickerColumn),
     /// Begin `/` search input on the active column.

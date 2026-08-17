@@ -21,19 +21,39 @@ pub enum SqlClickAction {
     FocusSubPane(SqlFocus),
     /// Activate the clicked tab, given its visible-tab offset.
     ActivateTab(usize),
+    /// Close the open context picker (click outside it).
+    CloseContextPicker,
+    /// Click the editor header's context segment: open the context picker
+    /// focused on `column` (the `· {db}` segment → Database, the `› {schema}`
+    /// remainder → Schema).
+    OpenContextPicker(crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn),
+    /// Click a picker row: move the cursor to that row (switching column);
+    /// `double` additionally applies the selection.
+    ContextPickerHit {
+        column: crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn,
+        cursor: usize,
+        double: bool,
+    },
+    /// Click inside a picker column area (not on a row): switch the focused column.
+    ContextPickerColumn(crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn),
 }
 
 /// Hit-test a click at `(x, y)` inside the SQL workspace's tab-bar + body
 /// region (`area`). A click on the top tab bar activates that tab; a click in
 /// the body focuses the sub-pane (editor / history / results) under the cursor.
-/// Returns `None` for clicks outside any interactive region (splitters,
-/// footer, empty areas).
+/// When the context picker is open, clicks on its rows/columns operate on it and
+/// clicks outside it close it (mirroring the original dbm). Returns `None` for
+/// clicks outside any interactive region (splitters, footer, empty areas).
 pub fn sql_workspace_click(
     state: &SqlTabState,
     area: ratatui::layout::Rect,
     x: u16,
     y: u16,
+    is_double_click: bool,
 ) -> Option<SqlClickAction> {
+    use crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn;
+    use crate::features::sql_workspace::sql_tab::editor::context_picker::view as cp_view;
+
     // The tab bar is the single top row; the child panes are below it.
     let tab_bar = ratatui::layout::Rect {
         x: area.x,
@@ -65,6 +85,55 @@ pub fn sql_workspace_click(
     let layout = sql_tab_layout(body, tab.split_ratio, tab.history_pane_width);
     if layout.editor.width == 0 {
         return None;
+    }
+
+    // When the picker is open, clicks inside it operate on it; clicks outside
+    // it close it (the picker owns the editor sub-pane region).
+    let picker_open = tab.editor.context_picker.open;
+    if let Some(picker_area) = editor_view::context_picker_area(layout.editor, picker_open) {
+        if contains(picker_area, x, y) {
+            // A click on a visible row moves the cursor there (and, on a double
+            // click, applies the selection).
+            if let Some((column, cursor)) = cp_view::row_hit_at(picker_area, &tab.editor.context_picker, x, y) {
+                return Some(SqlClickAction::ContextPickerHit {
+                    column,
+                    cursor,
+                    double: is_double_click,
+                });
+            }
+            // A click on a column's area (not a row) switches that column.
+            let (db_rect, schema_rect) = cp_view::column_rects(picker_area);
+            if contains(db_rect, x, y) {
+                return Some(SqlClickAction::ContextPickerColumn(PickerColumn::Database));
+            }
+            if contains(schema_rect, x, y) {
+                return Some(SqlClickAction::ContextPickerColumn(PickerColumn::Schema));
+            }
+            return None;
+        }
+        // A click in the SQL body outside the open picker closes it.
+        return Some(SqlClickAction::CloseContextPicker);
+    }
+
+    // A click on the editor's title bar context segment opens the context
+    // picker, focused on the column matching the clicked chip. The trigger is
+    // always present (even without a chosen database), matching the original
+    // dbm.
+    if y == layout.editor.y {
+        let (db_rect, full_rect) = editor_view::context_trigger_rects(
+            layout.editor,
+            tab.editor.editor.mode,
+            tab.session.database.as_deref(),
+            tab.session.schema.as_deref(),
+        );
+        if contains(full_rect, x, y) {
+            let column = if contains(db_rect, x, y) {
+                PickerColumn::Database
+            } else {
+                PickerColumn::Schema
+            };
+            return Some(SqlClickAction::OpenContextPicker(column));
+        }
     }
     let focus = if contains(layout.editor, x, y) {
         SqlFocus::Editor
@@ -147,10 +216,30 @@ pub fn render(
     }
 
     // Only the focused editor sub-pane exposes its caret to the shell.
+    let db = tab.session.database.as_deref();
+    let schema = tab.session.schema.as_deref();
     let cursor = if editor_focused {
-        editor_view::render(frame, theme, layout.editor, &tab.editor, editor_focused)
+        editor_view::render(
+            frame,
+            theme,
+            layout.editor,
+            &tab.editor,
+            editor_focused,
+            tab.complete_table_names,
+            db,
+            schema,
+        )
     } else {
-        editor_view::render(frame, theme, layout.editor, &tab.editor, editor_focused);
+        editor_view::render(
+            frame,
+            theme,
+            layout.editor,
+            &tab.editor,
+            editor_focused,
+            tab.complete_table_names,
+            db,
+            schema,
+        );
         None
     };
 
@@ -194,7 +283,7 @@ mod tests {
     fn state_with_tabs(count: usize) -> SqlTabState {
         let mut s = SqlTabState::default();
         for _ in 0..count {
-            s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None);
+            s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
         }
         s
     }
@@ -205,12 +294,12 @@ mod tests {
         // area at x=0,y=0; tab bar is row 0. Click on the first tab.
         let area = Rect::new(0, 0, 80, 20);
         assert_eq!(
-            sql_workspace_click(&state, area, 1, 0),
+            sql_workspace_click(&state, area, 1, 0, false),
             Some(SqlClickAction::ActivateTab(0))
         );
         // Second tab is just past "<SQL 1> " (8 chars).
         assert_eq!(
-            sql_workspace_click(&state, area, 9, 0),
+            sql_workspace_click(&state, area, 9, 0, false),
             Some(SqlClickAction::ActivateTab(1))
         );
     }
@@ -225,13 +314,13 @@ mod tests {
         // Click inside the editor region -> focus editor.
         let p = (layout.editor.x + 1, layout.editor.y + 1);
         assert_eq!(
-            sql_workspace_click(&state, area, p.0, p.1),
+            sql_workspace_click(&state, area, p.0, p.1, false),
             Some(SqlClickAction::FocusSubPane(SqlFocus::Editor))
         );
         // Click inside the history region -> focus history.
         let p = (layout.history.x + 1, layout.history.y + 1);
         assert_eq!(
-            sql_workspace_click(&state, area, p.0, p.1),
+            sql_workspace_click(&state, area, p.0, p.1, false),
             Some(SqlClickAction::FocusSubPane(SqlFocus::History))
         );
     }
@@ -244,9 +333,164 @@ mod tests {
         let body = Rect::new(0, 1, 120, 39);
         let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
         let p = (body.x + 1, layout.h_splitter.y);
-        assert_eq!(sql_workspace_click(&state, area, p.0, p.1), None);
+        assert_eq!(sql_workspace_click(&state, area, p.0, p.1, false), None);
         // Click in the body below results (should be inside results actually);
         // instead assert a click outside the whole area returns none.
-        assert_eq!(sql_workspace_click(&state, area, 500, 500), None);
+        assert_eq!(sql_workspace_click(&state, area, 500, 500, false), None);
+    }
+
+    #[test]
+    fn click_header_trigger_opens_picker_focused_on_column() {
+        use crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn;
+        let mut state = state_with_tabs(1);
+        state.tabs[0].session.database = Some("mydb".into());
+        state.tabs[0].session.schema = Some("public".into());
+        let area = Rect::new(0, 0, 120, 40);
+        let body = Rect::new(0, 1, 120, 39);
+        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
+        // Click the `· mydb` segment -> focus Database column.
+        let (db_rect, _full) = editor_view::context_trigger_rects(
+            layout.editor,
+            state.tabs[0].editor.editor.mode,
+            Some("mydb"),
+            Some("public"),
+        );
+        assert_eq!(
+            sql_workspace_click(&state, area, db_rect.x + 1, db_rect.y, false),
+            Some(SqlClickAction::OpenContextPicker(PickerColumn::Database))
+        );
+        // Click the `› public` remainder -> focus Schema column.
+        let (_db, full) = editor_view::context_trigger_rects(
+            layout.editor,
+            state.tabs[0].editor.editor.mode,
+            Some("mydb"),
+            Some("public"),
+        );
+        assert_eq!(
+            sql_workspace_click(&state, area, full.x + full.width - 1, full.y, false),
+            Some(SqlClickAction::OpenContextPicker(PickerColumn::Schema))
+        );
+    }
+
+    #[test]
+    fn picker_row_click_and_column_click_and_outside_close() {
+        use crate::features::sql_workspace::sql_tab::editor::context_picker::{
+            state::{CachedList, ContextPickerState, PickerColumn},
+            view as cp_view,
+        };
+        let mut state = state_with_tabs(1);
+        state.tabs[0].session.database = Some("mydb".into());
+        state.tabs[0].session.schema = Some("public".into());
+        state.tabs[0].editor.context_picker = ContextPickerState::open(
+            PickerColumn::Database,
+            "inst".into(),
+            "conn".into(),
+            "mydb".into(),
+        );
+        {
+            let cp = &mut state.tabs[0].editor.context_picker;
+            cp.databases = CachedList::Ready(vec!["a".into(), "b".into(), "c".into()]);
+            cp.schemas = CachedList::Ready(vec!["public".into()]);
+        }
+        let area = Rect::new(0, 0, 120, 40);
+        let body = Rect::new(0, 1, 120, 39);
+        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
+        let picker_area = editor_view::context_picker_area(layout.editor, true).unwrap();
+        let (db_rect, schema_rect) = cp_view::column_rects(picker_area);
+
+        // Click a database row (inside the db column body) -> cursor hit.
+        let row_y = db_rect.y + 1;
+        let hit = sql_workspace_click(&state, area, db_rect.x + 2, row_y, false);
+        assert!(matches!(
+            hit,
+            Some(SqlClickAction::ContextPickerHit {
+                column: PickerColumn::Database,
+                cursor,
+                double: false
+            }) if cursor == 0
+        ));
+
+        // Click the schema column area (its title row, not a row body) -> switch column.
+        assert_eq!(
+            sql_workspace_click(&state, area, schema_rect.x + 2, schema_rect.y, false),
+            Some(SqlClickAction::ContextPickerColumn(PickerColumn::Schema))
+        );
+
+        // Click outside the picker (e.g. the history pane) -> close it.
+        assert_eq!(
+            sql_workspace_click(&state, area, layout.history.x + 1, layout.history.y + 1, false),
+            Some(SqlClickAction::CloseContextPicker)
+        );
+    }
+
+    #[test]
+    fn connection_a_open_picker_does_not_leak_into_connection_b() {
+        use crate::features::sql_workspace::sql_tab::editor::context_picker::state::{
+            ContextPickerState, PickerColumn,
+        };
+        // Two tabs: A (index 0) has its context picker left open; B (index 1)
+        // is the active connection's tab and never opened a picker.
+        let mut state = SqlTabState::default();
+        state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        state.open_connection_tab("inst".into(), "c2".into(), "id2".into(), None, None, None);
+        state.tabs[0].session.database = Some("dbA".into());
+        state.tabs[0].session.schema = Some("public".into());
+        state.tabs[0].editor.context_picker =
+            ContextPickerState::open(PickerColumn::Database, "inst".into(), "c1".into(), "dbA".into());
+        state.tabs[1].session.database = Some("dbB".into());
+        state.tabs[1].session.schema = Some("public".into());
+        // B is active.
+        state.active_tab = 1;
+
+        let area = Rect::new(0, 0, 120, 40);
+        let body = Rect::new(0, 1, 120, 39);
+        let layout = sql_tab_layout(body, state.tabs[1].split_ratio, state.tabs[1].history_pane_width);
+
+        // Clicking B's context trigger opens B's picker (B's picker is closed,
+        // so this is NOT treated as an outside-click-close).
+        let (_db, full) = editor_view::context_trigger_rects(
+            layout.editor,
+            state.tabs[1].editor.editor.mode,
+            Some("dbB"),
+            Some("public"),
+        );
+        assert_eq!(
+            sql_workspace_click(&state, area, full.x + full.width - 1, full.y, false),
+            Some(SqlClickAction::OpenContextPicker(PickerColumn::Schema))
+        );
+
+        // Clicking B's editor body focuses the editor (not CloseContextPicker,
+        // because B's picker is closed).
+        assert_eq!(
+            sql_workspace_click(&state, area, layout.editor.x + 2, layout.editor.y + 3, false),
+            Some(SqlClickAction::FocusSubPane(SqlFocus::Editor))
+        );
+    }
+
+    #[test]
+    fn connection_without_database_can_still_open_context_picker() {
+        use crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn;
+        // A connection whose tab has no database yet (opened straight from the
+        // instances tree) must still be able to open its own context picker —
+        // the picker's whole purpose is to choose a database. Previously the
+        // header trigger was hidden when `database` was empty, so the click did
+        // nothing and only connections that had already applied a context could
+        // open a picker.
+        let state = state_with_tabs(1);
+        assert_eq!(state.tabs[0].session.database, None);
+        let area = Rect::new(0, 0, 120, 40);
+        let body = Rect::new(0, 1, 120, 39);
+        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
+        let (_db, full) = editor_view::context_trigger_rects(
+            layout.editor,
+            state.tabs[0].editor.editor.mode,
+            None,
+            None,
+        );
+        // The `› …` remainder focuses the Schema column (database not chosen yet).
+        assert_eq!(
+            sql_workspace_click(&state, area, full.x + full.width - 1, full.y, false),
+            Some(SqlClickAction::OpenContextPicker(PickerColumn::Schema))
+        );
     }
 }

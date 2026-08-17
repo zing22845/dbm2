@@ -34,6 +34,15 @@ pub fn update(
             let before = state.active_tab;
             if let Some(global) = state.visible_to_global(visible_idx) {
                 state.active_tab = global;
+                // Clearing a leftover picker on the newly active tab prevents it
+                // from blocking that tab's editor (keys / context clicks).
+                if global != before {
+                    state.close_active_context_picker();
+                }
+                // Keep the connection's "current tab" bookmark in sync with the
+                // active tab, so a new tab opened later (`Alt+t`/`n`) inherits
+                // the currently active tab's context rather than a stale one.
+                state.remember_active_tab_for_connection();
             }
             dirty = before != state.active_tab;
         }
@@ -69,6 +78,7 @@ pub fn update(
             connection_id,
             database,
             schema,
+            default_database,
         } => {
             state.open_connection_tab(
                 instance.clone(),
@@ -76,6 +86,7 @@ pub fn update(
                 connection_id,
                 database.clone(),
                 schema.clone(),
+                default_database.as_deref(),
             );
             // Load the SQL-completion catalog for the newly bound tab so table
             // and column completion is available immediately.
@@ -104,17 +115,24 @@ pub fn update(
             connection_id,
             database,
             schema,
+            default_database,
         } => {
             // Focus an existing tab for this connection if one exists, else
             // open a new one. Only a freshly created tab needs its completion
-            // catalog seeded.
+            // catalog seeded. Clear a leftover picker on the now-active tab so
+            // it can't block that editor's keys / context clicks.
+            let before = state.active_tab;
             let created = state.focus_or_open_connection_tab(
                 instance.clone(),
                 connection.clone(),
                 connection_id,
                 database.clone(),
                 schema.clone(),
+                default_database.as_deref(),
             );
+            if state.active_tab != before {
+                state.close_active_context_picker();
+            }
             if created {
                 let tab_id = state
                     .tabs
@@ -135,7 +153,14 @@ pub fn update(
             dirty = true;
         }
         SqlTabMessage::SetActiveConnection { instance, connection } => {
+            // Clear a leftover picker on the now-active tab (only when actually
+            // switching connections) so it can't block that tab's editor.
+            let key = (instance.clone(), connection.clone());
+            let switched = state.active_connection.as_ref() != Some(&key);
             state.activate_connection(instance, connection);
+            if switched {
+                state.close_active_context_picker();
+            }
             dirty = true;
         }
         SqlTabMessage::ApplyContext { tab_id, database, schema } => {
@@ -239,6 +264,16 @@ pub fn update(
                 warn_tab_missing(tab_id);
             }
         }
+        SqlTabMessage::ToggleTableCompletion { tab_id } => {
+            // Ctrl+T toggles table-name completion (TblCmp), only in INSERT mode,
+            // matching the original dbm. The header shows the status there.
+            if let Some(idx) = state.index_of(tab_id)
+                && matches!(state.tabs[idx].editor.editor.mode, edtui::EditorMode::Insert)
+            {
+                state.tabs[idx].complete_table_names = !state.tabs[idx].complete_table_names;
+                dirty = true;
+            }
+        }
         SqlTabMessage::Editor { tab_id, msg } => {
             let editor::msg::EditorMsg::Message(inner) = msg;
             if let Some(idx) = state.index_of(tab_id) {
@@ -328,4 +363,93 @@ fn session_key(session: &super::session::TabSession) -> (String, String) {
 /// swallowed forever.
 fn warn_tab_missing(tab_id: usize) {
     tracing::warn!("sql_tab: message targeted a missing tab (tab_id = {tab_id}); dropped");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::sql_workspace::sql_tab::state::SqlTabState;
+
+    #[test]
+    fn toggle_table_completion_only_in_insert_mode() {
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        s.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        assert!(!s.tabs[0].complete_table_names);
+
+        // In INSERT mode, Ctrl+T toggles TblCmp on.
+        let (s, _i, _e, dirty) = update(SqlTabMessage::ToggleTableCompletion { tab_id }, s);
+        assert!(dirty);
+        assert!(s.tabs[0].complete_table_names, "INSERT mode toggles TblCmp on");
+        // Toggling again turns it off.
+        let (s, _i, _e, dirty) = update(SqlTabMessage::ToggleTableCompletion { tab_id }, s);
+        assert!(dirty);
+        assert!(!s.tabs[0].complete_table_names);
+
+        // In NORMAL mode, Ctrl+T is a no-op (matches the original dbm).
+        let mut s = s;
+        s.tabs[0].editor.editor.mode = edtui::EditorMode::Normal;
+        let (s, _i, _e, dirty) = update(SqlTabMessage::ToggleTableCompletion { tab_id }, s);
+        assert!(!dirty, "normal mode does not toggle TblCmp");
+        assert!(!s.tabs[0].complete_table_names);
+    }
+
+    #[test]
+    fn switching_tab_closes_a_leftover_picker() {
+        use crate::features::sql_workspace::sql_tab::editor::context_picker::state::{
+            ContextPickerState, PickerColumn,
+        };
+        // Two tabs on the same connection; tab 0's picker is left open.
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        s.open_connection_tab("inst".into(), "c1".into(), "id2".into(), None, None, None);
+        s.tabs[0].editor.context_picker = ContextPickerState::open(
+            PickerColumn::Database,
+            "inst".into(),
+            "c1".into(),
+            "db".into(),
+        );
+        assert!(s.tabs[0].editor.context_picker.open);
+        assert_eq!(s.active_tab, 1);
+
+        // Switching back to tab 0 closes its leftover picker.
+        let (s, _i, _e, _d) = update(SqlTabMessage::Tab(0), s);
+        assert_eq!(s.active_tab, 0);
+        assert!(
+            !s.tabs[0].editor.context_picker.open,
+            "switching tabs closes a leftover picker"
+        );
+    }
+
+    #[test]
+    fn switching_connection_closes_a_leftover_picker() {
+        use crate::features::sql_workspace::sql_tab::editor::context_picker::state::{
+            ContextPickerState, PickerColumn,
+        };
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        s.open_connection_tab("inst".into(), "c2".into(), "id2".into(), None, None, None);
+        s.tabs[0].editor.context_picker = ContextPickerState::open(
+            PickerColumn::Database,
+            "inst".into(),
+            "c1".into(),
+            "db".into(),
+        );
+        assert!(s.tabs[0].editor.context_picker.open);
+        assert_eq!(s.active_tab, 1);
+
+        // Switching the active connection back to c1 closes the leftover picker.
+        let (s, _i, _e, _d) = update(
+            SqlTabMessage::SetActiveConnection {
+                instance: "inst".into(),
+                connection: "c1".into(),
+            },
+            s,
+        );
+        assert!(
+            !s.tabs[0].editor.context_picker.open,
+            "switching connections closes a leftover picker"
+        );
+    }
 }

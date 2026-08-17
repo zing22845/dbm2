@@ -57,6 +57,15 @@ pub fn update(
             move_cursor(&mut state, delta, &mut effects);
             true
         }
+        ContextPickerMessage::SetCursor { column, cursor } => {
+            state.switch_column(column);
+            match column {
+                PickerColumn::Database => state.db_cursor = cursor,
+                PickerColumn::Schema => state.schema_cursor = cursor,
+            }
+            sync_picker_cursors(&mut state, &mut effects);
+            true
+        }
         ContextPickerMessage::MoveColumn(column) => {
             let changed = state.switch_column(column);
             if changed {
@@ -328,6 +337,30 @@ mod tests {
         let (s2, _i, _e, _d) = update(ContextPickerMessage::MoveColumn(PickerColumn::Schema), s);
         s = s2;
         assert_eq!(s.column, PickerColumn::Schema);
+    }
+
+    #[test]
+    fn set_cursor_jumps_column_and_focus() {
+        let (mut s, _i, _e, _d) = update(
+            ContextPickerMessage::Open {
+                column: PickerColumn::Database,
+                instance: "inst".into(),
+                connection: "conn".into(),
+                database: "postgres".into(),
+            },
+            ContextPickerState::default(),
+        );
+        s.databases = CachedList::Ready(vec!["app".into(), "postgres".into(), "other".into()]);
+        s.schemas = CachedList::Ready(vec!["public".into()]);
+        let (s2, _i, _e, _d) = update(
+            ContextPickerMessage::SetCursor {
+                column: PickerColumn::Schema,
+                cursor: 0,
+            },
+            s,
+        );
+        assert_eq!(s2.column, PickerColumn::Schema);
+        assert_eq!(s2.schema_cursor, 0);
     }
 
     #[test]

@@ -56,7 +56,7 @@ fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
                 detail_pane_width: 32,
                 database: session.database.clone().unwrap_or_default(),
                 schema: session.schema.clone().unwrap_or_default(),
-                complete_table_names: false,
+                complete_table_names: tab.complete_table_names,
             }
         })
         .collect();
@@ -184,13 +184,21 @@ fn iw_snapshot(state: &AppState) -> Option<TuiInstanceWorkspaceSnapshot> {
 fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Box<dyn ErasedEffect<Action>>> {
     use crate::features::sql_workspace::sql_tab::editor::state::EditorState;
 
-    // Rebuild the tab list from the snapshot.
-    let tabs: Vec<crate::features::sql_workspace::sql_tab::state::SqlTab> = snapshot
-        .tabs
-        .iter()
-        .map(|t| crate::features::sql_workspace::sql_tab::state::SqlTab {
+    // Rebuild the tab list from the snapshot. `t.sequence` is a per-connection
+    // ordinal (each connection's tabs restart at 1), so it must NOT be reused
+    // as the global `session.id` — that would collide across connections (two
+    // connections' first tab both become `id == 1`), and `index_of` (which
+    // returns the first match) would then route editor/context messages to the
+    // wrong tab, leaving some connections unable to open their context picker.
+    // Assign a fresh unique global id per restored tab instead.
+    let mut restored: Vec<crate::features::sql_workspace::sql_tab::state::SqlTab> = Vec::with_capacity(
+        snapshot.tabs.len(),
+    );
+    for t in &snapshot.tabs {
+        let id = state.sql.sql_tab.next_session_id();
+        restored.push(crate::features::sql_workspace::sql_tab::state::SqlTab {
             session: crate::features::sql_workspace::sql_tab::session::TabSession {
-                id: t.sequence as usize,
+                id,
                 sequence: t.sequence as usize,
                 instance: non_empty(t.instance.clone()),
                 connection: non_empty(t.connection.clone()),
@@ -202,11 +210,13 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
             upper_pane: crate::features::sql_workspace::sql_tab::state::SqlFocus::Editor,
             split_ratio: t.split_ratio,
             history_pane_width: t.history_pane_width,
+            complete_table_names: t.complete_table_names,
             editor: EditorState::with_sql(&t.sql),
             results: crate::features::sql_workspace::sql_tab::results::state::ResultsState::new(),
             history: crate::features::sql_workspace::sql_tab::history::state::HistoryState::default(),
-        })
-        .collect();
+        });
+    }
+    let tabs = restored;
 
     // Replace the default single tab with the restored set. When there are no
     // persisted tabs, keep the default empty tab.
@@ -216,6 +226,9 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
             .filter(|&i| i < tabs.len())
             .unwrap_or(0);
         state.sql.sql_tab.tabs = tabs;
+        // `next_tab_id` was already bumped past every restored tab while they
+        // were allocated above (`next_session_id`), so a newly opened tab can
+        // never reuse a restored `session.id`.
         state.sql.sql_tab.active_tab = active;
         // Restore the active connection so the tab strip shows the restored
         // tabs. `active_connection` gates `visible_tab_indices()`; without it
