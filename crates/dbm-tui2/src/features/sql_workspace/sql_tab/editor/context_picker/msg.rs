@@ -9,8 +9,14 @@ use super::state::PickerColumn;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextPickerMessage {
     /// Open the picker focused on `column`, seeded with the current connection
-    /// context (`instance`/`connection`) and active `database`.
-    Open { column: PickerColumn, instance: String, connection: String, database: String },
+    /// context (`instance`/`connection`) and active `database`/`schema`.
+    Open {
+        column: PickerColumn,
+        instance: String,
+        connection: String,
+        database: String,
+        schema: String,
+    },
     /// Close the picker without applying.
     Close,
     /// Move the cursor in the active column by `delta` (`-1`/`+1`).

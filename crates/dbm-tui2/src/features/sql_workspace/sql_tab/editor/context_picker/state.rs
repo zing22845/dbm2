@@ -39,6 +39,9 @@ pub struct ContextPickerState {
     pub schema_cursor: usize,
     /// The database whose schemas are shown (preview).
     pub preview_database: String,
+    /// The tab's current schema, used to seed the schema column cursor so it
+    /// opens on the active schema rather than the first entry (matching dbm).
+    pub preview_schema: String,
     /// The connection whose databases are listed.
     pub instance: String,
     /// The connection whose databases are listed.
@@ -55,15 +58,23 @@ pub struct ContextPickerState {
 
 impl ContextPickerState {
     /// Open a fresh picker focused on `column`, seeded with the current
-    /// connection context (`instance`/`connection`) and `database` (so the
-    /// preview starts on the tab's active database).
-    pub fn open(column: PickerColumn, instance: String, connection: String, database: String) -> Self {
+    /// connection context (`instance`/`connection`) and the tab's active
+    /// `database`/`schema` (so the preview and the cursor seed to the active
+    /// context rather than the first entry).
+    pub fn open(
+        column: PickerColumn,
+        instance: String,
+        connection: String,
+        database: String,
+        schema: String,
+    ) -> Self {
         ContextPickerState {
             open: true,
             column,
             instance,
             connection,
             preview_database: database,
+            preview_schema: schema,
             ..ContextPickerState::default()
         }
     }
@@ -242,8 +253,13 @@ mod tests {
 
     #[test]
     fn close_resets_open_and_search() {
-        let mut picker =
-            ContextPickerState::open(PickerColumn::Database, "inst".into(), "conn".into(), "postgres".into());
+        let mut picker = ContextPickerState::open(
+            PickerColumn::Database,
+            "inst".into(),
+            "conn".into(),
+            "postgres".into(),
+            "public".into(),
+        );
         picker.db_search.start();
         picker.db_search.query = "post".into();
         picker.close();

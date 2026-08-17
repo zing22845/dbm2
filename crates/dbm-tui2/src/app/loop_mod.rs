@@ -1497,6 +1497,7 @@ fn sql_click_msgs(
                     instance: tab.session.instance.clone().unwrap_or_default(),
                     connection: tab.session.connection.clone().unwrap_or_default(),
                     database: tab.session.database.clone().unwrap_or_default(),
+                    schema: tab.session.schema.clone().unwrap_or_default(),
                 },
             )]
         }

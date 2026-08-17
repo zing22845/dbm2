@@ -52,12 +52,16 @@ pub fn context_trigger_rects(
 ) -> (Rect, Rect) {
     let db = database.filter(|d| !d.is_empty()).unwrap_or("…");
     let schema = schema.filter(|s| !s.is_empty()).unwrap_or("…");
-    let prefix_len = format!(" [S] SQL [{}] ", editor_mode_label(mode)).len() as u16;
+    // Widths must be display-cell widths, not byte lengths: `·`/`›` are UTF-8
+    // multi-byte (2 bytes) yet render as one cell, so using `str::len()` would
+    // over-cover the clickable region and mis-hit the schema segment as the
+    // database column.
+    let prefix_len = crate::common::utils::text_width::width(&format!(" [S] SQL [{}] ", editor_mode_label(mode))) as u16;
     let x = area.x.saturating_add(1).saturating_add(prefix_len);
     let db_seg = format!("· {db}");
     let ctx = format!("{db_seg} › {schema}");
-    let db_rect = Rect::new(x, area.y, db_seg.len() as u16, 1);
-    let full_rect = Rect::new(x, area.y, ctx.len() as u16, 1);
+    let db_rect = Rect::new(x, area.y, crate::common::utils::text_width::width(&db_seg) as u16, 1);
+    let full_rect = Rect::new(x, area.y, crate::common::utils::text_width::width(&ctx) as u16, 1);
     (db_rect, full_rect)
 }
 
@@ -210,7 +214,8 @@ mod tests {
         );
         assert_eq!(db_rect.y, area.y);
         assert_eq!(full_rect.y, area.y);
-        assert_eq!(db_rect.width, "· mydb".len() as u16);
+        // Width is display-cell width, not byte length (`·` is 2 bytes / 1 cell).
+        assert_eq!(db_rect.width, "· mydb".chars().count() as u16);
         assert_eq!(db_rect.x, full_rect.x);
         assert!(full_rect.width > db_rect.width);
         // No database yet -> the trigger is still present (the picker is how you

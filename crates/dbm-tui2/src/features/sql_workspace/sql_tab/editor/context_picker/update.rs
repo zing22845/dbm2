@@ -28,8 +28,8 @@ pub fn update(
     if !state.open {
         // A picker that is closed only accepts the Open message (everything
         // else is a no-op, e.g. late async results for a closed picker).
-        if let ContextPickerMessage::Open { column, instance, connection, database } = msg {
-            state = ContextPickerState::open(column, instance, connection, database);
+        if let ContextPickerMessage::Open { column, instance, connection, database, schema } = msg {
+            state = ContextPickerState::open(column, instance, connection, database, schema);
             effects.push(ContextPickerEffect::LoadDatabases {
                 instance: state.instance.clone(),
                 connection: state.connection.clone(),
@@ -101,6 +101,11 @@ pub fn update(
             true
         }
         ContextPickerMessage::SchemasLoaded { items } => {
+            // Seed the schema cursor onto the tab's active schema so the picker
+            // opens on it rather than the first entry (matching the original
+            // dbm's `cursor_for_name` for both columns).
+            state.schema_cursor =
+                cursor_for_name(&items, &state.schema_search, &state.preview_schema);
             state.schemas = CachedList::Ready(items);
             sync_picker_cursors(&mut state, &mut effects);
             true
@@ -249,6 +254,7 @@ mod tests {
                 instance: "inst".into(),
                 connection: "conn".into(),
                 database: "postgres".into(),
+                schema: "public".into(),
             },
             ContextPickerState::default(),
         );
@@ -272,6 +278,7 @@ mod tests {
                 instance: "inst".into(),
                 connection: "conn".into(),
                 database: "postgres".into(),
+                schema: "public".into(),
             },
             ContextPickerState::default(),
         );
@@ -298,6 +305,33 @@ mod tests {
     }
 
     #[test]
+    fn schemas_loaded_seeds_cursor_onto_active_schema() {
+        let (mut s, _i, _e, _d) = update(
+            ContextPickerMessage::Open {
+                column: PickerColumn::Database,
+                instance: "inst".into(),
+                connection: "conn".into(),
+                database: "postgres".into(),
+                schema: "analytics".into(),
+            },
+            ContextPickerState::default(),
+        );
+        s.databases = CachedList::Ready(vec!["postgres".into()]);
+        s.db_cursor = 0;
+        // When the schemas list arrives, the cursor lands on the active schema
+        // (analytics) rather than the first entry, matching the database column.
+        let (s2, _i, _e, _d) = update(
+            ContextPickerMessage::SchemasLoaded {
+                items: vec!["public".into(), "analytics".into()],
+            },
+            s,
+        );
+        s = s2;
+        assert!(matches!(s.schemas, CachedList::Ready(_)));
+        assert_eq!(s.schema_cursor, 1);
+    }
+
+    #[test]
     fn apply_emits_intent_and_closes() {
         let (mut s, _i, _e, _d) = update(
             ContextPickerMessage::Open {
@@ -305,6 +339,7 @@ mod tests {
                 instance: "inst".into(),
                 connection: "conn".into(),
                 database: "postgres".into(),
+                schema: "public".into(),
             },
             ContextPickerState::default(),
         );
@@ -331,6 +366,7 @@ mod tests {
                 instance: "inst".into(),
                 connection: "conn".into(),
                 database: "postgres".into(),
+                schema: "public".into(),
             },
             ContextPickerState::default(),
         );
@@ -347,6 +383,7 @@ mod tests {
                 instance: "inst".into(),
                 connection: "conn".into(),
                 database: "postgres".into(),
+                schema: "public".into(),
             },
             ContextPickerState::default(),
         );
@@ -371,6 +408,7 @@ mod tests {
                 instance: "inst".into(),
                 connection: "conn".into(),
                 database: "postgres".into(),
+                schema: "public".into(),
             },
             ContextPickerState::default(),
         );

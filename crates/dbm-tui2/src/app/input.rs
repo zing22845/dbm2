@@ -871,6 +871,7 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
                                 .clone()
                                 .unwrap_or_default(),
                             database: tab.session.database.clone().unwrap_or_default(),
+                            schema: tab.session.schema.clone().unwrap_or_default(),
                         },
                     )),
                     tab_id,

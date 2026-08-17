@@ -409,6 +409,7 @@ mod tests {
             "inst".into(),
             "c1".into(),
             "db".into(),
+            "public".into(),
         );
         assert!(s.tabs[0].editor.context_picker.open);
         assert_eq!(s.active_tab, 1);
@@ -435,6 +436,7 @@ mod tests {
             "inst".into(),
             "c1".into(),
             "db".into(),
+            "public".into(),
         );
         assert!(s.tabs[0].editor.context_picker.open);
         assert_eq!(s.active_tab, 1);

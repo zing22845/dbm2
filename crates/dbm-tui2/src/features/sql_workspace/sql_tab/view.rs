@@ -386,6 +386,7 @@ mod tests {
             "inst".into(),
             "conn".into(),
             "mydb".into(),
+            "public".into(),
         );
         {
             let cp = &mut state.tabs[0].editor.context_picker;
@@ -435,8 +436,13 @@ mod tests {
         state.open_connection_tab("inst".into(), "c2".into(), "id2".into(), None, None, None);
         state.tabs[0].session.database = Some("dbA".into());
         state.tabs[0].session.schema = Some("public".into());
-        state.tabs[0].editor.context_picker =
-            ContextPickerState::open(PickerColumn::Database, "inst".into(), "c1".into(), "dbA".into());
+        state.tabs[0].editor.context_picker = ContextPickerState::open(
+            PickerColumn::Database,
+            "inst".into(),
+            "c1".into(),
+            "dbA".into(),
+            "public".into(),
+        );
         state.tabs[1].session.database = Some("dbB".into());
         state.tabs[1].session.schema = Some("public".into());
         // B is active.
