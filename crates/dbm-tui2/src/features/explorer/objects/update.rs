@@ -72,6 +72,16 @@ pub fn update(
                 dirty = true;
             }
         }
+        ObjectsMessage::Expand => {
+            // `l` expands the cursor's row (database, schema, or group) and only
+            // expands — it never collapses (`h` collapses), matching the instances
+            // pane. Unlike `Select`, it never activates a schema or opens an
+            // object. Object (leaf) rows and already-expanded rows are no-ops.
+            if let Some(node) = state.expand() {
+                maybe_fetch_on_expand(&node, &state, &mut effects);
+                dirty = true;
+            }
+        }
         ObjectsMessage::Bind { instance, connection } => {
             // Idempotent: only rebind (and re-fetch databases) when the binding
             // actually changes. The shell's binding sync may emit duplicate
@@ -283,6 +293,44 @@ mod tests {
             ObjectsIntent::ApplySchema { database, name }
                 if database == "db" && name == "public"
         )));
+    }
+
+    #[test]
+    fn expand_on_a_schema_row_expands_without_activating_and_never_collapses() {
+        // `l` on a schema row expands it (showing the group headers) without
+        // activating it (no ApplySchema, no active change), unlike `Select`/Enter.
+        let mut s = ObjectsState::default();
+        s.rows = vec![super::super::state::ObjectsRow {
+            depth: 1,
+            expanded: false,
+            expandable: true,
+            active: false,
+            node: ObjectsNode::Schema {
+                database: "db".to_string(),
+                name: "public".to_string(),
+            },
+            label: "public".to_string(),
+        }];
+        s.cursor = 0;
+        let (s, intents, _effects, dirty) = update(ObjectsMessage::Expand, s);
+        assert!(dirty);
+        assert!(
+            s.expanded.contains("db\tpublic"),
+            "schema row is expanded"
+        );
+        assert!(
+            !intents.iter().any(|i| matches!(
+                i,
+                ObjectsIntent::ApplySchema { .. }
+            )),
+            "Expand must not activate the schema"
+        );
+        assert_eq!(s.active_db, None, "active state is untouched");
+
+        // `l` on an already-expanded row is a no-op (it never collapses; `h` does).
+        let (s, _i, _e, dirty) = update(ObjectsMessage::Expand, s);
+        assert!(!dirty, "re-expanding an expanded row is a no-op");
+        assert!(s.expanded.contains("db\tpublic"));
     }
 
     #[test]

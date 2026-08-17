@@ -14,6 +14,10 @@ pub enum ObjectsMessage {
     /// Toggle expand/collapse the expandable row at the given visible row
     /// (mouse marker click) without moving the cursor.
     ToggleExpandAt { row: usize },
+    /// Expand the row under the cursor (`l`), matching the instances pane: it
+    /// only expands, never collapses (`h` collapses). Unlike `Select` it never
+    /// activates a schema or opens an object.
+    Expand,
     /// Collapse the current row (`h`), matching the original dbm.
     Collapse,
     /// Scroll the tree horizontally by `delta` columns (`Left`/`Right`),

@@ -373,6 +373,26 @@ impl ObjectsState {
         Some(node)
     }
 
+    /// Expand the row under the cursor if it is not already expanded (`l`),
+    /// matching the instances pane and the original dbm's tree: `l` only expands,
+    /// it never collapses (use `h` to collapse). Returns the expanded node so the
+    /// caller can fetch its children, or `None` if there is nothing to expand
+    /// (an object leaf, or the node is already expanded).
+    pub fn expand(&mut self) -> Option<ObjectsNode> {
+        let node = self.node_at_cursor()?.clone();
+        if matches!(node, ObjectsNode::Object { .. }) {
+            return None;
+        }
+        let key = self.expand_key_of(&node);
+        if self.expanded.contains(&key) {
+            return None; // already expanded: `l` does not collapse
+        }
+        self.expanded.insert(key);
+        self.rebuild_rows();
+        self.preserve_cursor(&node);
+        Some(node)
+    }
+
     /// Toggle expand/collapse the expandable row at the given visible `row` (a
     /// mouse marker click) without moving the cursor to a different node.
     /// Returns the toggled node so the caller can fetch its children on expand,

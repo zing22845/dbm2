@@ -564,13 +564,18 @@ fn explorer_key(key: KeyEvent, sub: ExplorerPane, term_width: u16) -> Option<App
     }
 }
 
-/// Objects pane keys: navigate the object tree. Expansion is on `Enter`
-/// (toggle, or open an object), `h` collapses, and Left/Right scroll
+/// Objects pane keys: navigate the object tree. `l`/`Enter` toggle/expand the
+/// cursor's row (or open/activate it), `h` collapses, and Left/Right scroll
 /// horizontally — matching the original dbm.
 fn objects_key(key: KeyEvent, term_width: u16) -> Option<AppMsg> {
     let msg = match key.code {
         KeyCode::Up | KeyCode::Char('k') => ObjectsMessage::MoveUp,
         KeyCode::Down | KeyCode::Char('j') => ObjectsMessage::MoveDown,
+        // `l` expands the cursor's row (database, schema, or group), matching the
+        // instances pane: it only expands, never collapses (`h` collapses).
+        // Enter selects: it activates a schema or opens an object, and toggles
+        // expandable rows.
+        KeyCode::Char('l') => ObjectsMessage::Expand,
         KeyCode::Enter => ObjectsMessage::Select,
         KeyCode::Char('h') => ObjectsMessage::Collapse,
         KeyCode::Right => ObjectsMessage::ScrollHorizontal { delta: 1, term_width },
@@ -1460,6 +1465,7 @@ mod tests {
         state.focus = Pane::Explorer(ExplorerPane::Objects);
 
         for (code, expect) in [
+            (KeyCode::Char('l'), ObjectsMessage::Expand),
             (KeyCode::Char('h'), ObjectsMessage::Collapse),
             (KeyCode::Right, ObjectsMessage::ScrollHorizontal { delta: 1, term_width: 0 }),
             (KeyCode::Left, ObjectsMessage::ScrollHorizontal { delta: -1, term_width: 0 }),
@@ -1476,7 +1482,8 @@ mod tests {
             let match_kind = match (&got, &expect) {
                 (ObjectsMessage::Collapse, ObjectsMessage::Collapse)
                 | (ObjectsMessage::ScrollHorizontal { .. }, ObjectsMessage::ScrollHorizontal { .. })
-                | (ObjectsMessage::Select, ObjectsMessage::Select) => true,
+                | (ObjectsMessage::Select, ObjectsMessage::Select)
+                | (ObjectsMessage::Expand, ObjectsMessage::Expand) => true,
                 _ => false,
             };
             assert!(match_kind, "for {code:?}: got {got:?}, expected kind {expect:?}");
