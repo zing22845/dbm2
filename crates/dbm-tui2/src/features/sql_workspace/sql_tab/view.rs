@@ -76,9 +76,7 @@ pub fn sql_workspace_click(
     }
 
     // Click in the body: focus the sub-pane under the cursor.
-    let Some(tab) = state.tabs.get(state.active_tab) else {
-        return None;
-    };
+    let tab = state.active_tab()?;
     if body.width == 0 || body.height == 0 {
         return None;
     }
@@ -167,16 +165,16 @@ pub fn render(
     state: &SqlTabState,
     focused: bool,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
-    // No connection tab open: show an empty-state hint and no tab bar, mirroring
-    // the original dbm's `workspace_empty_hint` (no phantom "sql 0" tab, no
-    // editor / history / results panes).
-    if state.tabs.is_empty() {
+    // No tab open for the active connection: show an empty-state hint and no
+    // tab bar, mirroring the original dbm's `workspace_empty_hint` (no phantom
+    // "sql 0" tab, no editor / history / results panes). The hint differs based
+    // on whether a connection is active at all.
+    if state.active_connection_is_empty() {
         let p = theme.palette();
-        let hint = crate::common::view::hints::sql_workspace_empty_hint();
-        let para = Paragraph::new(Span::styled(
-            hint,
-            Style::default().fg(p.muted),
-        ));
+        let hint = crate::common::view::hints::sql_workspace_empty_hint(
+            state.active_connection().is_some(),
+        );
+        let para = Paragraph::new(Span::styled(hint, Style::default().fg(p.muted)));
         frame.render_widget(para, area);
         return None;
     }
@@ -192,11 +190,11 @@ pub fn render(
     // Tab bar: only render tabs belonging to the active connection.
     let visible = state.visible_tab_indices();
     let sessions: Vec<TabSession> = state.tabs.iter().map(|t| t.session.clone()).collect();
-    super::tab::render(frame, theme, chunks[0], &sessions, &visible, Some(state.active_tab));
+    super::tab::render(frame, theme, chunks[0], &sessions, &visible, state.active_tab);
 
     let body_area = chunks[1];
-    let Some(tab) = state.tabs.get(state.active_tab) else {
-        // No tab is open: render an empty placeholder in the body.
+    let Some(tab) = state.active_tab() else {
+        // No open tab for the active connection: render an empty placeholder.
         frame.render_widget(Block::default().title("No open SQL tab"), body_area);
         return None;
     };
@@ -446,7 +444,7 @@ mod tests {
         state.tabs[1].session.database = Some("dbB".into());
         state.tabs[1].session.schema = Some("public".into());
         // B is active.
-        state.active_tab = 1;
+        state.active_tab = Some(1);
 
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);

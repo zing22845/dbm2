@@ -33,10 +33,10 @@ pub fn update(
             // connection's tabs, mirroring the original dbm's `switch_tab_index`.
             let before = state.active_tab;
             if let Some(global) = state.visible_to_global(visible_idx) {
-                state.active_tab = global;
+                state.active_tab = Some(global);
                 // Clearing a leftover picker on the newly active tab prevents it
                 // from blocking that tab's editor (keys / context clicks).
-                if global != before {
+                if Some(global) != before {
                     state.close_active_context_picker();
                 }
                 // Keep the connection's "current tab" bookmark in sync with the
@@ -47,7 +47,10 @@ pub fn update(
             dirty = before != state.active_tab;
         }
         SqlTabMessage::Focus(focus) => {
-            if let Some(tab) = state.tabs.get_mut(state.active_tab) {
+            if let Some(tab) = state
+                .active_tab
+                .and_then(|i| state.tabs.get_mut(i))
+            {
                 let changed = tab.focus != focus;
                 // Track the sub-pane that was active before entering Results, so
                 // Ctrl+Up from Results returns to the previous editor/history
@@ -412,11 +415,11 @@ mod tests {
             "public".into(),
         );
         assert!(s.tabs[0].editor.context_picker.open);
-        assert_eq!(s.active_tab, 1);
+        assert_eq!(s.active_tab, Some(1));
 
         // Switching back to tab 0 closes its leftover picker.
         let (s, _i, _e, _d) = update(SqlTabMessage::Tab(0), s);
-        assert_eq!(s.active_tab, 0);
+        assert_eq!(s.active_tab, Some(0));
         assert!(
             !s.tabs[0].editor.context_picker.open,
             "switching tabs closes a leftover picker"
@@ -439,7 +442,7 @@ mod tests {
             "public".into(),
         );
         assert!(s.tabs[0].editor.context_picker.open);
-        assert_eq!(s.active_tab, 1);
+        assert_eq!(s.active_tab, Some(1));
 
         // Switching the active connection back to c1 closes the leftover picker.
         let (s, _i, _e, _d) = update(

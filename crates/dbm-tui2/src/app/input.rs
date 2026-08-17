@@ -188,7 +188,12 @@ fn pane_jump_from_key(key: KeyEvent, state: &super::state::AppState) -> Option<A
     // Suppress all letter jumps while typing in the SQL editor (insert mode),
     // mirroring the original dbm's `workspace_text_input_active`.
     if let Pane::SQLWorkspace = state.focus {
-        if let Some(tab) = state.sql.sql_tab.tabs.get(state.sql.sql_tab.active_tab) {
+        if let Some(tab) = state
+            .sql
+            .sql_tab
+            .active_tab
+            .and_then(|i| state.sql.sql_tab.tabs.get(i))
+        {
             if tab.focus == SqlFocus::Editor
                 && matches!(tab.editor.editor.mode, edtui::EditorMode::Insert)
             {
@@ -234,7 +239,7 @@ fn switch_subpane(dir: crate::app_shell::nav::PaneDir, sql: &SqlState) -> Option
     use crate::app_shell::nav::PaneDir;
     use crate::features::sql_workspace::sql_tab::state::SqlFocus;
 
-    let tab = sql.sql_tab.tabs.get(sql.sql_tab.active_tab)?;
+    let tab = sql.sql_tab.active_tab.and_then(|i| sql.sql_tab.tabs.get(i))?;
     let focus = match (tab.focus, dir) {
         (SqlFocus::Editor, PaneDir::Right) => SqlFocus::History,
         (SqlFocus::Editor, PaneDir::Down) => SqlFocus::Results,
@@ -275,7 +280,9 @@ pub fn paste_to_msg(contents: &str, state: &super::state::AppState) -> Option<Ap
         return None;
     }
     // SQL editor focused (no modal): paste into the active tab's buffer.
-    let tab_id = state.sql.sql_tab.active_tab;
+    let Some(tab_id) = state.sql.sql_tab.active_tab else {
+        return None;
+    };
     if state.focus == Pane::SQLWorkspace
         && state.sql.sql_tab.tabs.get(tab_id).is_some_and(|t| t.focus == SqlFocus::Editor)
     {
@@ -320,8 +327,7 @@ pub fn confirm_yes_msg(modal: &ModalKind, state: &super::state::AppState) -> Opt
             state
                 .sql
                 .sql_tab
-                .tabs
-                .get(state.sql.sql_tab.active_tab)
+                .active_tab()
                 .map(|t| t.session.id)
                 .map(|id| sql_results(R::Commit, id))
         }
@@ -347,14 +353,7 @@ fn modal_key(key: KeyEvent, modal: &ModalKind, state: &super::state::AppState) -
     use super::state::ModalKind;
     use crate::features::sql_workspace::sql_tab::results::msg::ResultsMessage as R;
     let close = || AppMsg::CloseModal;
-    let active_tab_id = || {
-        state
-            .sql
-            .sql_tab
-            .tabs
-            .get(state.sql.sql_tab.active_tab)
-            .map(|t| t.session.id)
-    };
+    let active_tab_id = || state.sql.sql_tab.active_tab().map(|t| t.session.id);
     match key.code {
         KeyCode::Esc => Some(close()),
         // Row-limit picker: up/down cycle the presets, enter applies.
@@ -788,7 +787,7 @@ fn confirm_delete_connection(instance: String, connection: String) -> AppMsg {
 /// SQL workspace key bindings, routed to the active tab's editor and its
 /// overlays (context picker / completion popup).
 fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
-    let tab = state.sql_tab.tabs.get(state.sql_tab.active_tab)?;
+    let tab = state.sql_tab.active_tab()?;
     let tab_id = tab.session.id;
     let editor = &tab.editor;
     tracing::debug!(
@@ -1785,7 +1784,12 @@ mod tests {
         state.focus = Pane::SQLWorkspace;
         // Put the active tab on Results so the old `switch_subpane` path would
         // have intercepted ctrl+h; top-level nav must still win.
-        if let Some(tab) = state.sql.sql_tab.tabs.get_mut(state.sql.sql_tab.active_tab) {
+        if let Some(tab) = state
+            .sql
+            .sql_tab
+            .active_tab
+            .and_then(|i| state.sql.sql_tab.tabs.get_mut(i))
+        {
             tab.focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::Results;
         }
         let msg = key_to_msg(key(KeyCode::Char('h'), KeyModifiers::CONTROL), &state)

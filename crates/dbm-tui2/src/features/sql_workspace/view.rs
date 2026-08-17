@@ -16,6 +16,19 @@ use crate::common::view::theme::Theme;
 use super::state::SqlState;
 use super::sql_tab::view as sql_tab_view;
 
+/// The outer block title for the SQL workspace, showing the active connection
+/// (matching the original dbm's `workspace_block_title_from_tree`): when a
+/// connection is active, ` Connection · {connection} @ {instance} `; otherwise
+/// a plain ` Workspace `.
+fn workspace_title(state: &SqlState) -> String {
+    match state.sql_tab.active_connection() {
+        Some((instance, connection)) => {
+            format!(" Connection · {connection} @ {instance} ")
+        }
+        None => " Workspace ".to_string(),
+    }
+}
+
 /// Render the SQL workspace parent pane: an outer " SQL Workspace " border
 /// wrapping the active tab's content (delegated to the `sql_tab` renderer),
 /// with a workspace-level tab-management footer below it. Returns the editor's
@@ -29,7 +42,7 @@ pub fn render(
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     let p = theme.palette();
     let outer = Block::default()
-        .title(" SQL Workspace ")
+        .title(workspace_title(state))
         .borders(Borders::ALL)
         .border_style(p.active_border(focused));
     let inner = outer.inner(area);
@@ -37,8 +50,8 @@ pub fn render(
 
     // Tab management (close / switch / open tab) is a workspace concern, so its
     // hint belongs here, not in any single pane's footer. It is only shown when
-    // there is at least one open tab.
-    if !state.sql_tab.tabs.is_empty() {
+    // the active connection has at least one open tab.
+    if !state.sql_tab.active_connection_is_empty() {
         let hint = sql_workspace_footer_text();
         let footer_h = footer_height(&hint, inner.width).min(inner.height.saturating_sub(1));
         let chunks = Layout::default()
@@ -49,7 +62,8 @@ pub fn render(
         draw_footer(frame, theme, chunks[1], &hint);
         cursor
     } else {
-        // No tabs: let sql_tab render its empty-state hint over the full area.
+        // Active connection has no visible tab: let sql_tab render its empty
+        // state hint over the full area.
         sql_tab_view::render(frame, theme, inner, &state.sql_tab, focused)
     }
 }

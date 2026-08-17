@@ -90,8 +90,9 @@ pub struct SqlTabState {
     /// All open tabs across all connections. Tab indices are targets for routed
     /// messages; the stable identity of a tab lives in its `session.id`.
     pub tabs: Vec<SqlTab>,
-    /// Index into `tabs` of the currently active tab (global index).
-    pub active_tab: usize,
+    /// Index into `tabs` of the currently active tab (global index), or `None`
+    /// when the active connection has no open query tab (empty workspace).
+    pub active_tab: Option<usize>,
     /// Monotonic counter for allocating stable session ids to new tabs.
     next_tab_id: usize,
     /// Per-connection last-active tab global index, so switching connections
@@ -170,11 +171,30 @@ impl SqlTabState {
         indices.get(visible_idx).copied()
     }
 
+    /// The tab currently active, or `None` when the active connection has no
+    /// open query tab.
+    pub fn active_tab(&self) -> Option<&SqlTab> {
+        self.active_tab.and_then(|i| self.tabs.get(i))
+    }
+
+    /// The currently active connection `(instance, connection)`, if any.
+    pub fn active_connection(&self) -> Option<(&str, &str)> {
+        self.active_connection
+            .as_ref()
+            .map(|(i, c)| (i.as_str(), c.as_str()))
+    }
+
+    /// Whether the active connection currently has no visible query tab (i.e.
+    /// the workspace should show the empty-state hint for it).
+    pub fn active_connection_is_empty(&self) -> bool {
+        self.visible_tab_indices().is_empty()
+    }
+
     /// Map the current `active_tab` (global) to its visible offset. Returns
     /// `None` when the active tab doesn't belong to the active connection.
     pub fn global_to_visible(&self) -> Option<usize> {
         let indices = self.visible_tab_indices();
-        indices.iter().position(|&i| i == self.active_tab)
+        indices.iter().position(|&i| Some(i) == self.active_tab)
     }
 
     /// Close the context picker on the tab currently active. Called before
@@ -182,7 +202,7 @@ impl SqlTabState {
     /// never keeps blocking another tab's editor (keys or context clicks) after
     /// the user has navigated away.
     pub fn close_active_context_picker(&mut self) {
-        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+        if let Some(tab) = self.active_tab.and_then(|i| self.tabs.get_mut(i)) {
             tab.editor.context_picker.close();
         }
     }
@@ -192,14 +212,17 @@ impl SqlTabState {
     /// connection (e.g. `Tab` switching), so a later new tab (`Alt+t`/`n`)
     /// inherits the *currently active* tab's context rather than a stale one.
     pub fn remember_active_tab_for_connection(&mut self) {
-        if let Some(tab) = self.tabs.get(self.active_tab) {
-            let key = self.connection_key(&tab.session);
-            self.connection_last_tab.insert(key, self.active_tab);
+        if let Some((key, idx)) = self.active_tab.and_then(|idx| {
+            self.tabs
+                .get(idx)
+                .map(|tab| (self.connection_key(&tab.session), idx))
+        }) {
+            self.connection_last_tab.insert(key, idx);
         }
     }
 
     /// Activate a connection: show only that connection's tabs, and restore the
-    /// last-active tab for it (or the first tab, falling back to 0).
+    /// last-active tab for it (or the first tab, `None` when it has none).
     pub fn activate_connection(&mut self, instance: String, connection: String) {
         let key = (instance, connection);
         if self.active_connection == Some(key.clone()) {
@@ -213,25 +236,22 @@ impl SqlTabState {
             if global_idx < self.tabs.len()
                 && self.connection_key(&self.tabs[global_idx].session) == key
             {
-                self.active_tab = global_idx;
+                self.active_tab = Some(global_idx);
                 return;
             }
         }
-        // Fall back to the first visible tab.
-        if let Some(&first) = self.visible_tab_indices().first() {
-            self.active_tab = first;
-        } else {
-            self.active_tab = 0;
-        }
+        // Fall back to the first visible tab (None when this connection has none).
+        self.active_tab = self.visible_tab_indices().first().copied();
     }
 
     /// Update `connection_last_tab` with the current active tab before
     /// deactivating a connection.
     fn save_connection_last_tab(&mut self) {
-        if let Some(ref key) = self.active_connection {
-            if self.active_tab < self.tabs.len() {
-                self.connection_last_tab.insert(key.clone(), self.active_tab);
-            }
+        let (Some(key), Some(idx)) = (&self.active_connection, self.active_tab) else {
+            return;
+        };
+        if idx < self.tabs.len() {
+            self.connection_last_tab.insert(key.clone(), idx);
         }
     }
 
@@ -273,11 +293,11 @@ impl SqlTabState {
             results: ResultsState::default(),
             history: HistoryState::default(),
         });
-        self.active_tab = self.tabs.len() - 1;
+        self.active_tab = Some(self.tabs.len() - 1);
         // Record this tab as the connection's last-active tab so every
         // connection always has a current tab (even one never switched away
         // from), letting new tabs inherit its context reliably.
-        self.connection_last_tab.insert(key.clone(), self.active_tab);
+        self.connection_last_tab.insert(key.clone(), self.tabs.len() - 1);
     }
 
     /// Resolve the database/schema for a newly opened tab. An explicit
@@ -345,20 +365,20 @@ impl SqlTabState {
             self.save_connection_last_tab();
         }
         // 1) Restore the last-active tab for this connection if it still exists.
-        if let Some(&global_idx) = self.connection_last_tab.get(&key) {
-            if global_idx < self.tabs.len()
-                && self.connection_key(&self.tabs[global_idx].session) == key
-            {
-                self.active_connection = Some(key);
-                self.active_tab = global_idx;
-                return false;
-            }
+        if let Some(&global_idx) = self
+            .connection_last_tab
+            .get(&key)
+            .filter(|&&i| i < self.tabs.len() && self.connection_key(&self.tabs[i].session) == key)
+        {
+            self.active_connection = Some(key);
+            self.active_tab = Some(global_idx);
+            return false;
         }
         // 2) Otherwise focus the last existing tab for this connection.
         let indices = self.visible_tab_indices_for(&key);
         if let Some(&global_idx) = indices.last() {
             self.active_connection = Some(key.clone());
-            self.active_tab = global_idx;
+            self.active_tab = Some(global_idx);
             self.connection_last_tab.insert(key, global_idx);
             return false;
         }
@@ -426,11 +446,11 @@ impl SqlTabState {
             results: ResultsState::default(),
             history: HistoryState::default(),
         });
-        self.active_tab = self.tabs.len() - 1;
+        self.active_tab = Some(self.tabs.len() - 1);
         // Record this tab as the connection's last-active tab so every
         // connection always has a current tab, letting new tabs inherit its
         // context reliably (case A fallback is only reached with no tab at all).
-        self.connection_last_tab.insert(key, self.active_tab);
+        self.connection_last_tab.insert(key, self.tabs.len() - 1);
     }
 
     /// Close the tab at global `idx`. The active index is repaired; closing the
@@ -450,36 +470,13 @@ impl SqlTabState {
             self.connection_last_tab.remove(&key);
         }
 
-        if self.tabs.is_empty() {
-            self.active_tab = 0;
-            return;
-        }
-        // If we removed the active tab, try to pick another visible tab.
+        // The workspace is per-connection (matching the original dbm): when the
+        // active connection has no visible tab left, it shows an empty state
+        // ("No query tabs for this connection") rather than jumping to another
+        // connection's tab. `active_connection` stays put.
         let visible = self.visible_tab_indices();
         if visible.is_empty() {
-            // The active connection's tabs are all gone, but other connections
-            // still have tabs: switch the active connection to the first tab of
-            // another connection so the workspace keeps showing a tab rather
-            // than a stale/phantom tab (matching the original dbm, where
-            // closing the active connection's tab falls back to any remaining
-            // tab).
-            let active_key = self.active_connection.clone();
-            if let Some((fallback_idx, fallback_key)) = self
-                .tabs
-                .iter()
-                .enumerate()
-                .find(|(i, tab)| {
-                    let k = self.connection_key(&tab.session);
-                    active_key.as_ref() != Some(&k) || *i != idx
-                })
-                .map(|(i, tab)| (i, self.connection_key(&tab.session)))
-            {
-                self.active_connection = Some(fallback_key);
-                self.active_tab = fallback_idx;
-                self.save_connection_last_tab();
-            } else {
-                self.active_tab = 0;
-            }
+            self.active_tab = None;
             return;
         }
         // Find a visible tab closest to the removed index.
@@ -488,7 +485,7 @@ impl SqlTabState {
         } else {
             *visible.last().unwrap()
         };
-        self.active_tab = target;
+        self.active_tab = Some(target);
         // Persist the new active tab for this connection.
         self.save_connection_last_tab();
     }
@@ -530,7 +527,7 @@ mod tests {
             Some("public".into()),
             None,
         );
-        let session = &state.tabs[state.active_tab].session;
+        let session = &state.tabs[state.active_tab.unwrap()].session;
         assert_eq!(session.instance.as_deref(), Some("local"));
         assert_eq!(session.connection.as_deref(), Some("app-db"));
         assert_eq!(session.connection_id.as_deref(), Some("conn-42"));
@@ -575,14 +572,14 @@ mod tests {
         state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None, None);
         state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None, None);
         // Second tab is active (index 1).
-        assert_eq!(state.active_tab, 1);
+        assert_eq!(state.active_tab, Some(1));
 
         // Switch to c2.
         state.open_connection_tab("local".into(), "c2".into(), "id2".into(), None, None, None);
 
         // Switch back to c1 — should restore tab 1.
         state.activate_connection("local".into(), "c1".into());
-        assert_eq!(state.active_tab, 1);
+        assert_eq!(state.active_tab, Some(1));
         assert_eq!(state.visible_tab_indices(), vec![0, 1]);
     }
 
@@ -622,8 +619,8 @@ mod tests {
     fn index_of_finds_tab_by_session_id() {
         let mut state = SqlTabState::default();
         state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None, None);
-        let id = state.tabs[state.active_tab].session.id;
-        assert_eq!(state.index_of(id), Some(state.active_tab));
+        let id = state.tabs[state.active_tab.unwrap()].session.id;
+        assert_eq!(state.index_of(id), state.active_tab);
         assert_eq!(state.index_of(999_999), None);
     }
 
@@ -710,7 +707,7 @@ mod tests {
         );
         assert!(!created, "existing tab should be focused, not created");
         assert_eq!(state.tabs.len(), before, "no new tab should be added");
-        assert_eq!(state.active_tab, 1);
+        assert_eq!(state.active_tab, Some(1));
         assert_eq!(
             state.active_connection.as_ref(),
             Some(&("local".to_string(), "c1".to_string()))
@@ -850,9 +847,9 @@ mod tests {
         state.tabs.last_mut().unwrap().session.schema = Some("s2".into());
         // Switch back to tab1 (index 0) within c1; the active connection's
         // current-tab bookmark must follow (as the `Tab` handler does).
-        state.active_tab = 0;
+        state.active_tab = Some(0);
         state.remember_active_tab_for_connection();
-        assert_eq!(state.active_tab, 0);
+        assert_eq!(state.active_tab, Some(0));
 
         // A new tab on c1 (`n`/`Alt+t`) must inherit tab1's context.
         state.open_tab();
@@ -862,29 +859,30 @@ mod tests {
     }
 
     #[test]
-    fn closing_active_connections_tab_falls_back_to_other_connection() {
+    fn closing_all_tabs_of_active_connection_shows_empty_workspace() {
         let mut state = SqlTabState::default();
         // A tab for c1 and a tab for c2.
         state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
         state.open_connection_tab("inst".into(), "c2".into(), "id2".into(), None, None, None);
         // Activate c1 (the first connection's tab).
         state.activate_connection("inst".into(), "c1".into());
-        assert_eq!(state.active_tab, 0);
+        assert_eq!(state.active_tab, Some(0));
         assert_eq!(state.visible_tab_count(), 1);
 
-        // Close c1's only tab (visible offset 0). c2's tab remains, so the
-        // active connection should fall back to c2 rather than leave a stale
-        // active_tab.
+        // Close c1's only tab. The workspace is per-connection: the active
+        // connection stays c1 and becomes empty (active_tab = None) rather than
+        // jumping to c2's tab.
         if let Some(global) = state.visible_to_global(0) {
             state.close_tab(global);
         }
         assert_eq!(state.tabs.len(), 1, "c2's tab must remain");
         assert_eq!(
             state.active_connection.as_ref(),
-            Some(&("inst".to_string(), "c2".to_string()))
+            Some(&("inst".to_string(), "c1".to_string())),
+            "active connection must stay c1 (per-connection workspace)"
         );
-        assert_eq!(state.active_tab, 0, "active tab now points at c2's tab");
-        assert_eq!(state.visible_tab_count(), 1);
+        assert_eq!(state.active_tab, None, "c1 has no visible tab left");
+        assert_eq!(state.visible_tab_count(), 0);
     }
 
     #[test]
@@ -897,7 +895,7 @@ mod tests {
             state.close_tab(global);
         }
         assert!(state.tabs.is_empty(), "closing the last tab must empty tabs");
-        assert_eq!(state.active_tab, 0);
+        assert_eq!(state.active_tab, None);
     }
 
     #[test]

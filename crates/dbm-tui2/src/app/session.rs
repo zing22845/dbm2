@@ -67,7 +67,7 @@ fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
         tree_width: 20,
         tree: tree_snapshot(&state.explorer),
         tabs,
-        active_tab: Some(state.sql.sql_tab.active_tab),
+        active_tab: state.sql.sql_tab.active_tab,
         instance_workspace: iw_snapshot(state),
         discover_targets_ratio: 35,
         explorer_split_ratio: 20,
@@ -221,15 +221,14 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
     // Replace the default single tab with the restored set. When there are no
     // persisted tabs, keep the default empty tab.
     if !tabs.is_empty() {
-        let active = snapshot
-            .active_tab
-            .filter(|&i| i < tabs.len())
-            .unwrap_or(0);
+        // Keep the restored active tab only if it is in range; otherwise fall
+        // back to the first restored tab (there is at least one).
+        let active = snapshot.active_tab.filter(|&i| i < tabs.len()).unwrap_or(0);
         state.sql.sql_tab.tabs = tabs;
         // `next_tab_id` was already bumped past every restored tab while they
         // were allocated above (`next_session_id`), so a newly opened tab can
         // never reuse a restored `session.id`.
-        state.sql.sql_tab.active_tab = active;
+        state.sql.sql_tab.active_tab = Some(active);
         // Restore the active connection so the tab strip shows the restored
         // tabs. `active_connection` gates `visible_tab_indices()`; without it
         // the strip renders nothing and the previously-open tabs appear lost.
@@ -524,7 +523,7 @@ mod tests {
         let mut state = sample_state();
         apply_snapshot(&mut state, &snap);
         assert_eq!(state.sql.sql_tab.tabs.len(), 2);
-        assert_eq!(state.sql.sql_tab.active_tab, 1);
+        assert_eq!(state.sql.sql_tab.active_tab, Some(1));
         assert_eq!(
             crate::common::editor::editor_text(&state.sql.sql_tab.tabs[1].editor.editor),
             "select 2"

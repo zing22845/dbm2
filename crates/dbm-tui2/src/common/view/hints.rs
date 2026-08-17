@@ -16,10 +16,16 @@ use crate::common::view::theme::Theme;
 /// Visible field separator for hint pairs.
 pub const SEP: &str = "  ";
 
-/// Empty-state hint shown in the SQL workspace when no connection has an open
-/// query tab, mirroring the original dbm's `workspace_empty_hint`.
-pub fn sql_workspace_empty_hint() -> &'static str {
-    "Select a connection in the tree — ENTER or double-click to open a workspace."
+/// Empty-state hint shown in the SQL workspace when the active connection has
+/// no open query tab, mirroring the original dbm's `workspace_empty_hint`.
+/// `has_connection` distinguishes "a connection is active but has no tabs"
+/// (show the connection-specific hint) from "no connection selected at all".
+pub fn sql_workspace_empty_hint(has_connection: bool) -> &'static str {
+    if has_connection {
+        "No query tabs for this connection — press n or ENTER in the tree."
+    } else {
+        "Select a connection in the tree — ENTER or double-click to open a workspace."
+    }
 }
 
 /// Workspace-level footer hint for SQL tab management (belongs to the SQL
@@ -408,9 +414,15 @@ mod tests {
 
     #[test]
     fn sql_workspace_empty_hint_points_to_connection_selection() {
-        let hint = sql_workspace_empty_hint();
+        let hint = sql_workspace_empty_hint(false);
         assert!(hint.contains("Select a connection"));
         assert!(hint.contains("open a workspace"));
+    }
+
+    #[test]
+    fn sql_workspace_empty_hint_with_active_connection_points_to_query_tabs() {
+        let hint = sql_workspace_empty_hint(true);
+        assert!(hint.contains("No query tabs for this connection"));
     }
 
     #[test]

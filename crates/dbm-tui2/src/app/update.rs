@@ -126,7 +126,7 @@ fn sync_objects_active(
 ) -> Option<ObjectsEffect> {
     let mut db = None;
     let mut schema = None;
-    if let Some(tab) = sql.sql_tab.tabs.get(sql.sql_tab.active_tab) {
+    if let Some(tab) = sql.sql_tab.active_tab() {
         let tab_instance = tab.session.instance.as_deref().unwrap_or_default();
         let tab_connection = tab
             .session
@@ -597,8 +597,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                     let tab_id = state
                         .sql
                         .sql_tab
-                        .tabs
-                        .get(state.sql.sql_tab.active_tab)
+                        .active_tab()
                         .map(|t| t.session.id);
                     if let Some(tab_id) = tab_id {
                         let sql_msg = SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(

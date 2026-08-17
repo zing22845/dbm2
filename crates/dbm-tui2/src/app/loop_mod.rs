@@ -787,7 +787,7 @@ fn sql_tab_layout_for_hit(
     {
         return None;
     }
-    let tab = state.sql.sql_tab.tabs.get(state.sql.sql_tab.active_tab)?;
+    let tab = state.sql.sql_tab.active_tab()?;
     let footer_h = footer_view::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size.height.saturating_sub(body_top).saturating_sub(footer_h);
@@ -867,7 +867,7 @@ fn sql_picker_area_for_hit(
     {
         return None;
     }
-    let tab = state.sql.sql_tab.tabs.get(state.sql.sql_tab.active_tab)?;
+    let tab = state.sql.sql_tab.active_tab()?;
     if !tab.editor.context_picker.open {
         return None;
     }
@@ -1456,7 +1456,7 @@ fn sql_click_msgs(
     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
     use crate::features::sql_workspace::sql_tab::view::SqlClickAction;
 
-    let tab_id = |active: usize| sql.tabs.get(active).map(|t| t.session.id);
+    let tab_id = |active: Option<usize>| active.and_then(|i| sql.tabs.get(i)).map(|t| t.session.id);
     let editor_msg = |tab_id: usize, m: EditorMessage| {
         AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
             SqlTabMessage::Editor {
@@ -1486,7 +1486,7 @@ fn sql_click_msgs(
             vec![close(tab_id)]
         }
         SqlClickAction::OpenContextPicker(column) => {
-            let Some(tab) = sql.tabs.get(sql.active_tab) else {
+            let Some(tab) = sql.active_tab() else {
                 return Vec::new();
             };
             let tab_id = tab.session.id;
