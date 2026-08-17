@@ -417,7 +417,22 @@ fn apply_objects_expansion(state: &mut AppState, snapshot: &TuiSessionSnapshot) 
     if snapshot.tree.expanded_objects.is_empty() {
         return;
     }
-    state.explorer.objects.restore_expanded = snapshot.tree.expanded_objects.clone();
+    // Only restore the ACTIVE database's expansion. Other databases that were
+    // expanded in the previous session are left collapsed on reopen: their
+    // schemas are not fetched eagerly, so re-expanding them would show only the
+    // Extensions group (matching the original dbm, which does not persist the
+    // objects tree's arbitrary expansion). The active database is already forced
+    // expanded via the active path; the active schema's keys are re-applied here
+    // so the active schema's groups stay open.
+    let active_db = snapshot.tree.objects_active_db.as_deref().unwrap_or_default();
+    let keep: Vec<String> = snapshot
+        .tree
+        .expanded_objects
+        .iter()
+        .filter(|k| k.split('\t').next().is_some_and(|db| db == active_db))
+        .cloned()
+        .collect();
+    state.explorer.objects.restore_expanded = keep;
     state.explorer.objects.restore_bound_connection =
         snapshot.tree.objects_bound_connection.clone();
 }
@@ -669,8 +684,8 @@ mod tests {
                 expanded_objects: vec!["mydb".into()],
                 objects_bound_instance: "local".into(),
                 objects_bound_connection: "app".into(),
-                objects_active_db: None,
-                objects_active_schema: None,
+                objects_active_db: Some("mydb".into()),
+                objects_active_schema: Some("public".into()),
             },
             tabs: Vec::new(),
             active_tab: None,
@@ -707,6 +722,52 @@ mod tests {
         assert!(state.explorer.objects.expanded.is_empty());
         assert_eq!(state.explorer.objects.restore_expanded, vec!["mydb".to_string()]);
         assert_eq!(state.explorer.objects.restore_bound_connection, "app");
+    }
+
+    #[test]
+    fn restore_collapses_databases_that_are_not_the_active_database() {
+        // The reported bug: database A was expanded but the active schema is
+        // under database B. On reopen, A must NOT be re-expanded (its schemas
+        // are not fetched eagerly, so it would only show the Extensions group);
+        // only the active database B's expansion is restored.
+        let mut state = sample_state();
+        state.explorer.instances.set_instances(vec![managed_instance("local")]);
+        let snap = TuiSessionSnapshot {
+            version: TUI_SESSION_VERSION,
+            focus: "explorer".into(),
+            tree_width: 20,
+            tree: TuiTreeSnapshot {
+                expanded_instances: Vec::new(),
+                cursor: None,
+                active_workspace: None,
+                // A is expanded; B is the active database (active schema under B).
+                expanded_objects: vec![
+                    "a".into(),
+                    "b".into(),
+                    "b\tpublic".into(),
+                    "b\tpublic\tTables".into(),
+                ],
+                objects_bound_instance: "local".into(),
+                objects_bound_connection: "app".into(),
+                objects_active_db: Some("b".into()),
+                objects_active_schema: Some("public".into()),
+            },
+            tabs: Vec::new(),
+            active_tab: None,
+            instance_workspace: None,
+            discover_targets_ratio: 35,
+            explorer_split_ratio: 20,
+            explorer_pane: "objects".into(),
+        };
+        apply_snapshot(&mut state, &snap);
+        // Only B's expansion is staged; A is dropped so it collapses on rebind.
+        assert_eq!(
+            state.explorer.objects.restore_expanded,
+            vec!["b".to_string(), "b\tpublic".to_string(), "b\tpublic\tTables".to_string()],
+            "non-active database A is not re-expanded"
+        );
+        // The active database is forced expanded via the active path.
+        assert_eq!(state.explorer.objects.active_db.as_deref(), Some("b"));
     }
 
     #[test]
