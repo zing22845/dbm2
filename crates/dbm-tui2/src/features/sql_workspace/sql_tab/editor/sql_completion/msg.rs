@@ -12,12 +12,16 @@ pub enum SqlCompletionMessage {
     /// (empty when unavailable). `explicit` is true when the user asked for
     /// completion directly (Shift+Tab) — that forces the popup open, bypassing
     /// the auto-open gate (matching the original dbm's `completion_trigger_key`).
+    /// `complete_table_names` is the TblCmp flag: when OFF, a table-intent slot
+    /// offers keyword completion instead of table names (original dbm's
+    /// `table_completion_allowed`).
     Refresh {
         sql: String,
         cursor: Cursor,
         tables: Vec<String>,
         columns: Vec<ColumnInfo>,
         explicit: bool,
+        complete_table_names: bool,
     },
     /// Close the popup without applying.
     Close,

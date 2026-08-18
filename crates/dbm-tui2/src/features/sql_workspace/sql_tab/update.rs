@@ -267,13 +267,173 @@ pub fn update(
                 warn_tab_missing(tab_id);
             }
         }
+        SqlTabMessage::RunTableQuery {
+            instance,
+            connection,
+            connection_id,
+            database,
+            schema,
+            table,
+            table_schema,
+        } => {
+            // Mirror the original dbm's double-click-on-table: run a data query
+            // in the connection's active tab (focusing/opening it as needed),
+            // filling the editor with `SELECT * FROM "schema"."table"`.
+            // If a new tab is created, seed its completion catalog.
+            let before = state.active_tab;
+            let table_schema = table_schema.or_else(|| schema.clone());
+            let created = state.focus_or_open_connection_tab(
+                instance.clone(),
+                connection.clone(),
+                connection_id,
+                database.clone(),
+                table_schema.clone(),
+                None,
+            );
+            if state.active_tab != before {
+                state.close_active_context_picker();
+            }
+            if let Some(idx) = state.active_tab {
+                // Pin the tab's query context to the object's schema so the
+                // generated SELECT targets the right namespace (original dbm
+                // sets `tab.schema = schema` before running the query).
+                state.tabs[idx].session.database = database.clone();
+                state.tabs[idx].session.schema = table_schema.clone();
+                // Build and apply the SQL, then run it immediately.
+                let sql = match &table_schema {
+                    Some(s) => format!(
+                        "SELECT * FROM {}.{}",
+                        results::edit_sql::quote_ident(s),
+                        results::edit_sql::quote_ident(&table)
+                    ),
+                    None => format!("SELECT * FROM {}", results::edit_sql::quote_ident(&table)),
+                };
+                let editor_state = std::mem::take(&mut state.tabs[idx].editor);
+                let (es, _ei, _ee, _ed) = editor::update::update(
+                    editor::msg::EditorMessage::SetSql { sql: sql.clone() },
+                    editor_state,
+                );
+                state.tabs[idx].editor = es;
+                // Move focus to the Results pane (original dbm ends up there).
+                let tab = &mut state.tabs[idx];
+                if matches!(tab.focus, SqlFocus::Editor | SqlFocus::History) {
+                    tab.upper_pane = tab.focus;
+                }
+                tab.focus = SqlFocus::Results;
+                // Dispatch the query through the results module, exactly as
+                // `RunQueryFromEditor` would, using the pinned session context.
+                // Snapshot the session context as owned values so no reference
+                // into `state.tabs[idx]` outlives the mutable take below.
+                let q_instance = state.tabs[idx]
+                    .session
+                    .instance
+                    .clone()
+                    .unwrap_or_default();
+                let conn = state.tabs[idx]
+                    .session
+                    .connection
+                    .clone()
+                    .or_else(|| state.tabs[idx].session.connection_id.clone())
+                    .unwrap_or_default();
+                let db = state.tabs[idx].session.database.clone();
+                let sch = state.tabs[idx]
+                    .session
+                    .schema
+                    .clone()
+                    .unwrap_or_else(|| "public".to_string());
+                let tab_id = state.tabs[idx].session.id;
+                let page = state.tabs[idx].results.page.max(1);
+                let row_limit = state.tabs[idx].results.row_limit;
+                let results_state = std::mem::take(&mut state.tabs[idx].results);
+                let (rs, ri, re, _rd) = results::update::update(
+                    results::msg::ResultsMessage::RunQuery {
+                        instance: q_instance,
+                        connection: conn,
+                        database: db,
+                        schema: sch,
+                        sql,
+                        paginated: true,
+                        page,
+                        row_limit,
+                    },
+                    results_state,
+                );
+                state.tabs[idx].results = rs;
+                intents.extend(ri.into_iter().map(|i| SqlTabIntent::Results { tab_id, intent: i }));
+                effects.extend(
+                    re.into_iter()
+                        .map(|e| SqlTabEffect::Results { tab_id, effect: e }),
+                );
+                if created {
+                    effects.push(SqlTabEffect::Editor {
+                        tab_id,
+                        effect: editor::effect::EditorEffect::LoadCompletionCatalog {
+                            instance,
+                            connection,
+                            database,
+                            schema: table_schema.unwrap_or_else(|| "public".to_string()),
+                        },
+                    });
+                }
+            }
+            dirty = true;
+        }
         SqlTabMessage::ToggleTableCompletion { tab_id } => {
-            // Ctrl+T toggles table-name completion (TblCmp), only in INSERT mode,
-            // matching the original dbm. The header shows the status there.
+            // Alt+Tab toggles table-name completion (TblCmp), only in INSERT
+            // mode. The header shows the status there. The flag is mirrored
+            // into the editor so the completion engine can gate table names.
             if let Some(idx) = state.index_of(tab_id)
                 && matches!(state.tabs[idx].editor.editor.mode, edtui::EditorMode::Insert)
             {
-                state.tabs[idx].complete_table_names = !state.tabs[idx].complete_table_names;
+                let on = !state.tabs[idx].complete_table_names;
+                state.tabs[idx].complete_table_names = on;
+                state.tabs[idx].editor.complete_table_names = on;
+                // Recompute the popup so the new setting takes effect
+                // immediately (closing the popup when turning TblCmp off,
+                // mirroring the original dbm's `toggle_table_name_completion`).
+                let editor_state = std::mem::take(&mut state.tabs[idx].editor);
+                let (s, i, e, _d) = editor::update::update(
+                    editor::msg::EditorMessage::RefreshCompletion,
+                    editor_state,
+                );
+                state.tabs[idx].editor = s;
+                intents.extend(
+                    i.into_iter()
+                        .map(|intent| SqlTabIntent::Editor { tab_id, intent }),
+                );
+                effects.extend(
+                    e.into_iter()
+                        .map(|effect| SqlTabEffect::Editor { tab_id, effect }),
+                );
+                dirty = true;
+            }
+        }
+        SqlTabMessage::ReloadCompletionCatalog { tab_id } => {
+            // The editor hit a table-intent slot with no cached table names, so
+            // (re)load the tab's completion catalog from the connection.
+            if let Some(idx) = state.index_of(tab_id) {
+                let instance = state.tabs[idx].session.instance.clone().unwrap_or_default();
+                let connection = state.tabs[idx]
+                    .session
+                    .connection
+                    .clone()
+                    .or_else(|| state.tabs[idx].session.connection_id.clone())
+                    .unwrap_or_default();
+                let database = state.tabs[idx].session.database.clone();
+                let schema = state.tabs[idx]
+                    .session
+                    .schema
+                    .clone()
+                    .unwrap_or_else(|| "public".to_string());
+                effects.push(SqlTabEffect::Editor {
+                    tab_id,
+                    effect: editor::effect::EditorEffect::LoadCompletionCatalog {
+                        instance,
+                        connection,
+                        database,
+                        schema,
+                    },
+                });
                 dirty = true;
             }
         }
@@ -381,21 +541,216 @@ mod tests {
         s.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
         assert!(!s.tabs[0].complete_table_names);
 
-        // In INSERT mode, Ctrl+T toggles TblCmp on.
+        // In INSERT mode, Alt+Tab toggles TblCmp on.
         let (s, _i, _e, dirty) = update(SqlTabMessage::ToggleTableCompletion { tab_id }, s);
         assert!(dirty);
         assert!(s.tabs[0].complete_table_names, "INSERT mode toggles TblCmp on");
+        assert!(
+            s.tabs[0].editor.complete_table_names,
+            "flag is mirrored into the editor so completion can gate table names"
+        );
         // Toggling again turns it off.
         let (s, _i, _e, dirty) = update(SqlTabMessage::ToggleTableCompletion { tab_id }, s);
         assert!(dirty);
         assert!(!s.tabs[0].complete_table_names);
+        assert!(!s.tabs[0].editor.complete_table_names);
 
-        // In NORMAL mode, Ctrl+T is a no-op (matches the original dbm).
+        // In NORMAL mode, Alt+Tab is a no-op.
         let mut s = s;
         s.tabs[0].editor.editor.mode = edtui::EditorMode::Normal;
         let (s, _i, _e, dirty) = update(SqlTabMessage::ToggleTableCompletion { tab_id }, s);
         assert!(!dirty, "normal mode does not toggle TblCmp");
         assert!(!s.tabs[0].complete_table_names);
+        assert!(!s.tabs[0].editor.complete_table_names);
+    }
+
+    #[test]
+    fn tblcmp_on_after_from_offers_table_names() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        use crate::features::sql_workspace::sql_tab::editor::state::CompletionCatalog;
+
+        let char_key = |c: char| KeyEvent {
+            code: KeyCode::Char(c),
+            modifiers: KeyModifiers::empty(),
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        s.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        // Seed the table-name catalog so the popup has tables to offer.
+        s.tabs[0].editor.completion_catalog = CompletionCatalog {
+            tables: vec!["users".into(), "orders".into()],
+            columns_by_table: Default::default(),
+        };
+
+        // Alt+Tab enables TblCmp.
+        let (mut s, _i, _e, _d) =
+            update(SqlTabMessage::ToggleTableCompletion { tab_id }, s);
+        assert!(s.tabs[0].complete_table_names);
+        assert!(s.tabs[0].editor.complete_table_names);
+
+        // Type `select * from ` and confirm the table popup appears.
+        for c in "select * from ".chars() {
+            let (s2, _i, _e, _d) = update(
+                SqlTabMessage::Editor {
+                    tab_id,
+                    msg: editor::msg::EditorMsg::Message(editor::msg::EditorMessage::KeyEvent {
+                        key: char_key(c),
+                        tracked_caps_lock: false,
+                    }),
+                },
+                s,
+            );
+            s = s2;
+        }
+        let items = &s.tabs[0].editor.sql_completion.items;
+        assert!(s.tabs[0].editor.sql_completion.is_open(), "popup should open after `from `");
+        assert!(
+            items.iter().any(|i| i.label == "users"),
+            "table names must be offered with TblCmp on, got: {items:?}"
+        );
+    }
+
+    #[test]
+    fn update_set_offers_columns_without_tblcmp() {
+        // Column completion for `update t set ` must work regardless of TblCmp:
+        // the original dbm only gates *table-name* completion on TblCmp, not
+        // column completion.
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+        use crate::features::sql_workspace::sql_tab::editor::state::CompletionCatalog;
+
+        let char_key = |c: char| KeyEvent {
+            code: KeyCode::Char(c),
+            modifiers: KeyModifiers::empty(),
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        s.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        // TblCmp stays OFF.
+        assert!(!s.tabs[0].complete_table_names);
+        // Seed the catalog with the target table's columns.
+        let mut catalog = CompletionCatalog {
+            tables: vec!["tb1".into()],
+            columns_by_table: Default::default(),
+        };
+        catalog.columns_by_table.insert(
+            "tb1".into(),
+            vec![
+                ColumnInfo {
+                    name: "id".into(),
+                    type_name: "integer".into(),
+                    type_display: "integer".into(),
+                    comment: None,
+                },
+                ColumnInfo {
+                    name: "name".into(),
+                    type_name: "text".into(),
+                    type_display: "text".into(),
+                    comment: None,
+                },
+            ],
+        );
+        s.tabs[0].editor.completion_catalog = catalog;
+
+        // Type `update tb1 set ` and confirm the column popup appears.
+        for c in "update tb1 set ".chars() {
+            let (s2, _i, _e, _d) = update(
+                SqlTabMessage::Editor {
+                    tab_id,
+                    msg: editor::msg::EditorMsg::Message(editor::msg::EditorMessage::KeyEvent {
+                        key: char_key(c),
+                        tracked_caps_lock: false,
+                    }),
+                },
+                s,
+            );
+            s = s2;
+        }
+        let items = &s.tabs[0].editor.sql_completion.items;
+        assert!(
+            s.tabs[0].editor.sql_completion.is_open(),
+            "popup should open after `set `"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "name"),
+            "columns must be offered for `update t set ` even with TblCmp off, got: {items:?}"
+        );
+    }
+
+    #[test]
+    fn where_whitespace_offers_columns_immediately() {
+        // `select * from t where ` must pop the column list right away — the
+        // cursor sits after a space, so the clause-keyword auto-open fix is
+        // required (it used to only pop after deleting and retyping the space).
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+        use crate::features::sql_workspace::sql_tab::editor::state::CompletionCatalog;
+
+        let char_key = |c: char| KeyEvent {
+            code: KeyCode::Char(c),
+            modifiers: KeyModifiers::empty(),
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        s.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        let mut catalog = CompletionCatalog {
+            tables: vec!["tb1".into()],
+            columns_by_table: Default::default(),
+        };
+        catalog.columns_by_table.insert(
+            "tb1".into(),
+            vec![
+                ColumnInfo {
+                    name: "id".into(),
+                    type_name: "integer".into(),
+                    type_display: "integer".into(),
+                    comment: None,
+                },
+                ColumnInfo {
+                    name: "status".into(),
+                    type_name: "text".into(),
+                    type_display: "text".into(),
+                    comment: None,
+                },
+            ],
+        );
+        s.tabs[0].editor.completion_catalog = catalog;
+
+        // Type the full `select * from tb1 where ` in one pass.
+        for c in "select * from tb1 where ".chars() {
+            let (s2, _i, _e, _d) = update(
+                SqlTabMessage::Editor {
+                    tab_id,
+                    msg: editor::msg::EditorMsg::Message(editor::msg::EditorMessage::KeyEvent {
+                        key: char_key(c),
+                        tracked_caps_lock: false,
+                    }),
+                },
+                s,
+            );
+            s = s2;
+        }
+        let items = &s.tabs[0].editor.sql_completion.items;
+        assert!(
+            s.tabs[0].editor.sql_completion.is_open(),
+            "popup should open right after `where `"
+        );
+        assert!(
+            items.iter().any(|i| i.label == "status"),
+            "columns must be offered after `where `, got: {items:?}"
+        );
     }
 
     #[test]

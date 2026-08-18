@@ -548,9 +548,13 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         }
                     }
                 }
-                // Cross-feature: opening an object (e.g. a table) in the object
-                // tree opens a SQL tab scoped to that object's database and
-                // schema, using the connection the tree is currently bound to.
+                // Cross-feature: opening an object (e.g. a table) from the object
+                // tree. Mirroring the original dbm's double-click behavior:
+                //   - a table/view/matview runs a `SELECT * FROM "schema"."table"`
+                //     data query in the connection's active SQL tab (opening it
+                //     if needed) and focuses the Results pane;
+                //   - other objects (procedure/function/sequence) open a new SQL
+                //     tab scoped to the object's database/schema.
                 if let ExplorerIntent::Objects(
                     crate::features::explorer::objects::intent::ObjectsIntent::OpenObject { target },
                 ) = intent
@@ -563,23 +567,41 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                             .instances
                             .connection_id_by_name(&instance, &connection)
                             .unwrap_or_default();
-                        let sql_msg = SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                            SqlTabMessage::OpenConnectionTab {
-                                instance,
-                                connection,
-                                connection_id,
-                                database: Some(target.database.clone()),
-                                schema: target.schema.clone(),
-                                // An explicit database is passed, so the
-                                // default fallback is never used.
-                                default_database: None,
-                            },
-                        )));
+                        let sql_msg = match target.kind {
+                            crate::features::explorer::objects::state::ObjectKind::Tables
+                            | crate::features::explorer::objects::state::ObjectKind::Views
+                            | crate::features::explorer::objects::state::ObjectKind::Matviews => {
+                                SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                                    SqlTabMessage::RunTableQuery {
+                                        instance,
+                                        connection,
+                                        connection_id,
+                                        database: Some(target.database.clone()),
+                                        schema: target.schema.clone(),
+                                        table: target.name.clone(),
+                                        table_schema: target.schema.clone(),
+                                    },
+                                )))
+                            }
+                            _ => SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                                SqlTabMessage::OpenConnectionTab {
+                                    instance,
+                                    connection,
+                                    connection_id,
+                                    database: Some(target.database.clone()),
+                                    schema: target.schema.clone(),
+                                    // An explicit database is passed, so the
+                                    // default fallback is never used.
+                                    default_database: None,
+                                },
+                            ))),
+                        };
                         explorer_dirty = true;
                         result.pending.push_back(AppMsg::Sql(sql_msg));
                         // Switch focus to the workspace so the user sees the
-                        // newly opened tab immediately, mirroring the original
-                        // dbm's `confirm_workspace_connection` → `focus_workspace`.
+                        // active tab / results immediately, mirroring the
+                        // original dbm's `confirm_workspace_connection` →
+                        // `focus_workspace`.
                         result.pending.push_back(focus_changed(Pane::SQLWorkspace));
                     }
                 }

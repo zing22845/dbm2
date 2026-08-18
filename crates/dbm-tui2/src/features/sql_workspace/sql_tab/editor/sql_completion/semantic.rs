@@ -6,7 +6,7 @@
 use crate::common::utils::cursor::Cursor;
 
 use super::alias_blacklist::{is_alias_blacklisted, is_clause_typing_prefix};
-use super::context::{CompletionContext, CompletionIntent, TableRef, offset_to_cursor};
+use super::context::{CompletionContext, CompletionIntent, TableRef};
 use super::ident;
 use super::tokens::{self, SemanticToken, TokenKind};
 
@@ -123,13 +123,22 @@ pub fn build_semantic_model(sql: &str, cursor: usize) -> SemanticModel {
 pub fn completion_context_from_semantic(
     model: &SemanticModel,
     sql: &str,
-    _cursor: Cursor,
+    cursor: Cursor,
     legacy: CompletionContext,
 ) -> CompletionContext {
     if model.cursor_intent.kind == CursorKind::Suppressed {
         return legacy;
     }
     if matches!(legacy.intent, CompletionIntent::Suppressed) {
+        return legacy;
+    }
+    // A select column list always offers columns: don't let a semantic Keyword
+    // intent override the heuristic Column intent here (e.g. after `select t `
+    // the cursor sits right after the column name). This keeps the column popup
+    // open instead of collapsing to keywords.
+    if matches!(legacy.intent, CompletionIntent::Column { .. })
+        && super::context::is_select_list_column_context(sql, cursor)
+    {
         return legacy;
     }
 
@@ -139,10 +148,13 @@ pub fn completion_context_from_semantic(
     }
 
     let intent = map_cursor_intent(model);
-    let replace_start = offset_to_cursor(sql, model.cursor_intent.replacement_start);
+    // Keep the heuristic's replace_start: it correctly covers a typed qualifier
+    // (e.g. `select t.id, t.` → replace_start at the second `t`), whereas the
+    // semantic model can point past it, causing a duplicated prefix on apply
+    // (`t.t.name`). The prefix/qualifier still come from the semantic model.
     CompletionContext {
         prefix: model.cursor_intent.prefix.clone(),
-        replace_start,
+        replace_start: legacy.replace_start,
         qualifier_parts: model.cursor_intent.qualifier_parts.clone(),
         intent,
     }

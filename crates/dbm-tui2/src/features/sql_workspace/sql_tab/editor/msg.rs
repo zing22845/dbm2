@@ -25,6 +25,10 @@ pub enum EditorMessage {
     /// bypassing the auto-open gate (Shift+Tab; mirrors the original dbm's
     /// `completion_trigger_key`).
     ForceCompletion,
+    /// Recompute the SQL-completion popup for the current buffer/cursor using
+    /// the normal auto-open gate. Used to re-evaluate the popup after a setting
+    /// that affects completion (e.g. toggling TblCmp) changes.
+    RefreshCompletion,
     /// The SQL-completion catalog for the tab's connection/schema was loaded.
     CatalogLoaded {
         tables: Vec<String>,

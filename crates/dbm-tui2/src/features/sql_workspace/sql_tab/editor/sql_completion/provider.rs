@@ -58,6 +58,10 @@ pub struct CompletionInput<'a> {
     pub tables: &'a [String],
     pub columns: &'a [ColumnInfo],
     pub referenced_tables: &'a [TableRef],
+    /// Whether table-name completion (TblCmp) is enabled. When OFF, a
+    /// `CompletionIntent::Table` offers keyword completion instead of table
+    /// names, mirroring the original dbm's `table_completion_allowed`.
+    pub complete_table_names: bool,
 }
 
 pub fn build_keyword_items(
@@ -107,14 +111,43 @@ pub fn build_completion_items(
         }
         CompletionIntent::Table { schema } => {
             let _ = schema;
-            build_tables(&context.prefix, input.tables)
+            if input.complete_table_names {
+                build_tables(&context.prefix, input.tables)
+            } else {
+                // TblCmp is OFF: don't offer table names here (matching the
+                // original dbm's `table_completion_allowed`); fall back to
+                // keyword completion in this table-intent position.
+                build_keyword_completion_items(
+                    &context.prefix,
+                    sql,
+                    cursor,
+                    context,
+                    false,
+                    true, // exclusive_table: this is a table-intent slot
+                    input.referenced_tables,
+                    input.engine,
+                )
+            }
         }
         CompletionIntent::Column { tables } => {
             let table_ctx = tables.first();
+            // When the user typed a qualifier (e.g. `t.`), completed columns
+            // keep that qualifier as a prefix: `t.id`, and `t.*` expands to
+            // `t.id, t.name, ...` (matching the requested dbm behavior).
+            let qualifier = if context.qualifier_parts.is_empty() {
+                None
+            } else {
+                Some(context.qualifier_parts.join("."))
+            };
             let mut items = if input.columns.is_empty() {
                 Vec::new()
             } else {
-                build_columns(&context.prefix, input.columns, table_ctx)
+                build_columns(
+                    &context.prefix,
+                    input.columns,
+                    table_ctx,
+                    qualifier.as_deref(),
+                )
             };
             if is_select_list_column_context(sql, cursor)
                 && !tables.is_empty()
@@ -124,6 +157,7 @@ pub fn build_completion_items(
                     &context.prefix,
                     tables,
                     input.columns,
+                    qualifier.as_deref(),
                 ));
             }
             items
@@ -146,7 +180,19 @@ pub fn build_completion_items(
                 }),
                 _ => None,
             };
-            let mut items = build_columns(&context.prefix, input.columns, table_ctx.as_ref());
+            // For `INSERT INTO t (...` the table may carry an alias; prefix
+            // completed columns with it for consistency. `UPDATE t SET` has no
+            // alias in this branch, so no prefix.
+            let qualifier = match &context.intent {
+                CompletionIntent::InsertColumn { alias, .. } => alias.as_deref(),
+                _ => None,
+            };
+            let mut items = build_columns(
+                &context.prefix,
+                input.columns,
+                table_ctx.as_ref(),
+                qualifier,
+            );
             if let Some(table_ref) = table_ctx
                 && matches!(context.intent, CompletionIntent::InsertColumn { .. })
                     && !input.columns.is_empty()
@@ -155,6 +201,7 @@ pub fn build_completion_items(
                     &context.prefix,
                     &[table_ref],
                     input.columns,
+                    qualifier,
                 ));
             }
             items
@@ -323,6 +370,7 @@ fn build_table_star_items(
     prefix: &str,
     tables: &[TableRef],
     columns: &[ColumnInfo],
+    qualifier: Option<&str>,
 ) -> Vec<CompletionItem> {
     let mut items = Vec::new();
     let mut emitted = HashSet::new();
@@ -339,9 +387,15 @@ fn build_table_star_items(
         }
         emitted.insert(key);
 
+        // Prefix every expanded field with the qualifier when one is in scope
+        // (e.g. `t.` → `t.id`), else with this table's own display name so a
+        // bare alias in the select list still expands to `t1.id, t1.name`
+        // (matching the requested dbm behavior). `t.*`/`t1.*` therefore never
+        // lose their prefix.
+        let qual = qualifier.unwrap_or(display);
         let expansion: Vec<String> = columns
             .iter()
-            .map(|col| quote_if_needed(&col.name))
+            .map(|col| format!("{qual}.{}", quote_if_needed(&col.name)))
             .collect();
         let expansion_text = expansion.join(", ");
         let detail = if expansion_text.len() > 60 {
@@ -380,13 +434,17 @@ fn build_columns(
     prefix: &str,
     columns: &[ColumnInfo],
     table: Option<&TableRef>,
+    qualifier: Option<&str>,
 ) -> Vec<CompletionItem> {
     let mut items: Vec<CompletionItem> = columns
         .iter()
         .filter(|col| matches_prefix(&col.name, prefix))
         .map(|col| CompletionItem {
             label: col.name.clone(),
-            insert_text: quote_if_needed(&col.name),
+            insert_text: match qualifier {
+                Some(q) => format!("{q}.{}", quote_if_needed(&col.name)),
+                None => quote_if_needed(&col.name),
+            },
             kind: CompletionKind::Column,
             detail: Some(column_detail(col, table)),
         })
@@ -476,6 +534,7 @@ mod tests {
                 tables: &[],
                 columns: &[],
                 referenced_tables: &[],
+                complete_table_names: true,
             },
             false,
             "selct",
@@ -499,6 +558,7 @@ mod tests {
                 tables: &[],
                 columns: &[],
                 referenced_tables: &[],
+                complete_table_names: true,
             },
             false,
             "select sel",
@@ -523,6 +583,7 @@ mod tests {
                 tables: &[],
                 columns: &[],
                 referenced_tables: &extract_referenced_tables(sql),
+                complete_table_names: true,
             },
             false,
             sql,
@@ -573,6 +634,7 @@ mod tests {
                 tables: &[],
                 columns: &[],
                 referenced_tables: &[],
+                complete_table_names: true,
             },
             false,
             sql,
@@ -617,6 +679,7 @@ mod tests {
                 tables: &[],
                 columns: &columns,
                 referenced_tables: &[],
+                complete_table_names: true,
             },
             false,
             sql,
@@ -668,6 +731,7 @@ mod tests {
                 tables: &[],
                 columns: &columns,
                 referenced_tables: &[],
+                complete_table_names: true,
             },
             false,
             sql,
@@ -680,5 +744,171 @@ mod tests {
             .expect("table.* expansion");
         assert!(star.insert_text.contains("id"));
         assert!(star.insert_text.contains("\"名称\""));
+    }
+
+    #[test]
+    fn qualified_column_completion_prepends_alias() {
+        // `select * from tb1 t` then `t.`: completed columns must carry the
+        // qualifier prefix (`t.id`), not just the bare column name.
+        let sql = "select * from tb1 t where t.";
+        let cursor = sql.len();
+        let cursor_idx = Cursor::new(0, sql[..cursor].chars().count());
+        let ctx = CompletionContext {
+            prefix: String::new(),
+            replace_start: cursor_idx,
+            qualifier_parts: vec!["t".into()],
+            intent: CompletionIntent::Column {
+                tables: vec![TableRef {
+                    name: "tb1".into(),
+                    schema: Some("public".into()),
+                    alias: Some("t".into()),
+                }],
+            },
+        };
+        let columns = vec![ColumnInfo {
+            name: "id".into(),
+            type_name: "integer".into(),
+            type_display: "integer".into(),
+            comment: None,
+        }];
+        let items = build_completion_items(
+            &ctx,
+            &CompletionInput {
+                engine: SqlEngine::Postgres,
+                tables: &[],
+                columns: &columns,
+                referenced_tables: &[],
+                complete_table_names: true,
+            },
+            false,
+            sql,
+            cursor_idx,
+        );
+        let col = items
+            .iter()
+            .find(|i| i.label == "id")
+            .expect("column item");
+        assert_eq!(col.insert_text, "t.id", "completed column must keep the alias prefix");
+    }
+
+    #[test]
+    fn qualified_star_expansion_prepends_alias_to_each_field() {
+        // `select * from tb1 t` then `t.` in the select list: the expansion
+        // must prefix every field with `t.` (`t.id, t.name`).
+        let sql = "select t. from tb1 t";
+        let cursor = "select t.".len();
+        let cursor_idx = Cursor::new(0, sql[..cursor].chars().count());
+        let ctx = CompletionContext {
+            prefix: String::new(),
+            replace_start: cursor_idx,
+            qualifier_parts: vec!["t".into()],
+            intent: CompletionIntent::Column {
+                tables: vec![TableRef {
+                    name: "tb1".into(),
+                    schema: Some("public".into()),
+                    alias: Some("t".into()),
+                }],
+            },
+        };
+        let columns = vec![
+            ColumnInfo {
+                name: "id".into(),
+                type_name: "integer".into(),
+                type_display: "integer".into(),
+                comment: None,
+            },
+            ColumnInfo {
+                name: "name".into(),
+                type_name: "text".into(),
+                type_display: "text".into(),
+                comment: None,
+            },
+        ];
+        let items = build_completion_items(
+            &ctx,
+            &CompletionInput {
+                engine: SqlEngine::Postgres,
+                tables: &[],
+                columns: &columns,
+                referenced_tables: &[],
+                complete_table_names: true,
+            },
+            false,
+            sql,
+            cursor_idx,
+        );
+        let star = items
+            .iter()
+            .find(|i| i.label == "t.*")
+            .expect("alias.* expansion");
+        assert_eq!(
+            star.insert_text, "t.id, t.name",
+            "qualified star expansion must prefix each field with the alias"
+        );
+    }
+
+    #[test]
+    fn bare_alias_star_expansion_prepends_own_alias_to_each_field() {
+        // `select t1 from tb1 t1 join tb2 t2 ...`: completing a bare alias
+        // (no trailing `.`) must still expand `t1.*`/`t2.*` with the table's
+        // own alias prefix (`t1.id, t1.name` / `t2.id, t2.name`). This mirrors
+        // the qualified-star case but for the no-qualifier select list, where
+        // the global qualifier is empty and each star item must use its own
+        // display name instead of dropping the prefix.
+        let base = "select  from tb1 t1 join tb2 t2 on t1.id=t2.id";
+        let columns = vec![
+            ColumnInfo {
+                name: "id".into(),
+                type_name: "integer".into(),
+                type_display: "integer".into(),
+                comment: None,
+            },
+            ColumnInfo {
+                name: "name".into(),
+                type_name: "text".into(),
+                type_display: "text".into(),
+                comment: None,
+            },
+        ];
+        for (tgt, expect_prefix) in [("t1", "t1"), ("t2", "t2")] {
+            let sql = base.replacen("  ", &format!(" {tgt} "), 1);
+            let c = Cursor::new(0, format!("select {tgt}").chars().count());
+            let ctx =
+                crate::features::sql_workspace::sql_tab::editor::sql_completion::context::get_completion_context(&sql, c);
+            let input = CompletionInput {
+                engine: SqlEngine::Postgres,
+                tables: &[],
+                columns: &columns,
+                referenced_tables: &crate::features::sql_workspace::sql_tab::editor::sql_completion::context::extract_referenced_tables(
+                    &sql[..crate::features::sql_workspace::sql_tab::editor::sql_completion::context::cursor_offset(&sql, c)],
+                ),
+                complete_table_names: true,
+            };
+            let items = build_completion_items(&ctx, &input, false, &sql, c);
+            let star = items
+                .iter()
+                .find(|i| i.label == format!("{tgt}.*"))
+                .unwrap_or_else(|| panic!("missing {tgt}.* item"));
+            assert_eq!(
+                star.insert_text,
+                format!("{expect_prefix}.id, {expect_prefix}.name"),
+                "{tgt}.* expansion must keep its own alias prefix"
+            );
+        }
+    }
+
+    #[test]
+    fn second_qualified_column_replace_start_covers_qualifier() {
+        // `select t.id, t.` then completing the second field must replace the
+        // whole `t.` qualifier, not leave it and prepend another `t.` (which
+        // would yield `t.t.name`). The resolved context's replace_start must
+        // cover the second `t` (byte offset 13 of `select t.id, `).
+        let sql = "select t.id, t.";
+        let cursor = Cursor::new(0, sql.chars().count());
+        let ctx = crate::features::sql_workspace::sql_tab::editor::sql_completion::context::get_completion_context(sql, cursor);
+        assert_eq!(
+            ctx.replace_start.col, 13,
+            "replace_start must cover the second qualifier so apply doesn't duplicate `t.`"
+        );
     }
 }

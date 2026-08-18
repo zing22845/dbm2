@@ -129,7 +129,13 @@ pub fn render(
     // The footer hint is sized to its wrapped height so a narrow terminal does
     // not clip it; the editor body gets the remaining space.
     let search_active = state.sql_search.text_input_active();
-    let hint = sql_pane_footer_text(search_active, search_active, footer_mode, state.sql_search.has_filter());
+    let hint = sql_pane_footer_text(
+        search_active,
+        search_active,
+        footer_mode,
+        state.sql_search.has_filter(),
+        complete_table_names,
+    );
     let footer_h = footer_height(&hint, inner.width).min(inner.height.saturating_sub(1));
     // When the context picker is open it occupies a full-width panel at the top
     // of the editor (below the block header), with the editor body + footer

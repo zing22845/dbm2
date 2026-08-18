@@ -78,8 +78,10 @@ pub(crate) fn get_completion_context_heuristic(sql: &str, cursor: Cursor) -> Com
     let replace_start = offset_to_cursor(sql, stmt_start + trailing.replace_start);
     let qualifier_parts = trailing.qualifier_parts.clone();
 
-    let full_stmt = &sql[stmt_start..offset];
-    let referenced = extract_referenced_tables(full_stmt);
+    // Resolve referenced tables from the whole statement (not just before the
+    // cursor), so column completion inside the select list can use tables that
+    // appear in `from` after the cursor (e.g. `select <cursor> from t1`).
+    let referenced = extract_referenced_tables(&sql[stmt_start..]);
 
     if let Some(insert) = detect_insert_column_list(before) {
         return CompletionContext {
@@ -253,6 +255,27 @@ fn ends_with_on_whitespace(before: &str) -> bool {
     before.trim_end().to_ascii_lowercase().ends_with("on")
 }
 
+/// True when `before` ends in whitespace and the word immediately before the
+/// space is a clause keyword that begins a column/expression list (`where`,
+/// `on`, `and`, ...). In that position a column-completion popup should
+/// auto-open even though the cursor sits after a space. This extends the
+/// original dbm's `ends_with_on_whitespace` (which only handled `on`) to the
+/// other common clauses, fixing `select * from t where ` not popping columns.
+fn ends_with_clause_whitespace(before: &str) -> bool {
+    if !before.ends_with(|c: char| c.is_whitespace()) {
+        return false;
+    }
+    matches!(
+        last_word(before.trim_end())
+            .map(|w| w.to_ascii_lowercase())
+            .as_deref(),
+        Some(
+            "where" | "on" | "and" | "or" | "having" | "using" | "group" | "order" | "by"
+                | "qualify"
+        )
+    )
+}
+
 fn is_auto_open_trigger_char(c: char) -> bool {
     super::ident::is_ident_part(c) || matches!(c, '.' | '$' | '@')
 }
@@ -282,7 +305,12 @@ pub fn should_auto_open(sql: &str, cursor: Cursor) -> bool {
         | CompletionIntent::InsertColumn { .. }
         | CompletionIntent::UpdateColumn { .. } => true,
         CompletionIntent::Column { .. } => {
-            !context.qualifier_parts.is_empty() || is_auto_open_trigger_char(previous_char)
+            !context.qualifier_parts.is_empty()
+                || is_auto_open_trigger_char(previous_char)
+                || ends_with_clause_whitespace(before)
+                // `SELECT <cursor> FROM t`: the cursor sits after a space, but
+                // the select column list still needs to auto-open columns.
+                || is_select_list_column_context(sql, cursor)
         }
         CompletionIntent::Keyword => is_auto_open_trigger_char(previous_char),
     }
@@ -713,9 +741,12 @@ fn is_column_context(before: &str) -> bool {
     ) {
         return true;
     }
-    if prev == "select" {
-        let lower = stmt_before.to_ascii_lowercase();
-        return !lower.contains(" from ");
+    let lower = stmt_before.to_ascii_lowercase();
+    // Any position inside a `SELECT <cols>` list (before `from`) is a column
+    // context — even right after a typed column name (`select t ` or
+    // `select t`), so the column popup keeps offering.
+    if lower.contains("select ") && !lower.contains(" from ") {
+        return true;
     }
     false
 }
@@ -723,7 +754,10 @@ fn is_column_context(before: &str) -> bool {
 pub(crate) fn extract_referenced_tables(stmt: &str) -> Vec<TableRef> {
     let lower = stmt.to_ascii_lowercase();
     let mut tables = Vec::new();
-    for keyword in ["from ", "join "] {
+    // `from`/`join`/`into`/`update` introduce a referenced table. `into` and
+    // `update` are needed so column completion for `INSERT ... (col` and
+    // `UPDATE t SET` resolves the target table's columns.
+    for keyword in ["from ", "join ", "into ", "update "] {
         let mut search_from = 0usize;
         while search_from < lower.len() {
             while search_from < lower.len() && !lower.is_char_boundary(search_from) {
@@ -815,6 +849,20 @@ mod tests {
 
     fn cursor_at(sql: &str) -> Cursor {
         Cursor::new(0, sql.chars().count())
+    }
+
+    #[test]
+    fn extract_referenced_tables_includes_mutation_targets() {
+        // `update`/`into` targets must count as referenced tables so column
+        // completion for `UPDATE t SET` / `INSERT INTO t (` can resolve columns.
+        let refs = extract_referenced_tables("update tb1 set name = ");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].name, "tb1");
+        assert!(refs[0].alias.is_none());
+
+        let refs = extract_referenced_tables("insert into tb2 (id, na");
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].name, "tb2");
     }
 
     #[test]
@@ -1019,6 +1067,59 @@ mod tests {
     fn should_auto_open_on_join_on_whitespace() {
         let sql = "select * from public.users u join public.orders o on ";
         assert!(should_auto_open(sql, cursor_at(sql)));
+    }
+
+    #[test]
+    fn should_auto_open_after_where_whitespace() {
+        // `where ` (a clause that begins a column/expression list) must
+        // auto-open the column popup even though the cursor follows a space.
+        let sql = "select * from tb1 where ";
+        assert!(
+            should_auto_open(sql, cursor_at(sql)),
+            "`where ` must auto-open a column popup"
+        );
+    }
+
+    #[test]
+    fn should_auto_open_after_and_or_having_whitespace() {
+        for clause in ["and ", "or ", "having ", "using "] {
+            let sql = format!("select * from tb1 where id = 1 {clause}");
+            assert!(
+                should_auto_open(&sql, cursor_at(&sql)),
+                "`{clause}` must auto-open a column popup"
+            );
+        }
+    }
+
+    #[test]
+    fn should_not_auto_open_bare_identifier_space() {
+        // A space after a non-clause word (e.g. an alias or a value) must NOT
+        // auto-open — only the recognized clause keywords do.
+        let sql = "select * from tb1 a ";
+        assert!(
+            !should_auto_open(sql, cursor_at(sql)),
+            "`a ` (a plain alias) must not auto-open"
+        );
+    }
+
+    #[test]
+    fn should_offer_completion_after_select_space() {
+        // `SELECT ` starts a column list, so it must offer column completion
+        // even though the cursor follows a space. This is the gate the original
+        // dbm uses (build_completion_state_inner → should_offer_completion),
+        // fixing `SELECT <cursor> FROM t` not popping the column list.
+        let sql = "SELECT  FROM tb1";
+        let cursor = cursor_at("SELECT ");
+        let context = get_completion_context(sql, cursor);
+        assert!(
+            matches!(context.intent, CompletionIntent::Column { .. }),
+            "expected Column intent, got {:?}",
+            context.intent
+        );
+        assert!(
+            should_offer_completion(&context, sql),
+            "`SELECT ` must offer column completion"
+        );
     }
 
     #[test]

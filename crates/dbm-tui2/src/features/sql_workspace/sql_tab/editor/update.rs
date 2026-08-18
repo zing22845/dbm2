@@ -42,6 +42,10 @@ pub fn update(
             refresh_completion(&mut state, true);
             dirty = true;
         }
+        EditorMessage::RefreshCompletion => {
+            refresh_completion(&mut state, false);
+            dirty = true;
+        }
         EditorMessage::CatalogLoaded {
             tables,
             columns_by_table,
@@ -78,6 +82,15 @@ pub fn update(
     // consumed Apply intent counts as a rendered change.
     if intents.len() < intent_count {
         dirty = true;
+    }
+
+    // If completion needs the catalog loaded (table-intent slot, TblCmp ON,
+    // no cached table names), raise the request for `sql_tab` to resolve into a
+    // `LoadCompletionCatalog` effect. Clear the transient flag either way so it
+    // does not leak into the next update.
+    if state.completion_catalog_needs_load {
+        intents.push(EditorIntent::LoadCompletionCatalog);
+        state.completion_catalog_needs_load = false;
     }
 
     (state, intents, effects, dirty)
@@ -188,8 +201,41 @@ fn handle_key(state: &mut EditorState, key: KeyEvent, tracked_caps_lock: bool) -
 /// columns). Falls back to keyword-only completion when the catalog is empty.
 /// `explicit` forces the popup open (Shift+Tab), bypassing the auto-open gate.
 fn refresh_completion(state: &mut EditorState, explicit: bool) {
+    // Completion only applies in insert mode (matching the original dbm):
+    // a normal/visual-mode cursor move must not pop the completion window.
+    if state.editor.mode != edtui::EditorMode::Insert {
+        state.sql_completion.close();
+        return;
+    }
     let sql = crate::common::editor::editor_text(&state.editor);
     let cursor = editor_cursor(&state.editor);
+    // A table-intent slot with TblCmp ON but no cached table names needs the
+    // catalog (re)loaded — mirroring the original dbm's `schedule_metadata_refresh`.
+    // The editor update routes this flag to a `LoadCompletionCatalog` intent.
+    let context = sql_completion::context::get_completion_context(&sql, cursor);
+    // Request a catalog (re)load when the current intent needs table/column
+    // metadata but the catalog hasn't provided it. Mirror the original dbm's
+    // `schedule_metadata_refresh`: column completions (Column/InsertColumn/
+    // UpdateColumn) load regardless of TblCmp; only a table-intent slot also
+    // requires TblCmp to be ON.
+    if sql_completion::provider::needs_table_metadata(&context) {
+        let is_table = matches!(
+            context.intent,
+            sql_completion::context::CompletionIntent::Table { .. }
+        );
+        let allowed = !is_table || state.complete_table_names;
+        if allowed {
+            let columns = scoped_columns(&state.completion_catalog, &sql, cursor);
+            let stale = if is_table {
+                state.completion_catalog.tables.is_empty()
+            } else {
+                state.completion_catalog.tables.is_empty() || columns.is_empty()
+            };
+            if stale {
+                state.completion_catalog_needs_load = true;
+            }
+        }
+    }
     let tables = state.completion_catalog.tables.clone();
     let columns = scoped_columns(&state.completion_catalog, &sql, cursor);
     let sc_state = std::mem::take(&mut state.sql_completion);
@@ -200,21 +246,24 @@ fn refresh_completion(state: &mut EditorState, explicit: bool) {
             tables,
             columns,
             explicit,
+            complete_table_names: state.complete_table_names,
         },
         sc_state,
     );
     state.sql_completion = s;
 }
 
-/// The column metadata for the tables referenced in `sql` before `cursor`,
-/// so column completion is scoped to the tables actually in use.
+/// The column metadata for the tables referenced in `sql`, so column
+/// completion is scoped to the tables actually in use. Tables are resolved from
+/// the whole statement (not just before `cursor`) so a select-list slot can use
+/// tables that appear in `from` after the cursor (e.g. `select <cursor> from t1`).
 fn scoped_columns(
     catalog: &super::state::CompletionCatalog,
     sql: &str,
     cursor: crate::common::utils::cursor::Cursor,
 ) -> Vec<super::sql_completion::provider::ColumnInfo> {
-    let offset = super::sql_completion::context::cursor_offset(sql, cursor);
-    let refs = super::sql_completion::context::extract_referenced_tables(&sql[..offset]);
+    let _ = cursor;
+    let refs = super::sql_completion::context::extract_referenced_tables(sql);
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for table_ref in refs {
@@ -303,6 +352,190 @@ mod tests {
     }
 
     #[test]
+    fn empty_catalog_with_tblcmp_on_requests_reload() {
+        // TblCmp ON in a table-intent slot with no cached table names must
+        // raise a `LoadCompletionCatalog` intent (the original dbm triggers a
+        // metadata refresh there), and clear the transient flag afterward.
+        let mut state = EditorState::with_sql("");
+        state.editor.mode = edtui::EditorMode::Insert;
+        state.complete_table_names = true;
+        state.completion_catalog.tables.clear();
+
+        let mut requested = false;
+        let mut s = state;
+        for c in "select * from ".chars() {
+            let (s2, i, _e, _d) = update(
+                EditorMessage::KeyEvent { key: char_key(c), tracked_caps_lock: false },
+                s,
+            );
+            requested |= i
+                .iter()
+                .any(|int| matches!(int, EditorIntent::LoadCompletionCatalog));
+            s = s2;
+        }
+        assert!(requested, "empty catalog + TblCmp on should request a catalog reload");
+        assert!(
+            !s.completion_catalog_needs_load,
+            "transient needs-load flag must be cleared"
+        );
+    }
+
+    #[test]
+    fn empty_catalog_update_set_requests_reload_without_tblcmp() {
+        // Column completion (`update t set `) must request a catalog reload
+        // even when TblCmp is OFF — the original dbm only gates *table-name*
+        // completion on TblCmp, not column completion.
+        let mut state = EditorState::with_sql("");
+        state.editor.mode = edtui::EditorMode::Insert;
+        state.complete_table_names = false;
+        state.completion_catalog.tables.clear();
+
+        let mut requested = false;
+        let mut s = state;
+        for c in "update tb1 set ".chars() {
+            let (s2, i, _e, _d) = update(
+                EditorMessage::KeyEvent { key: char_key(c), tracked_caps_lock: false },
+                s,
+            );
+            requested |= i
+                .iter()
+                .any(|int| matches!(int, EditorIntent::LoadCompletionCatalog));
+            s = s2;
+        }
+        assert!(
+            requested,
+            "column completion should request a catalog reload without TblCmp"
+        );
+    }
+
+    #[test]
+    fn select_slot_typing_offers_columns_without_editing_buffer() {
+        // `select  from t1 t` (two spaces), cursor right after `select ` (between
+        // the spaces), then type `t`. Typing must NOT auto-edit the buffer
+        // beyond inserting the typed char, and the column popup must offer `t1`
+        // columns (the select list is a column-intent slot).
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+        let mut state = EditorState::with_sql("select  from t1 t");
+        state.editor.mode = edtui::EditorMode::Insert;
+        state.editor.cursor = edtui::Index2::new(0, "select ".chars().count());
+        state.completion_catalog.tables = vec!["t1".into()];
+        state.completion_catalog.columns_by_table.insert(
+            "t1".into(),
+            vec![ColumnInfo {
+                name: "title".into(),
+                type_name: "text".into(),
+                type_display: "text".into(),
+                comment: None,
+            }],
+        );
+
+        let (s, _i, _e, _d) = update(
+            EditorMessage::KeyEvent { key: char_key('t'), tracked_caps_lock: false },
+            state,
+        );
+        // Only the typed `t` is inserted at the cursor — no auto-space, no
+        // removal of surrounding text.
+        assert_eq!(
+            crate::common::editor::editor_text(&s.editor),
+            "select t from t1 t",
+            "typing must not auto-insert/delete characters"
+        );
+        assert!(
+            s.sql_completion.is_open(),
+            "a column popup should open after typing at the select column slot"
+        );
+        assert!(
+            s.sql_completion.items.iter().any(|i| i.label == "title"),
+            "t1 columns should be offered, got: {:?}",
+            s.sql_completion.items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn normal_mode_does_not_pop_completion() {
+        // Completion only applies in insert mode (matching the original dbm):
+        // a cursor move / buffer edit in normal mode must not pop the window.
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+        let mut state = EditorState::with_sql("select from t1 t");
+        state.editor.mode = edtui::EditorMode::Normal;
+        state.editor.cursor = edtui::Index2::new(0, "select ".chars().count());
+        state.completion_catalog.tables = vec!["t1".into()];
+        state.completion_catalog.columns_by_table.insert(
+            "t1".into(),
+            vec![ColumnInfo {
+                name: "title".into(),
+                type_name: "text".into(),
+                type_display: "text".into(),
+                comment: None,
+            }],
+        );
+        // Simulate a refresh (as a cursor move or edit would trigger in
+        // insert mode); in normal mode it must stay closed.
+        let (s, _i, _e, _d) = update(
+            EditorMessage::RefreshCompletion,
+            state,
+        );
+        assert!(
+            !s.sql_completion.is_open(),
+            "normal mode must not pop the completion window"
+        );
+    }
+
+    #[test]
+    fn typing_mid_buffer_does_not_swallow_next_char() {
+        // Insert mode, cursor in the middle of `abcdef`, type `X`. The char to
+        // the right of the cursor must be preserved: `abXcdef`, not `abXdef`.
+        let mut state = EditorState::with_sql("abcdef");
+        state.editor.mode = edtui::EditorMode::Insert;
+        state.editor.cursor = edtui::Index2::new(0, 2); // after `ab`
+        let (s, _i, _e, _d) = update(
+            EditorMessage::KeyEvent { key: char_key('X'), tracked_caps_lock: false },
+            state,
+        );
+        assert_eq!(
+            crate::common::editor::editor_text(&s.editor),
+            "abXcdef",
+            "typing in the middle must not swallow the next character"
+        );
+    }
+
+    #[test]
+    fn typing_second_char_with_popup_open_does_not_swallow() {
+        // After `select |from t1 t` + `t` (popup open, `select t from t1 t`,
+        // cursor after `t`), typing another char must insert, not swallow the
+        // char that follows the cursor.
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+        let mut state = EditorState::with_sql("select  from t1 t");
+        state.editor.mode = edtui::EditorMode::Insert;
+        state.editor.cursor = edtui::Index2::new(0, "select ".chars().count());
+        state.completion_catalog.tables = vec!["t1".into()];
+        state.completion_catalog.columns_by_table.insert(
+            "t1".into(),
+            vec![ColumnInfo {
+                name: "title".into(),
+                type_name: "text".into(),
+                type_display: "text".into(),
+                comment: None,
+            }],
+        );
+        let (s, _i, _e, _d) = update(
+            EditorMessage::KeyEvent { key: char_key('t'), tracked_caps_lock: false },
+            state,
+        );
+        assert_eq!(crate::common::editor::editor_text(&s.editor), "select t from t1 t");
+        // Now the popup is open and the cursor is after `t`. Type `i`.
+        let (s, _i, _e, _d) = update(
+            EditorMessage::KeyEvent { key: char_key('i'), tracked_caps_lock: false },
+            s,
+        );
+        assert_eq!(
+            crate::common::editor::editor_text(&s.editor),
+            "select ti from t1 t",
+            "typing a second char with the popup open must not swallow the following char"
+        );
+    }
+
+    #[test]
     fn mode_toggle_marks_dirty_for_redraw() {
         // Starting in normal mode, pressing `i` only changes the editor mode
         // (no text/cursor change), but must still request a redraw so the title
@@ -382,6 +615,34 @@ mod tests {
         assert_eq!(
             editor::editor_text(&state.editor),
             "select \"名称\" from 测试表"
+        );
+    }
+
+    #[test]
+    fn apply_second_qualified_column_does_not_duplicate_prefix() {
+        // `select t.id, t.` and complete the second field with `t.name`
+        // (replace_start covers the second `t.`). The result must be
+        // `select t.id, t.name`, NOT `select t.id, t.t.name`.
+        let mut state = EditorState::with_sql("select t.id, t.");
+        state.editor.mode = edtui::EditorMode::Insert;
+        let intents = vec![super::super::intent::EditorIntent::SqlCompletion(
+            super::super::sql_completion::intent::SqlCompletionIntent::Apply {
+                item: super::super::sql_completion::provider::CompletionItem {
+                    label: "name".into(),
+                    kind: super::super::sql_completion::provider::CompletionKind::Column,
+                    detail: None,
+                    insert_text: "t.name".into(),
+                },
+                replace_start: crate::common::utils::cursor::Cursor::new(0, 13),
+                replace_end: crate::common::utils::cursor::Cursor::new(0, 15),
+            },
+        )];
+        let remaining = resolve_apply_intents(&mut state, intents);
+        assert!(remaining.is_empty());
+        assert_eq!(
+            editor::editor_text(&state.editor),
+            "select t.id, t.name",
+            "second qualified completion must replace the qualifier, not duplicate it"
         );
     }
 }

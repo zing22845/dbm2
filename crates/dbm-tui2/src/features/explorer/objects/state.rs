@@ -110,11 +110,16 @@ pub struct ObjectsRow {
 }
 
 /// A resolved tree target (used when opening an object, e.g. a table).
+///
+/// Carries `kind` so the app can decide whether to run a data query
+/// (table/view) or open a tab (procedure/function/sequence), mirroring the
+/// original dbm's double-click behavior on objects.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectsTarget {
     pub database: String,
     pub schema: Option<String>,
     pub name: String,
+    pub kind: ObjectKind,
 }
 
 /// State for the explorer objects pane.
@@ -304,11 +309,14 @@ impl ObjectsState {
     pub fn selected_target(&self) -> Option<ObjectsTarget> {
         let row = self.rows.get(self.cursor)?;
         match &row.node {
-            ObjectsNode::Object { database, schema, name, .. } => Some(ObjectsTarget {
-                database: database.clone(),
-                schema: schema.clone(),
-                name: name.clone(),
-            }),
+            ObjectsNode::Object { database, schema, name, kind, .. } => {
+                Some(ObjectsTarget {
+                    database: database.clone(),
+                    schema: schema.clone(),
+                    name: name.clone(),
+                    kind: *kind,
+                })
+            }
             _ => None,
         }
     }

@@ -39,6 +39,12 @@ impl Intent for SqlTabIntent {
                 tab_id,
                 intent: EditorIntent::RunQuery { sql },
             } => Some(SqlTabMsg::Message(SqlTabMessage::RunQueryFromEditor { tab_id, sql })),
+            // The editor's catalog-load request is resolved by sql_tab (which
+            // owns the connection context) into a dedicated reload message.
+            SqlTabIntent::Editor {
+                tab_id,
+                intent: EditorIntent::LoadCompletionCatalog,
+            } => Some(SqlTabMsg::Message(SqlTabMessage::ReloadCompletionCatalog { tab_id })),
             SqlTabIntent::Editor { tab_id, intent } => {
                 // The child editor intent may itself be cross-feature (a
                 // `RunQuery`/`ApplyContext` that was not intercepted above),

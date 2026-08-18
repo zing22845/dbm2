@@ -816,7 +816,18 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
                     SqlCompletionMessage::MoveSelection { delta: 1 },
                 )), tab_id));
             }
-            KeyCode::Enter => {
+            // A bare Enter applies the highlighted completion; Alt+Enter (or
+            // any modified Enter) is NOT consumed here so it falls through to
+            // the editor's run-SQL accelerator below.
+            KeyCode::Enter if key.modifiers.is_empty() => {
+                return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
+                    SqlCompletionMessage::Apply,
+                )), tab_id));
+            }
+            // A bare Tab applies the highlighted completion too (matching the
+            // original dbm's `handle_popup_key`) instead of inserting a tab
+            // character into the buffer.
+            KeyCode::Tab if key.modifiers.is_empty() => {
                 return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
                     SqlCompletionMessage::Apply,
                 )), tab_id));
@@ -876,13 +887,18 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
                     tab_id,
                 ));
             }
-            // Ctrl+Enter runs the current editor SQL.
-            if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
+            // Alt+Enter runs the current editor SQL, matching the original
+            // dbm (`run_sql_query`): it works in both Insert and Normal modes.
+            // Ctrl+Enter was a redundant duplicate that many terminals fail to
+            // report with the CONTROL modifier, so it has been removed.
+            if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::ALT) {
                 return Some(sql_editor(EditorMessage::Run, tab_id));
             }
-            // Ctrl+T toggles table-name completion (TblCmp) in insert mode,
-            // matching the original dbm (the editor header shows the status).
-            if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            // Alt+Tab toggles table-name completion (TblCmp) in insert mode.
+            // Ctrl+T is reserved for theme toggling in dbm2, so the original
+            // dbm's Ctrl+T is rebound to Alt+Tab (the editor header shows the
+            // TblCmp status).
+            if key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::ALT) {
                 return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
                     SqlTabMsg::Message(SqlTabMessage::ToggleTableCompletion { tab_id }),
                 ))));
@@ -1072,14 +1088,8 @@ fn sql_tab_navigation_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     }
     let visible_active = state.sql_tab.global_to_visible().unwrap_or(0);
     let tab_msg = match key.code {
-        KeyCode::Tab if key.modifiers.contains(KeyModifiers::CONTROL)
-            && !key.modifiers.contains(KeyModifiers::SHIFT) =>
-        {
-            SqlTabMessage::Tab((visible_active + 1) % count)
-        }
         // Plain `Shift+Tab` (BackTab) is not tab navigation — in the editor it
-        // forces the completion popup open (see `sql_workspace_key`). There is
-        // no `Ctrl+Shift+Tab` previous-tab binding; use `Alt+p` instead.
+        // forces the completion popup open (see `sql_workspace_key`).
         KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             SqlTabMessage::CloseTab(visible_active)
         }
@@ -1192,11 +1202,14 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_tab_switches_to_next_tab() {
-        let state = state_with_tabs(3); // active_tab = 2 (last opened)
-        let msg = sql_tab_navigation_key(key(KeyCode::Tab, KeyModifiers::CONTROL), &state)
-            .expect("ctrl+tab should be handled");
-        assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab(0));
+    fn ctrl_tab_is_not_tab_navigation() {
+        // `Ctrl+Tab` is no longer bound to tab switching; use `Alt+n` for the
+        // next tab instead (there was never a footer hint advertising it).
+        let state = state_with_tabs(3);
+        assert!(
+            sql_tab_navigation_key(key(KeyCode::Tab, KeyModifiers::CONTROL), &state).is_none(),
+            "Ctrl+Tab must not switch tabs anymore"
+        );
     }
 
     #[test]
@@ -1314,11 +1327,13 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_t_in_editor_emits_toggle_table_completion() {
+    fn alt_tab_in_editor_emits_toggle_table_completion() {
+        // Alt+Tab toggles TblCmp (Ctrl+T is reserved for theme toggling in
+        // dbm2). In insert mode it must toggle table-name completion.
         let mut state = state_with_tabs(1);
         state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
-        let msg = sql_key(key(KeyCode::Char('t'), KeyModifiers::CONTROL), &state)
-            .expect("ctrl+t should be handled in the editor");
+        let msg = sql_key(key(KeyCode::Tab, KeyModifiers::ALT), &state)
+            .expect("alt+tab should be handled in the editor");
         match msg {
             AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                 SqlTabMessage::ToggleTableCompletion { .. },
@@ -1342,6 +1357,113 @@ mod tests {
     }
 
     #[test]
+    fn alt_enter_in_normal_mode_runs_sql() {
+        // Alt+Enter is the original dbm's run-SQL accelerator; it must work in
+        // Normal mode without an open completion popup.
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Normal;
+        let msg = sql_key(key(KeyCode::Enter, KeyModifiers::ALT), &state)
+            .expect("alt+enter should run the editor SQL in normal mode");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    msg: EditorMsg::Message(EditorMessage::Run),
+                    ..
+                },
+            )))) => {}
+            other => panic!("expected EditorMessage::Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn alt_enter_in_insert_mode_runs_sql() {
+        // Alt+Enter must also run SQL while the editor is in Insert mode.
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        let msg = sql_key(key(KeyCode::Enter, KeyModifiers::ALT), &state)
+            .expect("alt+enter should run the editor SQL in insert mode");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    msg: EditorMsg::Message(EditorMessage::Run),
+                    ..
+                },
+            )))) => {}
+            other => panic!("expected EditorMessage::Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn alt_enter_with_completion_open_still_runs_sql() {
+        // When the completion popup is open, a bare Enter applies the
+        // completion, but Alt+Enter must fall through to run the SQL.
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        // Open the completion popup with one item so `is_open()` is true.
+        state.sql_tab.tabs[0].editor.sql_completion = {
+            use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::{
+                CompletionItem, CompletionKind,
+            };
+            let mut sc = crate::features::sql_workspace::sql_tab::editor::sql_completion::state::SqlCompletionState::default();
+            sc.open = true;
+            sc.items = vec![CompletionItem {
+                label: "customers".into(),
+                kind: CompletionKind::Table,
+                detail: None,
+                insert_text: "customers".into(),
+            }];
+            sc
+        };
+        let msg = sql_key(key(KeyCode::Enter, KeyModifiers::ALT), &state)
+            .expect("alt+enter should run SQL even with the completion popup open");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    msg: EditorMsg::Message(EditorMessage::Run),
+                    ..
+                },
+            )))) => {}
+            other => panic!("expected EditorMessage::Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tab_with_completion_open_applies_completion() {
+        // When the completion popup is open, a bare Tab applies the highlighted
+        // completion (matching the original dbm's `handle_popup_key`) instead
+        // of inserting a tab character into the buffer.
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        state.sql_tab.tabs[0].editor.sql_completion = {
+            use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::{
+                CompletionItem, CompletionKind,
+            };
+            let mut sc = crate::features::sql_workspace::sql_tab::editor::sql_completion::state::SqlCompletionState::default();
+            sc.open = true;
+            sc.items = vec![CompletionItem {
+                label: "customers".into(),
+                kind: CompletionKind::Table,
+                detail: None,
+                insert_text: "customers".into(),
+            }];
+            sc
+        };
+        let msg = sql_key(key(KeyCode::Tab, KeyModifiers::NONE), &state)
+            .expect("bare tab with the completion popup open should apply completion");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    msg: EditorMsg::Message(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
+                        SqlCompletionMessage::Apply,
+                    ))),
+                    ..
+                },
+            )))) => {}
+            other => panic!("expected SqlCompletionMessage::Apply, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn ctrl_w_closes_active_tab() {
         let state = state_with_tabs(2);
         let msg = sql_tab_navigation_key(key(KeyCode::Char('w'), KeyModifiers::CONTROL), &state)
@@ -1350,10 +1472,11 @@ mod tests {
     }
 
     #[test]
-    fn single_tab_switching_wraps_to_itself() {
+    fn single_tab_alt_n_switching_wraps_to_itself() {
+        // With a single tab, `Alt+n` (next tab) wraps back to the same tab.
         let state = state_with_tabs(1);
-        let msg = sql_tab_navigation_key(key(KeyCode::Tab, KeyModifiers::CONTROL), &state)
-            .expect("ctrl+tab should be handled");
+        let msg = sql_tab_navigation_key(key(KeyCode::Char('n'), KeyModifiers::ALT), &state)
+            .expect("alt+n should be handled");
         assert_eq!(extract_tab_msg(msg), SqlTabMessage::Tab(0));
     }
 

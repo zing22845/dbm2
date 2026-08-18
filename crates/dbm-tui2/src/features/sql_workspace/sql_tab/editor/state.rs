@@ -41,6 +41,15 @@ pub struct EditorState {
     pub sql_search: EditorSqlSearch,
     /// The cached SQL-completion catalog for the tab's connection/schema.
     pub completion_catalog: CompletionCatalog,
+    /// Whether table-name completion (TblCmp) is enabled. Mirrors the SQL
+    /// tab's `complete_table_names`; it gates whether a table-intent slot
+    /// offers table names (see `table_completion_allowed` in the original dbm).
+    pub complete_table_names: bool,
+    /// Transient flag raised by `refresh_completion` when a table-intent slot
+    /// is active (TblCmp ON) but the completion catalog has no table names yet.
+    /// The editor update clears it after routing it to a
+    /// `LoadCompletionCatalog` intent; it is never rendered.
+    pub completion_catalog_needs_load: bool,
 }
 
 impl std::fmt::Debug for EditorState {
@@ -65,6 +74,8 @@ impl Default for EditorState {
             sql_completion: SqlCompletionState::default(),
             sql_search: EditorSqlSearch::default(),
             completion_catalog: CompletionCatalog::default(),
+            complete_table_names: false,
+            completion_catalog_needs_load: false,
         }
     }
 }
@@ -79,6 +90,8 @@ impl EditorState {
             sql_completion: SqlCompletionState::default(),
             sql_search: EditorSqlSearch::default(),
             completion_catalog: CompletionCatalog::default(),
+            complete_table_names: false,
+            completion_catalog_needs_load: false,
         }
     }
 }

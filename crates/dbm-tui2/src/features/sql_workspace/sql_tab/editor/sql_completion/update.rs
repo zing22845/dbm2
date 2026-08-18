@@ -36,8 +36,17 @@ pub fn update(
             tables,
             columns,
             explicit,
+            complete_table_names,
         } => {
-            refresh(&mut state, &sql, cursor, &tables, &columns, explicit);
+            refresh(
+                &mut state,
+                &sql,
+                cursor,
+                &tables,
+                &columns,
+                explicit,
+                complete_table_names,
+            );
             true
         }
         SqlCompletionMessage::Close => {
@@ -86,6 +95,7 @@ fn refresh(
     tables: &[String],
     columns: &[ColumnInfo],
     explicit: bool,
+    complete_table_names: bool,
 ) {
     let context = get_completion_context(sql, cursor);
 
@@ -96,11 +106,11 @@ fn refresh(
     }
 
     // Auto-open gating, matching the original dbm: a *closed* popup only opens
-    // after an auto-open trigger (after `from `/`on `, an identifier char, or a
-    // qualifier / trigger char like `.`/`$`/`@`), and never right after
-    // `,`/`;`/`(`. An already-open popup stays open while typing so the user
-    // can keep selecting candidates without it flickering closed. An explicit
-    // request (Shift+Tab) bypasses this gate.
+    // after an auto-open trigger (after `from `/`on `/clause keyword, an
+    // identifier char, a qualifier / trigger char like `.`/`$`/`@`, or inside a
+    // select column list). An already-open popup stays open while typing so the
+    // user can keep selecting candidates without it flickering closed. An
+    // explicit request (Shift+Tab) bypasses this gate.
     if !explicit && !state.is_open() && !should_auto_open(sql, cursor) {
         state.close();
         return;
@@ -120,6 +130,18 @@ fn refresh(
         return;
     }
 
+    // A table-intent slot only offers table names when TblCmp is ON. With it
+    // OFF, a non-explicit refresh closes the popup (no hint at all), matching
+    // the original dbm's `table_completion_allowed` → `build_completion_state_inner`.
+    // Only an explicit Shift+Tab request forces keyword completion here.
+    if matches!(context.intent, CompletionIntent::Table { .. }) && !complete_table_names {
+        if !explicit {
+            state.close();
+            return;
+        }
+        // explicit: fall through to keyword completion (provider handles it).
+    }
+
     let referenced = extract_referenced_before(sql, cursor);
     let items = build_completion_items(
         &context,
@@ -128,6 +150,7 @@ fn refresh(
             tables,
             columns,
             referenced_tables: &referenced,
+            complete_table_names,
         },
         false,
         sql,
@@ -170,6 +193,7 @@ mod tests {
                 tables: vec![],
                 columns: vec![],
                 explicit: false,
+                complete_table_names: false,
             },
             SqlCompletionState::default(),
         );
@@ -186,6 +210,7 @@ mod tests {
                 tables: vec![],
                 columns: vec![],
                 explicit: false,
+                complete_table_names: false,
             },
             SqlCompletionState::default(),
         );
@@ -203,6 +228,7 @@ mod tests {
                 tables: vec!["users".into()],
                 columns: vec![],
                 explicit: false,
+                complete_table_names: true,
             },
             SqlCompletionState::default(),
         );
@@ -211,7 +237,8 @@ mod tests {
 
     #[test]
     fn refresh_auto_opens_after_from_whitespace() {
-        // After `from ` the table popup auto-opens (original dbm behavior).
+        // After `from ` the table popup auto-opens when TblCmp is on (original
+        // dbm behavior).
         let (s, _i, _e, _d) = update(
             SqlCompletionMessage::Refresh {
                 sql: "select * from ".into(),
@@ -219,11 +246,38 @@ mod tests {
                 tables: vec!["users".into(), "orders".into()],
                 columns: vec![],
                 explicit: false,
+                complete_table_names: true,
             },
             SqlCompletionState::default(),
         );
         assert!(s.is_open());
         assert!(s.items.iter().any(|i| i.label == "users"));
+    }
+
+    #[test]
+    fn refresh_table_intent_closed_when_tblcmp_off() {
+        // With TblCmp OFF, a table-intent slot (`from `) must NOT show any
+        // popup at all (no table names, no keywords) — matching the original
+        // dbm's `table_completion_allowed` → `build_completion_state_inner`.
+        let (s, _i, _e, _d) = update(
+            SqlCompletionMessage::Refresh {
+                sql: "select * from ".into(),
+                cursor: cursor_at("select * from "),
+                tables: vec!["users".into(), "orders".into()],
+                columns: vec![],
+                explicit: false,
+                complete_table_names: false,
+            },
+            SqlCompletionState::default(),
+        );
+        assert!(
+            !s.is_open(),
+            "table-intent slot with TblCmp off must not open a popup"
+        );
+        assert!(
+            !s.items.iter().any(|i| i.label == "users" || i.label == "orders"),
+            "table names must not be offered with TblCmp off"
+        );
     }
 
     #[test]
@@ -238,6 +292,7 @@ mod tests {
                 tables: vec![],
                 columns: vec![],
                 explicit: true,
+                complete_table_names: false,
             },
             SqlCompletionState::default(),
         );
@@ -255,6 +310,7 @@ mod tests {
                 tables: vec!["users".into()],
                 columns: vec![],
                 explicit: true,
+                complete_table_names: true,
             },
             SqlCompletionState::default(),
         );
@@ -270,6 +326,7 @@ mod tests {
                 tables: vec![],
                 columns: vec![],
                 explicit: false,
+                complete_table_names: false,
             },
             SqlCompletionState::default(),
         );
@@ -282,6 +339,71 @@ mod tests {
     }
 
     #[test]
+    fn refresh_offers_columns_after_select_space_with_from() {
+        // `SELECT <cursor> FROM t`: moving the cursor behind `SELECT ` must pop
+        // the column list (the original dbm's should_offer_completion treats a
+        // Column intent as always offering).
+        let (s, _i, _e, _d) = update(
+            SqlCompletionMessage::Refresh {
+                sql: "SELECT  FROM tb1".into(),
+                cursor: cursor_at("SELECT "),
+                tables: vec!["tb1".into()],
+                columns: vec![ColumnInfo {
+                    name: "status".into(),
+                    type_name: "text".into(),
+                    type_display: "text".into(),
+                    comment: None,
+                }],
+                explicit: false,
+                complete_table_names: false,
+            },
+            SqlCompletionState::default(),
+        );
+        assert!(s.is_open(), "popup should open behind `SELECT `");
+        assert!(
+            s.items.iter().any(|i| i.label == "status"),
+            "columns should be offered behind `SELECT `, got: {:?}",
+            s.items
+        );
+    }
+
+    #[test]
+    fn select_list_cursor_after_space_offers_columns() {
+        // `select <cursor> from t1 t` — cursor right after `select ` — must
+        // offer the t1 columns even though the cursor sits after a space.
+        let (s, _i, _e, _d) = update(
+            SqlCompletionMessage::Refresh {
+                sql: "select from t1 t".into(),
+                cursor: cursor_at("select "),
+                tables: vec!["t1".into()],
+                columns: vec![
+                    ColumnInfo {
+                        name: "id".into(),
+                        type_name: "integer".into(),
+                        type_display: "integer".into(),
+                        comment: None,
+                    },
+                    ColumnInfo {
+                        name: "title".into(),
+                        type_name: "text".into(),
+                        type_display: "text".into(),
+                        comment: None,
+                    },
+                ],
+                explicit: false,
+                complete_table_names: false,
+            },
+            SqlCompletionState::default(),
+        );
+        assert!(s.is_open(), "popup should open at `select ` in a column list");
+        assert!(
+            s.items.iter().any(|i| i.label == "title"),
+            "t1 columns should be offered, got: {:?}",
+            s.items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn close_clears_items() {
         let (mut s, _i, _e, _d) = update(
             SqlCompletionMessage::Refresh {
@@ -290,6 +412,7 @@ mod tests {
                 tables: vec![],
                 columns: vec![],
                 explicit: false,
+                complete_table_names: false,
             },
             SqlCompletionState::default(),
         );

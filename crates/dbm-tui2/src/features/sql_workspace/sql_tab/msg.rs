@@ -24,9 +24,28 @@ pub enum SqlTabMessage {
     Focus(SqlFocus),
     /// Run `sql` from the tab's editor (dispatched to results with session context).
     RunQueryFromEditor { tab_id: usize, sql: String },
+    /// Open (or focus) the connection's active tab, fill it with a
+    /// `SELECT * FROM "schema"."table"` query for `table`, and run it
+    /// immediately. Mirrors the original dbm's double-click-on-table behavior:
+    /// it runs a data query in the active tab and moves focus to Results.
+    RunTableQuery {
+        instance: String,
+        connection: String,
+        connection_id: String,
+        database: Option<String>,
+        schema: Option<String>,
+        table: String,
+        /// The schema that qualifies `table` in the generated SQL. Falls back
+        /// to `schema` when `None`.
+        table_schema: Option<String>,
+    },
     /// Toggle table-name completion (TblCmp) for the tab, in INSERT mode
-    /// (Ctrl+T), matching the original dbm.
+    /// (Alt+Tab; Ctrl+T is reserved for theme toggling in dbm2).
     ToggleTableCompletion { tab_id: usize },
+    /// Reload the tab's SQL-completion catalog. Raised by the editor when it
+    /// hits a table-intent slot (TblCmp ON) without cached table names;
+    /// resolved into a `LoadCompletionCatalog` effect here.
+    ReloadCompletionCatalog { tab_id: usize },
     /// Open a new tab bound to a connection with its display identity.
     OpenConnectionTab {
         instance: String,

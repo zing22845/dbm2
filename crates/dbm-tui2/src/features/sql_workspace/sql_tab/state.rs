@@ -58,7 +58,7 @@ pub struct SqlTab {
     pub history_pane_width: u16,
     /// Whether table-name completion (TblCmp) is enabled for this tab, shown in
     /// the editor header while in INSERT mode (matching the original dbm's
-    /// `complete_table_names`). Toggled with Ctrl+T in INSERT mode.
+    /// `complete_table_names`). Toggled with Alt+Tab in INSERT mode.
     pub complete_table_names: bool,
     /// Editor child feature state.
     pub editor: EditorState,

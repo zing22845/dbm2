@@ -95,6 +95,7 @@ pub fn sql_pane_footer_text(
     sql_search_active: bool,
     editor_mode: &str,
     sql_search_has_filter: bool,
+    complete_table_names: bool,
 ) -> String {
     if search_active || sql_search_active {
         return pane_search_active_footer(&[]);
@@ -102,6 +103,14 @@ pub fn sql_pane_footer_text(
     match editor_mode {
         "insert" => keys(&[
             ("History", hint_ctrl("r")),
+            (
+                "Tbl complete",
+                format!(
+                    "{} ({})",
+                    if complete_table_names { "ON" } else { "OFF" },
+                    "ALT+TAB"
+                ),
+            ),
             ("Complete", "SHIFT+TAB".into()),
             ("Context", lit("click title")),
             ("Normal", lit("ESC")),
@@ -427,23 +436,37 @@ mod tests {
 
     #[test]
     fn sql_pane_insert_footer_differs_from_normal() {
-        let insert = sql_pane_footer_text(false, false, "insert", false);
+        let insert = sql_pane_footer_text(false, false, "insert", false, true);
         assert!(insert.contains("Complete: SHIFT+TAB"));
+        assert!(insert.contains("Tbl complete: ON (ALT+TAB)"));
         assert!(insert.contains("Normal: ESC"));
-        let normal = sql_pane_footer_text(false, false, "normal", false);
+        let normal = sql_pane_footer_text(false, false, "normal", false, true);
         assert!(!normal.contains("Complete:"));
         assert!(normal.contains("Insert: i"));
         assert!(normal.contains("Visual: v"));
     }
 
     #[test]
+    fn sql_pane_footer_tbl_complete_reflects_flag() {
+        // The TblCmp toggle shows the live ON/OFF state plus its Alt+Tab
+        // shortcut in the insert-mode footer.
+        let on = sql_pane_footer_text(false, false, "insert", false, true);
+        assert!(on.contains("Tbl complete: ON (ALT+TAB)"));
+        let off = sql_pane_footer_text(false, false, "insert", false, false);
+        assert!(off.contains("Tbl complete: OFF (ALT+TAB)"));
+        // Non-insert modes never advertise the toggle.
+        let normal = sql_pane_footer_text(false, false, "normal", false, true);
+        assert!(!normal.contains("Tbl complete:"));
+    }
+
+    #[test]
     fn sql_pane_footer_excludes_workspace_level_tab_hints() {
         // Tab management belongs to the SQL workspace, not to a single editor
         // pane, so the editor footer must NOT advertise it.
-        let normal = sql_pane_footer_text(false, false, "normal", false);
+        let normal = sql_pane_footer_text(false, false, "normal", false, true);
         assert!(!normal.contains("Close tab:"));
         assert!(!normal.contains("Switch tab:"));
-        let insert = sql_pane_footer_text(false, false, "insert", false);
+        let insert = sql_pane_footer_text(false, false, "insert", false, true);
         assert!(!insert.contains("Close tab:"));
         assert!(!insert.contains("Switch tab:"));
     }
@@ -464,16 +487,16 @@ mod tests {
 
     #[test]
     fn sql_pane_normal_appends_search_jump_when_filtered() {
-        let filtered = sql_pane_footer_text(false, false, "normal", true);
+        let filtered = sql_pane_footer_text(false, false, "normal", true, false);
         assert!(filtered.contains("Next match: n/N"));
         assert!(filtered.contains("Clear filter: ESC"));
-        let unfiltered = sql_pane_footer_text(false, false, "normal", false);
+        let unfiltered = sql_pane_footer_text(false, false, "normal", false, false);
         assert!(!unfiltered.contains("Next match:"));
     }
 
     #[test]
     fn sql_pane_search_active_shows_search_footer() {
-        let footer = sql_pane_footer_text(false, true, "normal", false);
+        let footer = sql_pane_footer_text(false, true, "normal", false, false);
         assert!(footer.contains("Prev: "));
         assert!(!footer.contains("Insert: i"));
     }

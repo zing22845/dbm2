@@ -211,7 +211,15 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
             split_ratio: t.split_ratio,
             history_pane_width: t.history_pane_width,
             complete_table_names: t.complete_table_names,
-            editor: EditorState::with_sql(&t.sql),
+            editor: {
+                // Keep the editor's TblCmp flag in sync with the tab's flag on
+                // restore, otherwise the completion engine would still offer
+                // keywords at a table-intent slot even though the header shows
+                // `TblCmp: ON`.
+                let mut ed = EditorState::with_sql(&t.sql);
+                ed.complete_table_names = t.complete_table_names;
+                ed
+            },
             results: crate::features::sql_workspace::sql_tab::results::state::ResultsState::new(),
             history: crate::features::sql_workspace::sql_tab::history::state::HistoryState::default(),
         });
