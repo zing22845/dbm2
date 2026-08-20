@@ -1086,14 +1086,29 @@ pub(crate) fn action_to_app_msgs(action: Action) -> Vec<AppMsg> {
             use crate::features::sql_workspace::sql_tab::effect::SqlTabAction;
             use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
             let mut msgs = Vec::new();
-            if matches!(
-                &action,
+            match &action {
                 SqlAction::SqlTab(SqlTabAction::Results {
                     action: ResultsAction::CommitResult { .. },
                     ..
-                })
-            ) {
-                msgs.push(AppMsg::CloseModal);
+                }) => {
+                    msgs.push(AppMsg::CloseModal);
+                }
+                // A failed query surfaces its message in the results pane (via
+                // the routed `QueryError` message) and in the global footer
+                // status line, mirroring the original dbm's `set_status`.
+                SqlAction::SqlTab(SqlTabAction::Results {
+                    action: ResultsAction::QueryError { message },
+                    ..
+                }) => {
+                    msgs.push(AppMsg::Footer(
+                        crate::features::global_footer::msg::FooterMsg::Message(
+                            crate::features::global_footer::msg::FooterMessage::SetStatus(
+                                format!("Query failed: {message}"),
+                            ),
+                        ),
+                    ));
+                }
+                _ => {}
             }
             msgs.push(AppMsg::Sql(
                 crate::features::sql_workspace::msg::SqlMsg::Message(sql_action_to_msg(action)),
@@ -1569,7 +1584,9 @@ fn results_action_to_msg(action: crate::features::sql_workspace::sql_tab::result
         RA::ResultReady { result, paginated } => M::SetResult { result, paginated },
         RA::QueryError { message } => {
             tracing::warn!("query failed: {message}");
-            M::ClearResult
+            // Mirror the original dbm: clear the result and surface the error
+            // text in the results pane (stored as `query_error`).
+            M::QueryError { message }
         }
         RA::CommitResult { ok, message } => {
             tracing::info!("commit ok={ok}: {message}");
@@ -2020,7 +2037,7 @@ mod tests {
     }
 
     #[test]
-    fn sql_results_query_error_clears_result() {
+    fn sql_results_query_error_maps_to_query_error_message() {
         let action = SqlAction::SqlTab(SqlTabAction::Results {
             tab_id: 1,
             action: ResultsAction::QueryError {
@@ -2033,7 +2050,10 @@ mod tests {
             panic!("expected Results route");
         };
         assert_eq!(tab_id, 1);
-        assert!(matches!(msg, ResultsMsg::Message(ResultsMessage::ClearResult)));
+        assert!(matches!(
+            msg,
+            ResultsMsg::Message(ResultsMessage::QueryError { message }) if message == "boom"
+        ));
     }
 
     #[test]

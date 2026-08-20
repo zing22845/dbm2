@@ -15,6 +15,9 @@ pub enum ResultsMessage {
     EditabilityReady { target: Option<EditTarget>, blocked: Option<String> },
     /// Clear the current result (e.g. after a failed query).
     ClearResult,
+    /// A query failed: clear the current result and store `message` to be shown
+    /// (in red) in the results pane, mirroring the original dbm's `query_error`.
+    QueryError { message: String },
     /// Move the cell selection by `(dr, dc)`.
     MoveSelection { dr: i32, dc: i32 },
     /// Begin `/` search input.

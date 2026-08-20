@@ -33,6 +33,13 @@ pub fn render(
     }
     let p = theme.palette();
 
+    // A failed query is shown in the results pane as red error text, mirroring
+    // the original dbm's `query_error` rendering (ui.rs render_results_plain).
+    if let Some(message) = state.query_error.as_deref() {
+        render_error(frame, theme, area, focused, message);
+        return;
+    }
+
     let Some(result) = state.result.as_ref() else {
         render_empty(frame, theme, area, focused);
         return;
@@ -103,6 +110,23 @@ fn toolbar_model(state: &ResultsState) -> ResultsToolbarModel {
         commit_n,
         edit_reason: state.edit_blocked_reason.clone(),
     }
+}
+
+fn render_error(frame: &mut Frame, theme: &Theme, area: Rect, focused: bool, message: &str) {
+    let p = theme.palette();
+    let block = Block::default()
+        .title(" [R] Results ")
+        .borders(Borders::ALL)
+        .border_style(p.active_border(focused));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            message,
+            Style::default().fg(p.error),
+        ))),
+        inner,
+    );
 }
 
 fn render_empty(frame: &mut Frame, theme: &Theme, area: Rect, focused: bool) {

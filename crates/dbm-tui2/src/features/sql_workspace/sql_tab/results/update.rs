@@ -22,6 +22,7 @@ pub fn update(
     let dirty = match msg {
         ResultsMessage::SetResult { result, paginated } => {
             state.result = Some(result);
+            state.query_error = None;
             state.paginated = paginated;
             state.row = 0;
             state.col = 0;
@@ -61,6 +62,19 @@ pub fn update(
         ResultsMessage::ClearResult => {
             let changed = state.result.is_some();
             state.result = None;
+            state.query_error = None;
+            state.row = 0;
+            state.col = 0;
+            state.detail.scroll = 0;
+            state.edit_target = None;
+            state.edit_blocked_reason = None;
+            changed
+        }
+        ResultsMessage::QueryError { message } => {
+            let changed = state.result.is_some()
+                || state.query_error.as_deref() != Some(message.as_str());
+            state.result = None;
+            state.query_error = Some(message);
             state.row = 0;
             state.col = 0;
             state.detail.scroll = 0;
@@ -106,6 +120,9 @@ pub fn update(
             row_limit,
         } => {
             state.detail.scroll = 0;
+            // A fresh run clears the previous error (the outcome is reported
+            // later by `SetResult` / `QueryError`), mirroring the original dbm.
+            state.query_error = None;
             // Remember the connection context and query text so the eventual
             // result can resolve editability and so `Commit` can target the
             // same connection.
@@ -258,5 +275,89 @@ fn handle_search_key(state: &mut ResultsState, key: crossterm::event::KeyEvent) 
     }
     if matches!(action, PaneSearchInput::QueryChanged | PaneSearchInput::OptionsChanged) {
         state.row = 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+
+    fn sample_result() -> super::super::state::QueryResultData {
+        super::super::state::QueryResultData {
+            columns: vec![ColumnInfo {
+                name: "id".into(),
+                type_name: "int4".into(),
+                type_display: "int4".into(),
+                comment: None,
+            }],
+            rows: vec![vec!["1".into()]],
+            rows_affected: None,
+            total_rows: Some(1),
+        }
+    }
+
+    #[test]
+    fn query_error_clears_result_and_stores_message() {
+        let (mut state, _i, _e, dirty) = update(
+            ResultsMessage::SetResult {
+                result: sample_result(),
+                paginated: false,
+            },
+            ResultsState::default(),
+        );
+        assert!(state.result.is_some());
+        assert!(dirty);
+
+        let (s, _i, _e, dirty) = update(
+            ResultsMessage::QueryError {
+                message: "relation \"nope\" does not exist".into(),
+            },
+            state,
+        );
+        state = s;
+        assert!(state.result.is_none());
+        assert_eq!(
+            state.query_error.as_deref(),
+            Some("relation \"nope\" does not exist")
+        );
+        assert!(dirty);
+    }
+
+    #[test]
+    fn set_result_clears_previous_query_error() {
+        let (mut state, _i, _e, _d) = update(
+            ResultsMessage::QueryError {
+                message: "boom".into(),
+            },
+            ResultsState::default(),
+        );
+        assert!(state.query_error.is_some());
+
+        let (s, _i, _e, _d) = update(
+            ResultsMessage::SetResult {
+                result: sample_result(),
+                paginated: false,
+            },
+            state,
+        );
+        state = s;
+        assert!(state.result.is_some());
+        assert!(state.query_error.is_none(), "success clears the error");
+    }
+
+    #[test]
+    fn clear_result_clears_query_error_too() {
+        let (mut state, _i, _e, _d) = update(
+            ResultsMessage::QueryError {
+                message: "boom".into(),
+            },
+            ResultsState::default(),
+        );
+        assert!(state.query_error.is_some());
+
+        let (s, _i, _e, _d) = update(ResultsMessage::ClearResult, state);
+        state = s;
+        assert!(state.query_error.is_none());
     }
 }

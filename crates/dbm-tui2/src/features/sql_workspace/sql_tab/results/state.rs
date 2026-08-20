@@ -36,6 +36,10 @@ impl From<dbm_core::QueryResult> for QueryResultData {
 pub struct ResultsState {
     /// The last query result (None when no query has run / it failed).
     pub result: Option<QueryResultData>,
+    /// The last query failure message, if the last run query failed. Mirrors the
+    /// original dbm's `query_error`: it is rendered (in red) in the results
+    /// pane instead of the table, and cleared on the next successful result.
+    pub query_error: Option<String>,
     /// Selected cell (row, col) into `result`.
     pub row: usize,
     pub col: usize,
