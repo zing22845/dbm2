@@ -182,10 +182,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             // the draw closure (which returns `()`), then place the terminal
             // hardware cursor accordingly (edtui hides its own in-buffer caret).
             let editor_cursor = std::cell::RefCell::new(None);
+            tracing::debug!("render: begin terminal.draw");
             terminal.draw(|frame| {
                 let c = render(frame, &state);
                 *editor_cursor.borrow_mut() = c;
             })?;
+            tracing::debug!("render: terminal.draw done");
             crate::common::editor::apply_hardware_cursor(editor_cursor.into_inner())?;
             let changed_cells = terminal.backend_mut().last_changed_cells();
             if real_redraw {
@@ -661,6 +663,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         MouseEventKind::Drag(MouseButton::Left) => {
                             if let Some(splitter) = split_drag {
                                 let size = terminal.size()?;
+                                tracing::trace!(?splitter, ?point, "drag move begin");
                                 if let Some((layout, tab_id)) = sql_tab_layout_for_hit(size, &state) {
                                     // The SQL tab body area is the reference frame
                                     // for the detail splitter's zone position.
@@ -669,12 +672,14 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     // position and dispatch a resize message (all
                                     // state changes flow through `update`).
                                     let msg = split_resize_msg(splitter, point, layout, area, tab_id);
+                                    tracing::debug!(?msg, "dispatch resize msg");
                                     let result = process_message_round(
                                         &effect_runner,
                                         &mut action_rx,
                                         msg,
                                         &mut state,
                                     );
+                                    tracing::debug!("resize msg processed");
                                     dirty |= result.dirty;
                                 }
                             }
