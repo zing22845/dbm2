@@ -35,13 +35,16 @@ pub const MIN_SQL_PANE_WIDTH: u16 = 20;
 /// the detail is currently visible. This depends on the tab's focus, detail
 /// width, and the widened history zone, so it cannot be part of the static
 /// [`sql_tab_layout`] — the renderer and the run loop compute it identically.
-/// The fixed width of the History zone when the detail is visible: the base
-/// history (list) width plus the default detail width plus a splitter. This is
-/// held constant while dragging the internal detail/list splitter, which only
-/// re-allocates width between the detail and the list.
-pub fn history_zone_width(layout: &SqlTabLayout) -> u16 {
-    use crate::features::sql_workspace::sql_tab::history::detail::DEFAULT_DETAIL_PANE_WIDTH;
-    layout.history.width + DEFAULT_DETAIL_PANE_WIDTH + 1
+/// The width of the History zone when the detail is visible: the list width
+/// plus the *actual* detail pane width plus a splitter (mirrors the original
+/// dbm's `history_zone_width`). When the detail is hidden it is just the list
+/// width. The zone is what the editor/history splitter (A) controls; dragging
+/// the internal detail/list splitter (B) re-allocates list vs detail within it.
+pub fn history_zone_width(layout: &SqlTabLayout, detail_pane_width: u16) -> u16 {
+    let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
+        detail_pane_width,
+    );
+    layout.history.width + detail_w + 1
 }
 
 /// The left edge of the widened History zone (it extends left of the base
@@ -49,9 +52,9 @@ pub fn history_zone_width(layout: &SqlTabLayout) -> u16 {
 /// minimum width. The zone can never fill more than `area.width - MIN_SQL_PANE_WIDTH`,
 /// otherwise a very wide history pane (set by dragging the editor/history
 /// splitter) would squeeze the editor to zero and hang edtui's wrapped render.
-pub fn history_zone_x(area: Rect, layout: &SqlTabLayout) -> u16 {
+pub fn history_zone_x(area: Rect, layout: &SqlTabLayout, detail_pane_width: u16) -> u16 {
     let max_zone_w = area.width.saturating_sub(MIN_SQL_PANE_WIDTH).max(1);
-    let zone_w = history_zone_width(layout).min(max_zone_w);
+    let zone_w = history_zone_width(layout, detail_pane_width).min(max_zone_w);
     area.x
         .max(layout.history.right().saturating_sub(zone_w))
         .min(area.right().saturating_sub(MIN_SQL_PANE_WIDTH))
@@ -72,7 +75,7 @@ pub fn history_detail_splitter(
     let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
         detail_pane_width,
     );
-    let zone_x = history_zone_x(area, layout);
+    let zone_x = history_zone_x(area, layout, detail_pane_width);
     // The splitter sits at the right edge of the detail, inside the History
     // border (the border is 1 col wide, so the splitter is at
     // zone_x + 1 + detail_w), matching where the renderer draws it.
@@ -185,7 +188,7 @@ impl SqlTabLayout {
         // The editor/history splitter moves to the widened zone's left edge
         // (the editor is shrunk); the internal detail/list splitter sits just
         // right of the detail.
-        let zone_x = history_zone_x(area, self);
+        let zone_x = history_zone_x(area, self, detail_pane_width);
         let editor_history = Rect::new(zone_x.saturating_sub(1), self.v_splitter.y, 1, self.v_splitter.height);
         if hit(editor_history, x, y) {
             return Some(SqlSplitter::EditorHistory);
@@ -243,22 +246,19 @@ mod tests {
     }
 
     #[test]
-    fn history_detail_splitter_keeps_zone_constant() {
-        // The internal detail/list splitter re-allocates width while the total
-        // History zone width stays fixed.
+    fn history_detail_splitter_moves_with_detail_width() {
+        // The internal detail/list splitter (B): a wider detail pushes the
+        // splitter right (the list absorbs the change / the zone grows), while
+        // the list width (history_pane_width) itself is unchanged.
         let area = Rect::new(0, 0, 120, 40);
         let layout = sql_tab_layout(area, 45, 24);
-        let zone_w = history_zone_width(&layout);
-        assert_eq!(zone_w, 24 + 40 + 1); // base history + default detail + splitter
+        // zone = list(24) + detail(40) + splitter.
+        assert_eq!(history_zone_width(&layout, 40), 24 + 40 + 1);
 
-        // With the default detail width (40), the splitter sits at the detail's
-        // right edge inside the border.
-        let s1 = history_detail_splitter(area, &layout, true, 40).unwrap();
-        // A wider detail moves the splitter right (list shrinks); the zone's
-        // left edge is unchanged, so the total zone width stays constant.
-        let s2 = history_detail_splitter(area, &layout, true, 56).unwrap();
-        assert!(s2.x > s1.x, "wider detail must push the splitter right");
-        assert_eq!(history_zone_x(area, &layout), layout.history.x.saturating_sub(zone_w - layout.history.width));
+        // A wider detail widens the zone (zone = list + detail + splitter), so
+        // the editor yields width to the detail while the list stays fixed
+        // (original dbm behavior 2).
+        assert!(history_zone_width(&layout, 56) > history_zone_width(&layout, 40));
 
         // No detail -> no internal splitter.
         assert!(history_detail_splitter(area, &layout, false, 40).is_none());
@@ -273,7 +273,7 @@ mod tests {
         // must resolve to HistoryDetail (not the stale base editor/history
         // splitter), and a click on the relocated editor/history splitter to
         // EditorHistory.
-        let zone_x = history_zone_x(area, &layout);
+        let zone_x = history_zone_x(area, &layout, 40);
         let detail_split = history_detail_splitter(area, &layout, true, 40).unwrap();
         assert_eq!(
             layout.splitter_at_with_detail(area, detail_split.x, detail_split.y, true, 40),

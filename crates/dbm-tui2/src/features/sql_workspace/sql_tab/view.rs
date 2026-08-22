@@ -148,9 +148,16 @@ pub fn sql_workspace_click(
     let editor_hit;
     let history_hit;
     if detail_visible {
-        let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(body, &layout);
-        let zone_w =
-            crate::features::sql_workspace::sql_tab::layout::history_zone_width(&layout).min(body.width);
+        let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(
+            body,
+            &layout,
+            tab.history.detail_pane_width,
+        );
+        let zone_w = crate::features::sql_workspace::sql_tab::layout::history_zone_width(
+            &layout,
+            tab.history.detail_pane_width,
+        )
+        .min(body.width);
         // Editor ends where the detail zone begins (shrunk, like the renderer).
         let shrunk_editor = Rect::new(
             layout.editor.x,
@@ -267,7 +274,11 @@ pub fn render(
     // history pane and drawing a bogus second line.
     let mut editor_history_splitter_x = layout.v_splitter.x;
     let history_zone = if history_detail_visible {
-        let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(area, &layout);
+        let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(
+            area,
+            &layout,
+            tab.history.detail_pane_width,
+        );
         // The zone must leave the editor its minimum width, or a very wide
         // history pane (from the splitter drag) squeezes the editor to zero and
         // hangs edtui's wrapped render.
@@ -275,8 +286,11 @@ pub fn render(
             .width
             .saturating_sub(crate::features::sql_workspace::sql_tab::layout::MIN_SQL_PANE_WIDTH)
             .max(1);
-        let zone_w = crate::features::sql_workspace::sql_tab::layout::history_zone_width(&layout)
-            .min(max_zone_w);
+        let zone_w = crate::features::sql_workspace::sql_tab::layout::history_zone_width(
+            &layout,
+            tab.history.detail_pane_width,
+        )
+        .min(max_zone_w);
         // The splitter sits just left of the widened history zone.
         editor_history_splitter_x = zone_x.saturating_sub(1);
         // Shrink the editor to end where the detail zone begins (minus the

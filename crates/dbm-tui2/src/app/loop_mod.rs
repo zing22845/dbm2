@@ -668,10 +668,19 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     // The SQL tab body area is the reference frame
                                     // for the detail splitter's zone position.
                                     let area = sql_tab_body_for_hit(size, &state).unwrap_or_default();
+                                    let detail_pane_width = state
+                                        .sql
+                                        .sql_tab
+                                        .tabs
+                                        .get(tab_id)
+                                        .map(|t| t.history.detail_pane_width)
+                                        .unwrap_or(40);
                                     // Compute the new split value from the mouse
                                     // position and dispatch a resize message (all
                                     // state changes flow through `update`).
-                                    let msg = split_resize_msg(splitter, point, layout, area, tab_id);
+                                    let msg = split_resize_msg(
+                                        splitter, point, layout, area, detail_pane_width, tab_id,
+                                    );
                                     tracing::debug!(?msg, "dispatch resize msg");
                                     let result = process_message_round(
                                         &effect_runner,
@@ -1038,6 +1047,7 @@ fn split_resize_msg(
     point: ratatui::prelude::Position,
     layout: crate::features::sql_workspace::sql_tab::layout::SqlTabLayout,
     area: Rect,
+    detail_pane_width: u16,
     tab_id: usize,
 ) -> AppMsg {
     use crate::features::sql_workspace::sql_tab::layout::SqlSplitter;
@@ -1065,9 +1075,13 @@ fn split_resize_msg(
             // The detail pane is the LEFT side of the History zone (detail is
             // left of the splitter, the list is right). Its width is the
             // distance from the splitter to the History zone's content left
-            // edge (zone_x + 1 for the border), keeping the total History zone
-            // width constant.
-            let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(area, &layout);
+            // edge (zone_x + 1 for the border). Dragging B changes the detail
+            // width; the list stays fixed until the editor hits its minimum.
+            let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(
+                area,
+                &layout,
+                detail_pane_width,
+            );
             let width = point.x.saturating_sub(zone_x).saturating_sub(1);
             SqlTabMessage::SetHistoryDetailWidth { tab_id, width }
         }

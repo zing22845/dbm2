@@ -187,9 +187,26 @@ pub fn update(
             }
         }
         SqlTabMessage::SetHistoryWidth { tab_id, width } => {
+            // `width` is the total History zone width (from splitter A to the
+            // right edge). When the detail is visible the zone = list + detail +
+            // splitter, and dragging A must keep the detail width fixed and
+            // change the list + editor (original dbm behavior 1). So the stored
+            // list width is `zone - detail - splitter`; without the detail the
+            // list IS the zone.
             if let Some(idx) = state.index_of(tab_id) {
-                let changed = state.tabs[idx].history_pane_width != width;
-                state.tabs[idx].set_history_pane_width(width);
+                let tab = &state.tabs[idx];
+                let (instance, connection) = session_key(&tab.session);
+                let detail_visible = tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History
+                    && tab.history.store.entries(&instance, &connection).first().is_some();
+                let list_w = if detail_visible {
+                    width
+                        .saturating_sub(tab.history.detail_pane_width)
+                        .saturating_sub(1) // splitter
+                } else {
+                    width
+                };
+                let changed = tab.history_pane_width != list_w;
+                state.tabs[idx].set_history_pane_width(list_w);
                 dirty = changed;
             } else {
                 warn_tab_missing(tab_id);
@@ -965,5 +982,55 @@ mod tests {
             Some("SELECT 1"),
             "EnterHistoryRecall must pin the newest entry's detail"
         );
+    }
+
+    #[test]
+    fn set_history_width_with_detail_visible_changes_list_not_detail() {
+        // Behavior 1: dragging splitter A (editor/history) keeps the detail
+        // width fixed and changes the list + editor. The message's `width` is
+        // the whole zone (from A to the right edge); the stored list width must
+        // become `zone - detail - splitter`.
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        s.tabs[0].focus = SqlFocus::History;
+        s.tabs[0].history.detail_pane_width = 40;
+        s.tabs[0].history_pane_width = 24;
+        s.tabs[0]
+            .history
+            .store
+            .record_success("inst", "c1", "SELECT 1");
+
+        // zone = 100, detail = 40, splitter = 1 -> list = 100 - 40 - 1 = 59.
+        let (s, _i, _e, _d) = update(
+            SqlTabMessage::SetHistoryWidth { tab_id, width: 100 },
+            s,
+        );
+        assert_eq!(
+            s.tabs[0].history_pane_width, 59,
+            "with the detail visible, A drags change the list, not the detail"
+        );
+        assert_eq!(
+            s.tabs[0].history.detail_pane_width, 40,
+            "the detail width must not change when dragging splitter A"
+        );
+    }
+
+    #[test]
+    fn set_history_width_without_detail_sets_list_directly() {
+        // When the detail is hidden, the zone is just the list, so A drags set
+        // the list width directly.
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        s.tabs[0].focus = SqlFocus::Editor; // no detail visible
+
+        let (s, _i, _e, _d) = update(
+            SqlTabMessage::SetHistoryWidth { tab_id, width: 80 },
+            s,
+        );
+        assert_eq!(s.tabs[0].history_pane_width, 80);
     }
 }
