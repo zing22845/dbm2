@@ -9,7 +9,7 @@ use super::detail::HistoryDetailState;
 use super::store::SqlHistoryStore;
 
 /// The history feature state (the history list pane + detail preview).
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct HistoryState {
     /// The per-connection SQL history.
     pub store: SqlHistoryStore,
@@ -23,6 +23,24 @@ pub struct HistoryState {
     pub h_scroll: usize,
     /// The detail sub-pane state.
     pub detail: HistoryDetailState,
+    /// Width of the detail preview pane (an extension to the left of the list,
+    /// mirroring the original dbm's `detail_pane_width`).
+    pub detail_pane_width: u16,
+}
+
+impl Default for HistoryState {
+    fn default() -> Self {
+        Self {
+            store: SqlHistoryStore::default(),
+            search: PaneSearch::default(),
+            cursor: 0,
+            v_scroll: 0,
+            h_scroll: 0,
+            detail: HistoryDetailState::default(),
+            // Mirror the original dbm's `detail_pane_width` default.
+            detail_pane_width: super::detail::DEFAULT_DETAIL_PANE_WIDTH,
+        }
+    }
 }
 
 impl HistoryState {

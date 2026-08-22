@@ -247,32 +247,30 @@ pub fn render(
     // splitter can widen the detail, but it is never absent). When not focused
     // we keep the list-only view to save space.
     if history_focused {
-        // Mirroring the original dbm, the focused History pane shows the list
-        // and the detail preview of the selected entry side by side. The detail
-        // takes roughly half the pane (clamped to a usable width); the list
-        // takes the rest. We only split when the pane is wide enough for both,
-        // otherwise the list shows alone. (Detail width is a *share* of the
-        // pane — not the fixed 40px default — so it appears even at the default
-        // 24-col history pane width.)
-        let detail_w = crate::features::sql_workspace::sql_tab::history::detail::MIN_DETAIL_PANE_WIDTH
-            .min(layout.history.width.saturating_sub(12).max(12));
-        if layout.history.width >= detail_w + 8 {
-            let halves = ratatui::layout::Layout::default()
+        // Mirror the original dbm: the focused History pane shows the detail
+        // preview as its OWN pane (width `detail_pane_width`, default 40) to the
+        // LEFT of the list, with a splitter between them. The list takes the
+        // remaining width — i.e. the detail *extends* the history zone and eats
+        // into the list's width, rather than the list being split in half.
+        const SPLITTER_W: u16 = 1;
+        let detail_w =
+            crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
+                tab.history.detail_pane_width,
+            );
+        let list_w = layout
+            .history
+            .width
+            .saturating_sub(detail_w)
+            .saturating_sub(SPLITTER_W);
+        if list_w >= 8 {
+            let body_h = ratatui::layout::Layout::default()
                 .direction(ratatui::layout::Direction::Horizontal)
                 .constraints([
-                    ratatui::layout::Constraint::Min(1),
                     ratatui::layout::Constraint::Length(detail_w),
+                    ratatui::layout::Constraint::Length(SPLITTER_W),
+                    ratatui::layout::Constraint::Length(list_w),
                 ])
                 .split(layout.history);
-            history_view::render(
-                frame,
-                theme,
-                halves[0],
-                &tab.history,
-                &instance,
-                &connection,
-                history_focused,
-            );
             // Prefer the selected entry; fall back to the pinned entry so the
             // detail always reflects something when the pane is focused.
             let detail_sql = tab
@@ -284,7 +282,7 @@ pub fn render(
                 let mut v_bar = Rect::default();
                 crate::features::sql_workspace::sql_tab::history::detail::draw_history_detail(
                     frame,
-                    halves[1],
+                    body_h[0],
                     &sql,
                     &tab.history.detail,
                     &tab.history.search,
@@ -293,7 +291,24 @@ pub fn render(
                     &mut v_bar,
                 );
             }
+            crate::common::view::splitter::draw(
+                frame,
+                body_h[1],
+                crate::common::view::splitter::SplitOrientation::Vertical,
+                false,
+                false,
+            );
+            history_view::render(
+                frame,
+                theme,
+                body_h[2],
+                &tab.history,
+                &instance,
+                &connection,
+                history_focused,
+            );
         } else {
+            // Pane too narrow for the detail; show the list alone.
             history_view::render(
                 frame,
                 theme,
