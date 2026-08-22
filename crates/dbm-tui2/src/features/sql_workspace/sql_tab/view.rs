@@ -213,6 +213,52 @@ pub fn render(
         return None;
     }
 
+    let (instance, connection) = session_view_key(&tab.session);
+    // Mirror the original dbm: the detail preview is shown whenever the History
+    // *pane* is focused (`tab.focus == History`), exactly like the original's
+    // `detail_visible` (gated on `workspace_pane == History`, NOT the editor's
+    // caret/shell focus). So focusing History with `H` pops the detail to the
+    // left of the list immediately. The splitter can widen the detail, but it
+    // is never absent while History is focused.
+    let history_detail_visible = tab.focus == SqlFocus::History
+        && tab.history.store.entries(&instance, &connection).first().is_some();
+
+    // When the detail is visible it extends the history zone to the left,
+    // eating into the editor's width (mirrors original `history_zone_width`).
+    // Compute that zone first so the editor below can be shrunk to make room,
+    // instead of the detail painting over it.
+    const MIN_SQL_PANE_WIDTH: u16 = 20;
+    let mut editor_area = layout.editor;
+    let history_zone = if history_detail_visible {
+        const SPLITTER_W: u16 = 1;
+        let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
+            tab.history.detail_pane_width,
+        );
+        let zone_w = (layout.history.width + detail_w + SPLITTER_W).min(area.width);
+        // Don't let the detail zone push the editor below its minimum width
+        // (mirrors the original dbm's `clamp_history_zone_width`, which keeps
+        // the editor >= MIN_SQL_PANE_WIDTH).
+        let max_zone_x = area.right().saturating_sub(MIN_SQL_PANE_WIDTH);
+        let zone_x = area
+            .x
+            .max(layout.history.right().saturating_sub(zone_w))
+            .min(max_zone_x);
+        // Shrink the editor to end where the detail zone begins (minus the
+        // vertical splitter between editor and history).
+        editor_area = Rect::new(
+            editor_area.x,
+            editor_area.y,
+            zone_x
+                .saturating_sub(editor_area.x)
+                .saturating_sub(layout.v_splitter.width)
+                .max(1),
+            editor_area.height,
+        );
+        Some(Rect::new(zone_x, layout.history.y, zone_w, layout.history.height))
+    } else {
+        None
+    };
+
     // Only the focused editor sub-pane exposes its caret to the shell.
     let db = tab.session.database.as_deref();
     let schema = tab.session.schema.as_deref();
@@ -220,7 +266,7 @@ pub fn render(
         editor_view::render(
             frame,
             theme,
-            layout.editor,
+            editor_area,
             &tab.editor,
             editor_focused,
             tab.complete_table_names,
@@ -231,7 +277,7 @@ pub fn render(
         editor_view::render(
             frame,
             theme,
-            layout.editor,
+            editor_area,
             &tab.editor,
             editor_focused,
             tab.complete_table_names,
@@ -241,32 +287,17 @@ pub fn render(
         None
     };
 
-    let (instance, connection) = session_view_key(&tab.session);
-    // Mirror the original dbm: the detail preview is shown whenever the History
-    // *pane* is focused (`tab.focus == History`), exactly like the original's
-    // `detail_visible` (gated on `workspace_pane == History`, NOT the editor's
-    // caret/shell focus). So focusing History with `H` pops the detail to the
-    // left of the list immediately. The splitter can widen the detail, but it
-    // is never absent while History is focused.
-    let history_detail_visible = tab.focus == SqlFocus::History
-        && tab.history.store.entries(&instance, &connection).first().is_some();
-    if history_detail_visible {
+    if let Some(history_zone) = history_zone {
         // Mirror the original dbm: the detail preview is its OWN pane (width
         // `detail_pane_width`, default 40) to the LEFT of the list, with a
         // splitter between them. The detail *extends* the history zone and eats
-        // into the editor's width to its left. The history zone is widened to
-        // host both (the editor yields the extra room), exactly like the
-        // original dbm's `history_zone_width` — there is no "too narrow, fall
-        // back to list-only" branch; the list simply shrinks (down to zero).
+        // into the editor's width to its left (the editor was shrunk above).
+        // There is no "too narrow, fall back to list-only" branch; the list
+        // simply shrinks (down to zero) to make room for the detail.
         const SPLITTER_W: u16 = 1;
         let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
             tab.history.detail_pane_width,
         );
-        // Widen the history zone to fit detail + splitter, borrowing from the
-        // editor side (extend left to the workspace's left edge if needed).
-        let zone_w = (layout.history.width + detail_w + SPLITTER_W).min(area.width);
-        let zone_x = area.x.max(layout.history.right().saturating_sub(zone_w));
-        let history_zone = Rect::new(zone_x, layout.history.y, zone_w, layout.history.height);
         let body_h = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Horizontal)
             .constraints([
@@ -568,5 +599,42 @@ mod tests {
             sql_workspace_click(&state, area, full.x + full.width - 1, full.y, false),
             Some(SqlClickAction::OpenContextPicker(PickerColumn::Schema))
         );
+    }
+
+    #[test]
+    fn render_shows_history_detail_when_history_focused() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut state = state_with_tabs(1);
+        state.active_tab = Some(0);
+        // Put the tab in History focus (as pressing `H` does).
+        state.tabs[0].focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
+        // Seed one history entry for this connection so there is a detail to show.
+        let (instance, connection) = session_view_key(&state.tabs[0].session);
+        state.tabs[0]
+            .history
+            .store
+            .record_success(&instance, &connection, "SELECT * FROM users");
+        // A typical terminal geometry. `area` is the full SQL workspace region
+        // (render draws its own tab bar at the top), so it must fit exactly.
+        let theme = crate::common::view::theme::dracula();
+        // The detail must render whenever the History *pane* is focused,
+        // independent of shell focus (mirrors original dbm `detail_visible`).
+        for focused in [true, false] {
+            let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+            let area = Rect::new(0, 0, 120, 40);
+            terminal
+                .draw(|frame| {
+                    let _ = render(frame, &theme, area, &state, focused);
+                })
+                .unwrap();
+            let buf = terminal.backend().buffer();
+            let cell_text = buf.content().iter().map(|c| c.symbol()).collect::<String>();
+            assert!(
+                cell_text.contains("SELECT * FROM users"),
+                "detail must render when History pane focused (shell focused={focused}); buffer lacked the SQL"
+            );
+        }
     }
 }
