@@ -2248,7 +2248,7 @@ mod tests {
         // internal detail/list splitter. A panic here would leave the terminal
         // in raw/alternate-screen mode and make it look "unresponsive".
         for detail_w in 24u16..=72 {
-            for history_w in [12u16, 24, 46, 100, 200] {
+            for history_w in [12u16, 24, 46, 84, 100, 200] {
                 let mut state = AppState::default();
                 state.focus = Pane::SQLWorkspace;
                 state.sql.sql_tab.open_connection_tab(
@@ -2266,6 +2266,11 @@ mod tests {
                 tab.history
                     .store
                     .record_success("inst", "c1", "SELECT * FROM users");
+                // Give the editor real SQL content so it is exercised at the
+                // narrow width the widened history zone leaves it.
+                tab.editor = crate::features::sql_workspace::sql_tab::editor::state::EditorState::with_sql(
+                    "SELECT * FROM \"测试表\" WHERE id = 1 AND name ILIKE '%foo%' ORDER BY created_at DESC",
+                );
                 // Wide terminal to match the real app (which can be > 100 cols).
                 let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

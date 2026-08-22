@@ -45,10 +45,13 @@ pub fn history_zone_width(layout: &SqlTabLayout) -> u16 {
 }
 
 /// The left edge of the widened History zone (it extends left of the base
-/// history pane, eating into the editor), clamped so the editor keeps a minimum
-/// width.
+/// history pane, eating into the editor), clamped so the editor always keeps a
+/// minimum width. The zone can never fill more than `area.width - MIN_SQL_PANE_WIDTH`,
+/// otherwise a very wide history pane (set by dragging the editor/history
+/// splitter) would squeeze the editor to zero and hang edtui's wrapped render.
 pub fn history_zone_x(area: Rect, layout: &SqlTabLayout) -> u16 {
-    let zone_w = history_zone_width(layout).min(area.width);
+    let max_zone_w = area.width.saturating_sub(MIN_SQL_PANE_WIDTH).max(1);
+    let zone_w = history_zone_width(layout).min(max_zone_w);
     area.x
         .max(layout.history.right().saturating_sub(zone_w))
         .min(area.right().saturating_sub(MIN_SQL_PANE_WIDTH))

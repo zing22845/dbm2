@@ -95,7 +95,7 @@ pub fn render(
                 Constraint::Min(0),
             ])
             .split(inner);
-        tracing::debug!("history: split done inner={:?} detail={:?} list={:?}", inner, body_h[0], body_h[2]);
+        tracing::debug!("history: split done inner={inner:?} detail={:?} list={:?}", body_h[0], body_h[2]);
         // Detail preview of the selected / pinned / first statement.
         if let Some(sql) = state
             .selected_sql(instance, connection)

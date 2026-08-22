@@ -174,7 +174,6 @@ pub fn render(
         &state.sql_completion,
         cursor.as_ref().map(|c| c.position),
     );
-
     // Editor footer hints from the shared builder (wrapped to the pane width).
     draw_footer(frame, theme, footer_area, &hint);
 
@@ -230,5 +229,37 @@ mod tests {
             context_trigger_rects(area, edtui::EditorMode::Normal, None, None);
         assert!(db_rect.width > 0);
         assert!(full_rect.width > db_rect.width);
+    }
+
+    #[test]
+    fn editor_render_does_not_hang_at_narrow_width() {
+        // Regression: rendering the editor with real SQL at the very narrow
+        // width the widened History zone leaves it used to hang (100% CPU).
+        // A wide history pane (e.g. 84) squeezes the editor; edtui's wrapped
+        // render must still terminate.
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let editor = EditorState::with_sql(
+            "SELECT * FROM \"测试表\" WHERE id = 1 AND name ILIKE '%foo%' ORDER BY created_at DESC",
+        );
+        let theme = crate::common::view::theme::dracula();
+        let mut terminal = Terminal::new(TestBackend::new(60, 40)).unwrap();
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            terminal
+                .draw(|frame| {
+                    let _ = render(
+                        frame,
+                        &theme,
+                        Rect::new(0, 0, 60, 40),
+                        &editor,
+                        false,
+                        true,
+                        None,
+                        None,
+                    );
+                })
+                .unwrap();
+        }));
+        assert!(r.is_ok(), "editor render hung or panicked at a narrow width");
     }
 }

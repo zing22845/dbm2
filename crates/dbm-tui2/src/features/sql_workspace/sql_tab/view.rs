@@ -268,8 +268,15 @@ pub fn render(
     let mut editor_history_splitter_x = layout.v_splitter.x;
     let history_zone = if history_detail_visible {
         let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(area, &layout);
-        let zone_w =
-            crate::features::sql_workspace::sql_tab::layout::history_zone_width(&layout).min(area.width);
+        // The zone must leave the editor its minimum width, or a very wide
+        // history pane (from the splitter drag) squeezes the editor to zero and
+        // hangs edtui's wrapped render.
+        let max_zone_w = area
+            .width
+            .saturating_sub(crate::features::sql_workspace::sql_tab::layout::MIN_SQL_PANE_WIDTH)
+            .max(1);
+        let zone_w = crate::features::sql_workspace::sql_tab::layout::history_zone_width(&layout)
+            .min(max_zone_w);
         // The splitter sits just left of the widened history zone.
         editor_history_splitter_x = zone_x.saturating_sub(1);
         // Shrink the editor to end where the detail zone begins (minus the
@@ -706,5 +713,40 @@ mod tests {
             matches!(action, Some(SqlClickAction::FocusSubPane(SqlFocus::History))),
             "clicking the detail preview must keep focus in History, got {action:?}"
         );
+    }
+
+    #[test]
+    fn sql_tab_render_does_not_hang_with_editor_text_at_history_w84() {
+        // The exact drag-triggered state that used to hang the full app render:
+        // History focused (detail expanded), history pane width 84 (set by the
+        // editor/history splitter drag), and real SQL text in the editor.
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut state = state_with_tabs(1);
+        state.active_tab = Some(0);
+        state.tabs[0].focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
+        state.tabs[0].history_pane_width = 84;
+        state.tabs[0].history.detail_pane_width = 40;
+        state.tabs[0].editor = crate::features::sql_workspace::sql_tab::editor::state::EditorState::with_sql(
+            "SELECT * FROM \"测试表\" WHERE id = 1 AND name ILIKE '%foo%' ORDER BY created_at DESC",
+        );
+        let (instance, connection) = session_view_key(&state.tabs[0].session);
+        state.tabs[0]
+            .history
+            .store
+            .record_success(&instance, &connection, "SELECT * FROM users");
+        let theme = crate::common::view::theme::dracula();
+        // Match the real workspace width (80% of 160 minus the border) so the
+        // editor is actually squeezed by the 84-wide history zone.
+        let area = Rect::new(0, 0, 126, 40);
+        let mut terminal = Terminal::new(TestBackend::new(126, 40)).unwrap();
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            terminal
+                .draw(|frame| {
+                    let _ = render(frame, &theme, area, &state, true);
+                })
+                .unwrap();
+        }));
+        assert!(r.is_ok(), "sql_tab render hung/panicked at history_w=84 with editor text");
     }
 }
