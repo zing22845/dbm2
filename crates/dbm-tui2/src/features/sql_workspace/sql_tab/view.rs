@@ -267,6 +267,12 @@ pub fn render(
     // instead of the detail painting over it.
     const MIN_SQL_PANE_WIDTH: u16 = 20;
     let mut editor_area = layout.editor;
+    // The editor/history vertical splitter position. Normally it is the shared
+    // layout's `v_splitter`, but when the detail is visible the history zone
+    // grows leftward and the editor shrinks, so the splitter must move to the
+    // new editor right edge (history_zone.x - 1) rather than sitting inside the
+    // history pane and drawing a bogus second line.
+    let mut editor_history_splitter_x = layout.v_splitter.x;
     let history_zone = if history_detail_visible {
         const SPLITTER_W: u16 = 1;
         let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
@@ -281,6 +287,8 @@ pub fn render(
             .x
             .max(layout.history.right().saturating_sub(zone_w))
             .min(max_zone_x);
+        // The splitter sits just left of the widened history zone.
+        editor_history_splitter_x = zone_x.saturating_sub(1);
         // Shrink the editor to end where the detail zone begins (minus the
         // vertical splitter between editor and history).
         editor_area = Rect::new(
@@ -355,9 +363,17 @@ pub fn render(
 
     results_view::render(frame, theme, layout.results, &tab.results, results_focused);
 
-    // Draw the two draggable splitter strips.
+    // Draw the two draggable splitter strips. The editor/history splitter is
+    // drawn at the (possibly shifted) editor right edge so it never lands
+    // inside the history pane when the detail is visible.
     draw(frame, layout.h_splitter, SplitOrientation::Horizontal, false, false);
-    draw(frame, layout.v_splitter, SplitOrientation::Vertical, false, false);
+    draw(
+        frame,
+        Rect::new(editor_history_splitter_x, layout.v_splitter.y, layout.v_splitter.width, layout.v_splitter.height),
+        SplitOrientation::Vertical,
+        false,
+        false,
+    );
 
     if editor_focused { cursor } else { None }
 }
