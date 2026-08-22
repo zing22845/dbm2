@@ -95,6 +95,7 @@ pub fn render(
                 Constraint::Min(0),
             ])
             .split(inner);
+        tracing::debug!("history: split done inner={:?} detail={:?} list={:?}", inner, body_h[0], body_h[2]);
         // Detail preview of the selected / pinned / first statement.
         if let Some(sql) = state
             .selected_sql(instance, connection)
@@ -114,6 +115,7 @@ pub fn render(
                 &mut v_bar,
             );
         }
+        tracing::debug!("history: detail drawn");
         draw_splitter(
             frame,
             body_h[1],

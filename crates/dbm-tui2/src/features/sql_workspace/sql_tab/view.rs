@@ -319,6 +319,7 @@ pub fn render(
     // The History feature owns both the list and the detail under a single
     // border; pass the full history zone and let it split internally.
     if let Some(history_zone) = history_zone {
+        tracing::debug!(?history_zone, detail_w = tab.history.detail_pane_width, "render: begin history_view");
         history_view::render(
             frame,
             theme,
@@ -616,11 +617,11 @@ mod tests {
         // A typical terminal geometry. `area` is the full SQL workspace region
         // (render draws its own tab bar at the top), so it must fit exactly.
         let theme = crate::common::view::theme::dracula();
+        let area = Rect::new(0, 0, 120, 40);
         // The detail must render whenever the History *pane* is focused,
         // independent of shell focus (mirrors original dbm `detail_visible`).
         for focused in [true, false] {
             let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
-            let area = Rect::new(0, 0, 120, 40);
             terminal
                 .draw(|frame| {
                     let _ = render(frame, &theme, area, &state, focused);
@@ -632,6 +633,42 @@ mod tests {
                 cell_text.contains("SELECT * FROM users"),
                 "detail must render when History pane focused (shell focused={focused}); buffer lacked the SQL"
             );
+        }
+    }
+
+    #[test]
+    fn render_does_not_panic_at_extreme_split_widths() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let theme = crate::common::view::theme::dracula();
+        let area = Rect::new(0, 0, 120, 40);
+        // After dragging the splitters, detail/history widths can reach their
+        // extremes; the renderer must not panic.
+        for detail_w in [24u16, 40, 72] {
+            for history_w in [12u16, 24, 60] {
+                let mut state = state_with_tabs(1);
+                state.active_tab = Some(0);
+                state.tabs[0].focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
+                state.tabs[0].history_pane_width = history_w;
+                state.tabs[0].history.detail_pane_width = detail_w;
+                let (instance, connection) = session_view_key(&state.tabs[0].session);
+                state.tabs[0]
+                    .history
+                    .store
+                    .record_success(&instance, &connection, "SELECT * FROM users");
+                let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    terminal
+                        .draw(|frame| {
+                            let _ = render(frame, &theme, area, &state, true);
+                        })
+                        .unwrap();
+                }));
+                assert!(
+                    r.is_ok(),
+                    "render panicked at detail_w={detail_w}, history_w={history_w}"
+                );
+            }
         }
     }
 
