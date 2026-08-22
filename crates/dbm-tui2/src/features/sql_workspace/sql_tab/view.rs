@@ -187,6 +187,97 @@ pub fn sql_workspace_click(
 fn contains(r: ratatui::layout::Rect, x: u16, y: u16) -> bool {
     x >= r.x && x < r.x.saturating_add(r.width) && y >= r.y && y < r.y.saturating_add(r.height)
 }
+
+/// Which splitter (if any) a drag starting at `(x, y)` in the SQL tab body
+/// hits, along with the active tab's id. All the History-detail geometry
+/// (the widened zone / relocated editor&history splitters when the detail is
+/// visible) lives here, so the app shell only passes a point and an area and
+/// never touches feature-internal layout math.
+pub fn sql_tab_splitter_at(
+    state: &SqlTabState,
+    area: Rect,
+    x: u16,
+    y: u16,
+) -> Option<(usize, super::layout::SqlSplitter)> {
+    use super::layout::SqlSplitter;
+    let tab = state.active_tab()?;
+    // The body is below the 1-row tab bar.
+    let body = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
+    if body.width == 0 || body.height == 0 {
+        return None;
+    }
+    let layout = super::layout::sql_tab_layout(body, tab.split_ratio, tab.history_pane_width);
+    if layout.editor.width == 0 {
+        return None;
+    }
+    let (instance, connection) = session_view_key(&tab.session);
+    let detail_visible = tab.focus == SqlFocus::History
+        && tab.history.store.entries(&instance, &connection).first().is_some();
+    // When the detail is visible the base layout's editor/history splitter is
+    // stale (the editor is shrunk); hit-test against the relocated splitters.
+    let splitter = if detail_visible {
+        layout.splitter_at_with_detail(
+            body,
+            x,
+            y,
+            true,
+            tab.history.detail_pane_width,
+        )
+    } else {
+        layout.splitter_at(x, y)
+    };
+    // The internal detail/list splitter is only draggable while History has
+    // focus (the detail is only shown then).
+    let splitter = splitter.filter(|s| {
+        !matches!(s, SqlSplitter::HistoryDetail) || tab.focus == SqlFocus::History
+    });
+    Some((tab.session.id, splitter?))
+}
+
+/// Resolve a drag of `splitter` to the new split value at `x` and build the
+/// feature message. The feature computes its own geometry (zone widths, the
+/// detail/list split re-allocation), so the app shell never reasons about
+/// `history_zone_*` or `detail_pane_width`.
+pub fn sql_tab_splitter_resize_msg(
+    state: &SqlTabState,
+    area: Rect,
+    tab_id: usize,
+    splitter: super::layout::SqlSplitter,
+    x: u16,
+    y: u16,
+) -> Option<super::msg::SqlTabMessage> {
+    use super::layout::SqlSplitter;
+    let tab = state.tabs.get(state.index_of(tab_id)?)?;
+    let body = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
+    let layout = super::layout::sql_tab_layout(body, tab.split_ratio, tab.history_pane_width);
+    if layout.editor.width == 0 {
+        return None;
+    }
+    match splitter {
+        SqlSplitter::EditorResults => {
+            let body_top = layout.editor.y;
+            let body_h = layout.results.bottom().saturating_sub(body_top).max(1);
+            let top_h = y.saturating_sub(body_top);
+            let ratio = ((u32::from(top_h) * 100) / u32::from(body_h)).min(99) as u8;
+            Some(super::msg::SqlTabMessage::SetSplitRatio { tab_id, ratio })
+        }
+        SqlSplitter::EditorHistory => {
+            let right_edge = layout.history.right();
+            let width = right_edge.saturating_sub(x);
+            Some(super::msg::SqlTabMessage::SetHistoryWidth { tab_id, width })
+        }
+        SqlSplitter::HistoryDetail => {
+            let zone_x = super::layout::history_zone_x(
+                body,
+                &layout,
+                tab.history.detail_pane_width,
+            );
+            let width = x.saturating_sub(zone_x).saturating_sub(1);
+            Some(super::msg::SqlTabMessage::SetHistoryDetailWidth { tab_id, width })
+        }
+    }
+}
+
 use super::history::view as history_view;
 use super::results::view as results_view;
 
@@ -443,6 +534,64 @@ mod tests {
             sql_workspace_click(&state, area, p.0, p.1, false),
             Some(SqlClickAction::FocusSubPane(SqlFocus::History))
         );
+    }
+
+    #[test]
+    fn splitter_drag_begin_hits_history_detail_when_open() {
+        // The feature resolves a drag point to a splitter. With the detail open
+        // (focus History + an entry), dragging the internal detail/list splitter
+        // must resolve to HistoryDetail (not the stale editor/history splitter).
+        use crate::features::sql_workspace::sql_tab::layout::SqlSplitter;
+        let mut state = state_with_tabs(1);
+        state.active_tab = Some(0);
+        state.tabs[0].focus = SqlFocus::History;
+        let (instance, connection) = session_view_key(&state.tabs[0].session);
+        state.tabs[0]
+            .history
+            .store
+            .record_success(&instance, &connection, "SELECT 1");
+        let area = Rect::new(0, 0, 120, 40);
+        let body = Rect::new(0, 1, 120, 39);
+        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
+        let detail_split = crate::features::sql_workspace::sql_tab::layout::history_detail_splitter(
+            body, &layout, true, state.tabs[0].history.detail_pane_width,
+        )
+        .unwrap();
+        let (tab_id, s) = sql_tab_splitter_at(&state, area, detail_split.x, detail_split.y + 1).unwrap();
+        assert_eq!(tab_id, state.tabs[0].session.id);
+        assert_eq!(s, SqlSplitter::HistoryDetail);
+    }
+
+    #[test]
+    fn splitter_drag_resize_builds_correct_messages() {
+        use crate::features::sql_workspace::sql_tab::layout::SqlSplitter;
+        use crate::features::sql_workspace::sql_tab::msg::SqlTabMessage;
+        let mut state = state_with_tabs(1);
+        state.active_tab = Some(0);
+        let tab_id = state.tabs[0].session.id;
+        let area = Rect::new(0, 0, 120, 40);
+        // Editor/history drag at x=60 -> SetHistoryWidth.
+        let msg = sql_tab_splitter_resize_msg(
+            &state,
+            area,
+            tab_id,
+            SqlSplitter::EditorHistory,
+            60,
+            0,
+        )
+        .unwrap();
+        assert!(matches!(msg, SqlTabMessage::SetHistoryWidth { tab_id: t, .. } if t == tab_id));
+        // Detail drag -> SetHistoryDetailWidth.
+        let msg = sql_tab_splitter_resize_msg(
+            &state,
+            area,
+            tab_id,
+            SqlSplitter::HistoryDetail,
+            80,
+            0,
+        )
+        .unwrap();
+        assert!(matches!(msg, SqlTabMessage::SetHistoryDetailWidth { tab_id: t, .. } if t == tab_id));
     }
 
     #[test]

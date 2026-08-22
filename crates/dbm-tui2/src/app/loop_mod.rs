@@ -119,7 +119,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // interaction state that lives only for the lifetime of a drag gesture; it
     // never reaches `AppState` (TEA: state mutations still flow through
     // `update` via split-resize messages).
-    let mut split_drag: Option<crate::features::sql_workspace::sql_tab::layout::SqlSplitter> = None;
+    let mut split_drag: Option<(usize, crate::features::sql_workspace::sql_tab::layout::SqlSplitter)> = None;
 
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
@@ -624,72 +624,56 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
 
                             // Starting a drag on a SQL-tab splitter begins a
                             // resize gesture (only when the SQL workspace owns
-                            // focus and it is actually rendered).
+                            // focus and it is actually rendered). The feature
+                            // resolves the point to a splitter; the shell only
+                            // supplies the area and the coordinates.
                             if state.focus == Pane::SQLWorkspace
-                                && let Some((layout, tab_id)) =
-                                    sql_tab_layout_for_hit(terminal.size()?, &state)
+                                && let Some(tab_area) = sql_tab_area_for_hit(terminal.size()?, &state)
                             {
-                                use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-                                let size = terminal.size()?;
-                                let (area, detail_visible, detail_w) =
-                                    sql_tab_detail_drag_info(size, &state, tab_id);
-                                // When the detail is visible, the base layout's
-                                // editor/history splitter is stale (the editor is
-                                // shrunk), so hit-test against the relocated
-                                // splitters first; otherwise fall back to the base.
-                                let splitter = if detail_visible {
-                                    layout.splitter_at_with_detail(
-                                        area,
-                                        point.x,
-                                        point.y,
-                                        true,
-                                        detail_w,
-                                    )
-                                } else {
-                                    layout.splitter_at(point.x, point.y)
-                                }
-                                .filter(|s| {
-                                    // The detail splitter is only draggable
-                                    // while History is focused.
-                                    !matches!(s, crate::features::sql_workspace::sql_tab::layout::SqlSplitter::HistoryDetail)
-                                        || state.sql.sql_tab.tabs.get(tab_id).is_some_and(|t| t.focus == SqlFocus::History)
-                                });
-                                if let Some(splitter) = splitter {
-                                    split_drag = Some(splitter);
+                                if let Some((tab_id, splitter)) = crate::features::sql_workspace::sql_tab::view::sql_tab_splitter_at(
+                                    &state.sql.sql_tab,
+                                    tab_area,
+                                    point.x,
+                                    point.y,
+                                ) {
+                                    split_drag = Some((tab_id, splitter));
                                     tracing::debug!(?splitter, "splitter drag started");
                                 }
                             }
                         }
                         MouseEventKind::Drag(MouseButton::Left) => {
-                            if let Some(splitter) = split_drag {
-                                let size = terminal.size()?;
+                            if let Some((tab_id, splitter)) = split_drag {
                                 tracing::trace!(?splitter, ?point, "drag move begin");
-                                if let Some((layout, tab_id)) = sql_tab_layout_for_hit(size, &state) {
-                                    // The SQL tab body area is the reference frame
-                                    // for the detail splitter's zone position.
-                                    let area = sql_tab_body_for_hit(size, &state).unwrap_or_default();
-                                    let detail_pane_width = state
-                                        .sql
-                                        .sql_tab
-                                        .tabs
-                                        .get(tab_id)
-                                        .map(|t| t.history.detail_pane_width)
-                                        .unwrap_or(40);
-                                    // Compute the new split value from the mouse
-                                    // position and dispatch a resize message (all
-                                    // state changes flow through `update`).
-                                    let msg = split_resize_msg(
-                                        splitter, point, layout, area, detail_pane_width, tab_id,
-                                    );
-                                    tracing::debug!(?msg, "dispatch resize msg");
-                                    let result = process_message_round(
-                                        &effect_runner,
-                                        &mut action_rx,
-                                        msg,
-                                        &mut state,
-                                    );
-                                    tracing::debug!("resize msg processed");
-                                    dirty |= result.dirty;
+                                let size = terminal.size()?;
+                                // The feature resolves the drag to a resize
+                                // message; the shell only supplies the area and
+                                // the coordinates.
+                                if let Some(tab_area) = sql_tab_area_for_hit(size, &state) {
+                                    if let Some(msg) = crate::features::sql_workspace::sql_tab::view::sql_tab_splitter_resize_msg(
+                                        &state.sql.sql_tab,
+                                        tab_area,
+                                        tab_id,
+                                        splitter,
+                                        point.x,
+                                        point.y,
+                                    ) {
+                                        let msg = AppMsg::Sql(
+                                            crate::features::sql_workspace::msg::SqlMsg::Message(
+                                                crate::features::sql_workspace::msg::SqlMessage::SqlTab(
+                                                    crate::features::sql_workspace::sql_tab::msg::SqlTabMsg::Message(msg),
+                                                ),
+                                            ),
+                                        );
+                                        tracing::debug!(?msg, "dispatch resize msg");
+                                        let result = process_message_round(
+                                            &effect_runner,
+                                            &mut action_rx,
+                                            msg,
+                                            &mut state,
+                                        );
+                                        tracing::debug!("resize msg processed");
+                                        dirty |= result.dirty;
+                                    }
                                 }
                             }
                         }
@@ -858,81 +842,6 @@ fn perf_exclude_rects(size: ratatui::layout::Size, footer_h: u16) -> Vec<Rect> {
     vec![Rect::new(x, size.height - footer_h, size.width - x, footer_h)]
 }
 
-/// Compute the active SQL tab's body layout for mouse hit-testing, using the
-/// tab's stored split values. Returns the layout and the tab's session id, or
-/// `None` when the SQL workspace is not currently rendered (a modal is open,
-/// the instance workspace is showing, or no tab is active).
-fn sql_tab_layout_for_hit(
-    size: ratatui::layout::Size,
-    state: &AppState,
-) -> Option<(crate::features::sql_workspace::sql_tab::layout::SqlTabLayout, usize)> {
-    use crate::features::sql_workspace::sql_tab::layout::sql_tab_layout;
-
-    if state.modal.is_some()
-        || matches!(state.focus, Pane::Discover(_))
-        || state.instance_workspace_open()
-    {
-        return None;
-    }
-    let tab = state.sql.sql_tab.active_tab()?;
-    let sql_body = sql_tab_body_for_hit(size, state)?;
-    let layout = sql_tab_layout(sql_body, tab.split_ratio, tab.history_pane_width);
-    if layout.editor.width == 0 {
-        return None;
-    }
-    Some((layout, tab.session.id))
-}
-
-/// The SQL tab's body rect (the workspace region below its 1-row tab bar),
-/// mirroring `sql_workspace/view.rs`. Computed from the same geometry as
-/// `sql_tab_area_for_hit` (workspace border + footer + tab bar), so hit-testing
-/// agrees with the renderer. Returns `None` when the SQL workspace is not the
-/// region being shown or the body is too small.
-fn sql_tab_body_for_hit(
-    size: ratatui::layout::Size,
-    state: &AppState,
-) -> Option<ratatui::layout::Rect> {
-    let tab_area = sql_tab_area_for_hit(size, state)?;
-    // The body sits below the 1-row tab bar.
-    if tab_area.height < 2 {
-        return None;
-    }
-    Some(Rect::new(
-        tab_area.x,
-        tab_area.y + 1,
-        tab_area.width,
-        tab_area.height.saturating_sub(1),
-    ))
-}
-
-/// The SQL tab body area plus the current History-detail drag info for the
-/// given tab, used to hit-test the internal detail/list splitter. Mirrors the
-/// renderer's `history_detail_visible` (focus == History + at least one entry)
-/// and the same SQL-tab-body geometry as `sql_tab_layout_for_hit`.
-fn sql_tab_detail_drag_info(
-    size: ratatui::layout::Size,
-    state: &AppState,
-    tab_id: usize,
-) -> (Rect, bool, u16) {
-    use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-    let default = (Rect::default(), false, 0);
-    let Some(tab) = state.sql.sql_tab.tabs.get(tab_id) else {
-        return default;
-    };
-    let detail_visible = tab.focus == SqlFocus::History
-        && tab.history.store.entries(
-            tab.session.instance.as_deref().unwrap_or_default(),
-            tab.session.connection.as_deref().unwrap_or_default(),
-        )
-        .first()
-        .is_some();
-    // The SQL tab body is the workspace region below its tab bar; reuse the
-    // same geometry as `sql_tab_layout_for_hit` so hit-testing agrees with the
-    // renderer.
-    let sql_body = sql_tab_body_for_hit(size, state).unwrap_or_default();
-    (sql_body, detail_visible, tab.history.detail_pane_width)
-}
-
 /// Compute the SQL tab region (tab bar + child panes) for mouse hit-testing,
 /// mirroring `sql_workspace/view.rs` (workspace inner minus its tab footer).
 /// Returns `None` when the SQL workspace is not the region being shown.
@@ -1038,55 +947,6 @@ fn sql_picker_area_for_hit(
         layout.editor,
         true,
     )
-}
-
-/// Build the split-resize message for a drag gesture at `point`, using the
-/// current layout as the reference frame.
-fn split_resize_msg(
-    splitter: crate::features::sql_workspace::sql_tab::layout::SqlSplitter,
-    point: ratatui::prelude::Position,
-    layout: crate::features::sql_workspace::sql_tab::layout::SqlTabLayout,
-    area: Rect,
-    detail_pane_width: u16,
-    tab_id: usize,
-) -> AppMsg {
-    use crate::features::sql_workspace::sql_tab::layout::SqlSplitter;
-    use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
-    use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
-
-    let msg = match splitter {
-        SqlSplitter::EditorResults => {
-            // The splitter's row becomes the top-pane height; express it as a
-            // percent of the body height so the ratio survives terminal resizes.
-            let body_top = layout.editor.y;
-            let body_h = layout.results.bottom().saturating_sub(body_top).max(1);
-            let top_h = point.y.saturating_sub(body_top);
-            let ratio = ((u32::from(top_h) * 100) / u32::from(body_h)).min(99) as u8;
-            SqlTabMessage::SetSplitRatio { tab_id, ratio }
-        }
-        SqlSplitter::EditorHistory => {
-            // The history pane owns the right side; its width is the distance
-            // from the splitter to the right edge of the top row.
-            let right_edge = layout.history.right();
-            let width = right_edge.saturating_sub(point.x);
-            SqlTabMessage::SetHistoryWidth { tab_id, width }
-        }
-        SqlSplitter::HistoryDetail => {
-            // The detail pane is the LEFT side of the History zone (detail is
-            // left of the splitter, the list is right). Its width is the
-            // distance from the splitter to the History zone's content left
-            // edge (zone_x + 1 for the border). Dragging B changes the detail
-            // width; the list stays fixed until the editor hits its minimum.
-            let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(
-                area,
-                &layout,
-                detail_pane_width,
-            );
-            let width = point.x.saturating_sub(zone_x).saturating_sub(1);
-            SqlTabMessage::SetHistoryDetailWidth { tab_id, width }
-        }
-    };
-    AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(msg))))
 }
 
 /// A round triggered by an external message (keyboard/tick). The seed message
