@@ -247,8 +247,16 @@ pub fn render(
     // splitter can widen the detail, but it is never absent). When not focused
     // we keep the list-only view to save space.
     if history_focused {
-        let detail_w = crate::features::sql_workspace::sql_tab::history::detail::DEFAULT_DETAIL_PANE_WIDTH;
-        if layout.history.width > detail_w + 4 {
+        // Mirroring the original dbm, the focused History pane shows the list
+        // and the detail preview of the selected entry side by side. The detail
+        // takes roughly half the pane (clamped to a usable width); the list
+        // takes the rest. We only split when the pane is wide enough for both,
+        // otherwise the list shows alone. (Detail width is a *share* of the
+        // pane — not the fixed 40px default — so it appears even at the default
+        // 24-col history pane width.)
+        let detail_w = crate::features::sql_workspace::sql_tab::history::detail::MIN_DETAIL_PANE_WIDTH
+            .min(layout.history.width.saturating_sub(12).max(12));
+        if layout.history.width >= detail_w + 8 {
             let halves = ratatui::layout::Layout::default()
                 .direction(ratatui::layout::Direction::Horizontal)
                 .constraints([
@@ -265,7 +273,13 @@ pub fn render(
                 &connection,
                 history_focused,
             );
-            if let Some(sql) = tab.history.selected_entry(&instance, &connection) {
+            // Prefer the selected entry; fall back to the pinned entry so the
+            // detail always reflects something when the pane is focused.
+            let detail_sql = tab
+                .history
+                .selected_entry(&instance, &connection)
+                .or_else(|| tab.history.detail.pinned_sql.clone());
+            if let Some(sql) = detail_sql {
                 let mut content = Rect::default();
                 let mut v_bar = Rect::default();
                 crate::features::sql_workspace::sql_tab::history::detail::draw_history_detail(
