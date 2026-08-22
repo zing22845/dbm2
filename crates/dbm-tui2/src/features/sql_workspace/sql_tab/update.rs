@@ -195,6 +195,35 @@ pub fn update(
                 warn_tab_missing(tab_id);
             }
         }
+        SqlTabMessage::SetHistoryDetailWidth { tab_id, width } => {
+            if let Some(idx) = state.index_of(tab_id) {
+                let clamped =
+                    crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
+                        width,
+                    );
+                let changed = state.tabs[idx].history.detail_pane_width != clamped;
+                state.tabs[idx].history.detail_pane_width = clamped;
+                dirty = changed;
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
+        SqlTabMessage::NudgeHistoryDetailWidth { tab_id, nudge } => {
+            if let Some(idx) = state.index_of(tab_id) {
+                let delta =
+                    crate::common::view::splitter::width_delta_for_left_pane(nudge, crate::common::view::splitter::WIDTH_NUDGE_STEP);
+                let next = (state.tabs[idx].history.detail_pane_width as i16 + delta).max(0) as u16;
+                let clamped =
+                    crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
+                        next,
+                    );
+                let changed = state.tabs[idx].history.detail_pane_width != clamped;
+                state.tabs[idx].history.detail_pane_width = clamped;
+                dirty = changed;
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
         SqlTabMessage::NudgeHistoryWidth { tab_id, nudge } => {
             use crate::common::view::splitter::{
                 WIDTH_NUDGE_STEP, width_delta_for_right_pane,

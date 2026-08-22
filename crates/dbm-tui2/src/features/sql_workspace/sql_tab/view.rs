@@ -148,15 +148,9 @@ pub fn sql_workspace_click(
     let editor_hit;
     let history_hit;
     if detail_visible {
-        let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
-            tab.history.detail_pane_width,
-        );
-        const SPLITTER_W: u16 = 1;
-        let zone_w = (layout.history.width + detail_w + SPLITTER_W).min(body.width);
-        let zone_x = body
-            .x
-            .max(layout.history.right().saturating_sub(zone_w))
-            .min(body.right().saturating_sub(20));
+        let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(body, &layout);
+        let zone_w =
+            crate::features::sql_workspace::sql_tab::layout::history_zone_width(&layout).min(body.width);
         // Editor ends where the detail zone begins (shrunk, like the renderer).
         let shrunk_editor = Rect::new(
             layout.editor.x,
@@ -265,7 +259,6 @@ pub fn render(
     // eating into the editor's width (mirrors original `history_zone_width`).
     // Compute that zone first so the editor below can be shrunk to make room,
     // instead of the detail painting over it.
-    const MIN_SQL_PANE_WIDTH: u16 = 20;
     let mut editor_area = layout.editor;
     // The editor/history vertical splitter position. Normally it is the shared
     // layout's `v_splitter`, but when the detail is visible the history zone
@@ -274,19 +267,9 @@ pub fn render(
     // history pane and drawing a bogus second line.
     let mut editor_history_splitter_x = layout.v_splitter.x;
     let history_zone = if history_detail_visible {
-        const SPLITTER_W: u16 = 1;
-        let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
-            tab.history.detail_pane_width,
-        );
-        let zone_w = (layout.history.width + detail_w + SPLITTER_W).min(area.width);
-        // Don't let the detail zone push the editor below its minimum width
-        // (mirrors the original dbm's `clamp_history_zone_width`, which keeps
-        // the editor >= MIN_SQL_PANE_WIDTH).
-        let max_zone_x = area.right().saturating_sub(MIN_SQL_PANE_WIDTH);
-        let zone_x = area
-            .x
-            .max(layout.history.right().saturating_sub(zone_w))
-            .min(max_zone_x);
+        let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(area, &layout);
+        let zone_w =
+            crate::features::sql_workspace::sql_tab::layout::history_zone_width(&layout).min(area.width);
         // The splitter sits just left of the widened history zone.
         editor_history_splitter_x = zone_x.saturating_sub(1);
         // Shrink the editor to end where the detail zone begins (minus the

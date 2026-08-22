@@ -614,22 +614,47 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // resize gesture (only when the SQL workspace owns
                             // focus and it is actually rendered).
                             if state.focus == Pane::SQLWorkspace
-                                && let Some((layout, _tab_id)) =
+                                && let Some((layout, tab_id)) =
                                     sql_tab_layout_for_hit(terminal.size()?, &state)
-                                && let Some(splitter) = layout.splitter_at(point.x, point.y)
                             {
-                                split_drag = Some(splitter);
-                                tracing::debug!(?splitter, "splitter drag started");
+                                use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+                                let size = terminal.size()?;
+                                let (area, detail_visible, detail_w) =
+                                    sql_tab_detail_drag_info(size, &state, tab_id);
+                                let splitter = layout
+                                    .splitter_at(point.x, point.y)
+                                    .or_else(|| {
+                                        layout.splitter_at_with_detail(
+                                            area,
+                                            point.x,
+                                            point.y,
+                                            detail_visible,
+                                            detail_w,
+                                        )
+                                    })
+                                    .filter(|s| {
+                                        // The detail splitter is only draggable
+                                        // while History is focused.
+                                        !matches!(s, crate::features::sql_workspace::sql_tab::layout::SqlSplitter::HistoryDetail)
+                                            || state.sql.sql_tab.tabs.get(tab_id).is_some_and(|t| t.focus == SqlFocus::History)
+                                    });
+                                if let Some(splitter) = splitter {
+                                    split_drag = Some(splitter);
+                                    tracing::debug!(?splitter, "splitter drag started");
+                                }
                             }
                         }
                         MouseEventKind::Drag(MouseButton::Left) => {
                             if let Some(splitter) = split_drag {
                                 let size = terminal.size()?;
                                 if let Some((layout, tab_id)) = sql_tab_layout_for_hit(size, &state) {
+                                    // The SQL tab body area is the reference frame
+                                    // for the detail splitter's zone position.
+                                    let area = sql_tab_body_for_hit(size, &state).unwrap_or_default();
                                     // Compute the new split value from the mouse
                                     // position and dispatch a resize message (all
                                     // state changes flow through `update`).
-                                    let msg = split_resize_msg(splitter, point, layout, tab_id);
+                                    let msg = split_resize_msg(splitter, point, layout, area, tab_id);
                                     let result = process_message_round(
                                         &effect_runner,
                                         &mut action_rx,
@@ -788,6 +813,27 @@ fn sql_tab_layout_for_hit(
         return None;
     }
     let tab = state.sql.sql_tab.active_tab()?;
+    let sql_body = sql_tab_body_for_hit(size, state)?;
+    let layout = sql_tab_layout(sql_body, tab.split_ratio, tab.history_pane_width);
+    if layout.editor.width == 0 {
+        return None;
+    }
+    Some((layout, tab.session.id))
+}
+
+/// The SQL tab's body rect (the workspace region below its 1-row tab bar),
+/// mirroring `sql_workspace/view.rs`. Returns `None` when the SQL workspace is
+/// not the region being shown or the body is too small.
+fn sql_tab_body_for_hit(
+    size: ratatui::layout::Size,
+    state: &AppState,
+) -> Option<ratatui::layout::Rect> {
+    if state.modal.is_some()
+        || matches!(state.focus, Pane::Discover(_))
+        || state.instance_workspace_open()
+    {
+        return None;
+    }
     let footer_h = footer_view::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size.height.saturating_sub(body_top).saturating_sub(footer_h);
@@ -797,18 +843,40 @@ fn sql_tab_layout_for_hit(
     let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
     let workspace_w = size.width.saturating_sub(explorer_w);
     let workspace = Rect::new(explorer_w, body_top, workspace_w, body_h);
-    // The SQL tab's body sits below its 1-row tab bar within the workspace.
-    let sql_body = Rect::new(
+    Some(Rect::new(
         workspace.x,
         workspace.y + 1,
         workspace.width,
         workspace.height.saturating_sub(1),
-    );
-    let layout = sql_tab_layout(sql_body, tab.split_ratio, tab.history_pane_width);
-    if layout.editor.width == 0 {
-        return None;
-    }
-    Some((layout, tab.session.id))
+    ))
+}
+
+/// The SQL tab body area plus the current History-detail drag info for the
+/// given tab, used to hit-test the internal detail/list splitter. Mirrors the
+/// renderer's `history_detail_visible` (focus == History + at least one entry)
+/// and the same SQL-tab-body geometry as `sql_tab_layout_for_hit`.
+fn sql_tab_detail_drag_info(
+    size: ratatui::layout::Size,
+    state: &AppState,
+    tab_id: usize,
+) -> (Rect, bool, u16) {
+    use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+    let default = (Rect::default(), false, 0);
+    let Some(tab) = state.sql.sql_tab.tabs.get(tab_id) else {
+        return default;
+    };
+    let detail_visible = tab.focus == SqlFocus::History
+        && tab.history.store.entries(
+            tab.session.instance.as_deref().unwrap_or_default(),
+            tab.session.connection.as_deref().unwrap_or_default(),
+        )
+        .first()
+        .is_some();
+    // The SQL tab body is the workspace region below its tab bar; reuse the
+    // same geometry as `sql_tab_layout_for_hit` so hit-testing agrees with the
+    // renderer.
+    let sql_body = sql_tab_body_for_hit(size, state).unwrap_or_default();
+    (sql_body, detail_visible, tab.history.detail_pane_width)
 }
 
 /// Compute the SQL tab region (tab bar + child panes) for mouse hit-testing,
@@ -924,6 +992,7 @@ fn split_resize_msg(
     splitter: crate::features::sql_workspace::sql_tab::layout::SqlSplitter,
     point: ratatui::prelude::Position,
     layout: crate::features::sql_workspace::sql_tab::layout::SqlTabLayout,
+    area: Rect,
     tab_id: usize,
 ) -> AppMsg {
     use crate::features::sql_workspace::sql_tab::layout::SqlSplitter;
@@ -946,6 +1015,16 @@ fn split_resize_msg(
             let right_edge = layout.history.right();
             let width = right_edge.saturating_sub(point.x);
             SqlTabMessage::SetHistoryWidth { tab_id, width }
+        }
+        SqlSplitter::HistoryDetail => {
+            // The detail pane is the LEFT side of the History zone (detail is
+            // left of the splitter, the list is right). Its width is the
+            // distance from the splitter to the History zone's content left
+            // edge (zone_x + 1 for the border), keeping the total History zone
+            // width constant.
+            let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(area, &layout);
+            let width = point.x.saturating_sub(zone_x).saturating_sub(1);
+            SqlTabMessage::SetHistoryDetailWidth { tab_id, width }
         }
     };
     AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(msg))))

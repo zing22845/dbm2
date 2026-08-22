@@ -86,6 +86,16 @@ pub enum SqlTabMessage {
     /// Set the history pane width in columns (vertical splitter), e.g. from a
     /// mouse drag on the editor/history splitter.
     SetHistoryWidth { tab_id: usize, width: u16 },
+    /// Set the History detail pane width (dragging the internal detail/list
+    /// splitter). The total History zone width stays constant; only the
+    /// detail-vs-list split re-allocates.
+    SetHistoryDetailWidth { tab_id: usize, width: u16 },
+    /// Nudge the History detail pane width by one keyboard step (`[` shrinks,
+    /// `]` grows — the detail is the LEFT side of the internal splitter).
+    NudgeHistoryDetailWidth {
+        tab_id: usize,
+        nudge: crate::common::view::splitter::VerticalSplitterNudge,
+    },
     /// Nudge the history pane width by one keyboard step (`[` grows, `]`
     /// shrinks — history owns the right side of the editor/history splitter).
     NudgeHistoryWidth {

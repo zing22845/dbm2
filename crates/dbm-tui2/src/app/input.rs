@@ -846,8 +846,11 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         return Some(msg);
     }
 
-    // Vertical-splitter nudges work from any sub-pane: `[` grows the history
-    // pane (it owns the right side of the editor/history split), `]` shrinks it.
+    // Vertical-splitter nudges work from any sub-pane: `[` / `]` resize the
+    // splitter boundary of the focused pane. When the History pane is focused
+    // they resize the internal detail/list splitter (the detail owns the left
+    // side: `]` grows it, `[` shrinks it); otherwise they resize the history
+    // pane (which owns the right side of the editor/history split).
     if !key.modifiers.contains(KeyModifiers::CONTROL) {
         let nudge = match key.code {
             KeyCode::Char('[') => Some(crate::common::view::splitter::VerticalSplitterNudge::Left),
@@ -855,6 +858,11 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
             _ => None,
         };
         if let Some(nudge) = nudge {
+            if tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History {
+                return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::NudgeHistoryDetailWidth { tab_id, nudge }),
+                ))));
+            }
             return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
                 SqlTabMsg::Message(SqlTabMessage::NudgeHistoryWidth { tab_id, nudge }),
             ))));
