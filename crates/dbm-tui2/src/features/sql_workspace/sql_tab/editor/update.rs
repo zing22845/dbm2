@@ -22,7 +22,12 @@ pub fn update(
     let mut dirty = false;
     match msg {
         EditorMessage::KeyEvent { key, tracked_caps_lock } => {
-            dirty = handle_key(&mut state, key, tracked_caps_lock);
+            match handle_key(&mut state, key, tracked_caps_lock) {
+                Ok(changed) => dirty = changed,
+                // Ctrl+R escapes the buffer and opens history recall (mirrors the
+                // original dbm's `ctrl+r` in the SQL editor).
+                Err(intent) => intents.push(intent),
+            }
         }
         EditorMessage::Paste { text } => {
             crate::common::editor::paste_text(&mut state.handler, &mut state.editor, &text);
@@ -162,21 +167,33 @@ fn new_text_char_offset(text: &str, char_count: usize) -> usize {
 /// Forward a normalized key to the edtui editor, then refresh completion if the
 /// buffer changed. Returns whether the editor's rendered state (buffer text or
 /// cursor/completion) changed.
-fn handle_key(state: &mut EditorState, key: KeyEvent, tracked_caps_lock: bool) -> bool {
+fn handle_key(
+    state: &mut EditorState,
+    key: KeyEvent,
+    tracked_caps_lock: bool,
+) -> Result<bool, EditorIntent> {
     use crate::common::editor;
+    // Ctrl+R opens the history recall overlay (mirrors the original dbm's
+    // `ctrl+r` in the SQL editor). It must be intercepted before reaching the
+    // buffer, which has no such binding.
+    if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+        && key.code == crossterm::event::KeyCode::Char('r')
+    {
+        return Err(EditorIntent::HistoryRecall);
+    }
     // In-buffer `/` search takes the key first (active input, `/` to start,
     // `n`/`N` to jump). Consumed keys never reach the buffer.
     if super::sql_search::handle_sql_pane_search_key(&mut state.sql_search, &mut state.editor, key) {
-        return true;
+        return Ok(true);
     }
     // Non-ASCII chars (IME commits) route through insert_text in Insert mode.
     if editor::try_insert_non_ascii_key(&mut state.handler, &mut state.editor, key, tracked_caps_lock)
     {
         refresh_completion(state, false);
-        return true;
+        return Ok(true);
     }
     if !editor::accepts_key_event(&key) {
-        return false;
+        return Ok(false);
     }
     let before = editor::editor_text(&state.editor);
     let before_cursor = state.editor.cursor;
@@ -190,7 +207,7 @@ fn handle_key(state: &mut EditorState, key: KeyEvent, tracked_caps_lock: bool) -
     if changed {
         refresh_completion(state, false);
     }
-    changed
+    Ok(changed)
 }
 
 /// Recompute the completion popup for the current buffer/cursor.
@@ -644,6 +661,32 @@ mod tests {
             "select t.id, t.name",
             "second qualified completion must replace the qualifier, not duplicate it"
         );
+    }
+
+    #[test]
+    fn ctrl_r_opens_history_recall() {
+        // Mirrors the original dbm's `ctrl+r` in the SQL editor: the editor
+        // must intercept Ctrl+R and emit a `HistoryRecall` intent rather than
+        // forwarding it to edtui (which would ignore it).
+        let state = EditorState::with_sql("select 1");
+        let key = KeyEvent {
+            code: KeyCode::Char('r'),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        let (_s, intents, _e, _d) = update(
+            EditorMessage::KeyEvent { key, tracked_caps_lock: false },
+            state.clone(),
+        );
+        assert!(
+            intents
+                .iter()
+                .any(|i| matches!(i, EditorIntent::HistoryRecall)),
+            "ctrl+r must raise a HistoryRecall intent, got: {intents:?}"
+        );
+        // The buffer must be untouched by the recall chord.
+        assert_eq!(editor::editor_text(&EditorState::with_sql("select 1").editor), "select 1");
     }
 }
 

@@ -223,6 +223,19 @@ pub fn update(
                 warn_tab_missing(tab_id);
             }
         }
+        SqlTabMessage::EnterHistoryRecall { tab_id } => {
+            // Mirrors the original dbm's `enter_history_recall_from_sql`:
+            // pin the most recent entry so its detail shows, and move focus
+            // to the History pane so the recall list is interactive.
+            if let Some(idx) = state.index_of(tab_id) {
+                let (instance, connection) = session_key(&state.tabs[idx].session);
+                state.tabs[idx].history.pin_most_recent(&instance, &connection);
+                state.tabs[idx].focus = SqlFocus::History;
+                dirty = true;
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
         SqlTabMessage::RunQueryFromEditor { tab_id, sql } => {
             if let Some(idx) = state.index_of(tab_id) {
                 let session = &state.tabs[idx].session;
@@ -895,6 +908,33 @@ mod tests {
                 .iter()
                 .any(|i| matches!(i, SqlTabIntent::History { intent: HistoryIntent::RecordSuccess { .. }, .. })),
             "a failed query must not record history, got: {intents:?}"
+        );
+    }
+
+    #[test]
+    fn enter_history_recall_pins_and_focuses_history() {
+        // Mirrors the original dbm's `ctrl+r` from the SQL editor: entering
+        // recall pins the newest entry and moves focus to the History pane.
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        // Seed history so there is an entry to pin.
+        s.tabs[0]
+            .history
+            .store
+            .record_success("inst", "c1", "SELECT 1");
+
+        let (s, _i, _e, _d) = update(SqlTabMessage::EnterHistoryRecall { tab_id }, s);
+
+        assert_eq!(
+            s.tabs[0].focus,
+            crate::features::sql_workspace::sql_tab::state::SqlFocus::History,
+            "EnterHistoryRecall must move focus to the History pane"
+        );
+        assert_eq!(
+            s.tabs[0].history.detail.pinned_sql.as_deref(),
+            Some("SELECT 1"),
+            "EnterHistoryRecall must pin the newest entry's detail"
         );
     }
 }

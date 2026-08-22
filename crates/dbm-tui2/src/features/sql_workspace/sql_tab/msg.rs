@@ -20,6 +20,10 @@ pub enum SqlTabMessage {
     ApplyContext { tab_id: usize, database: String, schema: String },
     /// Recall `sql` into the tab's editor (history apply).
     RecallHistory { tab_id: usize, sql: String },
+    /// Enter history recall from the editor (`ctrl+r`): pin the most recent
+    /// entry and move focus to the History pane (mirrors the original dbm's
+    /// `enter_history_recall_from_sql`).
+    EnterHistoryRecall { tab_id: usize },
     /// Set the active tab's sub-pane focus (editor / results / history).
     Focus(SqlFocus),
     /// Run `sql` from the tab's editor (dispatched to results with session context).

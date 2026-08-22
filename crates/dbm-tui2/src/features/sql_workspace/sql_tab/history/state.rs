@@ -38,4 +38,18 @@ impl HistoryState {
         let &idx = visible.get(self.cursor)?;
         entries.get(idx).cloned()
     }
+
+    /// Pin the most recent entry and place the cursor on it, mirroring the
+    /// original dbm's `enter_history_recall_from_sql`: the recall list opens on
+    /// the newest statement with its detail shown.
+    pub fn pin_most_recent(&mut self, instance: &str, connection: &str) {
+        let entries = self.store.entries(instance, connection);
+        let visible = self.visible_indices(instance, connection);
+        if let Some(&first) = visible.first() {
+            self.cursor = 0;
+            if let Some(sql) = entries.get(first) {
+                self.detail.pinned_sql = Some(sql.clone());
+            }
+        }
+    }
 }

@@ -17,6 +17,10 @@ pub enum EditorIntent {
     /// names yet, mirroring the original dbm's `schedule_metadata_refresh`.
     /// `sql_tab` resolves it into a `LoadCompletionCatalog` effect.
     LoadCompletionCatalog,
+    /// Open the history recall overlay from the editor (mirrors the original
+    /// dbm's `ctrl+r` in the SQL editor). Resolved by `sql_tab` into a
+    /// `EnterHistoryRecall` message.
+    HistoryRecall,
 }
 
 impl Intent for EditorIntent {
@@ -26,10 +30,12 @@ impl Intent for EditorIntent {
         match self {
             EditorIntent::ContextPicker(i) => i.into_message().map(Into::into),
             EditorIntent::SqlCompletion(i) => i.into_message().map(Into::into),
-            // Cross-feature: `RunQuery` and `LoadCompletionCatalog` are routed
-            // by `sql_tab` (which owns the connection context); they have no
-            // editor sub-module message.
-            EditorIntent::RunQuery { .. } | EditorIntent::LoadCompletionCatalog => None,
+            // Cross-feature: `RunQuery`, `LoadCompletionCatalog` and
+            // `HistoryRecall` are routed by `sql_tab` (which owns the
+            // connection context); they have no editor sub-module message.
+            EditorIntent::RunQuery { .. }
+            | EditorIntent::LoadCompletionCatalog
+            | EditorIntent::HistoryRecall => None,
         }
     }
 }

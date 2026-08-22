@@ -22,6 +22,9 @@ pub const MAX_DETAIL_PANE_WIDTH: u16 = 72;
 #[derive(Debug, Default, Clone)]
 pub struct HistoryDetailState {
     pub scroll: usize,
+    /// The entry whose detail is pinned open (set when entering recall or
+    /// selecting an entry). Mirrors the original dbm's `detail_pinned`.
+    pub pinned_sql: Option<String>,
 }
 
 pub fn clamp_detail_pane_width(width: u16) -> u16 {
@@ -369,7 +372,10 @@ mod tests {
     #[test]
     fn scroll_on_selection_change_resets_without_filter() {
         let sql = "a\nb\nc";
-        let mut state = HistoryDetailState { scroll: 3 };
+        let mut state = HistoryDetailState {
+            scroll: 3,
+            pinned_sql: None,
+        };
         let search = PaneSearch::default();
         scroll_on_selection_change(&mut state, sql, &search, 40, 2);
         assert_eq!(state.scroll, 0);

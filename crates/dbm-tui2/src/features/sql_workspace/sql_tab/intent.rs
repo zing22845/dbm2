@@ -45,6 +45,12 @@ impl Intent for SqlTabIntent {
                 tab_id,
                 intent: EditorIntent::LoadCompletionCatalog,
             } => Some(SqlTabMsg::Message(SqlTabMessage::ReloadCompletionCatalog { tab_id })),
+            // The editor's `ctrl+r` history recall is resolved by sql_tab into a
+            // dedicated message (pins the entry and moves focus to History).
+            SqlTabIntent::Editor {
+                tab_id,
+                intent: EditorIntent::HistoryRecall,
+            } => Some(SqlTabMsg::Message(SqlTabMessage::EnterHistoryRecall { tab_id })),
             SqlTabIntent::Editor { tab_id, intent } => {
                 // The child editor intent may itself be cross-feature (a
                 // `RunQuery`/`ApplyContext` that was not intercepted above),

@@ -242,15 +242,65 @@ pub fn render(
     };
 
     let (instance, connection) = session_view_key(&tab.session);
-    history_view::render(
-        frame,
-        theme,
-        layout.history,
-        &tab.history,
-        &instance,
-        &connection,
-        history_focused,
-    );
+    // Mirroring the original dbm, the History pane shows both the list and the
+    // detail preview of the selected entry whenever the pane is focused (the
+    // splitter can widen the detail, but it is never absent). When not focused
+    // we keep the list-only view to save space.
+    if history_focused {
+        let detail_w = crate::features::sql_workspace::sql_tab::history::detail::DEFAULT_DETAIL_PANE_WIDTH;
+        if layout.history.width > detail_w + 4 {
+            let halves = ratatui::layout::Layout::default()
+                .direction(ratatui::layout::Direction::Horizontal)
+                .constraints([
+                    ratatui::layout::Constraint::Min(1),
+                    ratatui::layout::Constraint::Length(detail_w),
+                ])
+                .split(layout.history);
+            history_view::render(
+                frame,
+                theme,
+                halves[0],
+                &tab.history,
+                &instance,
+                &connection,
+                history_focused,
+            );
+            if let Some(sql) = tab.history.selected_entry(&instance, &connection) {
+                let mut content = Rect::default();
+                let mut v_bar = Rect::default();
+                crate::features::sql_workspace::sql_tab::history::detail::draw_history_detail(
+                    frame,
+                    halves[1],
+                    &sql,
+                    &tab.history.detail,
+                    &tab.history.search,
+                    theme,
+                    &mut content,
+                    &mut v_bar,
+                );
+            }
+        } else {
+            history_view::render(
+                frame,
+                theme,
+                layout.history,
+                &tab.history,
+                &instance,
+                &connection,
+                history_focused,
+            );
+        }
+    } else {
+        history_view::render(
+            frame,
+            theme,
+            layout.history,
+            &tab.history,
+            &instance,
+            &connection,
+            history_focused,
+        );
+    }
 
     results_view::render(frame, theme, layout.results, &tab.results, results_focused);
 
