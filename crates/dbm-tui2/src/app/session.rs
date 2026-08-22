@@ -53,7 +53,7 @@ fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
                 sql,
                 split_ratio: tab.splitter.split_ratio,
                 history_pane_width: tab.splitter.history_pane_width,
-                detail_pane_width: 32,
+                detail_pane_width: tab.history.splitter.detail_pane_width,
                 database: session.database.clone().unwrap_or_default(),
                 schema: session.schema.clone().unwrap_or_default(),
                 complete_table_names: tab.complete_table_names,
@@ -208,9 +208,11 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
             },
             focus: crate::features::sql_workspace::sql_tab::state::SqlFocus::default(),
             upper_pane: crate::features::sql_workspace::sql_tab::state::SqlFocus::Editor,
-            splitter: crate::features::sql_workspace::sql_tab::splitter::state::SqlTabSplitterState {
-                split_ratio: t.split_ratio,
-                history_pane_width: t.history_pane_width,
+            splitter: {
+                let mut s = crate::features::sql_workspace::sql_tab::splitter::state::SqlTabSplitterState::default();
+                s.set_split_ratio(t.split_ratio);
+                s.set_history_pane_width(t.history_pane_width);
+                s
             },
             complete_table_names: t.complete_table_names,
             editor: {
@@ -223,7 +225,14 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
                 ed
             },
             results: crate::features::sql_workspace::sql_tab::results::state::ResultsState::new(),
-            history: crate::features::sql_workspace::sql_tab::history::state::HistoryState::default(),
+            history: {
+                let mut h =
+                    crate::features::sql_workspace::sql_tab::history::state::HistoryState::default();
+                // Mirror the original dbm: the detail pane width is persisted and
+                // restored (clamped to its allowed range).
+                h.splitter.set_detail_pane_width(t.detail_pane_width);
+                h
+            },
         });
     }
     let tabs = restored;
@@ -952,5 +961,62 @@ mod tests {
             ExplorerPane::Objects,
             "feature sub-pane mirrors the restored focus"
         );
+    }
+
+    #[test]
+    fn restore_keeps_persisted_splitter_widths() {
+        // Mirrors the original dbm's restore_sql_tab_keeps_persisted_pane_widths:
+        // the A (history) and B (detail) splitter widths survive a save/load
+        // round trip, clamped to their allowed ranges.
+        let snap = TuiSessionSnapshot {
+            version: TUI_SESSION_VERSION,
+            focus: "sql_workspace".into(),
+            tree_width: 20,
+            tree: TuiTreeSnapshot {
+                expanded_instances: Vec::new(),
+                cursor: None,
+                active_workspace: None,
+                expanded_objects: Vec::new(),
+                objects_bound_instance: String::new(),
+                objects_bound_connection: String::new(),
+                objects_active_db: None,
+                objects_active_schema: None,
+            },
+            tabs: vec![TuiTabSnapshot {
+                instance: "local".into(),
+                connection: "app".into(),
+                sequence: 0,
+                sql: "select 1".into(),
+                split_ratio: 55,
+                history_pane_width: 60,
+                detail_pane_width: 66,
+                database: "mydb".into(),
+                schema: "public".into(),
+                complete_table_names: false,
+            }],
+            active_tab: Some(0),
+            instance_workspace: None,
+            discover_targets_ratio: 35,
+            explorer_split_ratio: 20,
+            explorer_pane: "instances".into(),
+        };
+        let mut state = sample_state();
+        apply_snapshot(&mut state, &snap);
+        assert_eq!(state.sql.sql_tab.tabs.len(), 1);
+        let tab = &state.sql.sql_tab.tabs[0];
+        assert_eq!(tab.splitter.split_ratio, 55);
+        assert_eq!(tab.splitter.history_pane_width, 60);
+        assert_eq!(tab.history.splitter.detail_pane_width, 66);
+
+        // Out-of-range values are clamped on restore.
+        let snap2 = {
+            let mut s = snap;
+            s.tabs[0].history_pane_width = 9999;
+            s.tabs[0].detail_pane_width = 9999;
+            s
+        };
+        apply_snapshot(&mut state, &snap2);
+        assert!(state.sql.sql_tab.tabs[0].splitter.history_pane_width <= 200);
+        assert!(state.sql.sql_tab.tabs[0].history.splitter.detail_pane_width <= 72);
     }
 }
