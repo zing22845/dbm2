@@ -136,6 +136,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // scan tick) rather than a real event. Such repaints must NOT feed the
     // FPS/waste estimates, so they are tracked separately from `needs_redraw`.
     let mut timed_redraw = false;
+    // Watchdog: if the select loop ever spins (e.g. a select branch becomes
+    // immediately ready), the loop would burn 100% CPU and freeze keyboard
+    // input. Any real event (mouse/key/action) or a redraw resets this counter;
+    // exceeding the threshold forces a sleep to break the spin.
+    let mut idle_iterations = 0u32;
+    const MAX_IDLE_ITERATIONS: u32 = 64;
 
     loop {
         // Whether real work (an event/action) asked for a repaint, captured at
@@ -737,6 +743,22 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     needs_redraw |= result.dirty;
                 }
             }
+        }
+
+        // Watchdog: the select should only return on a real event, a timed wake,
+        // or an async action. If it ever returns with nothing scheduled, it is
+        // spinning (a select branch became immediately ready) — which would burn
+        // 100% CPU and starve keyboard input. Force a short sleep to break the
+        // spin and let a real event (key/mouse) be picked up.
+        if !needs_redraw && !timed_redraw && !state.should_quit {
+            idle_iterations += 1;
+            if idle_iterations >= MAX_IDLE_ITERATIONS {
+                tracing::warn!("event loop spin detected; forcing a sleep to break it");
+                tokio::time::sleep(Duration::from_millis(8)).await;
+                idle_iterations = 0;
+            }
+        } else {
+            idle_iterations = 0;
         }
 
         if state.should_quit {
@@ -2221,7 +2243,7 @@ mod tests {
         // internal detail/list splitter. A panic here would leave the terminal
         // in raw/alternate-screen mode and make it look "unresponsive".
         for detail_w in 24u16..=72 {
-            for history_w in 12u16..=60 {
+            for history_w in [12u16, 24, 46, 100, 200] {
                 let mut state = AppState::default();
                 state.focus = Pane::SQLWorkspace;
                 state.sql.sql_tab.open_connection_tab(
@@ -2239,7 +2261,8 @@ mod tests {
                 tab.history
                     .store
                     .record_success("inst", "c1", "SELECT * FROM users");
-                let mut terminal = Terminal::new(TestBackend::new(100, 50)).unwrap();
+                // Wide terminal to match the real app (which can be > 100 cols).
+                let mut terminal = Terminal::new(TestBackend::new(160, 50)).unwrap();
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     terminal
                         .draw(|frame| {
