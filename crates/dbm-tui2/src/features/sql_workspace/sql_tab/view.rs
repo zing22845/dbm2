@@ -133,9 +133,47 @@ pub fn sql_workspace_click(
             return Some(SqlClickAction::OpenContextPicker(column));
         }
     }
-    let focus = if contains(layout.editor, x, y) {
+    // When the detail is visible it extends the history zone leftward (eating
+    // into the editor). Clicks anywhere in that widened zone — including the
+    // detail preview — must keep focus on History, not fall through to the
+    // editor. Mirror the same zone computation used by the renderer.
+    let (instance, connection) = session_view_key(&tab.session);
+    let detail_visible = tab.focus == SqlFocus::History
+        && tab.history.store.entries(&instance, &connection).first().is_some();
+    // The History feature owns the list AND the detail; when the detail is
+    // visible the history zone widens leftward (eating into the editor). Both
+    // the shrunk editor and the widened history zone must be hit-tested so a
+    // click on the detail keeps focus in History instead of falling to the
+    // editor. Mirror the same geometry the renderer uses.
+    let editor_hit;
+    let history_hit;
+    if detail_visible {
+        let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
+            tab.history.detail_pane_width,
+        );
+        const SPLITTER_W: u16 = 1;
+        let zone_w = (layout.history.width + detail_w + SPLITTER_W).min(body.width);
+        let zone_x = body
+            .x
+            .max(layout.history.right().saturating_sub(zone_w))
+            .min(body.right().saturating_sub(20));
+        // Editor ends where the detail zone begins (shrunk, like the renderer).
+        let shrunk_editor = Rect::new(
+            layout.editor.x,
+            layout.editor.y,
+            zone_x.saturating_sub(layout.editor.x).saturating_sub(layout.v_splitter.width).max(1),
+            layout.editor.height,
+        );
+        let history_zone = Rect::new(zone_x, layout.history.y, zone_w, layout.history.height);
+        editor_hit = contains(shrunk_editor, x, y);
+        history_hit = contains(history_zone, x, y);
+    } else {
+        editor_hit = contains(layout.editor, x, y);
+        history_hit = contains(layout.history, x, y);
+    }
+    let focus = if editor_hit {
         SqlFocus::Editor
-    } else if contains(layout.history, x, y) {
+    } else if history_hit {
         SqlFocus::History
     } else if contains(layout.results, x, y) {
         SqlFocus::Results
@@ -287,61 +325,19 @@ pub fn render(
         None
     };
 
+    // The History feature owns both the list and the detail under a single
+    // border; pass the full history zone and let it split internally.
     if let Some(history_zone) = history_zone {
-        // Mirror the original dbm: the detail preview is its OWN pane (width
-        // `detail_pane_width`, default 40) to the LEFT of the list, with a
-        // splitter between them. The detail *extends* the history zone and eats
-        // into the editor's width to its left (the editor was shrunk above).
-        // There is no "too narrow, fall back to list-only" branch; the list
-        // simply shrinks (down to zero) to make room for the detail.
-        const SPLITTER_W: u16 = 1;
-        let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
-            tab.history.detail_pane_width,
-        );
-        let body_h = ratatui::layout::Layout::default()
-            .direction(ratatui::layout::Direction::Horizontal)
-            .constraints([
-                ratatui::layout::Constraint::Length(detail_w),
-                ratatui::layout::Constraint::Length(SPLITTER_W),
-                ratatui::layout::Constraint::Min(0),
-            ])
-            .split(history_zone);
-        // Prefer the selected entry; fall back to the pinned, then the first
-        // entry, so the detail always reflects the focused/nearest statement.
-        let detail_sql = tab
-            .history
-            .selected_entry(&instance, &connection)
-            .or_else(|| tab.history.detail.pinned_sql.clone())
-            .or_else(|| tab.history.store.entries(&instance, &connection).first().cloned());
-        if let Some(sql) = detail_sql {
-            let mut content = Rect::default();
-            let mut v_bar = Rect::default();
-            crate::features::sql_workspace::sql_tab::history::detail::draw_history_detail(
-                frame,
-                body_h[0],
-                &sql,
-                &tab.history.detail,
-                &tab.history.search,
-                theme,
-                &mut content,
-                &mut v_bar,
-            );
-        }
-        crate::common::view::splitter::draw(
-            frame,
-            body_h[1],
-            crate::common::view::splitter::SplitOrientation::Vertical,
-            false,
-            false,
-        );
         history_view::render(
             frame,
             theme,
-            body_h[2],
+            history_zone,
             &tab.history,
             &instance,
             &connection,
             history_focused,
+            true,
+            tab.history.detail_pane_width,
         );
     } else {
         history_view::render(
@@ -352,6 +348,8 @@ pub fn render(
             &instance,
             &connection,
             history_focused,
+            false,
+            tab.history.detail_pane_width,
         );
     }
 
@@ -636,5 +634,41 @@ mod tests {
                 "detail must render when History pane focused (shell focused={focused}); buffer lacked the SQL"
             );
         }
+    }
+
+    #[test]
+    fn clicking_history_detail_keeps_focus_in_history() {
+        let mut state = state_with_tabs(1);
+        state.active_tab = Some(0);
+        state.tabs[0].focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
+        let (instance, connection) = session_view_key(&state.tabs[0].session);
+        state.tabs[0]
+            .history
+            .store
+            .record_success(&instance, &connection, "SELECT * FROM users");
+
+        let area = Rect::new(0, 0, 120, 40);
+        let body = Rect::new(0, 1, 120, 39);
+        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
+        // The detail zone extends left of `layout.history` (into what would be
+        // the editor region). A click there must focus History, not the editor.
+        let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
+            state.tabs[0].history.detail_pane_width,
+        );
+        let zone_w = (layout.history.width + detail_w + 1).min(body.width);
+        let zone_x = body
+            .x
+            .max(layout.history.right().saturating_sub(zone_w))
+            .min(body.right().saturating_sub(20));
+        let detail_x = zone_x + 2; // inside the detail pane
+        assert!(
+            detail_x < layout.history.x,
+            "detail must sit left of the base history list (test setup)"
+        );
+        let action = sql_workspace_click(&state, area, detail_x, layout.history.y + 2, false);
+        assert!(
+            matches!(action, Some(SqlClickAction::FocusSubPane(SqlFocus::History))),
+            "clicking the detail preview must keep focus in History, got {action:?}"
+        );
     }
 }
