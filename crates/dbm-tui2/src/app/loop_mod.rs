@@ -54,6 +54,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         crossterm::event::EnableMouseCapture,
         crossterm::event::EnableBracketedPaste
     )?;
+    // Restore the terminal even on an early `?` return or a panic so raw mode /
+    // alternate screen never leak out and leave the terminal looking "frozen"
+    // and unresponsive to keys.
+    let _terminal_guard = TerminalGuard;
     // The backend is wrapped in a `CountingBackend` so the redundancy metric
     // can read how many cells each frame actually changed.
     let backend = CountingBackend::new(CrosstermBackend::new(stdout));
@@ -754,6 +758,24 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         crossterm::event::DisableBracketedPaste
     )?;
     Ok(())
+}
+
+/// Restores the terminal on drop so raw mode / alternate screen / mouse capture
+/// are always cleaned up, even if the event loop exits via an error (`?`) or a
+/// panic. Without this, an early return leaves the terminal in raw mode and the
+/// alternate screen, which makes it look frozen and unresponsive to keys.
+struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::event::DisableMouseCapture,
+            crossterm::event::DisableBracketedPaste
+        );
+    }
 }
 
 /// The next instant at which a timed repaint is due, if any. Returns `None`
@@ -2187,5 +2209,49 @@ mod tests {
         assert!(result.dirty, "completion must mark the round dirty");
         assert!(!state.discover.scanning, "scanning must clear on completion");
         assert_eq!(state.discover.scan_progress, None);
+    }
+
+    #[test]
+    fn full_app_render_does_not_panic_at_extreme_history_split_widths() {
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        // Render the whole app (workspace border, footer, sql tab, history) at
+        // the extreme detail/history split widths reachable by dragging the
+        // internal detail/list splitter. A panic here would leave the terminal
+        // in raw/alternate-screen mode and make it look "unresponsive".
+        for detail_w in 24u16..=72 {
+            for history_w in 12u16..=60 {
+                let mut state = AppState::default();
+                state.focus = Pane::SQLWorkspace;
+                state.sql.sql_tab.open_connection_tab(
+                    "inst".into(),
+                    "c1".into(),
+                    "id1".into(),
+                    None,
+                    None,
+                    None,
+                );
+                let tab = &mut state.sql.sql_tab.tabs[0];
+                tab.focus = SqlFocus::History;
+                tab.history_pane_width = history_w;
+                tab.history.detail_pane_width = detail_w;
+                tab.history
+                    .store
+                    .record_success("inst", "c1", "SELECT * FROM users");
+                let mut terminal = Terminal::new(TestBackend::new(100, 50)).unwrap();
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    terminal
+                        .draw(|frame| {
+                            let _ = crate::app::view::render(frame, &state);
+                        })
+                        .unwrap();
+                }));
+                assert!(
+                    r.is_ok(),
+                    "full-app render panicked at detail_w={detail_w}, history_w={history_w}"
+                );
+            }
+        }
     }
 }
