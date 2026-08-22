@@ -31,7 +31,7 @@ use crate::features::sql_workspace::state::SqlState;
 use crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn;
 use crate::features::sql_workspace::sql_tab::editor::context_picker::msg::{ContextPickerMessage, ContextPickerMsg};
 use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
-use crate::features::sql_workspace::sql_tab::editor::sql_completion::msg::{SqlCompletionMessage, SqlCompletionMsg};
+use crate::features::sql_workspace::sql_tab::editor::sql_completion::msg::SqlCompletionMsg;
 use crate::features::sql_workspace::sql_tab::history::msg::{HistoryMessage, HistoryMsg};
 use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
 use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage as SqlResultsMessage, ResultsMsg as SqlResultsMsg};
@@ -803,44 +803,15 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         return sql_context_picker_key(key, tab_id);
     }
 
-    // The completion popup handles selection/apply/close when open. Only the
-    // arrow keys move the selection (matching the original dbm's handle_popup_key);
-    // `j`/`k` fall through so they can be typed into the buffer.
-    if editor.sql_completion.is_open() {
-        match key.code {
-            KeyCode::Up if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
-                    SqlCompletionMessage::MoveSelection { delta: -1 },
-                )), tab_id));
-            }
-            KeyCode::Down if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
-                    SqlCompletionMessage::MoveSelection { delta: 1 },
-                )), tab_id));
-            }
-            // A bare Enter applies the highlighted completion; Alt+Enter (or
-            // any modified Enter) is NOT consumed here so it falls through to
-            // the editor's run-SQL accelerator below.
-            KeyCode::Enter if key.modifiers.is_empty() => {
-                return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
-                    SqlCompletionMessage::Apply,
-                )), tab_id));
-            }
-            // A bare Tab applies the highlighted completion too (matching the
-            // original dbm's `handle_popup_key`) instead of inserting a tab
-            // character into the buffer.
-            KeyCode::Tab if key.modifiers.is_empty() => {
-                return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
-                    SqlCompletionMessage::Apply,
-                )), tab_id));
-            }
-            KeyCode::Esc => {
-                return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
-                    SqlCompletionMessage::Close,
-                )), tab_id));
-            }
-            _ => {}
-        }
+    // The completion popup handles selection/apply/close when open. The key
+    // mapping lives in the `sql_completion` feature (`key_to_msg`); the shell
+    // only checks whether the popup is open and forwards a matching key.
+    if editor.sql_completion.is_open()
+        && let Some(msg) = crate::features::sql_workspace::sql_tab::editor::sql_completion::view::key_to_msg(key)
+    {
+        return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
+            msg,
+        )), tab_id));
     }
 
     // Tab-bar / tab management keys (only when the popups are closed).
@@ -1394,6 +1365,7 @@ mod tests {
     fn arrow_keys_with_completion_open_move_selection() {
         // The arrow keys still move the completion selection when it is open.
         use crate::common::utils::cursor::Cursor;
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::msg::SqlCompletionMessage;
         use crate::features::sql_workspace::sql_tab::editor::sql_completion::state::SqlCompletionState;
         use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::CompletionItem;
         use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::CompletionKind;
@@ -1514,6 +1486,7 @@ mod tests {
         // When the completion popup is open, a bare Tab applies the highlighted
         // completion (matching the original dbm's `handle_popup_key`) instead
         // of inserting a tab character into the buffer.
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::msg::SqlCompletionMessage;
         let mut state = state_with_tabs(1);
         state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
         state.sql_tab.tabs[0].editor.sql_completion = {
