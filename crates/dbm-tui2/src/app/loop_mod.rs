@@ -1571,6 +1571,28 @@ fn sql_action_to_msg(action: crate::features::sql_workspace::effect::SqlAction) 
                 ),
             }))
         }
+        SA::SqlTab(STA::History { tab_id, action }) => {
+            use crate::features::sql_workspace::sql_tab::history::effect::HistoryAction as HA;
+            use crate::features::sql_workspace::sql_tab::history::store::SqlHistoryStore;
+            match action {
+                HA::HistoryLoaded {
+                    instance,
+                    connection,
+                    entries,
+                } => {
+                    let mut store = SqlHistoryStore::default();
+                    if !entries.is_empty() {
+                        let mut map = std::collections::HashMap::new();
+                        map.insert((instance, connection), entries);
+                        store = SqlHistoryStore::from_map(map);
+                    }
+                    SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::SetHistoryStore {
+                        tab_id,
+                        store,
+                    }))
+                }
+            }
+        }
     }
 }
 
@@ -2052,6 +2074,27 @@ mod tests {
             msg,
             ResultsMsg::Message(ResultsMessage::QueryError { message }) if message == "boom"
         ));
+    }
+
+    #[test]
+    fn sql_history_loaded_routes_to_set_history_store() {
+        use crate::features::sql_workspace::sql_tab::history::effect::HistoryAction;
+        let action = SqlAction::SqlTab(SqlTabAction::History {
+            tab_id: 7,
+            action: HistoryAction::HistoryLoaded {
+                instance: "inst".into(),
+                connection: "c1".into(),
+                entries: vec!["SELECT 1".into(), "SELECT 2".into()],
+            },
+        });
+        let SqlMessage::SqlTab(SqlTabMsg::Message(
+            SqlTabMessage::SetHistoryStore { tab_id, store },
+        )) = sql_action_to_msg(action)
+        else {
+            panic!("expected SetHistoryStore route");
+        };
+        assert_eq!(tab_id, 7);
+        assert_eq!(store.entries("inst", "c1"), &["SELECT 1", "SELECT 2"]);
     }
 
     #[test]

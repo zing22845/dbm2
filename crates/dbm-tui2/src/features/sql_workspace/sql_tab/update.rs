@@ -146,10 +146,19 @@ pub fn update(
                 effects.push(SqlTabEffect::Editor {
                     tab_id,
                     effect: editor::effect::EditorEffect::LoadCompletionCatalog {
-                        instance,
-                        connection,
+                        instance: instance.clone(),
+                        connection: connection.clone(),
                         database,
                         schema: schema_name,
+                    },
+                });
+                // Seed the newly created tab with this connection's persisted
+                // SQL history (mirrors the original dbm's per-connection history).
+                effects.push(SqlTabEffect::History {
+                    tab_id,
+                    effect: history::effect::HistoryEffect::LoadHistory {
+                        instance,
+                        connection,
                     },
                 });
             }
@@ -208,6 +217,14 @@ pub fn update(
                 let changed = tab.splitter.history_pane_width != list_w;
                 state.tabs[idx].set_history_pane_width(list_w);
                 dirty = changed;
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
+        SqlTabMessage::SetHistoryStore { tab_id, store } => {
+            if let Some(idx) = state.index_of(tab_id) {
+                state.tabs[idx].history.store = store;
+                dirty = true;
             } else {
                 warn_tab_missing(tab_id);
             }

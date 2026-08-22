@@ -23,10 +23,25 @@ use crate::app_shell::pane::{Pane, pane_from_name, pane_name};
 /// were restored expanded (their connections are loaded lazily). Returns an
 /// empty vec when no compatible snapshot exists (fresh start).
 pub fn restore_session(state: &mut AppState) -> anyhow::Result<Vec<Box<dyn ErasedEffect<Action>>>> {
-    let Some(snapshot) = load_tui_session()? else {
-        return Ok(Vec::new());
+    // Load the persisted SQL history once at startup and seed it into every
+    // restored tab, mirroring the original dbm's `load_sql_history` (the store
+    // groups by `(instance, connection)`, so each tab sees the history for any
+    // connection it later binds to).
+    let loaded = dbm_store::Store::open_default().ok().and_then(|store| {
+        store.load_sql_history().ok()
+    });
+    let effects = if let Some(snapshot) = load_tui_session()? {
+        apply_snapshot(state, &snapshot)
+    } else {
+        Vec::new()
     };
-    Ok(apply_snapshot(state, &snapshot))
+    if let Some(map) = loaded {
+        for tab in &mut state.sql.sql_tab.tabs {
+            tab.history.store =
+                crate::features::sql_workspace::sql_tab::history::store::SqlHistoryStore::from_map(map.clone());
+        }
+    }
+    Ok(effects)
 }
 
 /// Persist the current session. Best-effort: a failure to write is surfaced to

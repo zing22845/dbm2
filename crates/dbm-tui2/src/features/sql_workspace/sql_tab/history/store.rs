@@ -22,7 +22,7 @@ pub fn history_no_matches_hint() -> &'static str {
 }
 
 /// In-memory SQL history keyed by `(instance, connection)`, newest first.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SqlHistoryStore {
     by_connection: HashMap<(String, String), Vec<String>>,
 }

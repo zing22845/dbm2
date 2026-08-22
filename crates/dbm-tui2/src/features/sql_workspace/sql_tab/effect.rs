@@ -3,7 +3,7 @@
 use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
 use crate::common::service::services::Services;
 use super::editor::effect::{EditorAction, EditorEffect};
-use super::history::effect::HistoryEffect;
+use super::history::effect::{HistoryAction, HistoryEffect};
 use super::results::effect::{ResultsAction, ResultsEffect};
 
 /// Actions produced by `sql_tab` effects. Each carries the `tab_id` of the tab
@@ -15,6 +15,8 @@ pub enum SqlTabAction {
     Editor { tab_id: usize, action: EditorAction },
     /// A results action from the tab with `tab_id`.
     Results { tab_id: usize, action: ResultsAction },
+    /// A history action from the tab with `tab_id`.
+    History { tab_id: usize, action: HistoryAction },
 }
 
 // Streaming emission from a child editor effect carries no tab context (the
@@ -30,6 +32,12 @@ impl From<EditorAction> for SqlTabAction {
 impl From<ResultsAction> for SqlTabAction {
     fn from(action: ResultsAction) -> Self {
         SqlTabAction::Results { tab_id: 0, action }
+    }
+}
+
+impl From<HistoryAction> for SqlTabAction {
+    fn from(action: HistoryAction) -> Self {
+        SqlTabAction::History { tab_id: 0, action }
     }
 }
 
@@ -69,7 +77,15 @@ impl Effect for SqlTabEffect {
                         .map(|a| SqlTabAction::Results { tab_id, action: a })
                         .collect()
                 }
-                SqlTabEffect::History { .. } => Vec::new(),
+                SqlTabEffect::History { tab_id, effect } => {
+                    let emit = emit.map::<HistoryAction>();
+                    effect
+                        .run(emit, services)
+                        .await
+                        .into_iter()
+                        .map(|a| SqlTabAction::History { tab_id, action: a })
+                        .collect()
+                }
             }
         })
     }

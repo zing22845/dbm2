@@ -29,10 +29,18 @@ pub fn update(
     detail_viewport: usize,
 ) -> (HistoryState, Vec<HistoryIntent>, Vec<HistoryEffect>, bool) {
     let mut intents = Vec::new();
+    let mut effects = Vec::new();
 
     let dirty = match msg {
         HistoryMessage::RecordSuccess { instance, connection, sql } => {
             state.store.record_success(&instance, &connection, &sql);
+            // Persist to the SQLite store (mirrors the original dbm). The
+            // in-memory store is already updated above; this is fire-and-forget.
+            effects.push(HistoryEffect::PersistSuccess {
+                instance,
+                connection,
+                sql,
+            });
             true
         }
         HistoryMessage::MoveCursor { delta } => {
@@ -68,7 +76,7 @@ pub fn update(
         }
     };
 
-    (state, intents, Vec::new(), dirty)
+    (state, intents, effects, dirty)
 }
 
 /// Move the list cursor, clamping to the filtered entries, and reconcile the
