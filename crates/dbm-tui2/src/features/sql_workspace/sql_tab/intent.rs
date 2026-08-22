@@ -63,6 +63,13 @@ impl Intent for SqlTabIntent {
                 tab_id,
                 intent: HistoryIntent::Recall { sql },
             } => Some(SqlTabMsg::Message(SqlTabMessage::RecallHistory { tab_id, sql })),
+            // Any other history intent (e.g. `RecordSuccess`) is a plain
+            // sub-module message, routed back to the same tab.
+            SqlTabIntent::History { tab_id, intent } => {
+                intent.into_message().map(|msg| {
+                    SqlTabMsg::Message(SqlTabMessage::History { tab_id, msg })
+                })
+            }
         }
     }
 }

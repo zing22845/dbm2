@@ -459,6 +459,23 @@ pub fn update(
         SqlTabMessage::Results { tab_id, msg } => {
             let results::msg::ResultsMsg::Message(inner) = msg;
             if let Some(idx) = state.index_of(tab_id) {
+                // A successful result landing mirrors the original dbm's
+                // "record on success": log the executed statement in the tab's
+                // SQL history (deduped, newest first). The connection context
+                // and query text were stored by the preceding `RunQuery`.
+                if matches!(&inner, results::msg::ResultsMessage::SetResult { .. }) {
+                    let rs = &state.tabs[idx].results;
+                    if !rs.last_sql.is_empty() {
+                        intents.push(SqlTabIntent::History {
+                            tab_id,
+                            intent: history::intent::HistoryIntent::RecordSuccess {
+                                instance: rs.last_instance.clone(),
+                                connection: rs.last_connection.clone(),
+                                sql: rs.last_sql.clone(),
+                            },
+                        });
+                    }
+                }
                 let results_state = std::mem::take(&mut state.tabs[idx].results);
                 let (s, i, e, d) = results::update::update(inner, results_state);
                 state.tabs[idx].results = s;
@@ -810,6 +827,74 @@ mod tests {
         assert!(
             !s.tabs[0].editor.context_picker.open,
             "switching connections closes a leftover picker"
+        );
+    }
+
+    #[test]
+    fn set_result_records_sql_history() {
+        use super::super::results::msg::{ResultsMessage, ResultsMsg};
+        use super::super::results::state::QueryResultData;
+        use super::history::intent::HistoryIntent;
+
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        // Simulate the connection context stored by the preceding `RunQuery`.
+        s.tabs[0].results.last_instance = "inst".into();
+        s.tabs[0].results.last_connection = "c1".into();
+        s.tabs[0].results.last_sql = "SELECT 1".into();
+
+        let (_s, intents, _e, _dirty) = update(
+            SqlTabMessage::Results {
+                tab_id,
+                msg: ResultsMsg::Message(ResultsMessage::SetResult {
+                    result: QueryResultData {
+                        columns: vec![],
+                        rows: vec![vec!["1".into()]],
+                        rows_affected: None,
+                        total_rows: None,
+                    },
+                    paginated: false,
+                }),
+            },
+            s,
+        );
+
+        assert!(
+            intents.iter().any(|i| matches!(
+                i,
+                SqlTabIntent::History { tab_id: t, intent: HistoryIntent::RecordSuccess { instance, connection, sql } }
+                    if *t == tab_id && instance == "inst" && connection == "c1" && sql == "SELECT 1"
+            )),
+            "SetResult must emit a RecordSuccess history intent, got: {intents:?}"
+        );
+    }
+
+    #[test]
+    fn query_error_does_not_record_history() {
+        use super::super::results::msg::{ResultsMessage, ResultsMsg};
+        use super::history::intent::HistoryIntent;
+
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        s.tabs[0].results.last_sql = "SELECT 1".into();
+
+        let (_s, intents, _e, _dirty) = update(
+            SqlTabMessage::Results {
+                tab_id,
+                msg: ResultsMsg::Message(ResultsMessage::QueryError {
+                    message: "boom".into(),
+                }),
+            },
+            s,
+        );
+
+        assert!(
+            !intents
+                .iter()
+                .any(|i| matches!(i, SqlTabIntent::History { intent: HistoryIntent::RecordSuccess { .. }, .. })),
+            "a failed query must not record history, got: {intents:?}"
         );
     }
 }
