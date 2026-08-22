@@ -621,23 +621,27 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 let size = terminal.size()?;
                                 let (area, detail_visible, detail_w) =
                                     sql_tab_detail_drag_info(size, &state, tab_id);
-                                let splitter = layout
-                                    .splitter_at(point.x, point.y)
-                                    .or_else(|| {
-                                        layout.splitter_at_with_detail(
-                                            area,
-                                            point.x,
-                                            point.y,
-                                            detail_visible,
-                                            detail_w,
-                                        )
-                                    })
-                                    .filter(|s| {
-                                        // The detail splitter is only draggable
-                                        // while History is focused.
-                                        !matches!(s, crate::features::sql_workspace::sql_tab::layout::SqlSplitter::HistoryDetail)
-                                            || state.sql.sql_tab.tabs.get(tab_id).is_some_and(|t| t.focus == SqlFocus::History)
-                                    });
+                                // When the detail is visible, the base layout's
+                                // editor/history splitter is stale (the editor is
+                                // shrunk), so hit-test against the relocated
+                                // splitters first; otherwise fall back to the base.
+                                let splitter = if detail_visible {
+                                    layout.splitter_at_with_detail(
+                                        area,
+                                        point.x,
+                                        point.y,
+                                        true,
+                                        detail_w,
+                                    )
+                                } else {
+                                    layout.splitter_at(point.x, point.y)
+                                }
+                                .filter(|s| {
+                                    // The detail splitter is only draggable
+                                    // while History is focused.
+                                    !matches!(s, crate::features::sql_workspace::sql_tab::layout::SqlSplitter::HistoryDetail)
+                                        || state.sql.sql_tab.tabs.get(tab_id).is_some_and(|t| t.focus == SqlFocus::History)
+                                });
                                 if let Some(splitter) = splitter {
                                     split_drag = Some(splitter);
                                     tracing::debug!(?splitter, "splitter drag started");
