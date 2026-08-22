@@ -826,32 +826,24 @@ fn sql_tab_layout_for_hit(
 }
 
 /// The SQL tab's body rect (the workspace region below its 1-row tab bar),
-/// mirroring `sql_workspace/view.rs`. Returns `None` when the SQL workspace is
-/// not the region being shown or the body is too small.
+/// mirroring `sql_workspace/view.rs`. Computed from the same geometry as
+/// `sql_tab_area_for_hit` (workspace border + footer + tab bar), so hit-testing
+/// agrees with the renderer. Returns `None` when the SQL workspace is not the
+/// region being shown or the body is too small.
 fn sql_tab_body_for_hit(
     size: ratatui::layout::Size,
     state: &AppState,
 ) -> Option<ratatui::layout::Rect> {
-    if state.modal.is_some()
-        || matches!(state.focus, Pane::Discover(_))
-        || state.instance_workspace_open()
-    {
+    let tab_area = sql_tab_area_for_hit(size, state)?;
+    // The body sits below the 1-row tab bar.
+    if tab_area.height < 2 {
         return None;
     }
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
-    let body_top = 3u16;
-    let body_h = size.height.saturating_sub(body_top).saturating_sub(footer_h);
-    if body_h < 3 {
-        return None;
-    }
-    let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
-    let workspace_w = size.width.saturating_sub(explorer_w);
-    let workspace = Rect::new(explorer_w, body_top, workspace_w, body_h);
     Some(Rect::new(
-        workspace.x,
-        workspace.y + 1,
-        workspace.width,
-        workspace.height.saturating_sub(1),
+        tab_area.x,
+        tab_area.y + 1,
+        tab_area.width,
+        tab_area.height.saturating_sub(1),
     ))
 }
 
