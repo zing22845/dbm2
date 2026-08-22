@@ -658,6 +658,23 @@ mod tests {
     }
 
     #[test]
+    fn detail_expansion_eats_editor_not_list() {
+        // Behavior 3: focusing History (detail open) keeps the list width fixed
+        // and eats the editor width. Behavior 2: widening the detail shrinks the
+        // editor (list unchanged) until the editor hits its minimum.
+        use crate::features::sql_workspace::sql_tab::layout::{history_zone_width, sql_tab_layout};
+        let area = Rect::new(0, 0, 120, 40);
+        let layout = sql_tab_layout(area, 45, 30); // list = 30
+
+        // Detail at 40 -> zone = list(30) + 40 + 1 = 71 (list unchanged, editor
+        // yields). Widening to 56 grows the zone further — the list width
+        // (layout.history.width) is untouched; the editor absorbs the growth.
+        assert_eq!(history_zone_width(&layout, 40), 30 + 40 + 1);
+        assert_eq!(history_zone_width(&layout, 56), 30 + 56 + 1);
+        assert_eq!(layout.history.width, 30, "the list width must not change");
+    }
+
+    #[test]
     fn render_does_not_panic_at_extreme_split_widths() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
