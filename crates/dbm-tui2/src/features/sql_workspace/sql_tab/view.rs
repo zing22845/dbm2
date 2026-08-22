@@ -10,7 +10,7 @@ use crate::common::view::splitter::{SplitOrientation, draw};
 use crate::common::view::theme::Theme;
 
 use super::layout::sql_tab_layout;
-use super::session::TabSession;
+use super::session::{TabSession, session_view_key};
 use super::state::{SqlFocus, SqlTabState};
 use super::editor::view as editor_view;
 
@@ -80,7 +80,7 @@ pub fn sql_workspace_click(
     if body.width == 0 || body.height == 0 {
         return None;
     }
-    let layout = sql_tab_layout(body, tab.split_ratio, tab.history_pane_width);
+    let layout = sql_tab_layout(body, tab.splitter.split_ratio, tab.splitter.history_pane_width);
     if layout.editor.width == 0 {
         return None;
     }
@@ -148,14 +148,14 @@ pub fn sql_workspace_click(
     let editor_hit;
     let history_hit;
     if detail_visible {
-        let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(
+        let zone_x = super::history::splitter::view::history_zone_x(
             body,
             &layout,
-            tab.history.detail_pane_width,
+            tab.history.splitter.detail_pane_width,
         );
-        let zone_w = crate::features::sql_workspace::sql_tab::layout::history_zone_width(
+        let zone_w = super::history::splitter::view::history_zone_width(
             &layout,
-            tab.history.detail_pane_width,
+            tab.history.splitter.detail_pane_width,
         )
         .min(body.width);
         // Editor ends where the detail zone begins (shrunk, like the renderer).
@@ -186,96 +186,6 @@ pub fn sql_workspace_click(
 
 fn contains(r: ratatui::layout::Rect, x: u16, y: u16) -> bool {
     x >= r.x && x < r.x.saturating_add(r.width) && y >= r.y && y < r.y.saturating_add(r.height)
-}
-
-/// Which splitter (if any) a drag starting at `(x, y)` in the SQL tab body
-/// hits, along with the active tab's id. All the History-detail geometry
-/// (the widened zone / relocated editor&history splitters when the detail is
-/// visible) lives here, so the app shell only passes a point and an area and
-/// never touches feature-internal layout math.
-pub fn sql_tab_splitter_at(
-    state: &SqlTabState,
-    area: Rect,
-    x: u16,
-    y: u16,
-) -> Option<(usize, super::layout::SqlSplitter)> {
-    use super::layout::SqlSplitter;
-    let tab = state.active_tab()?;
-    // The body is below the 1-row tab bar.
-    let body = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
-    if body.width == 0 || body.height == 0 {
-        return None;
-    }
-    let layout = super::layout::sql_tab_layout(body, tab.split_ratio, tab.history_pane_width);
-    if layout.editor.width == 0 {
-        return None;
-    }
-    let (instance, connection) = session_view_key(&tab.session);
-    let detail_visible = tab.focus == SqlFocus::History
-        && tab.history.store.entries(&instance, &connection).first().is_some();
-    // When the detail is visible the base layout's editor/history splitter is
-    // stale (the editor is shrunk); hit-test against the relocated splitters.
-    let splitter = if detail_visible {
-        layout.splitter_at_with_detail(
-            body,
-            x,
-            y,
-            true,
-            tab.history.detail_pane_width,
-        )
-    } else {
-        layout.splitter_at(x, y)
-    };
-    // The internal detail/list splitter is only draggable while History has
-    // focus (the detail is only shown then).
-    let splitter = splitter.filter(|s| {
-        !matches!(s, SqlSplitter::HistoryDetail) || tab.focus == SqlFocus::History
-    });
-    Some((tab.session.id, splitter?))
-}
-
-/// Resolve a drag of `splitter` to the new split value at `x` and build the
-/// feature message. The feature computes its own geometry (zone widths, the
-/// detail/list split re-allocation), so the app shell never reasons about
-/// `history_zone_*` or `detail_pane_width`.
-pub fn sql_tab_splitter_resize_msg(
-    state: &SqlTabState,
-    area: Rect,
-    tab_id: usize,
-    splitter: super::layout::SqlSplitter,
-    x: u16,
-    y: u16,
-) -> Option<super::msg::SqlTabMessage> {
-    use super::layout::SqlSplitter;
-    let tab = state.tabs.get(state.index_of(tab_id)?)?;
-    let body = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
-    let layout = super::layout::sql_tab_layout(body, tab.split_ratio, tab.history_pane_width);
-    if layout.editor.width == 0 {
-        return None;
-    }
-    match splitter {
-        SqlSplitter::EditorResults => {
-            let body_top = layout.editor.y;
-            let body_h = layout.results.bottom().saturating_sub(body_top).max(1);
-            let top_h = y.saturating_sub(body_top);
-            let ratio = ((u32::from(top_h) * 100) / u32::from(body_h)).min(99) as u8;
-            Some(super::msg::SqlTabMessage::SetSplitRatio { tab_id, ratio })
-        }
-        SqlSplitter::EditorHistory => {
-            let right_edge = layout.history.right();
-            let width = right_edge.saturating_sub(x);
-            Some(super::msg::SqlTabMessage::SetHistoryWidth { tab_id, width })
-        }
-        SqlSplitter::HistoryDetail => {
-            let zone_x = super::layout::history_zone_x(
-                body,
-                &layout,
-                tab.history.detail_pane_width,
-            );
-            let width = x.saturating_sub(zone_x).saturating_sub(1);
-            Some(super::msg::SqlTabMessage::SetHistoryDetailWidth { tab_id, width })
-        }
-    }
 }
 
 use super::history::view as history_view;
@@ -336,7 +246,7 @@ pub fn render(
     let editor_focused = focused && tab.focus == SqlFocus::Editor;
     let history_focused = focused && tab.focus == SqlFocus::History;
     let results_focused = focused && tab.focus == SqlFocus::Results;
-    let layout = sql_tab_layout(body_area, tab.split_ratio, tab.history_pane_width);
+    let layout = sql_tab_layout(body_area, tab.splitter.split_ratio, tab.splitter.history_pane_width);
     if layout.editor.width == 0 {
         // Area too small to split: show a single results pane.
         results_view::render(frame, theme, body_area, &tab.results, results_focused);
@@ -365,21 +275,21 @@ pub fn render(
     // history pane and drawing a bogus second line.
     let mut editor_history_splitter_x = layout.v_splitter.x;
     let history_zone = if history_detail_visible {
-        let zone_x = crate::features::sql_workspace::sql_tab::layout::history_zone_x(
+        let zone_x = super::history::splitter::view::history_zone_x(
             area,
             &layout,
-            tab.history.detail_pane_width,
+            tab.history.splitter.detail_pane_width,
         );
         // The zone must leave the editor its minimum width, or a very wide
         // history pane (from the splitter drag) squeezes the editor to zero and
         // hangs edtui's wrapped render.
         let max_zone_w = area
             .width
-            .saturating_sub(crate::features::sql_workspace::sql_tab::layout::MIN_SQL_PANE_WIDTH)
+            .saturating_sub(crate::features::sql_workspace::sql_tab::splitter::state::MIN_SQL_PANE_WIDTH)
             .max(1);
-        let zone_w = crate::features::sql_workspace::sql_tab::layout::history_zone_width(
+        let zone_w = super::history::splitter::view::history_zone_width(
             &layout,
-            tab.history.detail_pane_width,
+            tab.history.splitter.detail_pane_width,
         )
         .min(max_zone_w);
         // The splitter sits just left of the widened history zone.
@@ -431,7 +341,7 @@ pub fn render(
     // The History feature owns both the list and the detail under a single
     // border; pass the full history zone and let it split internally.
     if let Some(history_zone) = history_zone {
-        tracing::debug!(?history_zone, detail_w = tab.history.detail_pane_width, "render: begin history_view");
+        tracing::debug!(?history_zone, detail_w = tab.history.splitter.detail_pane_width, "render: begin history_view");
         history_view::render(
             frame,
             theme,
@@ -441,7 +351,7 @@ pub fn render(
             &connection,
             history_focused,
             true,
-            tab.history.detail_pane_width,
+            tab.history.splitter.detail_pane_width,
         );
     } else {
         history_view::render(
@@ -453,7 +363,7 @@ pub fn render(
             &connection,
             history_focused,
             false,
-            tab.history.detail_pane_width,
+            tab.history.splitter.detail_pane_width,
         );
     }
 
@@ -474,21 +384,10 @@ pub fn render(
     if editor_focused { cursor } else { None }
 }
 
-/// Derive the `(instance, connection)` history key for rendering (mirrors the
-/// update path's `session_key`).
-fn session_view_key(session: &super::session::TabSession) -> (String, String) {
-    let instance = session.instance.clone().unwrap_or_default();
-    let connection = session
-        .connection
-        .clone()
-        .or_else(|| session.connection_id.clone())
-        .unwrap_or_default();
-    (instance, connection)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::history::splitter::view::history_zone_width;
     use ratatui::layout::Rect;
 
     fn state_with_tabs(count: usize) -> SqlTabState {
@@ -521,7 +420,7 @@ mod tests {
         // Body is rows 1..; the editor occupies the left of the top row.
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
         // Click inside the editor region -> focus editor.
         let p = (layout.editor.x + 1, layout.editor.y + 1);
         assert_eq!(
@@ -537,70 +436,12 @@ mod tests {
     }
 
     #[test]
-    fn splitter_drag_begin_hits_history_detail_when_open() {
-        // The feature resolves a drag point to a splitter. With the detail open
-        // (focus History + an entry), dragging the internal detail/list splitter
-        // must resolve to HistoryDetail (not the stale editor/history splitter).
-        use crate::features::sql_workspace::sql_tab::layout::SqlSplitter;
-        let mut state = state_with_tabs(1);
-        state.active_tab = Some(0);
-        state.tabs[0].focus = SqlFocus::History;
-        let (instance, connection) = session_view_key(&state.tabs[0].session);
-        state.tabs[0]
-            .history
-            .store
-            .record_success(&instance, &connection, "SELECT 1");
-        let area = Rect::new(0, 0, 120, 40);
-        let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
-        let detail_split = crate::features::sql_workspace::sql_tab::layout::history_detail_splitter(
-            body, &layout, true, state.tabs[0].history.detail_pane_width,
-        )
-        .unwrap();
-        let (tab_id, s) = sql_tab_splitter_at(&state, area, detail_split.x, detail_split.y + 1).unwrap();
-        assert_eq!(tab_id, state.tabs[0].session.id);
-        assert_eq!(s, SqlSplitter::HistoryDetail);
-    }
-
-    #[test]
-    fn splitter_drag_resize_builds_correct_messages() {
-        use crate::features::sql_workspace::sql_tab::layout::SqlSplitter;
-        use crate::features::sql_workspace::sql_tab::msg::SqlTabMessage;
-        let mut state = state_with_tabs(1);
-        state.active_tab = Some(0);
-        let tab_id = state.tabs[0].session.id;
-        let area = Rect::new(0, 0, 120, 40);
-        // Editor/history drag at x=60 -> SetHistoryWidth.
-        let msg = sql_tab_splitter_resize_msg(
-            &state,
-            area,
-            tab_id,
-            SqlSplitter::EditorHistory,
-            60,
-            0,
-        )
-        .unwrap();
-        assert!(matches!(msg, SqlTabMessage::SetHistoryWidth { tab_id: t, .. } if t == tab_id));
-        // Detail drag -> SetHistoryDetailWidth.
-        let msg = sql_tab_splitter_resize_msg(
-            &state,
-            area,
-            tab_id,
-            SqlSplitter::HistoryDetail,
-            80,
-            0,
-        )
-        .unwrap();
-        assert!(matches!(msg, SqlTabMessage::SetHistoryDetailWidth { tab_id: t, .. } if t == tab_id));
-    }
-
-    #[test]
     fn click_empty_or_splitter_returns_none() {
         let state = state_with_tabs(1);
         let area = Rect::new(0, 0, 120, 40);
         // Click on the splitter row between top row and results -> none.
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
         let p = (body.x + 1, layout.h_splitter.y);
         assert_eq!(sql_workspace_click(&state, area, p.0, p.1, false), None);
         // Click in the body below results (should be inside results actually);
@@ -616,7 +457,7 @@ mod tests {
         state.tabs[0].session.schema = Some("public".into());
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
         // Click the `· mydb` segment -> focus Database column.
         let (db_rect, _full) = editor_view::context_trigger_rects(
             layout.editor,
@@ -664,7 +505,7 @@ mod tests {
         }
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
         let picker_area = editor_view::context_picker_area(layout.editor, true).unwrap();
         let (db_rect, schema_rect) = cp_view::column_rects(picker_area);
 
@@ -719,7 +560,7 @@ mod tests {
 
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[1].split_ratio, state.tabs[1].history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[1].splitter.split_ratio, state.tabs[1].splitter.history_pane_width);
 
         // Clicking B's context trigger opens B's picker (B's picker is closed,
         // so this is NOT treated as an outside-click-close).
@@ -755,7 +596,7 @@ mod tests {
         assert_eq!(state.tabs[0].session.database, None);
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
         let (_db, full) = editor_view::context_trigger_rects(
             layout.editor,
             state.tabs[0].editor.editor.mode,
@@ -811,7 +652,7 @@ mod tests {
         // Behavior 3: focusing History (detail open) keeps the list width fixed
         // and eats the editor width. Behavior 2: widening the detail shrinks the
         // editor (list unchanged) until the editor hits its minimum.
-        use crate::features::sql_workspace::sql_tab::layout::{history_zone_width, sql_tab_layout};
+        use crate::features::sql_workspace::sql_tab::layout::sql_tab_layout;
         let area = Rect::new(0, 0, 120, 40);
         let layout = sql_tab_layout(area, 45, 30); // list = 30
 
@@ -836,8 +677,8 @@ mod tests {
                 let mut state = state_with_tabs(1);
                 state.active_tab = Some(0);
                 state.tabs[0].focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
-                state.tabs[0].history_pane_width = history_w;
-                state.tabs[0].history.detail_pane_width = detail_w;
+                state.tabs[0].splitter.history_pane_width = history_w;
+                state.tabs[0].history.splitter.detail_pane_width = detail_w;
                 let (instance, connection) = session_view_key(&state.tabs[0].session);
                 state.tabs[0]
                     .history
@@ -872,12 +713,10 @@ mod tests {
 
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].split_ratio, state.tabs[0].history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
         // The detail zone extends left of `layout.history` (into what would be
         // the editor region). A click there must focus History, not the editor.
-        let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
-            state.tabs[0].history.detail_pane_width,
-        );
+        let detail_w = state.tabs[0].history.splitter.detail_pane_width;
         let zone_w = (layout.history.width + detail_w + 1).min(body.width);
         let zone_x = body
             .x
@@ -905,8 +744,8 @@ mod tests {
         let mut state = state_with_tabs(1);
         state.active_tab = Some(0);
         state.tabs[0].focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
-        state.tabs[0].history_pane_width = 84;
-        state.tabs[0].history.detail_pane_width = 40;
+        state.tabs[0].splitter.history_pane_width = 84;
+        state.tabs[0].history.splitter.detail_pane_width = 40;
         state.tabs[0].editor = crate::features::sql_workspace::sql_tab::editor::state::EditorState::with_sql(
             "SELECT * FROM \"测试表\" WHERE id = 1 AND name ILIKE '%foo%' ORDER BY created_at DESC",
         );

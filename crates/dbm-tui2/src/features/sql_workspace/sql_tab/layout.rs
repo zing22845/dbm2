@@ -12,75 +12,7 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-use crate::common::view::splitter::{clamp_split_px, hit};
-
-/// Identifies which splitter a mouse position is on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SqlSplitter {
-    /// Horizontal splitter: editor+history row vs results.
-    EditorResults,
-    /// Vertical splitter: editor vs history in the top row.
-    EditorHistory,
-    /// Vertical splitter inside the History pane: the detail preview vs the
-    /// history list. Dragging it re-allocates width between detail and list
-    /// while the total History zone width stays constant.
-    HistoryDetail,
-}
-
-/// Minimum width of the SQL editor pane, so the detail zone can never push the
-/// editor to zero (mirrors the original dbm's `MIN_SQL_PANE_WIDTH`).
-pub const MIN_SQL_PANE_WIDTH: u16 = 20;
-
-/// Compute the rect of the History pane's internal detail/list splitter, if
-/// the detail is currently visible. This depends on the tab's focus, detail
-/// width, and the widened history zone, so it cannot be part of the static
-/// [`sql_tab_layout`] — the renderer and the run loop compute it identically.
-/// The width of the History zone when the detail is visible: the list width
-/// plus the *actual* detail pane width plus a splitter (mirrors the original
-/// dbm's `history_zone_width`). When the detail is hidden it is just the list
-/// width. The zone is what the editor/history splitter (A) controls; dragging
-/// the internal detail/list splitter (B) re-allocates list vs detail within it.
-pub fn history_zone_width(layout: &SqlTabLayout, detail_pane_width: u16) -> u16 {
-    let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
-        detail_pane_width,
-    );
-    layout.history.width + detail_w + 1
-}
-
-/// The left edge of the widened History zone (it extends left of the base
-/// history pane, eating into the editor), clamped so the editor always keeps a
-/// minimum width. The zone can never fill more than `area.width - MIN_SQL_PANE_WIDTH`,
-/// otherwise a very wide history pane (set by dragging the editor/history
-/// splitter) would squeeze the editor to zero and hang edtui's wrapped render.
-pub fn history_zone_x(area: Rect, layout: &SqlTabLayout, detail_pane_width: u16) -> u16 {
-    let max_zone_w = area.width.saturating_sub(MIN_SQL_PANE_WIDTH).max(1);
-    let zone_w = history_zone_width(layout, detail_pane_width).min(max_zone_w);
-    area.x
-        .max(layout.history.right().saturating_sub(zone_w))
-        .min(area.right().saturating_sub(MIN_SQL_PANE_WIDTH))
-}
-
-/// Compute the rect of the History pane's internal detail/list splitter, if
-/// the detail is currently visible. The History zone width is fixed; dragging
-/// this splitter re-allocates detail vs list within that fixed zone.
-pub fn history_detail_splitter(
-    area: Rect,
-    layout: &SqlTabLayout,
-    detail_visible: bool,
-    detail_pane_width: u16,
-) -> Option<Rect> {
-    if !detail_visible {
-        return None;
-    }
-    let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
-        detail_pane_width,
-    );
-    let zone_x = history_zone_x(area, layout, detail_pane_width);
-    // The splitter sits at the right edge of the detail, inside the History
-    // border (the border is 1 col wide, so the splitter is at
-    // zone_x + 1 + detail_w), matching where the renderer draws it.
-    Some(Rect::new(zone_x + 1 + detail_w, layout.history.y, 1, layout.history.height))
-}
+use crate::common::view::splitter::clamp_split_px;
 
 /// The panes and splitter strips computed by [`sql_tab_layout`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -157,50 +89,6 @@ pub fn sql_tab_layout(area: Rect, split_ratio: u8, history_width: u16) -> SqlTab
     }
 }
 
-impl SqlTabLayout {
-    /// The splitter the position `(x, y)` is on, if any.
-    pub fn splitter_at(&self, x: u16, y: u16) -> Option<SqlSplitter> {
-        if hit(self.h_splitter, x, y) {
-            return Some(SqlSplitter::EditorResults);
-        }
-        if hit(self.v_splitter, x, y) {
-            return Some(SqlSplitter::EditorHistory);
-        }
-        None
-    }
-
-    /// Like [`splitter_at`](Self::splitter_at), but when the History detail is
-    /// visible the editor is shrunk and the history zone is widened, so both the
-    /// editor/history splitter and the internal detail/list splitter move. Hit
-    /// test against those relocated positions instead of the stale base
-    /// `v_splitter`. `area` is the full SQL-tab body region.
-    pub fn splitter_at_with_detail(
-        &self,
-        area: Rect,
-        x: u16,
-        y: u16,
-        detail_visible: bool,
-        detail_pane_width: u16,
-    ) -> Option<SqlSplitter> {
-        if !detail_visible {
-            return self.splitter_at(x, y);
-        }
-        // The editor/history splitter moves to the widened zone's left edge
-        // (the editor is shrunk); the internal detail/list splitter sits just
-        // right of the detail.
-        let zone_x = history_zone_x(area, self, detail_pane_width);
-        let editor_history = Rect::new(zone_x.saturating_sub(1), self.v_splitter.y, 1, self.v_splitter.height);
-        if hit(editor_history, x, y) {
-            return Some(SqlSplitter::EditorHistory);
-        }
-        if let Some(r) = history_detail_splitter(area, self, true, detail_pane_width) {
-            if hit(r, x, y) {
-                return Some(SqlSplitter::HistoryDetail);
-            }
-        }
-        None
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -223,79 +111,10 @@ mod tests {
     }
 
     #[test]
-    fn splitter_hit_test_identifies_both() {
-        let area = Rect::new(0, 0, 120, 40);
-        let layout = sql_tab_layout(area, 45, 24);
-        assert_eq!(
-            layout.splitter_at(layout.v_splitter.x, layout.v_splitter.y),
-            Some(SqlSplitter::EditorHistory)
-        );
-        assert_eq!(
-            layout.splitter_at(layout.h_splitter.x, layout.h_splitter.y),
-            Some(SqlSplitter::EditorResults)
-        );
-        assert_eq!(layout.splitter_at(1, 1), None);
-    }
-
-    #[test]
     fn layout_tiny_area_returns_empty() {
         assert_eq!(
             sql_tab_layout(Rect::new(0, 0, 5, 2), 45, 24),
             SqlTabLayout::default()
-        );
-    }
-
-    #[test]
-    fn history_detail_splitter_moves_with_detail_width() {
-        // The internal detail/list splitter (B): a wider detail pushes the
-        // splitter right (the list absorbs the change / the zone grows), while
-        // the list width (history_pane_width) itself is unchanged.
-        let area = Rect::new(0, 0, 120, 40);
-        let layout = sql_tab_layout(area, 45, 24);
-        // zone = list(24) + detail(40) + splitter.
-        assert_eq!(history_zone_width(&layout, 40), 24 + 40 + 1);
-
-        // A wider detail widens the zone (zone = list + detail + splitter), so
-        // the editor yields width to the detail while the list stays fixed
-        // (original dbm behavior 2).
-        assert!(history_zone_width(&layout, 56) > history_zone_width(&layout, 40));
-
-        // No detail -> no internal splitter.
-        assert!(history_detail_splitter(area, &layout, false, 40).is_none());
-    }
-
-    #[test]
-    fn detail_splitter_hit_test_resolves_correctly() {
-        let area = Rect::new(0, 0, 120, 40);
-        let layout = sql_tab_layout(area, 45, 24);
-
-        // With the detail visible, a click on the internal detail/list splitter
-        // must resolve to HistoryDetail (not the stale base editor/history
-        // splitter), and a click on the relocated editor/history splitter to
-        // EditorHistory.
-        let zone_x = history_zone_x(area, &layout, 40);
-        let detail_split = history_detail_splitter(area, &layout, true, 40).unwrap();
-        assert_eq!(
-            layout.splitter_at_with_detail(area, detail_split.x, detail_split.y, true, 40),
-            Some(SqlSplitter::HistoryDetail),
-            "a click on the internal splitter must be HistoryDetail"
-        );
-        assert_eq!(
-            layout.splitter_at_with_detail(
-                area,
-                zone_x.saturating_sub(1),
-                layout.v_splitter.y + 1,
-                true,
-                40
-            ),
-            Some(SqlSplitter::EditorHistory),
-            "a click on the relocated editor/history splitter must be EditorHistory"
-        );
-
-        // Without the detail, the internal splitter is not present.
-        assert_eq!(
-            layout.splitter_at_with_detail(area, detail_split.x, detail_split.y, false, 40),
-            None
         );
     }
 }

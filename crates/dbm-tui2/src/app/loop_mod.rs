@@ -119,7 +119,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // interaction state that lives only for the lifetime of a drag gesture; it
     // never reaches `AppState` (TEA: state mutations still flow through
     // `update` via split-resize messages).
-    let mut split_drag: Option<(usize, crate::features::sql_workspace::sql_tab::layout::SqlSplitter)> = None;
+    let mut split_drag: Option<(usize, crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter)> = None;
 
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
@@ -630,7 +630,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             if state.focus == Pane::SQLWorkspace
                                 && let Some(tab_area) = sql_tab_area_for_hit(terminal.size()?, &state)
                             {
-                                if let Some((tab_id, splitter)) = crate::features::sql_workspace::sql_tab::view::sql_tab_splitter_at(
+                                if let Some((tab_id, splitter)) = crate::features::sql_workspace::sql_tab::splitter::view::sql_tab_splitter_at(
                                     &state.sql.sql_tab,
                                     tab_area,
                                     point.x,
@@ -649,7 +649,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 // message; the shell only supplies the area and
                                 // the coordinates.
                                 if let Some(tab_area) = sql_tab_area_for_hit(size, &state) {
-                                    if let Some(msg) = crate::features::sql_workspace::sql_tab::view::sql_tab_splitter_resize_msg(
+                                    if let Some(msg) = crate::features::sql_workspace::sql_tab::splitter::view::sql_tab_splitter_resize_msg(
                                         &state.sql.sql_tab,
                                         tab_area,
                                         tab_id,
@@ -940,8 +940,8 @@ fn sql_picker_area_for_hit(
     );
     let layout = crate::features::sql_workspace::sql_tab::layout::sql_tab_layout(
         sql_body,
-        tab.split_ratio,
-        tab.history_pane_width,
+        tab.splitter.split_ratio,
+        tab.splitter.history_pane_width,
     );
     crate::features::sql_workspace::sql_tab::editor::view::context_picker_area(
         layout.editor,
@@ -2135,8 +2135,8 @@ mod tests {
                 );
                 let tab = &mut state.sql.sql_tab.tabs[0];
                 tab.focus = SqlFocus::History;
-                tab.history_pane_width = history_w;
-                tab.history.detail_pane_width = detail_w;
+                tab.splitter.history_pane_width = history_w;
+                tab.history.splitter.detail_pane_width = detail_w;
                 tab.history
                     .store
                     .record_success("inst", "c1", "SELECT * FROM users");

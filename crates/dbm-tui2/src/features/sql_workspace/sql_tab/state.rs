@@ -26,20 +26,9 @@ pub enum SqlFocus {
     History,
 }
 
-/// Default editor top-pane height (percent of the body) for the SQL tab's
-/// horizontal splitter.
-pub const DEFAULT_SPLIT_RATIO: u8 = 45;
-/// Default history pane width (columns) for the SQL tab's vertical splitter.
-pub const DEFAULT_HISTORY_WIDTH: u16 = 24;
-/// Min/max editor top-pane height as a percent of the body.
-pub const MIN_SPLIT_RATIO: u8 = 20;
-pub const MAX_SPLIT_RATIO: u8 = 80;
 /// Maximum number of open tabs per connection (and thus the highest sequence
 /// number, `<SQL N>` with `N <= 9`), matching the original dbm's tab limit.
 pub const MAX_TABS: usize = 9;
-/// Min/max history pane width in columns.
-pub const MIN_HISTORY_WIDTH: u16 = 16;
-pub const MAX_HISTORY_WIDTH: u16 = 200;
 
 /// A single SQL tab: an independent session plus the three child module states.
 #[derive(Debug, Clone)]
@@ -52,10 +41,8 @@ pub struct SqlTab {
     /// so Ctrl+Up from Results returns to the previous pane (mirroring the
     /// original dbm's `workspace_upper_pane`). Defaults to `Editor`.
     pub upper_pane: SqlFocus,
-    /// Editor top-pane height as a percent of the body (horizontal splitter).
-    pub split_ratio: u8,
-    /// History pane width in columns (vertical splitter between editor/history).
-    pub history_pane_width: u16,
+    /// The `sql_tab` splitter child feature (A + editor+history/results).
+    pub splitter: super::splitter::state::SqlTabSplitterState,
     /// Whether table-name completion (TblCmp) is enabled for this tab, shown in
     /// the editor header while in INSERT mode (matching the original dbm's
     /// `complete_table_names`). Toggled with Alt+Tab in INSERT mode.
@@ -71,12 +58,12 @@ pub struct SqlTab {
 impl SqlTab {
     /// Clamp and store the editor top-pane height percentage.
     pub fn set_split_ratio(&mut self, ratio: u8) {
-        self.split_ratio = ratio.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO);
+        self.splitter.set_split_ratio(ratio);
     }
 
     /// Clamp and store the history pane width (columns).
     pub fn set_history_pane_width(&mut self, width: u16) {
-        self.history_pane_width = width.clamp(MIN_HISTORY_WIDTH, MAX_HISTORY_WIDTH);
+        self.splitter.set_history_pane_width(width);
     }
 }
 
@@ -286,8 +273,7 @@ impl SqlTabState {
             },
             focus: SqlFocus::default(),
             upper_pane: SqlFocus::Editor,
-            split_ratio: DEFAULT_SPLIT_RATIO,
-            history_pane_width: DEFAULT_HISTORY_WIDTH,
+            splitter: super::splitter::state::SqlTabSplitterState::default(),
             complete_table_names: false,
             editor: EditorState::default(),
             results: ResultsState::default(),
@@ -439,8 +425,7 @@ impl SqlTabState {
             },
             focus: SqlFocus::default(),
             upper_pane: SqlFocus::Editor,
-            split_ratio: DEFAULT_SPLIT_RATIO,
-            history_pane_width: DEFAULT_HISTORY_WIDTH,
+            splitter: super::splitter::state::SqlTabSplitterState::default(),
             complete_table_names: false,
             editor: EditorState::default(),
             results: ResultsState::default(),

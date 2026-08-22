@@ -200,12 +200,12 @@ pub fn update(
                     && tab.history.store.entries(&instance, &connection).first().is_some();
                 let list_w = if detail_visible {
                     width
-                        .saturating_sub(tab.history.detail_pane_width)
+                        .saturating_sub(tab.history.splitter.detail_pane_width)
                         .saturating_sub(1) // splitter
                 } else {
                     width
                 };
-                let changed = tab.history_pane_width != list_w;
+                let changed = tab.splitter.history_pane_width != list_w;
                 state.tabs[idx].set_history_pane_width(list_w);
                 dirty = changed;
             } else {
@@ -214,13 +214,9 @@ pub fn update(
         }
         SqlTabMessage::SetHistoryDetailWidth { tab_id, width } => {
             if let Some(idx) = state.index_of(tab_id) {
-                let clamped =
-                    crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
-                        width,
-                    );
-                let changed = state.tabs[idx].history.detail_pane_width != clamped;
-                state.tabs[idx].history.detail_pane_width = clamped;
-                dirty = changed;
+                let before = state.tabs[idx].history.splitter.detail_pane_width;
+                state.tabs[idx].history.splitter.set_detail_pane_width(width);
+                dirty = before != state.tabs[idx].history.splitter.detail_pane_width;
             } else {
                 warn_tab_missing(tab_id);
             }
@@ -229,14 +225,10 @@ pub fn update(
             if let Some(idx) = state.index_of(tab_id) {
                 let delta =
                     crate::common::view::splitter::width_delta_for_left_pane(nudge, crate::common::view::splitter::WIDTH_NUDGE_STEP);
-                let next = (state.tabs[idx].history.detail_pane_width as i16 + delta).max(0) as u16;
-                let clamped =
-                    crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
-                        next,
-                    );
-                let changed = state.tabs[idx].history.detail_pane_width != clamped;
-                state.tabs[idx].history.detail_pane_width = clamped;
-                dirty = changed;
+                let next = (state.tabs[idx].history.splitter.detail_pane_width as i16 + delta).max(0) as u16;
+                let before = state.tabs[idx].history.splitter.detail_pane_width;
+                state.tabs[idx].history.splitter.set_detail_pane_width(next);
+                dirty = before != state.tabs[idx].history.splitter.detail_pane_width;
             } else {
                 warn_tab_missing(tab_id);
             }
@@ -247,9 +239,9 @@ pub fn update(
             };
             if let Some(idx) = state.index_of(tab_id) {
                 let delta = width_delta_for_right_pane(nudge, WIDTH_NUDGE_STEP);
-                let current = i32::from(state.tabs[idx].history_pane_width);
+                let current = i32::from(state.tabs[idx].splitter.history_pane_width);
                 let next = (current + i32::from(delta)).max(0) as u16;
-                let changed = state.tabs[idx].history_pane_width != next;
+                let changed = state.tabs[idx].splitter.history_pane_width != next;
                 state.tabs[idx].set_history_pane_width(next);
                 dirty = changed;
             } else {
@@ -995,8 +987,8 @@ mod tests {
         s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
         let tab_id = s.tabs[0].session.id;
         s.tabs[0].focus = SqlFocus::History;
-        s.tabs[0].history.detail_pane_width = 40;
-        s.tabs[0].history_pane_width = 24;
+        s.tabs[0].history.splitter.detail_pane_width = 40;
+        s.tabs[0].splitter.history_pane_width = 24;
         s.tabs[0]
             .history
             .store
@@ -1008,11 +1000,11 @@ mod tests {
             s,
         );
         assert_eq!(
-            s.tabs[0].history_pane_width, 59,
+            s.tabs[0].splitter.history_pane_width, 59,
             "with the detail visible, A drags change the list, not the detail"
         );
         assert_eq!(
-            s.tabs[0].history.detail_pane_width, 40,
+            s.tabs[0].history.splitter.detail_pane_width, 40,
             "the detail width must not change when dragging splitter A"
         );
     }
@@ -1031,6 +1023,6 @@ mod tests {
             SqlTabMessage::SetHistoryWidth { tab_id, width: 80 },
             s,
         );
-        assert_eq!(s.tabs[0].history_pane_width, 80);
+        assert_eq!(s.tabs[0].splitter.history_pane_width, 80);
     }
 }

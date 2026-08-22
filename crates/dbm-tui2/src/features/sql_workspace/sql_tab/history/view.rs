@@ -19,7 +19,8 @@ use crate::common::view::pane_scrollbar::{draw_vertical_pane_scrollbar, pane_scr
 use crate::common::view::splitter::{draw as draw_splitter, SplitOrientation};
 use crate::common::view::theme::Theme;
 
-use super::detail::{clamp_detail_pane_width, draw_history_detail};
+use super::detail::draw_history_detail;
+use super::splitter::state::clamp_detail_pane_width;
 use super::state::HistoryState;
 use super::store::history_one_line;
 

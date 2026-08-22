@@ -23,9 +23,8 @@ pub struct HistoryState {
     pub h_scroll: usize,
     /// The detail sub-pane state.
     pub detail: HistoryDetailState,
-    /// Width of the detail preview pane (an extension to the left of the list,
-    /// mirroring the original dbm's `detail_pane_width`).
-    pub detail_pane_width: u16,
+    /// The History-internal detail/list splitter child feature (B).
+    pub splitter: super::splitter::state::DetailSplitterState,
 }
 
 impl Default for HistoryState {
@@ -37,8 +36,7 @@ impl Default for HistoryState {
             v_scroll: 0,
             h_scroll: 0,
             detail: HistoryDetailState::default(),
-            // Mirror the original dbm's `detail_pane_width` default.
-            detail_pane_width: super::detail::DEFAULT_DETAIL_PANE_WIDTH,
+            splitter: super::splitter::state::DetailSplitterState::default(),
         }
     }
 }

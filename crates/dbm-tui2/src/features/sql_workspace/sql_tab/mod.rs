@@ -9,6 +9,7 @@ pub mod layout;
 pub mod msg;
 pub mod results;
 pub mod session;
+pub mod splitter;
 pub mod state;
 pub mod tab;
 pub mod update;

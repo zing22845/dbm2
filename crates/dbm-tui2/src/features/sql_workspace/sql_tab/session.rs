@@ -33,3 +33,15 @@ pub struct TabSession {
     pub schema: Option<String>,
 }
 
+/// The `(instance, connection)` key used to look up history entries, mirroring
+/// how history is recorded per connection.
+pub fn session_view_key(session: &TabSession) -> (String, String) {
+    let instance = session.instance.clone().unwrap_or_default();
+    let connection = session
+        .connection
+        .clone()
+        .or_else(|| session.connection_id.clone())
+        .unwrap_or_default();
+    (instance, connection)
+}
+

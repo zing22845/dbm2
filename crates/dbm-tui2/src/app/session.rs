@@ -51,8 +51,8 @@ fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
                 connection: session.connection.clone().unwrap_or_default(),
                 sequence: session.sequence as u32,
                 sql,
-                split_ratio: tab.split_ratio,
-                history_pane_width: tab.history_pane_width,
+                split_ratio: tab.splitter.split_ratio,
+                history_pane_width: tab.splitter.history_pane_width,
                 detail_pane_width: 32,
                 database: session.database.clone().unwrap_or_default(),
                 schema: session.schema.clone().unwrap_or_default(),
@@ -208,8 +208,10 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
             },
             focus: crate::features::sql_workspace::sql_tab::state::SqlFocus::default(),
             upper_pane: crate::features::sql_workspace::sql_tab::state::SqlFocus::Editor,
-            split_ratio: t.split_ratio,
-            history_pane_width: t.history_pane_width,
+            splitter: crate::features::sql_workspace::sql_tab::splitter::state::SqlTabSplitterState {
+                split_ratio: t.split_ratio,
+                history_pane_width: t.history_pane_width,
+            },
             complete_table_names: t.complete_table_names,
             editor: {
                 // Keep the editor's TblCmp flag in sync with the tab's flag on

@@ -15,20 +15,12 @@ use crate::common::components::search::{PaneSearch, TextSearchOptions, find_matc
 use crate::common::utils::text_width;
 use crate::common::view::theme::Theme;
 
-pub const DEFAULT_DETAIL_PANE_WIDTH: u16 = 40;
-pub const MIN_DETAIL_PANE_WIDTH: u16 = 24;
-pub const MAX_DETAIL_PANE_WIDTH: u16 = 72;
-
 #[derive(Debug, Default, Clone)]
 pub struct HistoryDetailState {
     pub scroll: usize,
     /// The entry whose detail is pinned open (set when entering recall or
     /// selecting an entry). Mirrors the original dbm's `detail_pinned`.
     pub pinned_sql: Option<String>,
-}
-
-pub fn clamp_detail_pane_width(width: u16) -> u16 {
-    width.clamp(MIN_DETAIL_PANE_WIDTH, MAX_DETAIL_PANE_WIDTH)
 }
 
 pub fn sql_line_count(sql: &str) -> usize {
