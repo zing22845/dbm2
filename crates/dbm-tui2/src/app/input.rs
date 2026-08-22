@@ -24,7 +24,6 @@ use crate::features::explorer::state::ExplorerPane;
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 use crate::features::instance_workspace::connections::msg::{ConnectionsMessage, ConnectionsMsg};
 use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
-use crate::features::instance_workspace::overview::msg::{OverviewMessage, OverviewMsg};
 use crate::features::instance_workspace::state::IwState;
 use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
 use crate::features::sql_workspace::state::SqlState;
@@ -609,160 +608,42 @@ fn explorer(msg: ExplorerMessage) -> AppMsg {
 
 /// Instance workspace key bindings, routed by the active sub-pane `sub`
 /// (overview / connections), or the connection form when one is open.
+///
+/// All per-pane key mapping and feature-state reads live in the feature's
+/// `input::key_to_msg`; this shell keeps only the `Tab` pane navigation and the
+/// pure conversion of the returned action into an `AppMsg` (opening a confirm
+/// modal when the feature requests one).
 fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
-    if state.connections.form.is_some() {
-        return iw_form_key(key, state);
-    }
     // `Tab` cycles the instance-workspace sub-panes (overview <-> connections),
-    // mirroring the explorer's Tab behavior.
+    // mirroring the explorer's Tab behavior. This is shell-level focus, so it
+    // is handled here rather than in the feature.
     if key.code == KeyCode::Tab {
         return Some(AppMsg::Shell(ShellMsg::FocusChanged {
             pane: Pane::InstanceWorkspace(sub.next()),
         }));
     }
-    match sub {
-        IwPane::Overview => {
-            // Overview panel keys: move the cursor (j/k, ↑/↓), H-Scroll (←/→),
-            // and unregister (`u`) which opens a confirm modal.
-            let msg = match key.code {
-                KeyCode::Up | KeyCode::Char('k') => Some(overview(OverviewMessage::MoveCursor(-1))),
-                KeyCode::Down | KeyCode::Char('j') => Some(overview(OverviewMessage::MoveCursor(1))),
-                KeyCode::Char('u') => {
-                    if state.instance_name.is_empty() {
-                        None
-                    } else {
-                        Some(AppMsg::OpenModal(
-                            crate::app::state::ModalKind::UnregisterInstanceConfirm {
-                                instance: state.instance_name.clone(),
-                            },
-                        ))
-                    }
-                }
-                KeyCode::Char('r') => {
-                    // Refresh the open instance (matching the original dbm): the
-                    // update re-probes lifecycle and reloads overview +
-                    // connections. A 1s cooldown set on refresh means a held `r`
-                    // fires once and ignores the auto-repeat.
-                    if state.instance_name.is_empty()
-                        || state
-                            .overview
-                            .refresh_cooldown_until
-                            .is_some_and(|until| std::time::Instant::now() < until)
-                    {
-                        None
-                    } else {
-                        Some(iw(IwMessage::Refresh {
-                            instance_name: state.instance_name.clone(),
-                        }))
-                    }
-                }
-                _ => None,
-            };
-            msg
-        }
-        IwPane::Connections => {
-            // `d` opens a delete-confirm modal for the selected connection
-            // (matching the original dbm); the actual delete is dispatched from
-            // the modal's `y` key.
-            if matches!(key.code, KeyCode::Char('d') | KeyCode::Delete) {
-                let Some(connection) = state.connections.selected_name() else {
-                    return None;
-                };
-                return Some(AppMsg::OpenModal(
-                    crate::app::state::ModalKind::DeleteConnectionConfirm {
-                        instance: state.instance_name.clone(),
-                        connection,
-                    },
-                ));
-            }
-            let msg = match key.code {
-                KeyCode::Up | KeyCode::Char('k') => ConnectionsMessage::MoveUp,
-                KeyCode::Down | KeyCode::Char('j') => ConnectionsMessage::MoveDown,
-                // Align with the original dbm: `a` adds, `i` edits the selected
-                // connection (no separate `e`/`Enter` binding).
-                KeyCode::Char('a') => ConnectionsMessage::BeginAdd,
-                KeyCode::Char('i') => ConnectionsMessage::BeginEdit,
-                // Test the selected connection (the list's `t`), matching dbm,
-                // at most once per second (cooldown set in the update).
-                KeyCode::Char('t') => {
-                    if state
-                        .connections
-                        .test_cooldown_until
-                        .is_some_and(|until| std::time::Instant::now() < until)
-                    {
-                        return None;
-                    }
-                    ConnectionsMessage::TestSelected
-                }
-                _ => return None,
-            };
-            Some(iw(IwMessage::Connections(ConnectionsMsg::Message(msg))))
-        }
+    match crate::features::instance_workspace::input::key_to_msg(key, sub, state) {
+        Some(crate::features::instance_workspace::input::IwInput::Message(msg)) => Some(iw(msg)),
+        Some(crate::features::instance_workspace::input::IwInput::OpenUnregisterConfirm {
+            instance,
+        }) => Some(AppMsg::OpenModal(
+            super::state::ModalKind::UnregisterInstanceConfirm { instance },
+        )),
+        Some(crate::features::instance_workspace::input::IwInput::OpenDeleteConfirm {
+            instance,
+            connection,
+        }) => Some(AppMsg::OpenModal(
+            super::state::ModalKind::DeleteConnectionConfirm {
+                instance,
+                connection,
+            },
+        )),
+        None => None,
     }
-}
-
-/// Form keys when a connection form is open, matching the original dbm: typing
-/// happens in an explicit per-field insert mode. In insert mode keys edit the
-/// current field (`Enter` commits it, `Esc` reverts it); in normal mode `i`
-/// starts editing a field, `j`/`k` move between fields, `Enter` saves the whole
-/// connection and `Esc` cancels the form.
-fn iw_form_key(key: KeyEvent, state: &IwState) -> Option<AppMsg> {
-    use crate::features::instance_workspace::connections::state::FormMode;
-    let form = state.connections.form.as_ref()?;
-    let insert = form.mode == FormMode::Insert;
-    let msg = if insert {
-        match key.code {
-            // In insert mode, printable characters go straight into the field.
-            KeyCode::Char(c) if !c.is_control() => ConnectionsMessage::FormChar(c),
-            KeyCode::Backspace => ConnectionsMessage::FormBackspace,
-            KeyCode::Enter => ConnectionsMessage::CommitFieldInsert,
-            KeyCode::Esc => ConnectionsMessage::CancelFieldInsert,
-            _ => return None,
-        }
-    } else {
-        match key.code {
-            KeyCode::Char('i') | KeyCode::Char('I') => ConnectionsMessage::BeginFieldInsert,
-            KeyCode::Up | KeyCode::Char('k') => ConnectionsMessage::FormField(form.field.prev()),
-            KeyCode::Down | KeyCode::Char('j') => ConnectionsMessage::FormField(form.field.next()),
-            KeyCode::Enter => ConnectionsMessage::CommitForm,
-            KeyCode::Esc => ConnectionsMessage::CancelForm,
-            // Test the form's current values against the database, at most once
-            // per second (cooldown set in the update).
-            KeyCode::Char('t') | KeyCode::Char('T') => {
-                if state
-                    .connections
-                    .test_cooldown_until
-                    .is_some_and(|until| std::time::Instant::now() < until)
-                {
-                    return None;
-                }
-                ConnectionsMessage::TestForm
-            }
-            // `dd` clears the current field and enters insert mode: the first
-            // `d` arms a short window, a second `d` within it clears.
-            KeyCode::Char('d') => {
-                let within = form.pending_d_at.is_some_and(|at| {
-                    at.elapsed()
-                        <= std::time::Duration::from_millis(300)
-                });
-                if within {
-                    ConnectionsMessage::ClearFieldAndInsert
-                } else {
-                    ConnectionsMessage::SetPendingD
-                }
-            }
-            _ => return None,
-        }
-    };
-    Some(iw(IwMessage::Connections(ConnectionsMsg::Message(msg))))
 }
 
 fn iw(msg: IwMessage) -> AppMsg {
     AppMsg::Iw(IwMsg::Message(msg))
-}
-
-fn overview(msg: OverviewMessage) -> AppMsg {
-    iw(IwMessage::Overview(OverviewMsg::Message(msg)))
 }
 
 /// Confirm-unregister helper: the shell closes the modal and dispatches the
@@ -1876,71 +1757,25 @@ mod tests {
         }
     }
 
+    // The overview/connections per-pane key mapping (j/k/r/t/dd/cooldowns)
+    // lives in the instance-workspace feature's `input` module and is tested
+    // there. This app-level test only pins the shell routing: a plain key on
+    // the overview pane is forwarded into the feature and wrapped as an `Iw`
+    // message.
     #[test]
-    fn overview_jk_move_cursor_and_arrows_hscroll() {
+    fn instance_workspace_key_routes_to_feature_message() {
         use crate::features::instance_workspace::overview::msg::{OverviewMessage, OverviewMsg};
         let mut state = crate::app::state::AppState::default();
         state.focus = Pane::InstanceWorkspace(IwPane::Overview);
-        // j -> MoveCursor(1)
+        state.iw.instance_name = "inst".to_string();
         let msg = key_to_msg(key(KeyCode::Char('j'), KeyModifiers::NONE), &state)
-            .expect("j in overview should move cursor down");
+            .expect("j in overview should route into the iw feature");
         assert!(matches!(
             msg,
             AppMsg::Iw(IwMsg::Message(IwMessage::Overview(OverviewMsg::Message(
                 OverviewMessage::MoveCursor(1)
             ))))
         ));
-        // k -> MoveCursor(-1)
-        let msg = key_to_msg(key(KeyCode::Char('k'), KeyModifiers::NONE), &state)
-            .expect("k in overview should move cursor up");
-        assert!(matches!(
-            msg,
-            AppMsg::Iw(IwMsg::Message(IwMessage::Overview(OverviewMsg::Message(
-                OverviewMessage::MoveCursor(-1)
-            ))))
-        ));
-    }
-
-    #[test]
-    fn overview_r_refreshes_instance() {
-        let mut state = crate::app::state::AppState::default();
-        state.focus = Pane::InstanceWorkspace(IwPane::Overview);
-        state.iw.instance_name = "inst-a".to_string();
-        let msg = key_to_msg(key(KeyCode::Char('r'), KeyModifiers::NONE), &state)
-            .expect("r in overview should refresh the instance");
-        assert!(matches!(
-            msg,
-            AppMsg::Iw(IwMsg::Message(IwMessage::Refresh { instance_name }))
-                if instance_name == "inst-a"
-        ));
-    }
-
-    #[test]
-    fn overview_r_honors_refresh_cooldown() {
-        let mut state = crate::app::state::AppState::default();
-        state.focus = Pane::InstanceWorkspace(IwPane::Overview);
-        state.iw.instance_name = "inst-a".to_string();
-        // Within the cooldown -> `r` is a no-op (no refresh message).
-        state.iw.overview.refresh_cooldown_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
-        assert!(key_to_msg(key(KeyCode::Char('r'), KeyModifiers::NONE), &state).is_none());
-        // Once the cooldown has passed -> `r` refreshes again.
-        state.iw.overview.refresh_cooldown_until = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-        assert!(key_to_msg(key(KeyCode::Char('r'), KeyModifiers::NONE), &state).is_some());
-    }
-
-    #[test]
-    fn connections_t_honors_test_cooldown() {
-        let mut state = crate::app::state::AppState::default();
-        state.focus = Pane::InstanceWorkspace(IwPane::Connections);
-        state.iw.instance_name = "inst".to_string();
-        // Within the test cooldown -> `t` is ignored (no test).
-        state.iw.connections.test_cooldown_until =
-            Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
-        assert!(key_to_msg(key(KeyCode::Char('t'), KeyModifiers::NONE), &state).is_none());
-        // Once the cooldown has passed -> `t` dispatches the test.
-        state.iw.connections.test_cooldown_until =
-            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
-        assert!(key_to_msg(key(KeyCode::Char('t'), KeyModifiers::NONE), &state).is_some());
     }
 
     #[test]

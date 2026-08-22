@@ -5,6 +5,7 @@
 
 pub mod connections;
 pub mod effect;
+pub mod input;
 pub mod intent;
 pub mod msg;
 pub mod overview;
