@@ -803,15 +803,17 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         return sql_context_picker_key(key, tab_id);
     }
 
-    // The completion popup handles selection/apply/close when open.
+    // The completion popup handles selection/apply/close when open. Only the
+    // arrow keys move the selection (matching the original dbm's handle_popup_key);
+    // `j`/`k` fall through so they can be typed into the buffer.
     if editor.sql_completion.is_open() {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Up if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
                     SqlCompletionMessage::MoveSelection { delta: -1 },
                 )), tab_id));
             }
-            KeyCode::Down | KeyCode::Char('j') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Down if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(
                     SqlCompletionMessage::MoveSelection { delta: 1 },
                 )), tab_id));
@@ -1347,6 +1349,78 @@ mod tests {
                 SqlTabMessage::ToggleTableCompletion { .. },
             )))) => {}
             other => panic!("expected ToggleTableCompletion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn jk_in_editor_with_completion_open_are_not_intercepted() {
+        // With the completion popup open, `j`/`k` must NOT be consumed as
+        // move-selection (the original dbm only binds the arrow keys): they fall
+        // through so the user can type them into the buffer (e.g. "select 1 as ok").
+        use crate::common::utils::cursor::Cursor;
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::state::SqlCompletionState;
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::CompletionItem;
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::CompletionKind;
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        state.sql_tab.tabs[0].editor.sql_completion = SqlCompletionState::open_with(
+            vec![CompletionItem {
+                label: "ok".into(),
+                kind: CompletionKind::Keyword,
+                detail: None,
+                insert_text: "ok".into(),
+            }],
+            Cursor::new(0, 0),
+            Cursor::new(0, 0),
+        );
+        // `k`/`j` must produce an editor KeyEvent (falls through), not a
+        // MoveSelection.
+        for code in [KeyCode::Char('k'), KeyCode::Char('j')] {
+            let msg = sql_key(key(code, KeyModifiers::NONE), &state)
+                .expect("j/k in an insert-mode editor with completion open must be handled");
+            match msg {
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Editor {
+                        msg: EditorMsg::Message(EditorMessage::KeyEvent { .. }),
+                        ..
+                    },
+                )))) => {}
+                other => panic!("expected editor KeyEvent for {code:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn arrow_keys_with_completion_open_move_selection() {
+        // The arrow keys still move the completion selection when it is open.
+        use crate::common::utils::cursor::Cursor;
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::state::SqlCompletionState;
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::CompletionItem;
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::CompletionKind;
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+        state.sql_tab.tabs[0].editor.sql_completion = SqlCompletionState::open_with(
+            vec![CompletionItem {
+                label: "ok".into(),
+                kind: CompletionKind::Keyword,
+                detail: None,
+                insert_text: "ok".into(),
+            }],
+            Cursor::new(0, 0),
+            Cursor::new(0, 0),
+        );
+        let msg = sql_key(key(KeyCode::Down, KeyModifiers::NONE), &state)
+            .expect("Down with completion open should move selection");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    msg: EditorMsg::Message(EditorMessage::SqlCompletion(
+                        SqlCompletionMsg::Message(SqlCompletionMessage::MoveSelection { delta: 1 }),
+                    )),
+                    ..
+                },
+            )))) => {}
+            other => panic!("expected MoveSelection for Down, got {other:?}"),
         }
     }
 
