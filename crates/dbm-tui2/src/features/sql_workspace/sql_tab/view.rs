@@ -242,19 +242,22 @@ pub fn render(
     };
 
     let (instance, connection) = session_view_key(&tab.session);
-    // Mirroring the original dbm, the History pane shows both the list and the
-    // detail preview of the selected entry whenever the pane is focused (the
-    // splitter can widen the detail, but it is never absent). When not focused
-    // we keep the list-only view to save space.
-    if history_focused {
-        // Mirror the original dbm: the focused History pane shows the detail
-        // preview as its OWN pane (width `detail_pane_width`, default 40) to the
-        // LEFT of the list, with a splitter between them. The detail *extends*
-        // the history zone and eats into the list's width. The history zone is
-        // widened to host both (the editor to its left yields the extra room),
-        // exactly like the original dbm's `history_zone_width` — there is no
-        // "too narrow, fall back to list-only" branch; the list simply shrinks
-        // (down to zero) to make room for the detail.
+    // Mirror the original dbm: the detail preview is shown whenever the History
+    // *pane* is focused (`tab.focus == History`), exactly like the original's
+    // `detail_visible` (gated on `workspace_pane == History`, NOT the editor's
+    // caret/shell focus). So focusing History with `H` pops the detail to the
+    // left of the list immediately. The splitter can widen the detail, but it
+    // is never absent while History is focused.
+    let history_detail_visible = tab.focus == SqlFocus::History
+        && tab.history.store.entries(&instance, &connection).first().is_some();
+    if history_detail_visible {
+        // Mirror the original dbm: the detail preview is its OWN pane (width
+        // `detail_pane_width`, default 40) to the LEFT of the list, with a
+        // splitter between them. The detail *extends* the history zone and eats
+        // into the editor's width to its left. The history zone is widened to
+        // host both (the editor yields the extra room), exactly like the
+        // original dbm's `history_zone_width` — there is no "too narrow, fall
+        // back to list-only" branch; the list simply shrinks (down to zero).
         const SPLITTER_W: u16 = 1;
         let detail_w = crate::features::sql_workspace::sql_tab::history::detail::clamp_detail_pane_width(
             tab.history.detail_pane_width,
@@ -272,12 +275,13 @@ pub fn render(
                 ratatui::layout::Constraint::Min(0),
             ])
             .split(history_zone);
-        // Prefer the selected entry; fall back to the pinned entry so the
-        // detail always reflects something when the pane is focused.
+        // Prefer the selected entry; fall back to the pinned, then the first
+        // entry, so the detail always reflects the focused/nearest statement.
         let detail_sql = tab
             .history
             .selected_entry(&instance, &connection)
-            .or_else(|| tab.history.detail.pinned_sql.clone());
+            .or_else(|| tab.history.detail.pinned_sql.clone())
+            .or_else(|| tab.history.store.entries(&instance, &connection).first().cloned());
         if let Some(sql) = detail_sql {
             let mut content = Rect::default();
             let mut v_bar = Rect::default();
