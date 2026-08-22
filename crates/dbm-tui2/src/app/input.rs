@@ -1451,23 +1451,23 @@ mod tests {
     fn alt_enter_with_completion_open_still_runs_sql() {
         // When the completion popup is open, a bare Enter applies the
         // completion, but Alt+Enter must fall through to run the SQL.
+        use crate::common::utils::cursor::Cursor;
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::{
+            CompletionItem, CompletionKind,
+        };
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::state::SqlCompletionState;
         let mut state = state_with_tabs(1);
         state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
-        // Open the completion popup with one item so `is_open()` is true.
-        state.sql_tab.tabs[0].editor.sql_completion = {
-            use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::{
-                CompletionItem, CompletionKind,
-            };
-            let mut sc = crate::features::sql_workspace::sql_tab::editor::sql_completion::state::SqlCompletionState::default();
-            sc.open = true;
-            sc.items = vec![CompletionItem {
+        state.sql_tab.tabs[0].editor.sql_completion = SqlCompletionState::open_with(
+            vec![CompletionItem {
                 label: "customers".into(),
                 kind: CompletionKind::Table,
                 detail: None,
                 insert_text: "customers".into(),
-            }];
-            sc
-        };
+            }],
+            Cursor::new(0, 0),
+            Cursor::new(0, 0),
+        );
         let msg = sql_key(key(KeyCode::Enter, KeyModifiers::ALT), &state)
             .expect("alt+enter should run SQL even with the completion popup open");
         match msg {
@@ -1486,23 +1486,24 @@ mod tests {
         // When the completion popup is open, a bare Tab applies the highlighted
         // completion (matching the original dbm's `handle_popup_key`) instead
         // of inserting a tab character into the buffer.
+        use crate::common::utils::cursor::Cursor;
         use crate::features::sql_workspace::sql_tab::editor::sql_completion::msg::SqlCompletionMessage;
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::{
+            CompletionItem, CompletionKind,
+        };
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::state::SqlCompletionState;
         let mut state = state_with_tabs(1);
         state.sql_tab.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
-        state.sql_tab.tabs[0].editor.sql_completion = {
-            use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::{
-                CompletionItem, CompletionKind,
-            };
-            let mut sc = crate::features::sql_workspace::sql_tab::editor::sql_completion::state::SqlCompletionState::default();
-            sc.open = true;
-            sc.items = vec![CompletionItem {
+        state.sql_tab.tabs[0].editor.sql_completion = SqlCompletionState::open_with(
+            vec![CompletionItem {
                 label: "customers".into(),
                 kind: CompletionKind::Table,
                 detail: None,
                 insert_text: "customers".into(),
-            }];
-            sc
-        };
+            }],
+            Cursor::new(0, 0),
+            Cursor::new(0, 0),
+        );
         let msg = sql_key(key(KeyCode::Tab, KeyModifiers::NONE), &state)
             .expect("bare tab with the completion popup open should apply completion");
         match msg {
