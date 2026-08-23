@@ -6,7 +6,7 @@
 //! child panes are always visible; the one that owns focus draws an active
 //! border.
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::Frame;
 
 use crate::common::view::theme::Theme;
@@ -45,18 +45,12 @@ pub fn render(
 
     // Instances (top) and objects (bottom) stacked vertically, split by a
     // 1-row draggable splitter, mirroring the original dbm explorer layout.
-    let panes = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(50), // instances tree
-            Constraint::Length(1),      // splitter
-            Constraint::Percentage(50), // objects tree
-        ])
-        .split(inner);
+    // The splitter width is owned by the explorer `splitter` child feature.
+    let panes = super::splitter::view::explorer_body_layout(inner, state.splitter.instances_height);
 
     let instances_focused = focused && state.pane == ExplorerPane::Instances;
     let objects_focused = focused && state.pane == ExplorerPane::Objects;
-    instances_view::render(frame, theme, panes[0], &state.instances, instances_focused);
-    draw(frame, panes[1], SplitOrientation::Horizontal, false, false);
-    objects_view::render(frame, theme, panes[2], &state.objects, objects_focused);
+    instances_view::render(frame, theme, panes.instances, &state.instances, instances_focused);
+    draw(frame, panes.splitter, SplitOrientation::Horizontal, false, false);
+    objects_view::render(frame, theme, panes.objects, &state.objects, objects_focused);
 }

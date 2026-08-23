@@ -74,6 +74,18 @@ fn approx_discover_body_height(state: &AppState) -> u16 {
         .max(1)
 }
 
+/// Approximate the explorer instances/objects track height: the explorer
+/// column's inner height (body minus the outer border). Only used to
+/// round-trip the persisted percentage to/from rows; the layout re-clamps to
+/// `[20%, 80%]` of the true track.
+fn approx_explorer_body_height(state: &AppState) -> u16 {
+    state
+        .term_height
+        .saturating_sub(6) // header + footer + borders
+        .saturating_sub(2) // explorer outer border
+        .max(1)
+}
+
 fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
     let track_h = approx_sql_body_height(state);
     let tabs = state
@@ -117,7 +129,11 @@ fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
         discover_targets_ratio: state.discover.splitter.targets_height_pct(
             approx_discover_body_height(state),
         ),
-        explorer_split_ratio: 20,
+        // Persist the explorer instances/objects split as a percentage (stable
+        // across terminals); the running state keeps it in absolute rows.
+        explorer_split_ratio: state.explorer.splitter.instances_height_pct(
+            approx_explorer_body_height(state),
+        ),
         explorer_pane: match state.explorer.pane {
             ExplorerPane::Instances => "instances",
             ExplorerPane::Objects => "objects",
@@ -355,6 +371,13 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
         approx_discover_body_height(state),
     );
 
+    // Restore the explorer instances/objects splitter (persisted as a
+    // percentage), materialized to rows against the current body height.
+    state.explorer.splitter.set_instances_height_pct(
+        snapshot.explorer_split_ratio,
+        approx_explorer_body_height(state),
+    );
+
     // Restore instance expansion + cursor by name. Expansion is applied to the
     // freshly-loaded tree nodes; the cursor resolves to the owning instance row
     // (connections load lazily, so a connection cursor focuses its instance).
@@ -549,6 +572,31 @@ mod tests {
         // Default app opens no tabs (a tab is opened when a connection is
         // selected in the tree).
         assert!(snap.tabs.is_empty());
+    }
+
+    #[test]
+    fn snapshot_persists_and_restores_explorer_instances_split() {
+        // The explorer instances/objects split is persisted as a percentage and
+        // re-materialized to rows against the current body height on restore.
+        let mut state = sample_state();
+        state.term_height = 48; // explorer body ≈ 40 rows
+        state
+            .explorer
+            .splitter
+            .set_instances_height_pct(50, approx_explorer_body_height(&state));
+        let snap = snapshot_from_app(&state);
+        assert_eq!(snap.explorer_split_ratio, 50);
+
+        let mut restored = sample_state();
+        restored.term_height = 48;
+        let effects = apply_snapshot(&mut restored, &snap);
+        let track = approx_explorer_body_height(&restored);
+        assert_eq!(
+            restored.explorer.splitter.instances_height,
+            (track * 50) / 100
+        );
+        assert_eq!(restored.explorer.splitter.instances_height_pct(track), 50);
+        drop(effects);
     }
 
     #[test]

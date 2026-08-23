@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{Event as CEvent, EventStream, KeyCode};
 use futures::StreamExt;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
@@ -139,6 +139,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // Whether the discover targets/results splitter is being dragged (only
     // meaningful while the discover parent pane owns focus).
     let mut discover_split_drag = false;
+
+    // Whether the explorer instances/objects splitter is being dragged (only
+    // meaningful while the explorer owns focus).
+    let mut explorer_split_drag = false;
 
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
@@ -460,6 +464,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.row,
                                     body_top,
                                     body_h,
+                                    state.explorer.splitter.instances_height,
                                 )))
                             } else if !state.instance_workspace_open() {
                                 Some(Pane::SQLWorkspace)
@@ -547,7 +552,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             {
                                 let select = AppMsg::Explorer(
                                     crate::features::explorer::msg::ExplorerMsg::Message(
-                                        match explorer_pane_for_click(mouse.row, body_top, body_h) {
+                                        match explorer_pane_for_click(
+                                            mouse.row,
+                                            body_top,
+                                            body_h,
+                                            state.explorer.splitter.instances_height,
+                                        ) {
                                             crate::app_shell::nav::ExplorerPane::Instances => {
                                                 crate::features::explorer::msg::ExplorerMessage::Instances(
                                                     crate::features::explorer::instances::msg::InstancesMsg::Message(
@@ -686,6 +696,35 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 tracing::debug!("app explorer/workspace splitter drag started");
                             }
 
+                            // Starting a drag on the explorer instances/objects
+                            // splitter (only while the explorer owns focus) begins
+                            // a resize gesture.
+                            let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+                            if matches!(state.focus, Pane::Explorer(_))
+                                && body_h >= 3
+                                && let explorer = Rect::new(0, body_top, explorer_w, body_h)
+                                && explorer.height >= 3
+                                && {
+                                    let inner = Rect::new(
+                                        explorer.x.saturating_add(1),
+                                        explorer.y.saturating_add(1),
+                                        explorer.width.saturating_sub(2),
+                                        explorer.height.saturating_sub(2),
+                                    );
+                                    let layout =
+                                        crate::features::explorer::splitter::view::explorer_body_layout(
+                                            inner,
+                                            state.explorer.splitter.instances_height,
+                                        );
+                                    crate::features::explorer::splitter::view::splitter_at(
+                                        &layout, point.x, point.y,
+                                    )
+                                }
+                            {
+                                explorer_split_drag = true;
+                                tracing::debug!("explorer instances/objects splitter drag started");
+                            }
+
                             // Starting a drag on a SQL-tab splitter begins a
                             // resize gesture (only when the SQL workspace owns
                             // focus and it is actually rendered). The feature
@@ -722,6 +761,42 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     let msg = AppMsg::Discover(
                                         crate::features::discover::msg::DiscoverMsg::Message(
                                             crate::features::discover::msg::DiscoverMessage::SetTargetsHeight { height },
+                                        ),
+                                    );
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+                            if explorer_split_drag {
+                                let size = terminal.size()?;
+                                let body_top = 3u16;
+                                let body_h = size
+                                    .height
+                                    .saturating_sub(body_top)
+                                    .saturating_sub(footer_view::footer_height(&state.footer, size.width));
+                                let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+                                let explorer = Rect::new(0, body_top, explorer_w, body_h);
+                                let inner = Rect::new(
+                                    explorer.x.saturating_add(1),
+                                    explorer.y.saturating_add(1),
+                                    explorer.width.saturating_sub(2),
+                                    explorer.height.saturating_sub(2),
+                                );
+                                if body_h >= 3 && inner.height >= 3 {
+                                    let height =
+                                        crate::features::explorer::splitter::view::instances_height_for_y(
+                                            inner, point.y,
+                                        );
+                                    let msg = AppMsg::Explorer(
+                                        crate::features::explorer::msg::ExplorerMsg::Message(
+                                            crate::features::explorer::msg::ExplorerMessage::SetInstancesHeight {
+                                                height,
+                                            },
                                         ),
                                     );
                                     let result = process_message_round(
@@ -790,6 +865,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
+                            if explorer_split_drag {
+                                explorer_split_drag = false;
+                                tracing::debug!("explorer instances/objects splitter drag finished");
+                            }
                             if discover_split_drag {
                                 discover_split_drag = false;
                                 tracing::debug!("discover targets/results splitter drag finished");
@@ -1358,30 +1437,25 @@ fn iw_action_to_msg(action: crate::features::instance_workspace::effect::IwActio
 }
 
 /// Compute the two explorer child tree areas (instances top / objects bottom)
-/// from the explorer's outer rect, mirroring `explorer/view.rs` (50% + 1-row
-/// splitter + 50%, inside the outer border).
-fn explorer_child_areas(explorer: ratatui::layout::Rect) -> (ratatui::layout::Rect, ratatui::layout::Rect) {
+/// from the explorer's outer rect, mirroring `explorer/view.rs` (the stored
+/// instances height + 1-row splitter, inside the outer border).
+fn explorer_child_areas(
+    explorer: ratatui::layout::Rect,
+    instances_height: u16,
+) -> (ratatui::layout::Rect, ratatui::layout::Rect) {
     // Mirror the explorer render exactly: the two child panes are laid out with
-    // `Layout::Vertical([Percentage(50), Length(1), Percentage(50)])` inside the
-    // outer border. Computing them the same way here guarantees the click
-    // hit-testing uses the same child-pane rectangles the render draws, so a
-    // click on a row maps to the same row (no off-by-one from `height/2` vs
-    // `Layout` rounding).
+    // the shared `explorer_body_layout` inside the outer border. Computing them
+    // the same way here guarantees the click hit-testing uses the same
+    // child-pane rectangles the render draws, so a click on a row maps to the
+    // same row (no off-by-one drift).
     let inner = Rect::new(
         explorer.x.saturating_add(1),
         explorer.y.saturating_add(1),
         explorer.width.saturating_sub(2),
         explorer.height.saturating_sub(2),
     );
-    let panes = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(50),
-            Constraint::Length(1),
-            Constraint::Percentage(50),
-        ])
-        .split(inner);
-    (panes[0], panes[2])
+    let panes = crate::features::explorer::splitter::view::explorer_body_layout(inner, instances_height);
+    (panes.instances, panes.objects)
 }
 
 /// Build the explorer messages for a single click on a visible tree row.
@@ -1401,8 +1475,9 @@ fn is_explorer_toggle_click(
         return false;
     }
     let explorer = Rect::new(0, body_top, explorer_w, body_h);
-    let (instances_area, objects_area) = explorer_child_areas(explorer);
-    match explorer_pane_for_click(y, body_top, body_h) {
+    let (instances_area, objects_area) =
+        explorer_child_areas(explorer, state.explorer.splitter.instances_height);
+    match explorer_pane_for_click(y, body_top, body_h, state.explorer.splitter.instances_height) {
         crate::app_shell::nav::ExplorerPane::Instances => {
             crate::features::explorer::instances::view::toggle_at(
                 instances_area,
@@ -1439,8 +1514,9 @@ fn explorer_click_hits_row(
         return false;
     }
     let explorer = Rect::new(0, body_top, explorer_w, body_h);
-    let (instances_area, objects_area) = explorer_child_areas(explorer);
-    match explorer_pane_for_click(y, body_top, body_h) {
+    let (instances_area, objects_area) =
+        explorer_child_areas(explorer, state.explorer.splitter.instances_height);
+    match explorer_pane_for_click(y, body_top, body_h, state.explorer.splitter.instances_height) {
         crate::app_shell::nav::ExplorerPane::Instances => {
             crate::features::explorer::instances::view::row_at(
                 instances_area,
@@ -1478,8 +1554,9 @@ fn explorer_row_click_msgs(
         return None;
     }
     let explorer = Rect::new(0, body_top, explorer_w, body_h);
-    let (instances_area, objects_area) = explorer_child_areas(explorer);
-    let pane = explorer_pane_for_click(y, body_top, body_h);
+    let (instances_area, objects_area) =
+        explorer_child_areas(explorer, state.explorer.splitter.instances_height);
+    let pane = explorer_pane_for_click(y, body_top, body_h, state.explorer.splitter.instances_height);
     match pane {
         crate::app_shell::nav::ExplorerPane::Instances => {
             let inst = &state.explorer.instances;
@@ -1533,13 +1610,14 @@ fn explorer_pane_for_click(
     row: u16,
     body_top: u16,
     body_h: u16,
+    instances_height: u16,
 ) -> crate::app_shell::nav::ExplorerPane {
     use crate::app_shell::nav::ExplorerPane;
     // Use the same `Layout` as the render and `explorer_child_areas` so the
     // instances/objects boundary matches exactly (no `height/2` vs `Layout`
     // rounding drift).
     let explorer = Rect::new(0, body_top, 1, body_h);
-    let (instances, _objects) = explorer_child_areas(explorer);
+    let (instances, _objects) = explorer_child_areas(explorer, instances_height);
     if row <= instances.y.saturating_add(instances.height) {
         ExplorerPane::Instances
     } else {
@@ -1862,8 +1940,9 @@ mod tests {
     #[test]
     fn explorer_child_areas_stack_trees() {
         let explorer = Rect::new(0, 3, 40, 21);
-        let (instances, objects) = explorer_child_areas(explorer);
-        // Outer border: inner is (1,4,38,19); half = 9.
+        let (instances, objects) = explorer_child_areas(explorer, 9);
+        // Outer border: inner is (1,4,38,19); instances height 9 (in the
+        // [20%,80%] range of the 19-row track).
         assert_eq!(instances, Rect::new(1, 4, 38, 9));
         // Objects start after the 1-row splitter.
         assert_eq!(objects.y, instances.y + instances.height + 1);
@@ -1875,18 +1954,18 @@ mod tests {
         use crate::app_shell::nav::ExplorerPane;
         // body_top=3, body_h=20. The boundary derives from the same `Layout` the
         // render uses, so it is exact (no `height/2` vs `Layout` rounding drift).
-        let (instances, _objects) = explorer_child_areas(Rect::new(0, 3, 1, 20));
+        let (instances, _objects) = explorer_child_areas(Rect::new(0, 3, 1, 20), 9);
         let boundary = instances.y.saturating_add(instances.height);
-        assert_eq!(explorer_pane_for_click(5, 3, 20), ExplorerPane::Instances);
+        assert_eq!(explorer_pane_for_click(5, 3, 20, 9), ExplorerPane::Instances);
         assert_eq!(
-            explorer_pane_for_click(boundary, 3, 20),
+            explorer_pane_for_click(boundary, 3, 20, 9),
             ExplorerPane::Instances
         );
         assert_eq!(
-            explorer_pane_for_click(boundary.saturating_add(1), 3, 20),
+            explorer_pane_for_click(boundary.saturating_add(1), 3, 20, 9),
             ExplorerPane::Objects
         );
-        assert_eq!(explorer_pane_for_click(21, 3, 20), ExplorerPane::Objects);
+        assert_eq!(explorer_pane_for_click(21, 3, 20, 9), ExplorerPane::Objects);
     }
 
     #[test]

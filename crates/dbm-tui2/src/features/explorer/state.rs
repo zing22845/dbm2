@@ -2,6 +2,7 @@
 
 use super::instances::state::InstancesState;
 use super::objects::state::ObjectsState;
+use super::splitter::state::ExplorerSplitterState;
 
 // Re-export the shared explorer sub-pane type so the shell's `Pane` and the
 // explorer feature agree on the same navigation type.
@@ -14,6 +15,8 @@ pub struct ExplorerState {
     pub instances: InstancesState,
     /// The object tree.
     pub objects: ObjectsState,
+    /// The instances/objects horizontal splitter.
+    pub splitter: ExplorerSplitterState,
     /// Which explorer pane is focused.
     pub pane: ExplorerPane,
 }

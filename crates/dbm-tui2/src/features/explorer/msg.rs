@@ -10,6 +10,9 @@ use super::state::ExplorerPane;
 pub enum ExplorerMessage {
     /// Set the active explorer pane.
     SetPane(ExplorerPane),
+    /// Set the instances tree height in rows (drag the instances/objects
+    /// splitter).
+    SetInstancesHeight { height: u16 },
     /// Forwarded instances list message.
     Instances(InstancesMsg),
     /// Forwarded objects tree message.
