@@ -130,10 +130,15 @@ pub fn sql_tab_splitter_resize_msg(
         SqlSplitter::EditorResults => {
             // Record the top-pane height in absolute rows (the exact row under
             // the pointer) — no percentage round-trip, so the splitter tracks
-            // the pointer precisely. The stored rows are re-clamped to the
-            // current track at layout time.
+            // the pointer precisely. Clamp to the valid `[20%, 80%]` row range
+            // of the current track so a pointer dragged beyond the boundary
+            // leaves the stored height (and thus the rendered split) unchanged:
+            // the drag then stops emitting redundant repaints, which would
+            // otherwise inflate the waste metric.
+            let track_h = layout.results.bottom().saturating_sub(layout.editor.y);
             let top_h = y.saturating_sub(layout.editor.y);
-            Some(SqlTabMessage::SetEditorTopHeight { tab_id, height: top_h })
+            let height = crate::common::view::splitter::clamp_split_px(top_h, track_h, 20, 20);
+            Some(SqlTabMessage::SetEditorTopHeight { tab_id, height })
         }
         SqlSplitter::EditorHistory => {
             let right_edge = layout.history.right();

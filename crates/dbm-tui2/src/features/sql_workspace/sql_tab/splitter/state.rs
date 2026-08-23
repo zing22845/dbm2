@@ -47,9 +47,17 @@ impl SqlTabSplitterState {
 
     /// Set and clamp the editor top-pane height in rows (drag the
     /// editor/results split). A generous floor/ceiling bounds the stored rows;
-    /// the layout re-clamps them to `[20%, 80%]` of the current track.
-    pub fn set_editor_top_height(&mut self, height: u16) {
-        self.editor_top_height = height.clamp(1, 1000);
+    /// the layout re-clamps them to `[20%, 80%]` of the current track. Returns
+    /// `true` when the stored height actually changed, so callers can skip a
+    /// redundant repaint (and keep the redundancy/waste metric low) when a drag
+    /// does not move the splitter.
+    pub fn set_editor_top_height(&mut self, height: u16) -> bool {
+        let new = height.clamp(1, 1000);
+        if new == self.editor_top_height {
+            return false;
+        }
+        self.editor_top_height = new;
+        true
     }
 
     /// The editor top-pane height as a percentage of the given track height

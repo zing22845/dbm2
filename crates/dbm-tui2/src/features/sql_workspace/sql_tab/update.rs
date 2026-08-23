@@ -189,8 +189,11 @@ pub fn update(
         }
         SqlTabMessage::SetEditorTopHeight { tab_id, height } => {
             if let Some(idx) = state.index_of(tab_id) {
-                state.tabs[idx].set_editor_top_height(height);
-                dirty = true;
+                // Only repaint when the split actually moved — a drag that does
+                // not change the split (e.g. at a clamp boundary, or the pointer
+                // resting on a row it already set) must not count as a redundant
+                // redraw and inflate the waste metric.
+                dirty |= state.tabs[idx].set_editor_top_height(height);
             } else {
                 warn_tab_missing(tab_id);
             }

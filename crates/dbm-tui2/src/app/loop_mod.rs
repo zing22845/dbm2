@@ -75,6 +75,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     };
 
     let mut state = AppState::default();
+    // Cache the terminal size once at startup: the terminal does not reliably
+    // emit a Resize event on launch, so without this the persisted
+    // horizontal-split percentage would be re-materialized against an
+    // incorrect (zero) body height and the explorer's horizontal-scroll clamp
+    // would have no width to work with.
+    if let Ok(size) = terminal.size() {
+        state.term_width = size.width;
+        state.term_height = size.height;
+    }
     let mut reader = EventStream::new();
 
     // Populate the explorer tree on startup. Use `update_unchecked` so the
