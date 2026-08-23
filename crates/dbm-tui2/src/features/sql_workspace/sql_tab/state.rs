@@ -63,8 +63,9 @@ impl SqlTab {
     }
 
     /// Nudge the editor top-pane height with `+` / `-`, growing the focused
-    /// pane (`top_focused` = editor/history row focused). Returns `true` when
-    /// the split actually moved.
+    /// pane (`top_focused` = editor/history row focused). The target is clamped
+    /// to the live `[20%, 80%]` range (via the last laid out track). Returns
+    /// `true` when the split actually moved.
     pub fn nudge_editor_top_height(&mut self, plus: bool, top_focused: bool) -> bool {
         self.splitter.nudge_editor_top_height(plus, top_focused)
     }
