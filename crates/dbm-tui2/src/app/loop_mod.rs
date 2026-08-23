@@ -1722,15 +1722,32 @@ fn normalize_splitter_tracks(state: &mut crate::app::state::AppState, size: rata
         tab.splitter.history_min = layout.history_min;
         tab.splitter.history_max = layout.history_max.max(layout.history_min);
     }
-    // Explorer column inner height (body minus the outer border).
-    state.explorer.splitter.last_track = body_h.saturating_sub(2).max(1);
-    // Discover popup body: the targets/results track inside the 75% overlay,
-    // computed with the same engine/footer split the render uses, so keyboard
-    // nudges clamp against the exact rendered body.
+    // Explorer instances/objects bounds, derived from the same layout the render
+    // uses so nudge clamps to the exact rendered boundary.
+    if let Some(explorer) = app_explorer_rect(size, 3, body_h, state) {
+        let inner = Rect::new(
+            explorer.x + 1,
+            explorer.y + 1,
+            explorer.width.saturating_sub(2),
+            explorer.height.saturating_sub(2),
+        );
+        let layout = crate::features::explorer::splitter::view::explorer_body_layout(
+            inner,
+            state.explorer.splitter.instances_height,
+        );
+        state.explorer.splitter.instances_min = layout.instances_min;
+        state.explorer.splitter.instances_max = layout.instances_max.max(layout.instances_min);
+    }
+    // Discover targets/results bounds, from the same popup/body the render lays.
     if let Some(ws) = workspace {
         let discover_popup = crate::common::view::modal::popup_rect(ws, 75, 75);
-        state.discover.splitter.last_track =
-            crate::features::discover::view::discover_body_track(discover_popup, &state.discover);
+        let body = crate::features::discover::view::discover_body_area(discover_popup, &state.discover);
+        let layout = crate::features::discover::splitter::view::discover_body_layout(
+            body,
+            state.discover.splitter.targets_height,
+        );
+        state.discover.splitter.targets_min = layout.targets_min;
+        state.discover.splitter.targets_max = layout.targets_max.max(layout.targets_min);
     }
 }
 

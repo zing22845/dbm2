@@ -13,22 +13,19 @@ pub const DEFAULT_TARGETS_HEIGHT: u16 = 10;
 pub struct DiscoverSplitterState {
     /// Targets editor (top pane) height in rows.
     pub targets_height: u16,
-    /// The last body height (rows) this split was laid out against; keyboard
-    /// nudges clamp to `[20%, 80%]` of this.
-    pub last_track: u16,
+    /// The actual targets-height bounds (rows) the last layout clamped to,
+    /// refreshed by the run loop from the layout; keyboard nudges clamp to these
+    /// so the stored value and the rendered split never disagree.
+    pub targets_min: u16,
+    pub targets_max: u16,
 }
-
-/// The last body height (rows) this split was laid out against, refreshed by
-/// the run loop before each render. Keyboard nudges clamp the target to
-/// `[20%, 80%]` of this so nudging past the boundary leaves the stored height
-/// unchanged (no redundant repaint).
-const DEFAULT_LAST_TRACK: u16 = DEFAULT_TARGETS_HEIGHT * 5;
 
 impl Default for DiscoverSplitterState {
     fn default() -> Self {
         Self {
             targets_height: DEFAULT_TARGETS_HEIGHT,
-            last_track: DEFAULT_LAST_TRACK,
+            targets_min: 1,
+            targets_max: 200,
         }
     }
 }
@@ -67,14 +64,15 @@ impl DiscoverSplitterState {
     /// focused rather than the results (bottom). `+` always grows the focused
     /// pane and `-` shrinks it. Returns `true` when the split actually moved.
     pub fn nudge_targets_height(&mut self, plus: bool, top_focused: bool) -> bool {
-        use crate::common::view::splitter::{WIDTH_NUDGE_STEP, clamp_split_px};
+        use crate::common::view::splitter::WIDTH_NUDGE_STEP;
         let grow_top = if plus { top_focused } else { !top_focused };
         let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
-        let next = (self.targets_height as i16 + delta).max(0) as u16;
-        // Clamp to the live `[20%, 80%]` range so nudging past the boundary
+        // Clamp to the layout's actual bounds so nudging past the boundary
         // leaves the stored height unchanged (no redundant repaint).
-        let clamped = clamp_split_px(next, self.last_track, 20, 20);
-        self.set_targets_height(clamped)
+        let next = (self.targets_height as i16 + delta)
+            .clamp(self.targets_min as i16, self.targets_max as i16)
+            as u16;
+        self.set_targets_height(next)
     }
 }
 
@@ -126,7 +124,8 @@ mod tests {
     #[test]
     fn nudge_stops_dirtying_at_the_boundary() {
         let mut s = DiscoverSplitterState::default();
-        s.last_track = 10; // valid range [2, 7]
+        s.targets_min = 2;
+        s.targets_max = 7;
         s.targets_height = 3;
         assert!(s.nudge_targets_height(false, true)); // 3 -> 2
         assert_eq!(s.targets_height, 2);

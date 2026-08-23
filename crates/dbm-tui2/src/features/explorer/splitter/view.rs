@@ -18,6 +18,11 @@ pub struct ExplorerSplitLayout {
     pub splitter: Rect,
     /// The objects tree (bottom).
     pub objects: Rect,
+    /// Actual instances-height bounds (rows), what the layout clamped to.
+    /// Nudge/drag clamp to these so the stored value and the rendered split
+    /// always agree (no redundant repaint at the boundary).
+    pub instances_min: u16,
+    pub instances_max: u16,
 }
 
 /// Compute the explorer instances/objects layout. `instances_height` is the
@@ -32,7 +37,9 @@ pub fn explorer_body_layout(area: Rect, instances_height: u16) -> ExplorerSplitL
     // Recompute the track from the current area so the stored rows are clamped
     // against the *live* height (handles terminal resizes).
     let track_h = area.height;
-    let top_px = clamp_split_px(instances_height, track_h, 20, 20);
+    let instances_min = (track_h * 20) / 100;
+    let instances_max = track_h.saturating_sub(1).saturating_sub(instances_min);
+    let top_px = instances_height.clamp(instances_min, instances_max);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -48,6 +55,8 @@ pub fn explorer_body_layout(area: Rect, instances_height: u16) -> ExplorerSplitL
         instances: rows[0],
         splitter: rows[1],
         objects: rows[2],
+        instances_min,
+        instances_max,
     }
 }
 

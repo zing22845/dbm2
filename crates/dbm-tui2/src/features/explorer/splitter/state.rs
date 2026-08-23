@@ -13,16 +13,19 @@ pub const DEFAULT_INSTANCES_HEIGHT: u16 = 10;
 pub struct ExplorerSplitterState {
     /// Instances tree (top pane) height in rows.
     pub instances_height: u16,
-    /// The last body height (rows) this split was laid out against; keyboard
-    /// nudges clamp to `[20%, 80%]` of this.
-    pub last_track: u16,
+    /// The actual instances-height bounds (rows) the last layout clamped to,
+    /// refreshed by the run loop from the layout; keyboard nudges clamp to these
+    /// so the stored value and the rendered split never disagree.
+    pub instances_min: u16,
+    pub instances_max: u16,
 }
 
 impl Default for ExplorerSplitterState {
     fn default() -> Self {
         Self {
             instances_height: DEFAULT_INSTANCES_HEIGHT,
-            last_track: DEFAULT_INSTANCES_HEIGHT * 5,
+            instances_min: 1,
+            instances_max: 200,
         }
     }
 }
@@ -63,14 +66,15 @@ impl ExplorerSplitterState {
     /// focused rather than the objects (bottom). `+` always grows the focused
     /// pane and `-` shrinks it. Returns `true` when the split actually moved.
     pub fn nudge_instances_height(&mut self, plus: bool, top_focused: bool) -> bool {
-        use crate::common::view::splitter::{WIDTH_NUDGE_STEP, clamp_split_px};
+        use crate::common::view::splitter::WIDTH_NUDGE_STEP;
         let grow_top = if plus { top_focused } else { !top_focused };
         let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
-        let next = (self.instances_height as i16 + delta).max(0) as u16;
-        // Clamp to the live `[20%, 80%]` range so nudging past the boundary
+        // Clamp to the layout's actual bounds so nudging past the boundary
         // leaves the stored height unchanged (no redundant repaint).
-        let clamped = clamp_split_px(next, self.last_track, 20, 20);
-        self.set_instances_height(clamped)
+        let next = (self.instances_height as i16 + delta)
+            .clamp(self.instances_min as i16, self.instances_max as i16)
+            as u16;
+        self.set_instances_height(next)
     }
 }
 
@@ -122,7 +126,8 @@ mod tests {
     #[test]
     fn nudge_stops_dirtying_at_the_boundary() {
         let mut s = ExplorerSplitterState::default();
-        s.last_track = 10; // valid range [2, 7]
+        s.instances_min = 2;
+        s.instances_max = 7;
         s.instances_height = 3;
         assert!(s.nudge_instances_height(false, true)); // 3 -> 2
         assert_eq!(s.instances_height, 2);

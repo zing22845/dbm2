@@ -18,6 +18,9 @@ pub struct DiscoverSplitLayout {
     pub splitter: Rect,
     /// The results list (bottom).
     pub results: Rect,
+    /// Actual targets-height bounds (rows), what the layout clamped to.
+    pub targets_min: u16,
+    pub targets_max: u16,
 }
 
 /// Compute the discover targets/results layout. `targets_height` is the stored
@@ -32,7 +35,9 @@ pub fn discover_body_layout(area: Rect, targets_height: u16) -> DiscoverSplitLay
     // Recompute the track from the current area so the stored rows are clamped
     // against the *live* height (handles terminal resizes).
     let track_h = area.height;
-    let top_px = clamp_split_px(targets_height, track_h, 20, 20);
+    let targets_min = (track_h * 20) / 100;
+    let targets_max = track_h.saturating_sub(1).saturating_sub(targets_min);
+    let top_px = targets_height.clamp(targets_min, targets_max);
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -48,6 +53,8 @@ pub fn discover_body_layout(area: Rect, targets_height: u16) -> DiscoverSplitLay
         targets: rows[0],
         splitter: rows[1],
         results: rows[2],
+        targets_min,
+        targets_max,
     }
 }
 
