@@ -1082,37 +1082,41 @@ fn perf_exclude_rects(size: ratatui::layout::Size, footer_h: u16) -> Vec<Rect> {
     vec![Rect::new(x, size.height - footer_h, size.width - x, footer_h)]
 }
 
+/// The app body layout (explorer + vertical splitter + workspace), computed once
+/// from the same `app_body_layout` the render uses. This is the single geometry
+/// source for app-level mouse hit-testing, so every region it derives (explorer,
+/// workspace) agrees with the rendered splitter (no hard-coded 20% drift when
+/// the Explorer is resized).
+fn app_body_geometry(
+    size: ratatui::layout::Size,
+    body_top: u16,
+    body_h: u16,
+    state: &AppState,
+) -> Option<crate::features::app_splitter::view::AppBodyLayout> {
+    let body_area = Rect::new(0, body_top, size.width, body_h);
+    let layout = crate::features::app_splitter::view::app_body_layout(body_area, state.splitter.explorer_pane_width);
+    (layout.workspace.width > 0 && layout.explorer.width > 0).then_some(layout)
+}
+
 /// The workspace region of the app body (right of the Explorer / workspace
-/// splitter), computed from the shared `app_body_layout` so mouse hit-testing
-/// always agrees with rendering. `body_top` is the row below the header and
-/// `body_h` the body height (after the footer). Returns `None` when the body
-/// is too small to lay out both panes.
+/// splitter). Returns `None` when the body is too small to lay out both panes.
 fn workspace_rect_for_hit(
     size: ratatui::layout::Size,
     body_top: u16,
     body_h: u16,
     state: &AppState,
 ) -> Option<ratatui::layout::Rect> {
-    let body_area = Rect::new(0, body_top, size.width, body_h);
-    let layout = crate::features::app_splitter::view::app_body_layout(body_area, state.splitter.explorer_pane_width);
-    if layout.workspace.width == 0 {
-        return None;
-    }
-    Some(layout.workspace)
+    app_body_geometry(size, body_top, body_h, state).map(|g| g.workspace)
 }
 
-/// The Explorer column rect (the left pane of the app body splitter), from the
-/// same `app_body_layout` the render uses, so mouse hit-testing agrees with the
-/// rendered splitter (no hard-coded 20% drift when the Explorer is resized).
+/// The Explorer column rect (the left pane of the app body splitter).
 fn app_explorer_rect(
     size: ratatui::layout::Size,
     body_top: u16,
     body_h: u16,
     state: &AppState,
 ) -> Option<ratatui::layout::Rect> {
-    let body_area = Rect::new(0, body_top, size.width, body_h);
-    let layout = crate::features::app_splitter::view::app_body_layout(body_area, state.splitter.explorer_pane_width);
-    (layout.explorer.width > 0).then_some(layout.explorer)
+    app_body_geometry(size, body_top, body_h, state).map(|g| g.explorer)
 }
 
 /// Compute the SQL tab region (tab bar + child panes) for mouse hit-testing,
