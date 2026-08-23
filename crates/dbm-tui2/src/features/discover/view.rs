@@ -139,3 +139,34 @@ fn render_close_confirm(frame: &mut Frame, theme: &Theme, area: Rect) {
         true,
     );
 }
+
+/// The discover targets/results body height (rows) for a given discover `area`,
+/// mirroring the engine/footer height split inside the outer border. This is
+/// the track the horizontal splitter is a percentage of; the run loop uses it
+/// so keyboard `+`/`-` nudges clamp against the exact rendered body.
+pub fn discover_body_track(area: Rect, state: &DiscoverState) -> u16 {
+    use crate::common::utils::text_width::wrapped_line_count;
+    use crate::common::view::hints::{discover_engine_footer_text, discover_footer_text};
+    let inner = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .inner(area);
+    if inner.width == 0 || inner.height == 0 {
+        return 1;
+    }
+    let footer_text = discover_footer_text(&discover_status(state));
+    let footer_h = if footer_text.is_empty() {
+        0
+    } else {
+        footer_text.lines().count().clamp(1, 2) as u16
+    };
+    let engine_footer_text = discover_engine_footer_text(state.engine.status.as_deref());
+    let engine_footer_h = if engine_footer_text.is_empty() {
+        0
+    } else {
+        wrapped_line_count(&engine_footer_text, inner.width.saturating_sub(2).max(1))
+            .max(1)
+            .min(inner.height.saturating_sub(3).max(1))
+    };
+    let engine_h = 3u16.saturating_add(engine_footer_h);
+    inner.height.saturating_sub(engine_h).saturating_sub(footer_h).max(1)
+}

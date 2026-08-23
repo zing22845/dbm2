@@ -15,6 +15,20 @@ use crate::app::state::ModalKind;
 use crate::common::view::overlay_clear::clear_overlay;
 use crate::common::view::theme::Theme;
 
+/// The centered `width_pct` × `height_pct` popup rect over `base` (pure
+/// geometry). Shared by the renderer and the mouse hit-tester so both agree on
+/// where a popup sits.
+pub fn popup_rect(base: Rect, width_pct: u16, height_pct: u16) -> Rect {
+    let w = (base.width * width_pct) / 100;
+    let h = (base.height * height_pct) / 100;
+    Rect {
+        x: base.x + (base.width - w) / 2,
+        y: base.y + (base.height - h) / 2,
+        width: w,
+        height: h,
+    }
+}
+
 /// Render a centered popup of `width_pct` × `height_pct` over `base`, clearing
 /// the overlay so wide glyphs below don't bleed through, and delegating the
 /// popup's interior (block + body) to `inner`.
@@ -38,17 +52,10 @@ pub fn render_popup<F>(
     if base.width == 0 || base.height == 0 {
         return;
     }
-    let w = (base.width * width_pct) / 100;
-    let h = (base.height * height_pct) / 100;
-    if w < 2 || h < 2 {
+    let popup = popup_rect(base, width_pct, height_pct);
+    if popup.width < 2 || popup.height < 2 {
         return;
     }
-    let popup = Rect {
-        x: base.x + (base.width - w) / 2,
-        y: base.y + (base.height - h) / 2,
-        width: w,
-        height: h,
-    };
     // Clear + fill either the whole modal region (dim_base) or only the popup's
     // own rect (leaving the surroundings visible). The `inner` renderer supplies
     // the popup's own block/surface background.

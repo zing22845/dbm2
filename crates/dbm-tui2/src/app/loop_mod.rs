@@ -354,32 +354,43 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 .height
                                 .saturating_sub(body_top)
                                 .saturating_sub(footer_h);
-                            let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
-                            let workspace = Rect::new(
-                                explorer_w,
-                                body_top,
-                                size.width.saturating_sub(explorer_w),
-                                body_h,
-                            );
-                            // Discover's close-confirm body is a single line.
-                            let popup = crate::common::view::modal::confirm_popup_rect(
-                                workspace,
-                                1,
-                            );
-                            let buttons =
-                                crate::common::view::modal::confirm_buttons(popup);
-                            let msg = if buttons.yes_rect.contains(point) {
-                                Some(AppMsg::Discover(
-                                    crate::features::discover::msg::DiscoverMsg::Message(
-                                        crate::features::discover::msg::DiscoverMessage::Close,
-                                    ),
-                                ))
-                            } else if buttons.no_rect.contains(point) {
-                                Some(AppMsg::Discover(
-                                    crate::features::discover::msg::DiscoverMsg::Message(
-                                        crate::features::discover::msg::DiscoverMessage::CancelClose,
-                                    ),
-                                ))
+                            // The workspace region matches the render exactly
+                            // (using the live Explorer splitter width, not a
+                            // hard-coded 20%), and the close-confirm popup is
+                            // centered inside the discover overlay (75% of the
+                            // workspace), matching `render_modal_popup` — so the
+                            // popup the mouse hits is the same one that is drawn.
+                            let msg = if let Some(workspace) =
+                                workspace_rect_for_hit(size, body_top, body_h, &state)
+                            {
+                                // The close-confirm popup is centered inside the
+                                // discover overlay (75% of the workspace), matching
+                                // `render_modal_popup`, so the popup the mouse hits
+                                // is the same one that is drawn.
+                                let discover_popup =
+                                    crate::common::view::modal::popup_rect(workspace, 75, 75);
+                                // Discover's close-confirm body is a single line.
+                                let popup = crate::common::view::modal::confirm_popup_rect(
+                                    discover_popup,
+                                    1,
+                                );
+                                let buttons =
+                                    crate::common::view::modal::confirm_buttons(popup);
+                                if buttons.yes_rect.contains(point) {
+                                    Some(AppMsg::Discover(
+                                        crate::features::discover::msg::DiscoverMsg::Message(
+                                            crate::features::discover::msg::DiscoverMessage::Close,
+                                        ),
+                                    ))
+                                } else if buttons.no_rect.contains(point) {
+                                    Some(AppMsg::Discover(
+                                        crate::features::discover::msg::DiscoverMsg::Message(
+                                            crate::features::discover::msg::DiscoverMessage::CancelClose,
+                                        ),
+                                    ))
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             };
@@ -1653,9 +1664,14 @@ fn normalize_splitter_tracks(state: &mut crate::app::state::AppState, size: rata
     }
     // Explorer column inner height (body minus the outer border).
     state.explorer.splitter.last_track = body_h.saturating_sub(2).max(1);
-    // Discover popup body (75% of the body, minus border + engine selector).
-    let popup_h = (body_h * 3) / 4;
-    state.discover.splitter.last_track = popup_h.saturating_sub(6).max(1);
+    // Discover popup body: the targets/results track inside the 75% overlay,
+    // computed with the same engine/footer split the render uses, so keyboard
+    // nudges clamp against the exact rendered body.
+    if let Some(workspace) = workspace_rect_for_hit(size, 3, body_h, state) {
+        let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75);
+        state.discover.splitter.last_track =
+            crate::features::discover::view::discover_body_track(discover_popup, &state.discover);
+    }
 }
 
 /// The discover popup's body region (the targets/results area, below the engine
