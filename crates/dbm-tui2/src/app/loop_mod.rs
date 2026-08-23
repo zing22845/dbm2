@@ -121,6 +121,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // `update` via split-resize messages).
     let mut split_drag: Option<(usize, crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter)> = None;
 
+    // Whether the app-level Explorer / workspace splitter is being dragged.
+    // This is separate from `split_drag` because the app splitter is draggable
+    // from any focus pane (it separates two peer top-level panes), not just
+    // from within the SQL workspace.
+    let mut app_split_drag = false;
+
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
     // lives outside `AppState` because it is transient interaction state, like
@@ -622,6 +628,31 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 tracing::debug!("dispatching HeaderMessage::Activate");
                             }
 
+                            // Starting a drag on the app-level Explorer /
+                            // workspace splitter begins a resize gesture. It is
+                            // draggable from any focus pane (it separates two
+                            // peer top-level panes), so it is checked before the
+                            // SQL-tab splitters below.
+                            let body_top = 3u16;
+                            let body_h = terminal
+                                .size()?
+                                .height
+                                .saturating_sub(body_top)
+                                .saturating_sub(footer_view::footer_height(&state.footer, size.width));
+                            if body_h >= 3
+                                && {
+                                    let body_area = Rect::new(0, body_top, size.width, body_h);
+                                    let layout = crate::app::splitter::view::app_body_layout(
+                                        body_area,
+                                        state.splitter.explorer_pane_width,
+                                    );
+                                    crate::app::splitter::view::splitter_at(&layout, point.x, point.y)
+                                }
+                            {
+                                app_split_drag = true;
+                                tracing::debug!("app explorer/workspace splitter drag started");
+                            }
+
                             // Starting a drag on a SQL-tab splitter begins a
                             // resize gesture (only when the SQL workspace owns
                             // focus and it is actually rendered). The feature
@@ -642,6 +673,27 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
                         }
                         MouseEventKind::Drag(MouseButton::Left) => {
+                            if app_split_drag {
+                                let size = terminal.size()?;
+                                let body_top = 3u16;
+                                let body_h = size
+                                    .height
+                                    .saturating_sub(body_top)
+                                    .saturating_sub(footer_view::footer_height(&state.footer, size.width));
+                                if body_h >= 3 {
+                                    let body_area = Rect::new(0, body_top, size.width, body_h);
+                                    let width =
+                                        crate::app::splitter::view::explorer_width_for_x(body_area, point.x);
+                                    let msg = AppMsg::SetExplorerWidth(width);
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
                             if let Some((tab_id, splitter)) = split_drag {
                                 tracing::trace!(?splitter, ?point, "drag move begin");
                                 let size = terminal.size()?;
@@ -678,6 +730,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
+                            if app_split_drag {
+                                app_split_drag = false;
+                                tracing::debug!("app explorer/workspace splitter drag finished");
+                            }
                             if split_drag.take().is_some() {
                                 tracing::debug!("splitter drag finished");
                             }
@@ -842,6 +898,25 @@ fn perf_exclude_rects(size: ratatui::layout::Size, footer_h: u16) -> Vec<Rect> {
     vec![Rect::new(x, size.height - footer_h, size.width - x, footer_h)]
 }
 
+/// The workspace region of the app body (right of the Explorer / workspace
+/// splitter), computed from the shared `app_body_layout` so mouse hit-testing
+/// always agrees with rendering. `body_top` is the row below the header and
+/// `body_h` the body height (after the footer). Returns `None` when the body
+/// is too small to lay out both panes.
+fn workspace_rect_for_hit(
+    size: ratatui::layout::Size,
+    body_top: u16,
+    body_h: u16,
+    state: &AppState,
+) -> Option<ratatui::layout::Rect> {
+    let body_area = Rect::new(0, body_top, size.width, body_h);
+    let layout = crate::app::splitter::view::app_body_layout(body_area, state.splitter.explorer_pane_width);
+    if layout.workspace.width == 0 {
+        return None;
+    }
+    Some(layout.workspace)
+}
+
 /// Compute the SQL tab region (tab bar + child panes) for mouse hit-testing,
 /// mirroring `sql_workspace/view.rs` (workspace inner minus its tab footer).
 /// Returns `None` when the SQL workspace is not the region being shown.
@@ -862,9 +937,7 @@ fn sql_tab_area_for_hit(
     if body_h < 3 {
         return None;
     }
-    let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
-    let workspace_w = size.width.saturating_sub(explorer_w);
-    let workspace = Rect::new(explorer_w, body_top, workspace_w, body_h);
+    let workspace = workspace_rect_for_hit(size, body_top, body_h, state)?;
     // Outer " SQL Workspace " border (1 col/row).
     let inner = Rect::new(
         workspace.x.saturating_add(1),
@@ -908,9 +981,7 @@ fn sql_picker_area_for_hit(
     if body_h < 3 {
         return None;
     }
-    let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
-    let workspace_w = size.width.saturating_sub(explorer_w);
-    let workspace = Rect::new(explorer_w, body_top, workspace_w, body_h);
+    let workspace = workspace_rect_for_hit(size, body_top, body_h, state)?;
     // Outer " SQL Workspace " border (1 col/row).
     let inner = Rect::new(
         workspace.x.saturating_add(1),

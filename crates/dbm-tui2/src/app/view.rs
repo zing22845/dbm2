@@ -37,17 +37,14 @@ pub fn render(
         ])
         .split(frame.area());
 
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(20), // explorer
-            Constraint::Percentage(80), // workspace (iw + sql + perf)
-        ])
-        .split(chunks[1]);
+    // The body is a horizontal split: Explorer (left) + a resizable vertical
+    // splitter + the workspace region (right). The splitter width is owned by
+    // the app-level `splitter` feature.
+    let body = crate::app::splitter::view::app_body_layout(chunks[1], state.splitter.explorer_pane_width);
 
     // The workspace region holds only the SQL view (main). The performance
     // readout moved into the footer row (right-aligned) to save vertical space.
-    let workspace = body[1];
+    let workspace = body.workspace;
 
     // Pass whether each region owns the shell focus so the views can highlight
     // the active pane's border (otherwise focus changes are invisible).
@@ -56,7 +53,15 @@ pub fn render(
     let workspace_focused = matches!(state.focus, Pane::SQLWorkspace)
         || matches!(state.focus, Pane::InstanceWorkspace(_));
     header_view::render(frame, &state.theme, chunks[0], &state.header, header_focused);
-    explorer_view::render(frame, &state.theme, body[0], &state.explorer, explorer_focused);
+    explorer_view::render(frame, &state.theme, body.explorer, &state.explorer, explorer_focused);
+    // Draw the resizable Explorer / workspace splitter strip.
+    crate::common::view::splitter::draw(
+        frame,
+        body.v_splitter,
+        crate::common::view::splitter::SplitOrientation::Vertical,
+        false,
+        false,
+    );
     // The workspace region shows whichever workspace is active, driven by the
     // explorer tree's `active_workspace` marker (the original dbm's
     // `is_instance_workspace()`), not by keyboard focus. Opening a connection

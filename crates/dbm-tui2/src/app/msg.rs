@@ -24,6 +24,9 @@ pub enum AppMsg {
     OpenModal(ModalKind),
     /// Close the currently open modal.
     CloseModal,
+    /// Resize the Explorer pane width (the app-level Explorer / workspace
+    /// splitter), clamped to its allowed range.
+    SetExplorerWidth(u16),
     /// Header feature messages.
     Header(HeaderMsg),
     /// Explorer feature messages.

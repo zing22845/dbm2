@@ -173,7 +173,11 @@ fn focus_pane_of(msg: &AppMsg) -> Option<Pane> {
     match msg {
         // Shell, footer, and modal open/close messages are shell orchestration
         // and bypass the focus guard.
-        AppMsg::Shell(_) | AppMsg::Footer(_) | AppMsg::OpenModal(_) | AppMsg::CloseModal => None,
+        AppMsg::Shell(_)
+        | AppMsg::Footer(_)
+        | AppMsg::OpenModal(_)
+        | AppMsg::CloseModal
+        | AppMsg::SetExplorerWidth(_) => None,
         AppMsg::Header(_) => Some(Pane::Header),
         AppMsg::Explorer(_) => Some(Pane::Explorer(
             crate::app_shell::nav::ExplorerPane::default(),
@@ -310,6 +314,10 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
         }
         AppMsg::CloseModal => {
             state.modal = None;
+            result.dirty = true;
+        }
+        AppMsg::SetExplorerWidth(width) => {
+            state.splitter.set_explorer_pane_width(width);
             result.dirty = true;
         }
         AppMsg::Shell(shell_msg) => match shell_msg {
@@ -1134,6 +1142,25 @@ mod tests {
         )));
         update(msg, &mut state);
         assert!(state.modal.is_none(), "confirm modal must close on delete");
+    }
+
+    #[test]
+    fn set_explorer_width_updates_and_clamps_the_splitter() {
+        let mut state = AppState::default();
+        // `SetExplorerWidth` bypasses the focus guard (app-level state).
+        update(AppMsg::SetExplorerWidth(40), &mut state);
+        assert_eq!(state.splitter.explorer_pane_width, 40);
+        // Out-of-range values are clamped on the way in.
+        update(AppMsg::SetExplorerWidth(9999), &mut state);
+        assert_eq!(
+            state.splitter.explorer_pane_width,
+            crate::app::splitter::state::MAX_EXPLORER_WIDTH
+        );
+        update(AppMsg::SetExplorerWidth(0), &mut state);
+        assert_eq!(
+            state.splitter.explorer_pane_width,
+            crate::app::splitter::state::MIN_EXPLORER_WIDTH
+        );
     }
 
     fn explorer_instances_msg(m: crate::features::explorer::instances::msg::InstancesMessage) -> AppMsg {

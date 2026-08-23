@@ -6,6 +6,7 @@ pub mod input;
 pub mod loop_mod;
 pub mod msg;
 pub mod session;
+pub mod splitter;
 pub mod state;
 pub mod update;
 pub mod view;

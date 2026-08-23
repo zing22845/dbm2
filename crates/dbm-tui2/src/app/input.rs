@@ -90,14 +90,41 @@ pub fn key_to_msg(key: KeyEvent, state: &super::state::AppState) -> Option<AppMs
         // confirms and dispatches the owning feature's action).
         Some(modal) => modal_key(key, modal, state),
         None => match state.focus {
-            Pane::Header => header_key(key),
-            Pane::Explorer(sub) => explorer_key(key, sub, state.term_width),
-            Pane::InstanceWorkspace(sub) => iw_key(key, sub, &state.iw),
+            // Outside the SQL workspace, `[` / `]` resize the app-level
+            // Explorer / workspace splitter. Inside the SQL workspace they
+            // resize the history/detail splitters instead (handled in `sql_key`).
+            Pane::Header => explorer_width_nudge(key, state).or_else(|| header_key(key)),
+            Pane::Explorer(sub) => {
+                explorer_width_nudge(key, state).or_else(|| explorer_key(key, sub, state.term_width))
+            }
+            Pane::InstanceWorkspace(sub) => {
+                explorer_width_nudge(key, state).or_else(|| iw_key(key, sub, &state.iw))
+            }
             Pane::SQLWorkspace => sql_key(key, &state.sql),
             // Discover is handled above (owns all input while open).
             Pane::Discover(_) => None,
         },
     }
+}
+
+/// Nudge the Explorer pane width with `[` (shrink) / `]` (grow), matching the
+/// splitter convention that the left-side pane (Explorer) is grown by `]`.
+/// Returns `None` when the key is not a bare `[` / `]`.
+fn explorer_width_nudge(key: KeyEvent, state: &super::state::AppState) -> Option<AppMsg> {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        return None;
+    }
+    let nudge = match key.code {
+        KeyCode::Char('[') => Some(crate::common::view::splitter::VerticalSplitterNudge::Left),
+        KeyCode::Char(']') => Some(crate::common::view::splitter::VerticalSplitterNudge::Right),
+        _ => None,
+    };
+    let delta = crate::common::view::splitter::width_delta_for_left_pane(
+        nudge?,
+        crate::common::view::splitter::WIDTH_NUDGE_STEP,
+    );
+    let next = (state.splitter.explorer_pane_width as i16 + delta).max(0) as u16;
+    Some(AppMsg::SetExplorerWidth(next))
 }
 
 /// Move the focus pane one step in `dir`. The explorer is a parent pane whose
@@ -1790,6 +1817,32 @@ mod tests {
             }
             _ => panic!("expected focus change"),
         }
+    }
+
+    #[test]
+    fn bracket_keys_nudge_explorer_width_outside_workspace() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::Explorer(ExplorerPane::Instances);
+        state.splitter.explorer_pane_width = 24;
+        // `]` grows the Explorer pane (left side); `[` shrinks it.
+        let msg = key_to_msg(key(KeyCode::Char(']'), KeyModifiers::NONE), &state)
+            .expect("] should nudge the explorer wider");
+        assert!(matches!(msg, AppMsg::SetExplorerWidth(w) if w == 26));
+        let msg = key_to_msg(key(KeyCode::Char('['), KeyModifiers::NONE), &state)
+            .expect("[ should nudge the explorer narrower");
+        assert!(matches!(msg, AppMsg::SetExplorerWidth(w) if w == 22));
+    }
+
+    #[test]
+    fn bracket_keys_do_not_nudge_explorer_inside_sql_workspace() {
+        // Inside the SQL workspace `[`/`]` resize the history/detail splitters
+        // (handled by `sql_key`), not the Explorer pane.
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        state.splitter.explorer_pane_width = 24;
+        let msg = key_to_msg(key(KeyCode::Char(']'), KeyModifiers::NONE), &state);
+        // Not an app-level SetExplorerWidth (the key is consumed by sql_key).
+        assert!(!matches!(msg, Some(AppMsg::SetExplorerWidth(_))));
     }
 
     #[test]
