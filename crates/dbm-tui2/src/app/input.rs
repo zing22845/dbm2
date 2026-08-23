@@ -502,16 +502,22 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
         }
         // Horizontal-splitter adjust (`+` / `-`): `+` grows the focused pane
         // (the targets editor on top or the results list below), `-` shrinks it.
-        // While a target cell is being edited these are literal input, handled
-        // by the targets pane above.
-        KeyCode::Char('+') => Some(discover(DiscoverMessage::NudgeTargetsHeight {
-            plus: true,
-            top_focused: sub == DiscoverPane::Targets,
-        })),
-        KeyCode::Char('-') => Some(discover(DiscoverMessage::NudgeTargetsHeight {
-            plus: false,
-            top_focused: sub == DiscoverPane::Targets,
-        })),
+        // Only meaningful while a splitter pane is focused; the engine selector
+        // is above the splitter, so `+` / `-` there fall through. While a target
+        // cell is being edited these are literal input, handled by the targets
+        // pane above.
+        KeyCode::Char('+') if sub != DiscoverPane::Engine => {
+            Some(discover(DiscoverMessage::NudgeTargetsHeight {
+                plus: true,
+                top_focused: sub == DiscoverPane::Targets,
+            }))
+        }
+        KeyCode::Char('-') if sub != DiscoverPane::Engine => {
+            Some(discover(DiscoverMessage::NudgeTargetsHeight {
+                plus: false,
+                top_focused: sub == DiscoverPane::Targets,
+            }))
+        }
         _ => match sub {
             DiscoverPane::Engine => match code {
                 // `e`/`Enter` would switch the engine if there were more than

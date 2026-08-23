@@ -423,17 +423,22 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             let body_h =
                                 size.height.saturating_sub(body_top).saturating_sub(footer_h);
                             let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
-
                             // Starting a drag on the discover targets/results
                             // splitter (only while discover owns focus) begins a
                             // resize gesture. It is checked before sub-pane
-                            // switching below.
+                            // switching below. The body uses the same live
+                            // workspace/popup/engine geometry the render uses.
                             if matches!(state.focus, Pane::Discover(_))
                                 && !state.discover.close_confirm
-                                && let Some(body) = discover_body_rect(explorer_w, body_top, body_h, size.width)
-                                && let Some(body_area) = (body.height >= 3).then_some(body)
+                                && let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, &state)
+                                && let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75)
+                                && let body = crate::features::discover::view::discover_body_area(
+                                    discover_popup,
+                                    &state.discover,
+                                )
+                                && body.height >= 3
                                 && let layout = crate::features::discover::splitter::view::discover_body_layout(
-                                    body_area,
+                                    body,
                                     state.discover.splitter.targets_height,
                                 )
                                 && crate::features::discover::splitter::view::splitter_at(&layout, point.x, point.y)
@@ -628,14 +633,13 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             if let Pane::Discover(sub) = state.focus
                                 && !state.discover.close_confirm
                                 && !discover_split_drag
+                                && let Some(workspace) =
+                                    workspace_rect_for_hit(size, body_top, body_h, &state)
                                 && let Some(next) = discover_subpane_for_click(
                                     mouse.column,
                                     mouse.row,
-                                    explorer_w,
-                                    body_top,
-                                    body_h,
-                                    size.width,
-                                    state.discover.splitter.targets_height,
+                                    workspace,
+                                    &state.discover,
                                 )
                                 && next != sub
                             {
@@ -767,24 +771,35 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     .height
                                     .saturating_sub(body_top)
                                     .saturating_sub(footer_view::footer_height(&state.footer, size.width));
-                                let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
-                                if let Some(body) = discover_body_rect(explorer_w, body_top, body_h, size.width)
-                                    && body.height >= 3
+                                // Use the same workspace/popup/body geometry the
+                                // render uses (live Explorer width + dynamic
+                                // engine height), so the drag track matches the
+                                // rendered split exactly.
+                                if let Some(workspace) =
+                                    workspace_rect_for_hit(size, body_top, body_h, &state)
                                 {
-                                    let height =
-                                        crate::features::discover::splitter::view::targets_height_for_y(body, point.y);
-                                    let msg = AppMsg::Discover(
-                                        crate::features::discover::msg::DiscoverMsg::Message(
-                                            crate::features::discover::msg::DiscoverMessage::SetTargetsHeight { height },
-                                        ),
+                                    let discover_popup =
+                                        crate::common::view::modal::popup_rect(workspace, 75, 75);
+                                    let body = crate::features::discover::view::discover_body_area(
+                                        discover_popup,
+                                        &state.discover,
                                     );
-                                    let result = process_message_round(
-                                        &effect_runner,
-                                        &mut action_rx,
-                                        msg,
-                                        &mut state,
-                                    );
-                                    dirty |= result.dirty;
+                                    if body.height >= 3 {
+                                        let height = crate::features::discover::splitter::view::
+                                            targets_height_for_y(body, point.y);
+                                        let msg = AppMsg::Discover(
+                                            crate::features::discover::msg::DiscoverMsg::Message(
+                                                crate::features::discover::msg::DiscoverMessage::SetTargetsHeight { height },
+                                            ),
+                                        );
+                                        let result = process_message_round(
+                                            &effect_runner,
+                                            &mut action_rx,
+                                            msg,
+                                            &mut state,
+                                        );
+                                        dirty |= result.dirty;
+                                    }
                                 }
                             }
                             if explorer_split_drag {
@@ -1684,57 +1699,25 @@ fn normalize_splitter_tracks(state: &mut crate::app::state::AppState, size: rata
     }
 }
 
-/// The discover popup's body region (the targets/results area, below the engine
-/// selector), in absolute screen coordinates. The popup overlays the workspace
-/// region at 75% width/height, centered (matches `render_modal_popup` and the
-/// view). Returns `None` when the popup is too small to lay out.
-fn discover_body_rect(
-    explorer_w: u16,
-    body_top: u16,
-    body_h: u16,
-    width: u16,
-) -> Option<Rect> {
-    let base_w = width.saturating_sub(explorer_w);
-    let w = (base_w * 3) / 4;
-    let h = (body_h * 3) / 4;
-    if w < 4 || h < 4 {
-        return None;
-    }
-    let px = explorer_w + (base_w - w) / 2;
-    let py = body_top + (body_h - h) / 2;
-    // Inner area after the 1-row border.
-    let inner_x = px + 1;
-    let inner_y = py + 1;
-    let inner_w = w.saturating_sub(2);
-    let inner_h = h.saturating_sub(2);
-    // The engine selector occupies the top 4 inner rows; the body below is the
-    // targets/results track.
-    Some(Rect::new(inner_x, inner_y + 4, inner_w, inner_h.saturating_sub(4)))
-}
-
 /// Map a click inside the discover popup to a discover child sub-pane
 /// (engine / targets / results), mirroring the discover view's vertical layout
-/// and Ctrl+j/k. Returns `None` for clicks outside the popup body (the header
-/// / explorer / workspace regions around the popup).
+/// and Ctrl+j/k. Uses the same live workspace/popup/engine geometry as the
+/// render, so a click maps to the same pane that is drawn. Returns `None` for
+/// clicks outside the popup.
 fn discover_subpane_for_click(
     col: u16,
     row: u16,
-    explorer_w: u16,
-    body_top: u16,
-    body_h: u16,
-    width: u16,
-    targets_height: u16,
+    workspace: Rect,
+    state: &crate::features::discover::state::DiscoverState,
 ) -> Option<crate::app_shell::nav::DiscoverPane> {
     use crate::app_shell::nav::DiscoverPane;
-    let body = discover_body_rect(explorer_w, body_top, body_h, width)?;
-    // The engine selector occupies the inner rows just above the body; the body
-    // rect starts below it. A click within the popup's inner width but above
-    // the body belongs to the engine selector.
-    if col < body.x || col >= body.right() {
+    let popup = crate::common::view::modal::popup_rect(workspace, 75, 75);
+    if col < popup.x || col >= popup.right() {
         return None;
     }
-    let inner_top = body.y.saturating_sub(4); // engine selector rows
-    if row >= inner_top && row < body.y {
+    let body = crate::features::discover::view::discover_body_area(popup, state);
+    // The engine selector occupies the rows between the popup top and the body.
+    if row >= popup.y && row < body.y {
         return Some(DiscoverPane::Engine);
     }
     if row < body.y || row >= body.bottom() {
@@ -1743,7 +1726,10 @@ fn discover_subpane_for_click(
     // Split the body at the same boundary the splitter renders at (the current
     // targets height, clamped to the live track), so clicking agrees with the
     // rendered splitter.
-    let layout = crate::features::discover::splitter::view::discover_body_layout(body, targets_height);
+    let layout = crate::features::discover::splitter::view::discover_body_layout(
+        body,
+        state.splitter.targets_height,
+    );
     if row < layout.targets.bottom() {
         Some(DiscoverPane::Targets)
     } else {
@@ -2304,29 +2290,31 @@ mod tests {
     #[test]
     fn discover_click_maps_rows_to_subpanes() {
         use crate::app_shell::nav::DiscoverPane;
-        // Fixed layout: width 100, explorer 20, body_top 3, body_h 50.
-        // base_w=80 -> popup w=60,h=37 at px=30,py=9; inner x=31,y=10,w=58,h=35.
-        // Engine selector: top 4 inner rows (10..14); the body below spans
-        // y=14..45 (height 31). A targets_height of 10 rows makes targets
-        // [14,24) and results [24,45), matching the rendered splitter.
+        // Fixed layout: width 100, explorer 20 -> workspace (20,3,80,50).
+        // popup = 75% centered = (30,9,60,37); inner (31,10,58,35).
+        // Engine height 3 -> body starts at y=13; footer is 1 row (the discover
+        // hint line is always present) -> body spans [13,44).
+        // Default targets_height 10 -> targets [13,23), results [23,44).
+        let workspace = Rect::new(20, 3, 80, 50);
+        let state = crate::features::discover::state::DiscoverState::default();
         let click = |col: u16, row: u16| {
-            discover_subpane_for_click(col, row, 20, 3, 50, 100, 10)
+            discover_subpane_for_click(col, row, workspace, &state)
         };
-        // Engine: top 4 rows of the inner area (inner_y=10 -> rows 10..14).
+        // Engine: rows [popup.y, body.y) = [9, 13).
         assert_eq!(click(40, 11), Some(DiscoverPane::Engine));
-        assert_eq!(click(40, 13), Some(DiscoverPane::Engine));
-        // Targets: rows [14, 14+10).
+        assert_eq!(click(40, 12), Some(DiscoverPane::Engine));
+        // Targets: rows [13, 23).
         assert_eq!(click(40, 15), Some(DiscoverPane::Targets));
-        assert_eq!(click(40, 23), Some(DiscoverPane::Targets));
-        // Results: rows [24, 45).
+        assert_eq!(click(40, 22), Some(DiscoverPane::Targets));
+        // Results: rows [23, 44).
         assert_eq!(click(40, 24), Some(DiscoverPane::Results));
-        assert_eq!(click(40, 44), Some(DiscoverPane::Results));
-        // Outside the popup: header row, explorer column, or beyond the inner
-        // area yields None.
+        assert_eq!(click(40, 43), Some(DiscoverPane::Results));
+        // Outside the popup: header row, explorer column, or beyond the popup
+        // yields None.
         assert_eq!(click(10, 11), None); // explorer column
         assert_eq!(click(40, 1), None); // header row
         assert_eq!(click(99, 11), None); // beyond popup right edge
-        assert_eq!(click(40, 45), None); // beyond popup bottom edge
+        assert_eq!(click(40, 44), None); // beyond body bottom edge (footer)
     }
 
     #[test]

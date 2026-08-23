@@ -143,10 +143,14 @@ pub fn render(
                     TargetCol::Host => content.x + num_w + spacing,
                     TargetCol::Ports => content.x + num_w + spacing + host_w + spacing,
                 };
-                // Caret column within the cell: display width of the edit prefix.
+                // Caret column within the cell: the cell text starts at
+                // `cell_x` (Host/Ports column origin, matching the Table's
+                // Length(3) + spacing + Percentage columns), so the caret sits
+                // at the display width of the edit prefix from there — no extra
+                // offset, or the caret drifts from where a typed char lands.
                 let prefix = &state.edit_buf[..state.edit_cursor.min(state.edit_buf.len())];
                 let caret_offset = unicode_width::UnicodeWidthStr::width(prefix) as u16;
-                let x = cell_x.saturating_add(1 + caret_offset);
+                let x = cell_x.saturating_add(caret_offset);
                 let y = content.y.saturating_add(1 /* header */ + row_in_content as u16);
                 caret = Some(crate::common::editor::EditorHardwareCursor {
                     position: ratatui::layout::Position::new(x, y),

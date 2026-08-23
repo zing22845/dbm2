@@ -140,18 +140,19 @@ fn render_close_confirm(frame: &mut Frame, theme: &Theme, area: Rect) {
     );
 }
 
-/// The discover targets/results body height (rows) for a given discover `area`,
-/// mirroring the engine/footer height split inside the outer border. This is
-/// the track the horizontal splitter is a percentage of; the run loop uses it
-/// so keyboard `+`/`-` nudges clamp against the exact rendered body.
-pub fn discover_body_track(area: Rect, state: &DiscoverState) -> u16 {
+/// The discover targets/results body rect (rows) for a given discover `area`,
+/// mirroring the engine/footer height split inside the outer border — exactly
+/// the `chunks[1]` region the render lays the targets/results splitter into.
+/// Both the render and the run loop (drag hit-testing, `+`/`-` track) use this,
+/// so the splitter you drag is the splitter you see.
+pub fn discover_body_area(area: Rect, state: &DiscoverState) -> Rect {
     use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::{discover_engine_footer_text, discover_footer_text};
     let inner = ratatui::widgets::Block::default()
         .borders(ratatui::widgets::Borders::ALL)
         .inner(area);
     if inner.width == 0 || inner.height == 0 {
-        return 1;
+        return inner;
     }
     let footer_text = discover_footer_text(&discover_status(state));
     let footer_h = if footer_text.is_empty() {
@@ -168,5 +169,13 @@ pub fn discover_body_track(area: Rect, state: &DiscoverState) -> u16 {
             .min(inner.height.saturating_sub(3).max(1))
     };
     let engine_h = 3u16.saturating_add(engine_footer_h);
-    inner.height.saturating_sub(engine_h).saturating_sub(footer_h).max(1)
+    let body_top = inner.y + engine_h;
+    let body_h = inner.height.saturating_sub(engine_h).saturating_sub(footer_h);
+    Rect::new(inner.x, body_top, inner.width, body_h)
+}
+
+/// The discover targets/results body height (rows): the track the horizontal
+/// splitter is a percentage of. Convenience wrapper over [`discover_body_area`].
+pub fn discover_body_track(area: Rect, state: &DiscoverState) -> u16 {
+    discover_body_area(area, state).height.max(1)
 }
