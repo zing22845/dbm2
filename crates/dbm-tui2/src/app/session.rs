@@ -94,7 +94,9 @@ fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
     TuiSessionSnapshot {
         version: TUI_SESSION_VERSION,
         focus: pane_name(state.focus).to_string(),
-        tree_width: 20,
+        // `tree_width` doubles as the Explorer / workspace splitter width (the
+        // Explorer pane is the tree); persisted in absolute columns.
+        tree_width: state.splitter.explorer_pane_width,
         tree: tree_snapshot(&state.explorer),
         tabs,
         active_tab: state.sql.sql_tab.active_tab,
@@ -327,6 +329,10 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
     }
     state.set_focus(focus);
 
+    // Restore the Explorer / workspace splitter width (persisted in `tree_width`),
+    // clamped to its allowed range so it survives any terminal-width change.
+    state.splitter.set_explorer_pane_width(snapshot.tree_width);
+
     // Restore instance expansion + cursor by name. Expansion is applied to the
     // freshly-loaded tree nodes; the cursor resolves to the owning instance row
     // (connections load lazily, so a connection cursor focuses its instance).
@@ -521,6 +527,31 @@ mod tests {
         // Default app opens no tabs (a tab is opened when a connection is
         // selected in the tree).
         assert!(snap.tabs.is_empty());
+    }
+
+    #[test]
+    fn snapshot_persists_and_restores_explorer_pane_width() {
+        // The Explorer / workspace splitter width is persisted in `tree_width`
+        // and clamped on restore.
+        let mut state = sample_state();
+        state.splitter.explorer_pane_width = 40;
+        let snap = snapshot_from_app(&state);
+        assert_eq!(snap.tree_width, 40);
+
+        // An out-of-range persisted width is clamped on restore.
+        let mut restored = sample_state();
+        let mut s = snap.clone();
+        s.tree_width = 9999;
+        let effects = apply_snapshot(&mut restored, &s);
+        assert!(
+            restored.splitter.explorer_pane_width
+                == crate::features::app_splitter::state::MAX_EXPLORER_WIDTH
+        );
+        // A valid width restores exactly.
+        let mut restored2 = sample_state();
+        apply_snapshot(&mut restored2, &snap);
+        assert_eq!(restored2.splitter.explorer_pane_width, 40);
+        drop(effects);
     }
 
     #[test]
