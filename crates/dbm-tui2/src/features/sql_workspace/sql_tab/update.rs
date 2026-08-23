@@ -236,22 +236,10 @@ pub fn update(
                 } else {
                     width
                 };
-                // Clamp to the live editor+history track so the editor keeps its
-                // minimum width; dragging past the boundary leaves the stored
-                // width unchanged (no redundant repaint).
-                let max_history = tab
-                    .splitter
-                    .last_history_track
-                    .saturating_sub(
-                        crate::features::sql_workspace::sql_tab::splitter::state::MIN_SQL_PANE_WIDTH
-                            + 1,
-                    );
-                let clamped = list_w.clamp(
-                    crate::features::sql_workspace::sql_tab::splitter::state::MIN_HISTORY_WIDTH,
-                    max_history.max(
-                        crate::features::sql_workspace::sql_tab::splitter::state::MIN_HISTORY_WIDTH,
-                    ),
-                );
+                // Clamp to the layout's actual history bounds (refreshed by the
+                // run loop); dragging past the boundary leaves the stored width
+                // unchanged (no redundant repaint).
+                let clamped = list_w.clamp(tab.splitter.history_min, tab.splitter.history_max);
                 let changed = tab.splitter.history_pane_width != clamped;
                 state.tabs[idx].set_history_pane_width(clamped);
                 dirty = changed;
@@ -1079,7 +1067,7 @@ mod tests {
         s.tabs[0].focus = SqlFocus::History;
         s.tabs[0].history.splitter.detail_pane_width = 40;
         s.tabs[0].splitter.history_pane_width = 24;
-        s.tabs[0].splitter.last_history_track = 200; // editor keeps its min width
+        s.tabs[0].splitter.history_max = 200; // so the drag width isn't clamped
         s.tabs[0]
             .history
             .store
@@ -1109,7 +1097,7 @@ mod tests {
         s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
         let tab_id = s.tabs[0].session.id;
         s.tabs[0].focus = SqlFocus::Editor; // no detail visible
-        s.tabs[0].splitter.last_history_track = 200; // editor keeps its min width
+        s.tabs[0].splitter.history_max = 200; // so the drag width isn't clamped
 
         let (s, _i, _e, _d) = update(
             SqlTabMessage::SetHistoryWidth { tab_id, width: 80 },

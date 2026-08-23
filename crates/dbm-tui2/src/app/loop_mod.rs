@@ -1708,9 +1708,19 @@ fn normalize_splitter_tracks(state: &mut crate::app::state::AppState, size: rata
             ws.height.saturating_sub(2).saturating_sub(ws_footer_h).saturating_sub(1)
         })
         .unwrap_or(body_h.saturating_sub(4));
+    // Derive the SQL splitter bounds from the layout itself (the same function
+    // the render uses), so nudge/drag clamp to the exact rendered boundary.
     for tab in &mut state.sql.sql_tab.tabs {
-        tab.splitter.last_track = sql_body_h.max(1);
-        tab.splitter.last_history_track = sql_track_w.max(1);
+        let sql_area = Rect::new(0, 0, sql_track_w.max(1), sql_body_h.max(1));
+        let layout = crate::features::sql_workspace::sql_tab::layout::sql_tab_layout(
+            sql_area,
+            tab.splitter.editor_top_height,
+            tab.splitter.history_pane_width,
+        );
+        tab.splitter.editor_top_min = layout.editor_top_min;
+        tab.splitter.editor_top_max = layout.editor_top_max.max(layout.editor_top_min);
+        tab.splitter.history_min = layout.history_min;
+        tab.splitter.history_max = layout.history_max.max(layout.history_min);
     }
     // Explorer column inner height (body minus the outer border).
     state.explorer.splitter.last_track = body_h.saturating_sub(2).max(1);

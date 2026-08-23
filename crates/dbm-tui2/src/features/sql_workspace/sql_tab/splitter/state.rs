@@ -28,15 +28,15 @@ pub struct SqlTabSplitterState {
     /// to `[20%, 80%]` of the current track at layout time. The percentage is
     /// only materialized for session persistence / terminal resizes.
     pub editor_top_height: u16,
-    /// The last body height (rows) this split was laid out against, refreshed
-    /// by the run loop before each render. Keyboard nudges clamp the target to
-    /// `[20%, 80%]` of this so nudging past the boundary leaves the stored
-    /// height unchanged (no redundant repaint).
-    pub last_track: u16,
-    /// The last editor+history track width (columns) this split was laid out
-    /// against; `[` / `]` nudges clamp the history width so the editor keeps its
-    /// minimum width.
-    pub last_history_track: u16,
+    /// The actual editor+history row height bounds (rows) the last layout
+    /// clamped to, refreshed by the run loop before each render from the layout.
+    /// Nudges clamp the target to these exact bounds, so the stored value and
+    /// the rendered split never disagree (no redundant repaint at the boundary).
+    pub editor_top_min: u16,
+    pub editor_top_max: u16,
+    /// The actual history width bounds (cols) the last layout clamped to.
+    pub history_min: u16,
+    pub history_max: u16,
 }
 
 impl Default for SqlTabSplitterState {
@@ -44,8 +44,10 @@ impl Default for SqlTabSplitterState {
         Self {
             history_pane_width: DEFAULT_HISTORY_WIDTH,
             editor_top_height: DEFAULT_EDITOR_TOP_HEIGHT,
-            last_track: DEFAULT_EDITOR_TOP_HEIGHT * 5,
-            last_history_track: DEFAULT_HISTORY_WIDTH + MIN_SQL_PANE_WIDTH + 1,
+            editor_top_min: 1,
+            editor_top_max: 200,
+            history_min: MIN_HISTORY_WIDTH,
+            history_max: MAX_HISTORY_WIDTH,
         }
     }
 }
@@ -58,10 +60,9 @@ impl SqlTabSplitterState {
 
     /// Nudge the History pane width with `[` / `]` (`nudge` is the splitter
     /// nudge; history owns the right side, so `[` grows it). Returns `true` when
-    /// the width actually changed. The target is clamped to `[MIN_HISTORY_WIDTH,
-    /// last_history_track - MIN_SQL_PANE_WIDTH]` so the editor always keeps its
-    /// minimum width — nudging past that boundary leaves the stored width
-    /// unchanged (no redundant repaint).
+    /// the width actually changed. The target is clamped to the layout's actual
+    /// `[history_min, history_max]`, so nudging past the boundary leaves the
+    /// stored width unchanged (no redundant repaint).
     pub fn nudge_history_width(
         &mut self,
         nudge: crate::common::view::splitter::VerticalSplitterNudge,
@@ -69,11 +70,8 @@ impl SqlTabSplitterState {
         use crate::common::view::splitter::{WIDTH_NUDGE_STEP, width_delta_for_right_pane};
         let delta = width_delta_for_right_pane(nudge, WIDTH_NUDGE_STEP);
         let current = i32::from(self.history_pane_width);
-        // Editor keeps MIN_SQL_PANE_WIDTH plus the 1-col splitter, matching the
-        // layout's own clamp so nudge and drag agree with the rendered width.
-        let max_history = self.last_history_track.saturating_sub(MIN_SQL_PANE_WIDTH + 1);
         let next = (current + i32::from(delta))
-            .clamp(i32::from(MIN_HISTORY_WIDTH), i32::from(max_history.max(MIN_HISTORY_WIDTH)))
+            .clamp(i32::from(self.history_min), i32::from(self.history_max))
             as u16;
         let changed = self.history_pane_width != next;
         self.set_history_pane_width(next);
@@ -120,18 +118,19 @@ impl SqlTabSplitterState {
     /// focused the top height moves opposite to the key. Returns `true` when the
     /// split actually moved.
     ///
-    /// The target is clamped to the live `[20%, 80%]` range (using the last laid
-    /// out track), so nudging past the boundary leaves the stored height
+    /// The target is clamped to the layout's actual `[editor_top_min,
+    /// editor_top_max]`, so nudging past the boundary leaves the stored height
     /// unchanged and does not trigger a redundant repaint.
     pub fn nudge_editor_top_height(&mut self, plus: bool, top_focused: bool) -> bool {
-        use crate::common::view::splitter::{WIDTH_NUDGE_STEP, clamp_split_px};
+        use crate::common::view::splitter::WIDTH_NUDGE_STEP;
         // `+` grows the focused pane; the top height moves opposite to a
         // bottom focus.
         let grow_top = if plus { top_focused } else { !top_focused };
         let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
-        let next = (self.editor_top_height as i16 + delta).max(0) as u16;
-        let clamped = clamp_split_px(next, self.last_track, 20, 20);
-        self.set_editor_top_height(clamped)
+        let next = (self.editor_top_height as i16 + delta)
+            .clamp(self.editor_top_min as i16, self.editor_top_max as i16)
+            as u16;
+        self.set_editor_top_height(next)
     }
 }
 
@@ -180,7 +179,8 @@ mod tests {
         // With a 10-row track the valid range is [2, 7]. Nudging down to the
         // min must be dirty once, then further `-` nudges leave it unchanged.
         let mut s = state();
-        s.last_track = 10;
+        s.editor_top_min = 2;
+        s.editor_top_max = 7;
         s.editor_top_height = 3;
         assert!(s.nudge_editor_top_height(false, true)); // 3 -> 2 (dirty)
         assert_eq!(s.editor_top_height, 2);
@@ -204,7 +204,8 @@ mod tests {
     fn history_nudge_stops_at_editor_min_width() {
         let mut s = state();
         // editor keeps MIN_SQL_PANE_WIDTH (20) + 1 splitter -> history max 19
-        s.last_history_track = 40;
+        s.history_min = MIN_HISTORY_WIDTH;
+        s.history_max = 19;
         s.history_pane_width = 8; // below MIN_HISTORY_WIDTH
         // `[` grows history; it clamps up to the min width.
         assert!(s.nudge_history_width(crate::common::view::splitter::VerticalSplitterNudge::Left));

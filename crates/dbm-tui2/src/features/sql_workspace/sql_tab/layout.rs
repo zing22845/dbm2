@@ -12,7 +12,6 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-use crate::common::view::splitter::clamp_split_px;
 use crate::features::sql_workspace::sql_tab::splitter::state::MIN_SQL_PANE_WIDTH;
 
 /// The panes and splitter strips computed by [`sql_tab_layout`].
@@ -25,6 +24,14 @@ pub struct SqlTabLayout {
     pub h_splitter: Rect,
     /// The 1-column vertical splitter between editor and history.
     pub v_splitter: Rect,
+    /// Actual editor+history row height bounds (rows), what the layout clamped
+    /// to. Nudge/drag read these so the stored value and the rendered split
+    /// always agree (no redundant repaint at the boundary).
+    pub editor_top_min: u16,
+    pub editor_top_max: u16,
+    /// Actual history width bounds (cols), what the layout clamped to.
+    pub history_min: u16,
+    pub history_max: u16,
 }
 
 /// Compute the SQL tab body layout. `area` is the region below the tab bar.
@@ -48,9 +55,12 @@ pub fn sql_tab_layout(area: Rect, editor_top_height: u16, history_width: u16) ->
     }
 
     // Editor top-pane height in rows, clamped to [20%, 80%] of the track so
-    // neither the top row nor results collapses.
+    // neither the top row nor results collapses. The bounds are exported so the
+    // nudge/drag clamp to the exact values the layout accepts.
     let track_h = body[0].height + 1 + body[2].height;
-    let row_h = clamp_split_px(editor_top_height, track_h, 20, 20);
+    let editor_top_min = (track_h * 20) / 100;
+    let editor_top_max = track_h.saturating_sub(1).saturating_sub(editor_top_min);
+    let row_h = editor_top_height.clamp(editor_top_min, editor_top_max);
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -70,16 +80,12 @@ pub fn sql_tab_layout(area: Rect, editor_top_height: u16, history_width: u16) ->
     // Top row horizontal split: editor (left) + vertical splitter + history.
     let track_w = top_row.width;
     // The editor always keeps MIN_SQL_PANE_WIDTH (plus the 1-col splitter), so
-    // history maxes out at `track_w - (MIN_SQL_PANE_WIDTH + 1)` — the same
-    // boundary the history nudge/drag clamps to, so the stored and rendered
-    // widths never disagree (no redundant repaints at the boundary).
-    let history_w = history_width
-        .clamp(
-            12,
-            track_w
-                .saturating_sub(MIN_SQL_PANE_WIDTH + 1)
-                .max(12),
-        );
+    // history maxes out at `track_w - (MIN_SQL_PANE_WIDTH + 1)`. The bounds are
+    // exported so the history nudge/drag clamp to the exact values the layout
+    // accepts (stored and rendered widths never disagree).
+    let history_min = 12u16;
+    let history_max = track_w.saturating_sub(MIN_SQL_PANE_WIDTH + 1).max(history_min);
+    let history_w = history_width.clamp(history_min, history_max);
     let top = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -99,6 +105,10 @@ pub fn sql_tab_layout(area: Rect, editor_top_height: u16, history_width: u16) ->
         results,
         h_splitter,
         v_splitter,
+        editor_top_min,
+        editor_top_max,
+        history_min,
+        history_max,
     }
 }
 
