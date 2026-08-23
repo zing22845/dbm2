@@ -13,12 +13,16 @@ pub const DEFAULT_INSTANCES_HEIGHT: u16 = 10;
 pub struct ExplorerSplitterState {
     /// Instances tree (top pane) height in rows.
     pub instances_height: u16,
+    /// The last body height (rows) this split was laid out against; keyboard
+    /// nudges clamp to `[20%, 80%]` of this.
+    pub last_track: u16,
 }
 
 impl Default for ExplorerSplitterState {
     fn default() -> Self {
         Self {
             instances_height: DEFAULT_INSTANCES_HEIGHT,
+            last_track: DEFAULT_INSTANCES_HEIGHT * 5,
         }
     }
 }
@@ -59,11 +63,14 @@ impl ExplorerSplitterState {
     /// focused rather than the objects (bottom). `+` always grows the focused
     /// pane and `-` shrinks it. Returns `true` when the split actually moved.
     pub fn nudge_instances_height(&mut self, plus: bool, top_focused: bool) -> bool {
-        use crate::common::view::splitter::WIDTH_NUDGE_STEP;
+        use crate::common::view::splitter::{WIDTH_NUDGE_STEP, clamp_split_px};
         let grow_top = if plus { top_focused } else { !top_focused };
         let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
         let next = (self.instances_height as i16 + delta).max(0) as u16;
-        self.set_instances_height(next)
+        // Clamp to the live `[20%, 80%]` range so nudging past the boundary
+        // leaves the stored height unchanged (no redundant repaint).
+        let clamped = clamp_split_px(next, self.last_track, 20, 20);
+        self.set_instances_height(clamped)
     }
 }
 
@@ -110,5 +117,20 @@ mod tests {
         s4.instances_height = 20;
         assert!(s4.nudge_instances_height(false, false));
         assert_eq!(s4.instances_height, 22);
+    }
+
+    #[test]
+    fn nudge_stops_dirtying_at_the_boundary() {
+        let mut s = ExplorerSplitterState::default();
+        s.last_track = 10; // valid range [2, 7]
+        s.instances_height = 3;
+        assert!(s.nudge_instances_height(false, true)); // 3 -> 2
+        assert_eq!(s.instances_height, 2);
+        assert!(!s.nudge_instances_height(false, true), "below min must not dirty");
+        assert_eq!(s.instances_height, 2);
+        s.instances_height = 6;
+        assert!(s.nudge_instances_height(true, true)); // 6 -> 7
+        assert!(!s.nudge_instances_height(true, true), "above max must not dirty");
+        assert_eq!(s.instances_height, 7);
     }
 }

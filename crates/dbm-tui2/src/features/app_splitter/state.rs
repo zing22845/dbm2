@@ -29,8 +29,16 @@ impl Default for AppSplitterState {
 
 impl AppSplitterState {
     /// Set and clamp the Explorer pane width (drag the splitter).
-    pub fn set_explorer_pane_width(&mut self, width: u16) {
-        self.explorer_pane_width = width.clamp(MIN_EXPLORER_WIDTH, MAX_EXPLORER_WIDTH);
+    /// Set and clamp the Explorer pane width (drag the splitter). Returns
+    /// `true` when the width actually changed, so callers can skip a redundant
+    /// repaint when the split is already at a boundary.
+    pub fn set_explorer_pane_width(&mut self, width: u16) -> bool {
+        let new = width.clamp(MIN_EXPLORER_WIDTH, MAX_EXPLORER_WIDTH);
+        if new == self.explorer_pane_width {
+            return false;
+        }
+        self.explorer_pane_width = new;
+        true
     }
 
     /// Nudge the Explorer pane width by `delta` columns (the `[` / `]` keys),

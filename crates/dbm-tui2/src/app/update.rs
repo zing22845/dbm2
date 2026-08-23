@@ -320,8 +320,10 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             result.dirty = true;
         }
         AppMsg::SetExplorerWidth(width) => {
-            state.splitter.set_explorer_pane_width(width);
-            result.dirty = true;
+            // Only repaint when the split actually moved — a nudge/drag that does
+            // not change the width (e.g. at a boundary) must not count as a
+            // redundant redraw and inflate the waste metric.
+            result.dirty = state.splitter.set_explorer_pane_width(width);
         }
         AppMsg::Shell(shell_msg) => match shell_msg {
             crate::app_shell::msg::ShellMsg::Quit => {

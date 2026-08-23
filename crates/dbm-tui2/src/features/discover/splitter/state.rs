@@ -13,12 +13,22 @@ pub const DEFAULT_TARGETS_HEIGHT: u16 = 10;
 pub struct DiscoverSplitterState {
     /// Targets editor (top pane) height in rows.
     pub targets_height: u16,
+    /// The last body height (rows) this split was laid out against; keyboard
+    /// nudges clamp to `[20%, 80%]` of this.
+    pub last_track: u16,
 }
+
+/// The last body height (rows) this split was laid out against, refreshed by
+/// the run loop before each render. Keyboard nudges clamp the target to
+/// `[20%, 80%]` of this so nudging past the boundary leaves the stored height
+/// unchanged (no redundant repaint).
+const DEFAULT_LAST_TRACK: u16 = DEFAULT_TARGETS_HEIGHT * 5;
 
 impl Default for DiscoverSplitterState {
     fn default() -> Self {
         Self {
             targets_height: DEFAULT_TARGETS_HEIGHT,
+            last_track: DEFAULT_LAST_TRACK,
         }
     }
 }
@@ -57,11 +67,14 @@ impl DiscoverSplitterState {
     /// focused rather than the results (bottom). `+` always grows the focused
     /// pane and `-` shrinks it. Returns `true` when the split actually moved.
     pub fn nudge_targets_height(&mut self, plus: bool, top_focused: bool) -> bool {
-        use crate::common::view::splitter::WIDTH_NUDGE_STEP;
+        use crate::common::view::splitter::{WIDTH_NUDGE_STEP, clamp_split_px};
         let grow_top = if plus { top_focused } else { !top_focused };
         let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
         let next = (self.targets_height as i16 + delta).max(0) as u16;
-        self.set_targets_height(next)
+        // Clamp to the live `[20%, 80%]` range so nudging past the boundary
+        // leaves the stored height unchanged (no redundant repaint).
+        let clamped = clamp_split_px(next, self.last_track, 20, 20);
+        self.set_targets_height(clamped)
     }
 }
 
@@ -108,5 +121,20 @@ mod tests {
         s4.targets_height = 20;
         assert!(s4.nudge_targets_height(false, false));
         assert_eq!(s4.targets_height, 22);
+    }
+
+    #[test]
+    fn nudge_stops_dirtying_at_the_boundary() {
+        let mut s = DiscoverSplitterState::default();
+        s.last_track = 10; // valid range [2, 7]
+        s.targets_height = 3;
+        assert!(s.nudge_targets_height(false, true)); // 3 -> 2
+        assert_eq!(s.targets_height, 2);
+        assert!(!s.nudge_targets_height(false, true), "below min must not dirty");
+        assert_eq!(s.targets_height, 2);
+        s.targets_height = 6;
+        assert!(s.nudge_targets_height(true, true)); // 6 -> 7
+        assert!(!s.nudge_targets_height(true, true), "above max must not dirty");
+        assert_eq!(s.targets_height, 7);
     }
 }

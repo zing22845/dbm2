@@ -273,16 +273,11 @@ pub fn update(
             }
         }
         SqlTabMessage::NudgeHistoryWidth { tab_id, nudge } => {
-            use crate::common::view::splitter::{
-                WIDTH_NUDGE_STEP, width_delta_for_right_pane,
-            };
             if let Some(idx) = state.index_of(tab_id) {
-                let delta = width_delta_for_right_pane(nudge, WIDTH_NUDGE_STEP);
-                let current = i32::from(state.tabs[idx].splitter.history_pane_width);
-                let next = (current + i32::from(delta)).max(0) as u16;
-                let changed = state.tabs[idx].splitter.history_pane_width != next;
-                state.tabs[idx].set_history_pane_width(next);
-                dirty = changed;
+                // The width is clamped to the live editor+history track so the
+                // editor keeps its minimum width; nudging past the boundary
+                // leaves the stored width unchanged (no redundant repaint).
+                dirty |= state.tabs[idx].splitter.nudge_history_width(nudge);
             } else {
                 warn_tab_missing(tab_id);
             }

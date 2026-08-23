@@ -196,6 +196,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             // don't mark every active frame as "changed" and mask real
             // redundancy.
             let size = terminal.size()?;
+            // Refresh each horizontal splitter's last-laid-out track so keyboard
+            // `+` / `-` nudges clamp against the live body height (and stop
+            // dirtying once the split reaches a boundary).
+            normalize_splitter_tracks(&mut state, size);
             let footer_h = footer_view::footer_height(&state.footer, size.width);
             terminal.backend_mut().set_exclude_rects(perf_exclude_rects(size, footer_h));
             // Draw the current frame. The perf_monitor feature is passive: the
@@ -1623,6 +1627,35 @@ fn explorer_pane_for_click(
     } else {
         ExplorerPane::Objects
     }
+}
+
+/// Refresh each horizontal splitter's last-laid-out track so keyboard `+`/`-`
+/// nudges clamp against the live body height. The tracks are approximated from
+/// the terminal size (header/footer/border/tab-bar rows); the exact layout
+/// re-clamps at render time anyway, and a small approximation error only shifts
+/// where a nudge stops — never the rendered split.
+fn normalize_splitter_tracks(state: &mut crate::app::state::AppState, size: ratatui::layout::Size) {
+    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    // Body height: header (3) at the top, footer at the bottom.
+    let body_h = size.height.saturating_sub(3).saturating_sub(footer_h);
+    // SQL tab body (below header, workspace border, tab bar, workspace footer).
+    let sql_body_h = body_h.saturating_sub(2 + 1 + 1);
+    // Editor+history track width (workspace inner minus the border), so `[`/`]`
+    // history nudges clamp against the live editor min width.
+    let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+    let sql_track_w = size
+        .width
+        .saturating_sub(explorer_w)
+        .saturating_sub(2);
+    for tab in &mut state.sql.sql_tab.tabs {
+        tab.splitter.last_track = sql_body_h.max(1);
+        tab.splitter.last_history_track = sql_track_w.max(1);
+    }
+    // Explorer column inner height (body minus the outer border).
+    state.explorer.splitter.last_track = body_h.saturating_sub(2).max(1);
+    // Discover popup body (75% of the body, minus border + engine selector).
+    let popup_h = (body_h * 3) / 4;
+    state.discover.splitter.last_track = popup_h.saturating_sub(6).max(1);
 }
 
 /// The discover popup's body region (the targets/results area, below the engine
