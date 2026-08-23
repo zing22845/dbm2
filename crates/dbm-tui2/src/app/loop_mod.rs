@@ -304,39 +304,38 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 .height
                                 .saturating_sub(body_top)
                                 .saturating_sub(footer_h);
-                            let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
-                            let workspace = Rect::new(
-                                explorer_w,
-                                body_top,
-                                size.width.saturating_sub(explorer_w),
-                                body_h,
-                            );
-                            let popup = crate::common::view::modal::confirm_popup_rect(
-                                workspace,
-                                crate::common::view::modal::confirm_body_rows(
-                                    state.modal.as_ref().unwrap(),
-                                ),
-                            );
-                            let buttons =
-                                crate::common::view::modal::confirm_buttons(popup);
-                            let msg = if buttons.yes_rect.contains(point) {
-                                crate::app::input::confirm_yes_msg(
-                                    state.modal.as_ref().unwrap(),
-                                    &state,
-                                )
-                            } else if buttons.no_rect.contains(point) {
-                                Some(AppMsg::CloseModal)
-                            } else {
-                                None
-                            };
-                            if let Some(msg) = msg {
-                                let result = process_message_round(
-                                    &effect_runner,
-                                    &mut action_rx,
-                                    msg,
-                                    &mut state,
+                            // The confirm modal renders over the live workspace
+                            // (app_body_layout), so hit-test against the same.
+                            if let Some(workspace) =
+                                workspace_rect_for_hit(size, body_top, body_h, &state)
+                            {
+                                let popup = crate::common::view::modal::confirm_popup_rect(
+                                    workspace,
+                                    crate::common::view::modal::confirm_body_rows(
+                                        state.modal.as_ref().unwrap(),
+                                    ),
                                 );
-                                dirty |= result.dirty;
+                                let buttons =
+                                    crate::common::view::modal::confirm_buttons(popup);
+                                let msg = if buttons.yes_rect.contains(point) {
+                                    crate::app::input::confirm_yes_msg(
+                                        state.modal.as_ref().unwrap(),
+                                        &state,
+                                    )
+                                } else if buttons.no_rect.contains(point) {
+                                    Some(AppMsg::CloseModal)
+                                } else {
+                                    None
+                                };
+                                if let Some(msg) = msg {
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
                             }
                         }
                         // Discover's close-confirmation dialog: clicking Yes/No
@@ -422,7 +421,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             let body_top = 3u16;
                             let body_h =
                                 size.height.saturating_sub(body_top).saturating_sub(footer_h);
-                            let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+                            // Use the live Explorer column width (not a hard-coded
+                            // 20%) so clicks/hits inside the resizable Explorer
+                            // agree with the rendered splitter.
+                            let explorer_w = app_explorer_rect(size, body_top, body_h, &state)
+                                .map(|r| r.width)
+                                .unwrap_or((size.width.saturating_mul(2) / 10).max(1));
                             // Starting a drag on the discover targets/results
                             // splitter (only while discover owns focus) begins a
                             // resize gesture. It is checked before sub-pane
@@ -718,10 +722,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // Starting a drag on the explorer instances/objects
                             // splitter (only while the explorer owns focus) begins
                             // a resize gesture.
-                            let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
                             if matches!(state.focus, Pane::Explorer(_))
                                 && body_h >= 3
-                                && let explorer = Rect::new(0, body_top, explorer_w, body_h)
+                                && let Some(explorer) =
+                                    app_explorer_rect(size, body_top, body_h, &state)
                                 && explorer.height >= 3
                                 && {
                                     let inner = Rect::new(
@@ -809,15 +813,19 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     .height
                                     .saturating_sub(body_top)
                                     .saturating_sub(footer_view::footer_height(&state.footer, size.width));
-                                let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
-                                let explorer = Rect::new(0, body_top, explorer_w, body_h);
-                                let inner = Rect::new(
-                                    explorer.x.saturating_add(1),
-                                    explorer.y.saturating_add(1),
-                                    explorer.width.saturating_sub(2),
-                                    explorer.height.saturating_sub(2),
-                                );
-                                if body_h >= 3 && inner.height >= 3 {
+                                let inner = app_explorer_rect(size, body_top, body_h, &state)
+                                    .map(|explorer| {
+                                        Rect::new(
+                                            explorer.x.saturating_add(1),
+                                            explorer.y.saturating_add(1),
+                                            explorer.width.saturating_sub(2),
+                                            explorer.height.saturating_sub(2),
+                                        )
+                                    });
+                                if body_h >= 3
+                                    && let Some(inner) = inner
+                                    && inner.height >= 3
+                                {
                                     let height =
                                         crate::features::explorer::splitter::view::instances_height_for_y(
                                             inner, point.y,
@@ -1091,6 +1099,20 @@ fn workspace_rect_for_hit(
         return None;
     }
     Some(layout.workspace)
+}
+
+/// The Explorer column rect (the left pane of the app body splitter), from the
+/// same `app_body_layout` the render uses, so mouse hit-testing agrees with the
+/// rendered splitter (no hard-coded 20% drift when the Explorer is resized).
+fn app_explorer_rect(
+    size: ratatui::layout::Size,
+    body_top: u16,
+    body_h: u16,
+    state: &AppState,
+) -> Option<ratatui::layout::Rect> {
+    let body_area = Rect::new(0, body_top, size.width, body_h);
+    let layout = crate::features::app_splitter::view::app_body_layout(body_area, state.splitter.explorer_pane_width);
+    (layout.explorer.width > 0).then_some(layout.explorer)
 }
 
 /// Compute the SQL tab region (tab bar + child panes) for mouse hit-testing,
@@ -1579,11 +1601,14 @@ fn explorer_row_click_msgs(
 ) -> Option<Vec<AppMsg>> {
     use crate::features::explorer::instances::msg::InstancesMessage;
     use crate::features::explorer::objects::msg::ObjectsMessage;
-    let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
-    if x >= explorer_w {
+    // Use the live Explorer column width so a click inside the (resizable)
+    // Explorer is mapped with the same geometry the render draws.
+    let Some(explorer) = app_explorer_rect(size, body_top, body_h, state) else {
+        return None;
+    };
+    if x < explorer.x || x >= explorer.right() {
         return None;
     }
-    let explorer = Rect::new(0, body_top, explorer_w, body_h);
     let (instances_area, objects_area) =
         explorer_child_areas(explorer, state.explorer.splitter.instances_height);
     let pane = explorer_pane_for_click(y, body_top, body_h, state.explorer.splitter.instances_height);
