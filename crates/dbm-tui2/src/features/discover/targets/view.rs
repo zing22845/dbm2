@@ -134,14 +134,23 @@ pub fn render(
         if state.editing && state.row < state.targets.len() {
             let row_in_content = state.row.saturating_sub(start);
             if (row_in_content as u16) < content.height.saturating_sub(1) {
-                // Column x positions: `#`(3) + spacing(1) + host(45%) + spacing(1).
-                let spacing: u16 = 1;
-                let num_w: u16 = 3;
-                let remaining = content.width.saturating_sub(num_w + spacing + spacing);
-                let host_w = (remaining as u16 * 45) / 100;
+                // Column x positions mirror the Table's own layout
+                // (`Length(3), Percentage(45), Percentage(55)` with
+                // column_spacing 1) so the caret lands exactly where a typed
+                // char does. Recompute via the same `Layout` ratatui uses rather
+                // than approximating the host width by hand (which drifted).
+                let cols = ratatui::layout::Layout::default()
+                    .direction(ratatui::layout::Direction::Horizontal)
+                    .constraints([
+                        ratatui::layout::Constraint::Length(3),
+                        ratatui::layout::Constraint::Percentage(45),
+                        ratatui::layout::Constraint::Percentage(55),
+                    ])
+                    .spacing(1)
+                    .split(content);
                 let cell_x = match state.col {
-                    TargetCol::Host => content.x + num_w + spacing,
-                    TargetCol::Ports => content.x + num_w + spacing + host_w + spacing,
+                    TargetCol::Host => cols[1].x,
+                    TargetCol::Ports => cols[2].x,
                 };
                 // Caret column within the cell: the cell text starts at
                 // `cell_x` (Host/Ports column origin, matching the Table's
