@@ -136,6 +136,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // from within the SQL workspace.
     let mut app_split_drag = false;
 
+    // Whether the discover targets/results splitter is being dragged (only
+    // meaningful while the discover parent pane owns focus).
+    let mut discover_split_drag = false;
+
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
     // lives outside `AppState` because it is transient interaction state, like
@@ -401,6 +405,24 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 size.height.saturating_sub(body_top).saturating_sub(footer_h);
                             let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
 
+                            // Starting a drag on the discover targets/results
+                            // splitter (only while discover owns focus) begins a
+                            // resize gesture. It is checked before sub-pane
+                            // switching below.
+                            if matches!(state.focus, Pane::Discover(_))
+                                && !state.discover.close_confirm
+                                && let Some(body) = discover_body_rect(explorer_w, body_top, body_h, size.width)
+                                && let Some(body_area) = (body.height >= 3).then_some(body)
+                                && let layout = crate::features::discover::splitter::view::discover_body_layout(
+                                    body_area,
+                                    state.discover.splitter.targets_height,
+                                )
+                                && crate::features::discover::splitter::view::splitter_at(&layout, point.x, point.y)
+                            {
+                                discover_split_drag = true;
+                                tracing::debug!("discover targets/results splitter drag started");
+                            }
+
                             // A click outside the open context picker closes it
                             // (mirroring the original dbm), regardless of which
                             // pane the click lands in. The SQL workspace click
@@ -580,6 +602,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // ignored (only Enter/Esc operate on the dialog).
                             if let Pane::Discover(sub) = state.focus
                                 && !state.discover.close_confirm
+                                && !discover_split_drag
                                 && let Some(next) = discover_subpane_for_click(
                                     mouse.column,
                                     mouse.row,
@@ -587,6 +610,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     body_top,
                                     body_h,
                                     size.width,
+                                    state.discover.splitter.targets_height,
                                 )
                                 && next != sub
                             {
@@ -682,6 +706,33 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
                         }
                         MouseEventKind::Drag(MouseButton::Left) => {
+                            if discover_split_drag {
+                                let size = terminal.size()?;
+                                let body_top = 3u16;
+                                let body_h = size
+                                    .height
+                                    .saturating_sub(body_top)
+                                    .saturating_sub(footer_view::footer_height(&state.footer, size.width));
+                                let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
+                                if let Some(body) = discover_body_rect(explorer_w, body_top, body_h, size.width)
+                                    && body.height >= 3
+                                {
+                                    let height =
+                                        crate::features::discover::splitter::view::targets_height_for_y(body, point.y);
+                                    let msg = AppMsg::Discover(
+                                        crate::features::discover::msg::DiscoverMsg::Message(
+                                            crate::features::discover::msg::DiscoverMessage::SetTargetsHeight { height },
+                                        ),
+                                    );
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
                             if app_split_drag {
                                 let size = terminal.size()?;
                                 let body_top = 3u16;
@@ -739,6 +790,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
+                            if discover_split_drag {
+                                discover_split_drag = false;
+                                tracing::debug!("discover targets/results splitter drag finished");
+                            }
                             if app_split_drag {
                                 app_split_drag = false;
                                 tracing::debug!("app explorer/workspace splitter drag finished");
@@ -1492,21 +1547,16 @@ fn explorer_pane_for_click(
     }
 }
 
-/// Map a click inside the discover popup to a discover child sub-pane
-/// (engine / targets / results), mirroring the discover view's vertical layout
-/// and Ctrl+j/k. Returns `None` for clicks outside the popup body (the header
-/// / explorer / workspace regions around the popup).
-fn discover_subpane_for_click(
-    col: u16,
-    row: u16,
+/// The discover popup's body region (the targets/results area, below the engine
+/// selector), in absolute screen coordinates. The popup overlays the workspace
+/// region at 75% width/height, centered (matches `render_modal_popup` and the
+/// view). Returns `None` when the popup is too small to lay out.
+fn discover_body_rect(
     explorer_w: u16,
     body_top: u16,
     body_h: u16,
     width: u16,
-) -> Option<crate::app_shell::nav::DiscoverPane> {
-    use crate::app_shell::nav::DiscoverPane;
-    // The discover popup overlays the workspace region: 3/4 of its size,
-    // centered (matches `render_modal_popup` in app/view.rs).
+) -> Option<Rect> {
     let base_w = width.saturating_sub(explorer_w);
     let w = (base_w * 3) / 4;
     let h = (body_h * 3) / 4;
@@ -1520,18 +1570,44 @@ fn discover_subpane_for_click(
     let inner_y = py + 1;
     let inner_w = w.saturating_sub(2);
     let inner_h = h.saturating_sub(2);
-    if col < inner_x || col >= inner_x + inner_w || row < inner_y || row >= inner_y + inner_h {
+    // The engine selector occupies the top 4 inner rows; the body below is the
+    // targets/results track.
+    Some(Rect::new(inner_x, inner_y + 4, inner_w, inner_h.saturating_sub(4)))
+}
+
+/// Map a click inside the discover popup to a discover child sub-pane
+/// (engine / targets / results), mirroring the discover view's vertical layout
+/// and Ctrl+j/k. Returns `None` for clicks outside the popup body (the header
+/// / explorer / workspace regions around the popup).
+fn discover_subpane_for_click(
+    col: u16,
+    row: u16,
+    explorer_w: u16,
+    body_top: u16,
+    body_h: u16,
+    width: u16,
+    targets_height: u16,
+) -> Option<crate::app_shell::nav::DiscoverPane> {
+    use crate::app_shell::nav::DiscoverPane;
+    let body = discover_body_rect(explorer_w, body_top, body_h, width)?;
+    // The engine selector occupies the inner rows just above the body; the body
+    // rect starts below it. A click within the popup's inner width but above
+    // the body belongs to the engine selector.
+    if col < body.x || col >= body.right() {
         return None;
     }
-    let rel = row - inner_y;
-    // Discover layout (vertical): engine selector (top 4 rows), then the
-    // targets/results body (targets upper half, splitter, results lower half).
-    if rel < 4 {
+    let inner_top = body.y.saturating_sub(4); // engine selector rows
+    if row >= inner_top && row < body.y {
         return Some(DiscoverPane::Engine);
     }
-    let body_y = inner_y + 4;
-    let body_half = inner_h.saturating_sub(4) / 2;
-    if row < body_y + body_half {
+    if row < body.y || row >= body.bottom() {
+        return None;
+    }
+    // Split the body at the same boundary the splitter renders at (the current
+    // targets height, clamped to the live track), so clicking agrees with the
+    // rendered splitter.
+    let layout = crate::features::discover::splitter::view::discover_body_layout(body, targets_height);
+    if row < layout.targets.bottom() {
         Some(DiscoverPane::Targets)
     } else {
         Some(DiscoverPane::Results)
@@ -2092,17 +2168,20 @@ mod tests {
         use crate::app_shell::nav::DiscoverPane;
         // Fixed layout: width 100, explorer 20, body_top 3, body_h 50.
         // base_w=80 -> popup w=60,h=37 at px=30,py=9; inner x=31,y=10,w=58,h=35.
+        // Engine selector: top 4 inner rows (10..14); the body below spans
+        // y=14..45 (height 31). A targets_height of 10 rows makes targets
+        // [14,24) and results [24,45), matching the rendered splitter.
         let click = |col: u16, row: u16| {
-            discover_subpane_for_click(col, row, 20, 3, 50, 100)
+            discover_subpane_for_click(col, row, 20, 3, 50, 100, 10)
         };
         // Engine: top 4 rows of the inner area (inner_y=10 -> rows 10..14).
         assert_eq!(click(40, 11), Some(DiscoverPane::Engine));
         assert_eq!(click(40, 13), Some(DiscoverPane::Engine));
-        // Targets: rows [14, body_y+half). body_y=14, half=(35-4)/2=15 -> [14,29).
+        // Targets: rows [14, 14+10).
         assert_eq!(click(40, 15), Some(DiscoverPane::Targets));
-        assert_eq!(click(40, 28), Some(DiscoverPane::Targets));
-        // Results: rows [29, 45).
-        assert_eq!(click(40, 30), Some(DiscoverPane::Results));
+        assert_eq!(click(40, 23), Some(DiscoverPane::Targets));
+        // Results: rows [24, 45).
+        assert_eq!(click(40, 24), Some(DiscoverPane::Results));
         assert_eq!(click(40, 44), Some(DiscoverPane::Results));
         // Outside the popup: header row, explorer column, or beyond the inner
         // area yields None.

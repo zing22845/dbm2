@@ -55,6 +55,12 @@ pub fn update(
             state.close_confirm = false;
             changed
         }
+        DiscoverMessage::SetTargetsHeight { height } => {
+            // Only repaint when the split actually moved — a drag that does not
+            // change the split (e.g. at a clamp boundary) must not count as a
+            // redundant redraw and inflate the waste metric.
+            state.splitter.set_targets_height(height)
+        }
         DiscoverMessage::StartScan => {
             if let Some(config) = build_scan_config(&state) {
                 // A fresh shared cancel flag per scan; the effect and the

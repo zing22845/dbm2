@@ -8,6 +8,7 @@ pub mod engine;
 pub mod intent;
 pub mod msg;
 pub mod results;
+pub mod splitter;
 pub mod state;
 pub mod targets;
 pub mod update;

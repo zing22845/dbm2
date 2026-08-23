@@ -199,10 +199,13 @@ fn focus_pane_of(msg: &AppMsg) -> Option<Pane> {
 fn open_discover(state: &mut AppState) {
     tracing::debug!("open_discover: setting focus to Discover parent pane");
     let preserved_targets = std::mem::take(&mut state.discover.targets).targets;
+    // Keep the targets/results splitter width across reopen (process lifetime).
+    let preserved_splitter = state.discover.splitter;
     state.discover = crate::features::discover::state::DiscoverState::opened();
     if !preserved_targets.is_empty() {
         state.discover.targets.targets = preserved_targets;
     }
+    state.discover.splitter = preserved_splitter;
     // Focus moves to Discover. The explorer sub-pane + cursor (and the sql /
     // iw states) are left untouched; closing discover returns to the Explorer
     // via `set_focus`, so the sub-pane and cursor the user had before opening

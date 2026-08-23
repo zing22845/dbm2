@@ -16,6 +16,9 @@ pub enum DiscoverMessage {
     CancelClose,
     /// Close the discover modal (after confirmation).
     Close,
+    /// Set the targets editor height in rows (drag the targets/results
+    /// splitter).
+    SetTargetsHeight { height: u16 },
     /// Start a discovery scan over the current targets.
     StartScan,
     /// Ask the in-flight scan to stop at the next host boundary (`c` key).

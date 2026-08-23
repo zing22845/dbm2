@@ -63,6 +63,17 @@ fn approx_sql_body_height(state: &AppState) -> u16 {
         .max(1)
 }
 
+/// Approximate the discover targets/results track height: the discover popup
+/// overlays ~75% of the body height (centered), minus the engine selector rows.
+/// Only used to round-trip the persisted percentage to/from rows; the layout
+/// re-clamps to `[20%, 80%]` of the true track.
+fn approx_discover_body_height(state: &AppState) -> u16 {
+    let body_h = state.term_height.saturating_sub(6).max(1);
+    let popup_h = (body_h * 3) / 4;
+    popup_h.saturating_sub(6) // border (2) + engine selector (~4)
+        .max(1)
+}
+
 fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
     let track_h = approx_sql_body_height(state);
     let tabs = state
@@ -101,7 +112,11 @@ fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
         tabs,
         active_tab: state.sql.sql_tab.active_tab,
         instance_workspace: iw_snapshot(state),
-        discover_targets_ratio: 35,
+        // Persist the discover targets/results split as a percentage (stable
+        // across terminals); the running state keeps it in absolute rows.
+        discover_targets_ratio: state.discover.splitter.targets_height_pct(
+            approx_discover_body_height(state),
+        ),
         explorer_split_ratio: 20,
         explorer_pane: match state.explorer.pane {
             ExplorerPane::Instances => "instances",
@@ -333,6 +348,13 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
     // clamped to its allowed range so it survives any terminal-width change.
     state.splitter.set_explorer_pane_width(snapshot.tree_width);
 
+    // Restore the discover targets/results splitter (persisted as a percentage),
+    // materialized to rows against the current (approximate) body height.
+    state.discover.splitter.set_targets_height_pct(
+        snapshot.discover_targets_ratio,
+        approx_discover_body_height(state),
+    );
+
     // Restore instance expansion + cursor by name. Expansion is applied to the
     // freshly-loaded tree nodes; the cursor resolves to the owning instance row
     // (connections load lazily, so a connection cursor focuses its instance).
@@ -551,6 +573,25 @@ mod tests {
         let mut restored2 = sample_state();
         apply_snapshot(&mut restored2, &snap);
         assert_eq!(restored2.splitter.explorer_pane_width, 40);
+        drop(effects);
+    }
+
+    #[test]
+    fn snapshot_persists_and_restores_discover_targets_split() {
+        // The discover targets/results split is persisted as a percentage and
+        // re-materialized to rows against the current body height on restore.
+        let mut state = sample_state();
+        state.term_height = 46; // discover body ≈ 24 rows
+        state.discover.splitter.set_targets_height_pct(50, approx_discover_body_height(&state));
+        let snap = snapshot_from_app(&state);
+        assert_eq!(snap.discover_targets_ratio, 50);
+
+        let mut restored = sample_state();
+        restored.term_height = 46;
+        let effects = apply_snapshot(&mut restored, &snap);
+        let track = approx_discover_body_height(&restored);
+        assert_eq!(restored.discover.splitter.targets_height, (track * 50) / 100);
+        assert_eq!(restored.discover.splitter.targets_height_pct(track), 50);
         drop(effects);
     }
 

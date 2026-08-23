@@ -73,26 +73,19 @@ pub fn render(
     engine_view::render(frame, theme, chunks[0], &state.engine, focus);
 
     // Stacked vertically, like the original: targets (top), a 1-row splitter,
-    // then results (bottom). A vertical split means both panes are the same
-    // width; the splitter keeps the horizontal divider visible.
-    let body = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(50), // targets editor
-            Constraint::Length(1),      // splitter
-            Constraint::Percentage(50), // results list
-        ])
-        .split(chunks[1]);
+    // then results (bottom). The splitter width is owned by the discover
+    // `splitter` child feature (targets height in rows).
+    let body = super::splitter::view::discover_body_layout(chunks[1], state.splitter.targets_height);
 
-    let caret = targets_view::render(frame, theme, body[0], &state.targets, focus);
+    let caret = targets_view::render(frame, theme, body.targets, &state.targets, focus);
     crate::common::view::splitter::draw(
         frame,
-        body[1],
+        body.splitter,
         crate::common::view::splitter::SplitOrientation::Horizontal,
         false,
         false,
     );
-    results_view::render(frame, theme, body[2], &state.results, focus);
+    results_view::render(frame, theme, body.results, &state.results, focus);
 
     // Discover dialog footer: rendered directly (no separator dashes), so the
     // style matches every other footer.

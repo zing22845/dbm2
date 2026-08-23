@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use super::engine::state::EngineState;
 use super::results::state::ResultsState;
+use super::splitter::state::DiscoverSplitterState;
 use super::targets::state::TargetsState;
 
 /// State for the discover feature, aggregating its three child sub-modules.
@@ -21,6 +22,8 @@ pub struct DiscoverState {
     pub targets: TargetsState,
     /// The discovery results list.
     pub results: ResultsState,
+    /// The targets/results horizontal splitter.
+    pub splitter: DiscoverSplitterState,
     /// Whether the close-confirmation dialog is shown.
     pub close_confirm: bool,
     /// Whether a scan is currently in flight.
