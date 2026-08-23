@@ -82,7 +82,7 @@ pub fn sql_tab_splitter_at(
     if body.width == 0 || body.height == 0 {
         return None;
     }
-    let layout = sql_tab_layout(body, tab.splitter.split_ratio, tab.splitter.history_pane_width);
+    let layout = sql_tab_layout(body, tab.splitter.editor_top_height, tab.splitter.history_pane_width);
     if layout.editor.width == 0 {
         return None;
     }
@@ -122,17 +122,18 @@ pub fn sql_tab_splitter_resize_msg(
     use super::super::history::splitter::view::detail_width_for_x;
     let tab = state.tabs.get(state.index_of(tab_id)?)?;
     let body = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
-    let layout = sql_tab_layout(body, tab.splitter.split_ratio, tab.splitter.history_pane_width);
+    let layout = sql_tab_layout(body, tab.splitter.editor_top_height, tab.splitter.history_pane_width);
     if layout.editor.width == 0 {
         return None;
     }
     match splitter {
         SqlSplitter::EditorResults => {
-            let body_top = layout.editor.y;
-            let body_h = layout.results.bottom().saturating_sub(body_top).max(1);
-            let top_h = y.saturating_sub(body_top);
-            let ratio = ((u32::from(top_h) * 100) / u32::from(body_h)).min(99) as u8;
-            Some(SqlTabMessage::SetSplitRatio { tab_id, ratio })
+            // Record the top-pane height in absolute rows (the exact row under
+            // the pointer) — no percentage round-trip, so the splitter tracks
+            // the pointer precisely. The stored rows are re-clamped to the
+            // current track at layout time.
+            let top_h = y.saturating_sub(layout.editor.y);
+            Some(SqlTabMessage::SetEditorTopHeight { tab_id, height: top_h })
         }
         SqlSplitter::EditorHistory => {
             let right_edge = layout.history.right();
@@ -181,7 +182,7 @@ mod tests {
             .record_success(&instance, &connection, "SELECT 1");
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.editor_top_height, state.tabs[0].splitter.history_pane_width);
         let detail_split =
             crate::features::sql_workspace::sql_tab::history::splitter::view::history_detail_splitter(
                 body, &layout, true, state.tabs[0].history.splitter.detail_pane_width,

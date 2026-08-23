@@ -80,9 +80,9 @@ pub enum SqlTabMessage {
         instance: String,
         connection: String,
     },
-    /// Set the editor top-pane height as a percent of the body (horizontal
-    /// splitter), e.g. from a mouse drag on the editor/results splitter.
-    SetSplitRatio { tab_id: usize, ratio: u8 },
+    /// Set the editor top-pane height in rows (horizontal splitter), e.g. from
+    /// a mouse drag on the editor/results splitter.
+    SetEditorTopHeight { tab_id: usize, height: u16 },
     /// Set the history pane width in columns (vertical splitter), e.g. from a
     /// mouse drag on the editor/history splitter.
     SetHistoryWidth { tab_id: usize, width: u16 },

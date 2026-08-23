@@ -80,7 +80,7 @@ pub fn sql_workspace_click(
     if body.width == 0 || body.height == 0 {
         return None;
     }
-    let layout = sql_tab_layout(body, tab.splitter.split_ratio, tab.splitter.history_pane_width);
+    let layout = sql_tab_layout(body, tab.splitter.editor_top_height, tab.splitter.history_pane_width);
     if layout.editor.width == 0 {
         return None;
     }
@@ -246,7 +246,7 @@ pub fn render(
     let editor_focused = focused && tab.focus == SqlFocus::Editor;
     let history_focused = focused && tab.focus == SqlFocus::History;
     let results_focused = focused && tab.focus == SqlFocus::Results;
-    let layout = sql_tab_layout(body_area, tab.splitter.split_ratio, tab.splitter.history_pane_width);
+    let layout = sql_tab_layout(body_area, tab.splitter.editor_top_height, tab.splitter.history_pane_width);
     if layout.editor.width == 0 {
         // Area too small to split: show a single results pane.
         results_view::render(frame, theme, body_area, &tab.results, results_focused);
@@ -420,7 +420,7 @@ mod tests {
         // Body is rows 1..; the editor occupies the left of the top row.
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.editor_top_height, state.tabs[0].splitter.history_pane_width);
         // Click inside the editor region -> focus editor.
         let p = (layout.editor.x + 1, layout.editor.y + 1);
         assert_eq!(
@@ -441,7 +441,7 @@ mod tests {
         let area = Rect::new(0, 0, 120, 40);
         // Click on the splitter row between top row and results -> none.
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.editor_top_height, state.tabs[0].splitter.history_pane_width);
         let p = (body.x + 1, layout.h_splitter.y);
         assert_eq!(sql_workspace_click(&state, area, p.0, p.1, false), None);
         // Click in the body below results (should be inside results actually);
@@ -457,7 +457,7 @@ mod tests {
         state.tabs[0].session.schema = Some("public".into());
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.editor_top_height, state.tabs[0].splitter.history_pane_width);
         // Click the `· mydb` segment -> focus Database column.
         let (db_rect, _full) = editor_view::context_trigger_rects(
             layout.editor,
@@ -505,7 +505,7 @@ mod tests {
         }
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.editor_top_height, state.tabs[0].splitter.history_pane_width);
         let picker_area = editor_view::context_picker_area(layout.editor, true).unwrap();
         let (db_rect, schema_rect) = cp_view::column_rects(picker_area);
 
@@ -560,7 +560,7 @@ mod tests {
 
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[1].splitter.split_ratio, state.tabs[1].splitter.history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[1].splitter.editor_top_height, state.tabs[1].splitter.history_pane_width);
 
         // Clicking B's context trigger opens B's picker (B's picker is closed,
         // so this is NOT treated as an outside-click-close).
@@ -596,7 +596,7 @@ mod tests {
         assert_eq!(state.tabs[0].session.database, None);
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.editor_top_height, state.tabs[0].splitter.history_pane_width);
         let (_db, full) = editor_view::context_trigger_rects(
             layout.editor,
             state.tabs[0].editor.editor.mode,
@@ -713,7 +713,7 @@ mod tests {
 
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].splitter.split_ratio, state.tabs[0].splitter.history_pane_width);
+        let layout = sql_tab_layout(body, state.tabs[0].splitter.editor_top_height, state.tabs[0].splitter.history_pane_width);
         // The detail zone extends left of `layout.history` (into what would be
         // the editor region). A click there must focus History, not the editor.
         let detail_w = state.tabs[0].history.splitter.detail_pane_width;

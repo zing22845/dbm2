@@ -187,9 +187,9 @@ pub fn update(
                 warn_tab_missing(tab_id);
             }
         }
-        SqlTabMessage::SetSplitRatio { tab_id, ratio } => {
+        SqlTabMessage::SetEditorTopHeight { tab_id, height } => {
             if let Some(idx) = state.index_of(tab_id) {
-                state.tabs[idx].set_split_ratio(ratio);
+                state.tabs[idx].set_editor_top_height(height);
                 dirty = true;
             } else {
                 warn_tab_missing(tab_id);

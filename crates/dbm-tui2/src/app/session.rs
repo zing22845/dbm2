@@ -51,7 +51,20 @@ pub fn persist_session(state: &AppState) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("failed to save TUI session: {e}"))
 }
 
+/// Approximate the SQL tab body height (the track the horizontal splitter is a
+/// percentage of) from the cached terminal height. The exact value depends on
+/// the live layout (header/footer/border rows), but this is only used to
+/// round-trip a persisted percentage to/from rows; the layout re-clamps the
+/// materialized rows to `[20%, 80%]` of the true track anyway.
+fn approx_sql_body_height(state: &AppState) -> u16 {
+    state
+        .term_height
+        .saturating_sub(6) // header + footer + borders
+        .max(1)
+}
+
 fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
+    let track_h = approx_sql_body_height(state);
     let tabs = state
         .sql
         .sql_tab
@@ -66,7 +79,9 @@ fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
                 connection: session.connection.clone().unwrap_or_default(),
                 sequence: session.sequence as u32,
                 sql,
-                split_ratio: tab.splitter.split_ratio,
+                // Persist the horizontal split as a percentage (stable across
+                // terminals); the running state keeps it in absolute rows.
+                split_ratio: tab.splitter.editor_top_pct(track_h),
                 history_pane_width: tab.splitter.history_pane_width,
                 detail_pane_width: tab.history.splitter.detail_pane_width,
                 database: session.database.clone().unwrap_or_default(),
@@ -225,7 +240,9 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
             upper_pane: crate::features::sql_workspace::sql_tab::state::SqlFocus::Editor,
             splitter: {
                 let mut s = crate::features::sql_workspace::sql_tab::splitter::state::SqlTabSplitterState::default();
-                s.set_split_ratio(t.split_ratio);
+                // The stored split is a percentage; materialize it to rows
+                // against the current (approximate) body height.
+                s.set_editor_top_pct(t.split_ratio, approx_sql_body_height(state));
                 s.set_history_pane_width(t.history_pane_width);
                 s
             },
@@ -1002,7 +1019,7 @@ mod tests {
                 connection: "app".into(),
                 sequence: 0,
                 sql: "select 1".into(),
-                split_ratio: 55,
+                split_ratio: 50,
                 history_pane_width: 60,
                 detail_pane_width: 66,
                 database: "mydb".into(),
@@ -1016,10 +1033,14 @@ mod tests {
             explorer_pane: "instances".into(),
         };
         let mut state = sample_state();
+        state.term_height = 40; // so 55% of the body maps to a concrete row count
         apply_snapshot(&mut state, &snap);
         assert_eq!(state.sql.sql_tab.tabs.len(), 1);
         let tab = &state.sql.sql_tab.tabs[0];
-        assert_eq!(tab.splitter.split_ratio, 55);
+        // The persisted percentage is materialized to absolute rows on restore.
+        let track_h = approx_sql_body_height(&state); // 40 - 6 = 34
+        assert_eq!(tab.splitter.editor_top_height, (34 * 50) / 100);
+        assert_eq!(tab.splitter.editor_top_pct(track_h), 50);
         assert_eq!(tab.splitter.history_pane_width, 60);
         assert_eq!(tab.history.splitter.detail_pane_width, 66);
 

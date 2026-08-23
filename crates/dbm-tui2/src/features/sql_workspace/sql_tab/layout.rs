@@ -27,7 +27,11 @@ pub struct SqlTabLayout {
 }
 
 /// Compute the SQL tab body layout. `area` is the region below the tab bar.
-pub fn sql_tab_layout(area: Rect, split_ratio: u8, history_width: u16) -> SqlTabLayout {
+///
+/// `editor_top_height` is the stored editor+history row height **in rows**; it
+/// is clamped to `[20%, 80%]` of the current track here (so a height recorded
+/// on a taller terminal is re-clamped correctly after a resize).
+pub fn sql_tab_layout(area: Rect, editor_top_height: u16, history_width: u16) -> SqlTabLayout {
     let empty = SqlTabLayout::default();
 
     let body = Layout::default()
@@ -42,11 +46,10 @@ pub fn sql_tab_layout(area: Rect, split_ratio: u8, history_width: u16) -> SqlTab
         return empty;
     }
 
-    // Editor top-pane height: split_ratio% of the body, clamped to [20%, 80%]
-    // of the track so neither the top row nor results collapses.
+    // Editor top-pane height in rows, clamped to [20%, 80%] of the track so
+    // neither the top row nor results collapses.
     let track_h = body[0].height + 1 + body[2].height;
-    let top_px = ((u32::from(track_h) * u32::from(split_ratio)) / 100) as u16;
-    let row_h = clamp_split_px(top_px, track_h, 20, 20);
+    let row_h = clamp_split_px(editor_top_height, track_h, 20, 20);
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -97,7 +100,7 @@ mod tests {
     #[test]
     fn layout_places_all_panes() {
         let area = Rect::new(0, 0, 120, 40);
-        let layout = sql_tab_layout(area, 45, 24);
+        let layout = sql_tab_layout(area, 18, 24);
         assert!(layout.editor.width > 0 && layout.editor.height > 0);
         assert!(layout.history.width > 0 && layout.history.height > 0);
         assert!(layout.results.height > 0);
@@ -113,7 +116,7 @@ mod tests {
     #[test]
     fn layout_tiny_area_returns_empty() {
         assert_eq!(
-            sql_tab_layout(Rect::new(0, 0, 5, 2), 45, 24),
+            sql_tab_layout(Rect::new(0, 0, 5, 2), 18, 24),
             SqlTabLayout::default()
         );
     }

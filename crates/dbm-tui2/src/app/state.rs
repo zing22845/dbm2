@@ -28,6 +28,10 @@ pub struct AppState {
     /// horizontal-scroll to clamp at the content boundary instead of a
     /// fixed cap.
     pub term_width: u16,
+    /// Terminal height in rows, updated on resize. Used to derive the SQL tab
+    /// body height when converting a persisted horizontal-split percentage back
+    /// to absolute rows (and vice-versa).
+    pub term_height: u16,
     /// App-level splitter state: the width of the Explorer pane (left) vs the
     /// workspace region (right).
     pub splitter: crate::features::app_splitter::state::AppSplitterState,
@@ -104,6 +108,7 @@ impl Default for AppState {
             global_status: String::new(),
             modal: None,
             term_width: 0,
+            term_height: 0,
             splitter: crate::features::app_splitter::state::AppSplitterState::default(),
             theme: crate::common::view::theme::dracula(),
             header: HeaderState::default(),

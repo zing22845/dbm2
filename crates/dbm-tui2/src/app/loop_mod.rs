@@ -764,15 +764,18 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                         needs_redraw |= result.dirty;
                     }
-                } else if let Some(Ok(CEvent::Resize(w, _h))) = maybe_event {
+                } else if let Some(Ok(CEvent::Resize(w, h))) = maybe_event {
                     // Terminal window resized: force a repaint so the layout
                     // recomputes against the new terminal size. Without this,
                     // `terminal.draw` is skipped while idle (no dirty state) and
                     // the rendered frame never catches up with the window size,
                     // unlike the original dbm which redraws on resize.
-                    // Also update the cached terminal width so the explorer's
-                    // horizontal-scroll can clamp at the content boundary.
+                    // Also update the cached terminal size so the explorer's
+                    // horizontal-scroll can clamp at the content boundary and
+                    // the persisted horizontal-split percentage can be
+                    // re-materialized against the new body height.
                     state.term_width = w;
+                    state.term_height = h;
                     needs_redraw = true;
                 }
             }
@@ -1011,7 +1014,7 @@ fn sql_picker_area_for_hit(
     );
     let layout = crate::features::sql_workspace::sql_tab::layout::sql_tab_layout(
         sql_body,
-        tab.splitter.split_ratio,
+        tab.splitter.editor_top_height,
         tab.splitter.history_pane_width,
     );
     crate::features::sql_workspace::sql_tab::editor::view::context_picker_area(

@@ -56,9 +56,9 @@ pub struct SqlTab {
 }
 
 impl SqlTab {
-    /// Clamp and store the editor top-pane height percentage.
-    pub fn set_split_ratio(&mut self, ratio: u8) {
-        self.splitter.set_split_ratio(ratio);
+    /// Clamp and store the editor top-pane height (rows).
+    pub fn set_editor_top_height(&mut self, height: u16) {
+        self.splitter.set_editor_top_height(height);
     }
 
     /// Clamp and store the history pane width (columns).
