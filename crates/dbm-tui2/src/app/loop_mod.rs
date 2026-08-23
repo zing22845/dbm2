@@ -642,11 +642,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             if body_h >= 3
                                 && {
                                     let body_area = Rect::new(0, body_top, size.width, body_h);
-                                    let layout = crate::app::splitter::view::app_body_layout(
+                                    let layout = crate::features::app_splitter::view::app_body_layout(
                                         body_area,
                                         state.splitter.explorer_pane_width,
                                     );
-                                    crate::app::splitter::view::splitter_at(&layout, point.x, point.y)
+                                    crate::features::app_splitter::view::splitter_at(&layout, point.x, point.y)
                                 }
                             {
                                 app_split_drag = true;
@@ -683,7 +683,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 if body_h >= 3 {
                                     let body_area = Rect::new(0, body_top, size.width, body_h);
                                     let width =
-                                        crate::app::splitter::view::explorer_width_for_x(body_area, point.x);
+                                        crate::features::app_splitter::view::explorer_width_for_x(body_area, point.x);
                                     let msg = AppMsg::SetExplorerWidth(width);
                                     let result = process_message_round(
                                         &effect_runner,
@@ -910,7 +910,7 @@ fn workspace_rect_for_hit(
     state: &AppState,
 ) -> Option<ratatui::layout::Rect> {
     let body_area = Rect::new(0, body_top, size.width, body_h);
-    let layout = crate::app::splitter::view::app_body_layout(body_area, state.splitter.explorer_pane_width);
+    let layout = crate::features::app_splitter::view::app_body_layout(body_area, state.splitter.explorer_pane_width);
     if layout.workspace.width == 0 {
         return None;
     }

@@ -40,7 +40,7 @@ pub fn render(
     // The body is a horizontal split: Explorer (left) + a resizable vertical
     // splitter + the workspace region (right). The splitter width is owned by
     // the app-level `splitter` feature.
-    let body = crate::app::splitter::view::app_body_layout(chunks[1], state.splitter.explorer_pane_width);
+    let body = crate::features::app_splitter::view::app_body_layout(chunks[1], state.splitter.explorer_pane_width);
 
     // The workspace region holds only the SQL view (main). The performance
     // readout moved into the footer row (right-aligned) to save vertical space.

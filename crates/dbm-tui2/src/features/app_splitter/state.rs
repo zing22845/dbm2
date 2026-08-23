@@ -2,7 +2,7 @@
 //! pane (left) vs the workspace region (right). The splitter separates two
 //! peer top-level features (explorer and the workspace), so — mirroring the
 //! `sql_tab` splitter which lives at the common parent of editor/history — this
-//! splitter lives at the app level.
+//! splitter is its own app-level feature.
 
 /// Width range of the Explorer pane (the splitter clamps to this).
 pub const MIN_EXPLORER_WIDTH: u16 = 16;

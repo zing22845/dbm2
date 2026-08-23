@@ -30,7 +30,7 @@ pub struct AppState {
     pub term_width: u16,
     /// App-level splitter state: the width of the Explorer pane (left) vs the
     /// workspace region (right).
-    pub splitter: crate::app::splitter::state::AppSplitterState,
+    pub splitter: crate::features::app_splitter::state::AppSplitterState,
 
     // --- Feature states ---
     pub header: HeaderState,
@@ -104,7 +104,7 @@ impl Default for AppState {
             global_status: String::new(),
             modal: None,
             term_width: 0,
-            splitter: crate::app::splitter::state::AppSplitterState::default(),
+            splitter: crate::features::app_splitter::state::AppSplitterState::default(),
             theme: crate::common::view::theme::dracula(),
             header: HeaderState::default(),
             explorer: ExplorerState::default(),

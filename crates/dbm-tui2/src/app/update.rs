@@ -1154,12 +1154,12 @@ mod tests {
         update(AppMsg::SetExplorerWidth(9999), &mut state);
         assert_eq!(
             state.splitter.explorer_pane_width,
-            crate::app::splitter::state::MAX_EXPLORER_WIDTH
+            crate::features::app_splitter::state::MAX_EXPLORER_WIDTH
         );
         update(AppMsg::SetExplorerWidth(0), &mut state);
         assert_eq!(
             state.splitter.explorer_pane_width,
-            crate::app::splitter::state::MIN_EXPLORER_WIDTH
+            crate::features::app_splitter::state::MIN_EXPLORER_WIDTH
         );
     }
 

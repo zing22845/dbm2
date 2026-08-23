@@ -3,8 +3,8 @@
 //!
 //! Unlike the `sql_tab` splitters (which separate panes owned by a single
 //! tab), this splitter separates two *peer top-level features* — the explorer
-//! and the workspace. There is no common feature parent, so it lives at the
-//! app layer. It owns `explorer_pane_width` (the left side).
+//! and the workspace. There is no common feature parent, so it is an app-level
+//! feature itself, owning `explorer_pane_width` (the left side).
 
 pub mod state;
 pub mod view;
