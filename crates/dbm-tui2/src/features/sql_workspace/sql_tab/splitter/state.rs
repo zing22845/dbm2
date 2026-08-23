@@ -69,7 +69,9 @@ impl SqlTabSplitterState {
         use crate::common::view::splitter::{WIDTH_NUDGE_STEP, width_delta_for_right_pane};
         let delta = width_delta_for_right_pane(nudge, WIDTH_NUDGE_STEP);
         let current = i32::from(self.history_pane_width);
-        let max_history = self.last_history_track.saturating_sub(MIN_SQL_PANE_WIDTH);
+        // Editor keeps MIN_SQL_PANE_WIDTH plus the 1-col splitter, matching the
+        // layout's own clamp so nudge and drag agree with the rendered width.
+        let max_history = self.last_history_track.saturating_sub(MIN_SQL_PANE_WIDTH + 1);
         let next = (current + i32::from(delta))
             .clamp(i32::from(MIN_HISTORY_WIDTH), i32::from(max_history.max(MIN_HISTORY_WIDTH)))
             as u16;
@@ -201,19 +203,20 @@ mod tests {
     #[test]
     fn history_nudge_stops_at_editor_min_width() {
         let mut s = state();
-        s.last_history_track = 40; // editor keeps MIN_SQL_PANE_WIDTH (20) -> max 20
+        // editor keeps MIN_SQL_PANE_WIDTH (20) + 1 splitter -> history max 19
+        s.last_history_track = 40;
         s.history_pane_width = 8; // below MIN_HISTORY_WIDTH
         // `[` grows history; it clamps up to the min width.
         assert!(s.nudge_history_width(crate::common::view::splitter::VerticalSplitterNudge::Left));
         assert_eq!(s.history_pane_width, MIN_HISTORY_WIDTH);
-        // Grow to the editor-min boundary (20) then stop dirtying.
-        s.history_pane_width = 19;
+        // Grow to the editor-min boundary (19) then stop dirtying.
+        s.history_pane_width = 18;
         assert!(s.nudge_history_width(crate::common::view::splitter::VerticalSplitterNudge::Left));
-        assert_eq!(s.history_pane_width, 20);
+        assert_eq!(s.history_pane_width, 19);
         assert!(
             !s.nudge_history_width(crate::common::view::splitter::VerticalSplitterNudge::Left),
             "growing past the editor min must not dirty"
         );
-        assert_eq!(s.history_pane_width, 20);
+        assert_eq!(s.history_pane_width, 19);
     }
 }

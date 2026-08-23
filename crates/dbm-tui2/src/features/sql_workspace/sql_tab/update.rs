@@ -242,7 +242,10 @@ pub fn update(
                 let max_history = tab
                     .splitter
                     .last_history_track
-                    .saturating_sub(crate::features::sql_workspace::sql_tab::splitter::state::MIN_SQL_PANE_WIDTH);
+                    .saturating_sub(
+                        crate::features::sql_workspace::sql_tab::splitter::state::MIN_SQL_PANE_WIDTH
+                            + 1,
+                    );
                 let clamped = list_w.clamp(
                     crate::features::sql_workspace::sql_tab::splitter::state::MIN_HISTORY_WIDTH,
                     max_history.max(

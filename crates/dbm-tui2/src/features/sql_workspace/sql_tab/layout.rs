@@ -13,6 +13,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 use crate::common::view::splitter::clamp_split_px;
+use crate::features::sql_workspace::sql_tab::splitter::state::MIN_SQL_PANE_WIDTH;
 
 /// The panes and splitter strips computed by [`sql_tab_layout`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -68,8 +69,17 @@ pub fn sql_tab_layout(area: Rect, editor_top_height: u16, history_width: u16) ->
 
     // Top row horizontal split: editor (left) + vertical splitter + history.
     let track_w = top_row.width;
+    // The editor always keeps MIN_SQL_PANE_WIDTH (plus the 1-col splitter), so
+    // history maxes out at `track_w - (MIN_SQL_PANE_WIDTH + 1)` — the same
+    // boundary the history nudge/drag clamps to, so the stored and rendered
+    // widths never disagree (no redundant repaints at the boundary).
     let history_w = history_width
-        .clamp(12, track_w.saturating_sub(30).max(12));
+        .clamp(
+            12,
+            track_w
+                .saturating_sub(MIN_SQL_PANE_WIDTH + 1)
+                .max(12),
+        );
     let top = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
