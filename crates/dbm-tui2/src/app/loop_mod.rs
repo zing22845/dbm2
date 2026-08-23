@@ -1649,15 +1649,25 @@ fn normalize_splitter_tracks(state: &mut crate::app::state::AppState, size: rata
     let footer_h = footer_view::footer_height(&state.footer, size.width);
     // Body height: header (3) at the top, footer at the bottom.
     let body_h = size.height.saturating_sub(3).saturating_sub(footer_h);
-    // SQL tab body (below header, workspace border, tab bar, workspace footer).
-    let sql_body_h = body_h.saturating_sub(2 + 1 + 1);
-    // Editor+history track width (workspace inner minus the border), so `[`/`]`
-    // history nudges clamp against the live editor min width.
-    let explorer_w = (size.width.saturating_mul(2) / 10).max(1);
-    let sql_track_w = size
-        .width
-        .saturating_sub(explorer_w)
-        .saturating_sub(2);
+    // SQL tab body track: workspace inner, minus the workspace footer and the
+    // tab bar. Computed with the same footer logic the workspace render uses.
+    let workspace = workspace_rect_for_hit(size, 3, body_h, state);
+    // Editor+history track width (the workspace inner width), matching the
+    // render (live Explorer splitter width), so `[`/`]` history nudges clamp
+    // against the exact editor min width.
+    let sql_track_w = workspace
+        .map(|ws| ws.width.saturating_sub(2))
+        .unwrap_or(size.width.saturating_sub(size.width.saturating_mul(2) / 10).saturating_sub(2));
+    let sql_body_h = workspace
+        .map(|ws| {
+            let inner_w = ws.width.saturating_sub(2);
+            let ws_footer_h = crate::common::view::hints::footer_height(
+                &crate::common::view::hints::sql_workspace_footer_text(),
+                inner_w.max(1),
+            );
+            ws.height.saturating_sub(2).saturating_sub(ws_footer_h).saturating_sub(1)
+        })
+        .unwrap_or(body_h.saturating_sub(4));
     for tab in &mut state.sql.sql_tab.tabs {
         tab.splitter.last_track = sql_body_h.max(1);
         tab.splitter.last_history_track = sql_track_w.max(1);
@@ -1667,8 +1677,8 @@ fn normalize_splitter_tracks(state: &mut crate::app::state::AppState, size: rata
     // Discover popup body: the targets/results track inside the 75% overlay,
     // computed with the same engine/footer split the render uses, so keyboard
     // nudges clamp against the exact rendered body.
-    if let Some(workspace) = workspace_rect_for_hit(size, 3, body_h, state) {
-        let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75);
+    if let Some(ws) = workspace {
+        let discover_popup = crate::common::view::modal::popup_rect(ws, 75, 75);
         state.discover.splitter.last_track =
             crate::features::discover::view::discover_body_track(discover_popup, &state.discover);
     }
