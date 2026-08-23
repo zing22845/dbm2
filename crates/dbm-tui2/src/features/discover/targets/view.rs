@@ -10,6 +10,15 @@ use crate::common::view::theme::Theme;
 
 use super::state::{TargetCol, TargetsState};
 
+/// The target list's table column layout. Used both by the `Table` render and
+/// by the inline-edit caret placement, so the caret always lands on the same
+/// column the Table draws (changing the layout here keeps both in sync).
+const TARGETS_COLUMNS: [ratatui::layout::Constraint; 3] = [
+    ratatui::layout::Constraint::Length(3),
+    ratatui::layout::Constraint::Percentage(45),
+    ratatui::layout::Constraint::Percentage(55),
+];
+
 /// Render the targets editor: a bordered list of `host : ports` rows, with the
 /// focused cell highlighted and an inline edit shown when editing. The border
 /// highlights only when the targets pane owns focus, and a footer line shows
@@ -111,14 +120,7 @@ pub fn render(
                     .style(cell_style(theme, row_sel, ports_focused, state.editing)),
                 ])
             });
-        let table = ratatui::widgets::Table::new(
-            rows,
-            [
-                ratatui::layout::Constraint::Length(3),
-                ratatui::layout::Constraint::Percentage(45),
-                ratatui::layout::Constraint::Percentage(55),
-            ],
-        )
+        let table = ratatui::widgets::Table::new(rows, TARGETS_COLUMNS)
         .header(header)
         .column_spacing(1);
         frame.render_widget(table, content);
@@ -141,11 +143,7 @@ pub fn render(
                 // than approximating the host width by hand (which drifted).
                 let cols = ratatui::layout::Layout::default()
                     .direction(ratatui::layout::Direction::Horizontal)
-                    .constraints([
-                        ratatui::layout::Constraint::Length(3),
-                        ratatui::layout::Constraint::Percentage(45),
-                        ratatui::layout::Constraint::Percentage(55),
-                    ])
+                    .constraints(TARGETS_COLUMNS)
                     .spacing(1)
                     .split(content);
                 let cell_x = match state.col {
