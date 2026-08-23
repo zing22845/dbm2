@@ -77,4 +77,61 @@ impl SqlTabSplitterState {
         let rows = (u32::from(track_h) * u32::from(pct.clamp(20, 80))) / 100;
         self.editor_top_height = rows.clamp(1, 1000) as u16;
     }
+
+    /// Nudge the editor top-pane height by one keyboard step. `plus` is the
+    /// `+` / `-` key (true = `+`); `top_focused` is whether the focused sub-pane
+    /// is the top row (editor/history) rather than the bottom (results). `+`
+    /// always grows the focused pane and `-` shrinks it, so when the bottom is
+    /// focused the top height moves opposite to the key. Returns `true` when the
+    /// split actually moved.
+    pub fn nudge_editor_top_height(&mut self, plus: bool, top_focused: bool) -> bool {
+        use crate::common::view::splitter::WIDTH_NUDGE_STEP;
+        // `+` grows the focused pane; the top height moves opposite to a
+        // bottom focus.
+        let grow_top = if plus { top_focused } else { !top_focused };
+        let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
+        let next = (self.editor_top_height as i16 + delta).max(0) as u16;
+        self.set_editor_top_height(next)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state() -> SqlTabSplitterState {
+        let mut s = SqlTabSplitterState::default();
+        s.editor_top_height = 20;
+        s
+    }
+
+    #[test]
+    fn plus_grows_top_when_top_focused() {
+        let mut s = state();
+        assert!(s.nudge_editor_top_height(true, true));
+        assert_eq!(s.editor_top_height, 22);
+    }
+
+    #[test]
+    fn minus_shrinks_top_when_top_focused() {
+        let mut s = state();
+        assert!(s.nudge_editor_top_height(false, true));
+        assert_eq!(s.editor_top_height, 18);
+    }
+
+    #[test]
+    fn plus_shrinks_top_when_bottom_focused() {
+        // `+` grows the focused (bottom) pane, so the top height drops.
+        let mut s = state();
+        assert!(s.nudge_editor_top_height(true, false));
+        assert_eq!(s.editor_top_height, 18);
+    }
+
+    #[test]
+    fn minus_grows_top_when_bottom_focused() {
+        // `-` shrinks the focused (bottom) pane, so the top height grows.
+        let mut s = state();
+        assert!(s.nudge_editor_top_height(false, false));
+        assert_eq!(s.editor_top_height, 22);
+    }
 }

@@ -53,6 +53,18 @@ impl ExplorerSplitterState {
         let rows = (u32::from(track_h) * u32::from(pct.clamp(20, 80))) / 100;
         self.instances_height = rows.clamp(1, 1000) as u16;
     }
+
+    /// Nudge the instances height by one keyboard step. `plus` is the `+` / `-`
+    /// key (true = `+`); `top_focused` is whether the instances (top) pane is
+    /// focused rather than the objects (bottom). `+` always grows the focused
+    /// pane and `-` shrinks it. Returns `true` when the split actually moved.
+    pub fn nudge_instances_height(&mut self, plus: bool, top_focused: bool) -> bool {
+        use crate::common::view::splitter::WIDTH_NUDGE_STEP;
+        let grow_top = if plus { top_focused } else { !top_focused };
+        let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
+        let next = (self.instances_height as i16 + delta).max(0) as u16;
+        self.set_instances_height(next)
+    }
 }
 
 #[cfg(test)]
@@ -74,5 +86,29 @@ mod tests {
         s.set_instances_height_pct(50, 20);
         assert_eq!(s.instances_height, 10);
         assert_eq!(s.instances_height_pct(20), 50);
+    }
+
+    #[test]
+    fn nudge_grows_focused_pane() {
+        let mut s = ExplorerSplitterState::default();
+        s.instances_height = 20;
+        // + with instances focused grows the top.
+        assert!(s.nudge_instances_height(true, true));
+        assert_eq!(s.instances_height, 22);
+        // + with objects focused shrinks the top (grows the bottom).
+        let mut s2 = ExplorerSplitterState::default();
+        s2.instances_height = 20;
+        assert!(s2.nudge_instances_height(true, false));
+        assert_eq!(s2.instances_height, 18);
+        // - with instances focused shrinks the top.
+        let mut s3 = ExplorerSplitterState::default();
+        s3.instances_height = 20;
+        assert!(s3.nudge_instances_height(false, true));
+        assert_eq!(s3.instances_height, 18);
+        // - with objects focused grows the top.
+        let mut s4 = ExplorerSplitterState::default();
+        s4.instances_height = 20;
+        assert!(s4.nudge_instances_height(false, false));
+        assert_eq!(s4.instances_height, 22);
     }
 }

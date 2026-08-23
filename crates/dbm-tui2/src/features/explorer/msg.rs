@@ -13,6 +13,9 @@ pub enum ExplorerMessage {
     /// Set the instances tree height in rows (drag the instances/objects
     /// splitter).
     SetInstancesHeight { height: u16 },
+    /// Nudge the instances height by one step with `+` / `-` (`plus` is true
+    /// for `+`), growing the currently-focused pane.
+    NudgeInstancesHeight { plus: bool },
     /// Forwarded instances list message.
     Instances(InstancesMsg),
     /// Forwarded objects tree message.

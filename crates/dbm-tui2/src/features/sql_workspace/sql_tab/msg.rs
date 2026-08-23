@@ -83,6 +83,10 @@ pub enum SqlTabMessage {
     /// Set the editor top-pane height in rows (horizontal splitter), e.g. from
     /// a mouse drag on the editor/results splitter.
     SetEditorTopHeight { tab_id: usize, height: u16 },
+    /// Nudge the editor top-pane height by one step with `+` / `-` (`plus` is
+    /// true for `+`), growing the currently-focused pane. The tab resolves the
+    /// top/bottom focus.
+    NudgeEditorTopHeight { tab_id: usize, plus: bool },
     /// Set the history pane width in columns (vertical splitter), e.g. from a
     /// mouse drag on the editor/history splitter.
     SetHistoryWidth { tab_id: usize, width: u16 },

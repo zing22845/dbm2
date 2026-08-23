@@ -203,6 +203,20 @@ pub fn update(
                 warn_tab_missing(tab_id);
             }
         }
+        SqlTabMessage::NudgeEditorTopHeight { tab_id, plus } => {
+            if let Some(idx) = state.index_of(tab_id) {
+                // `+` grows the focused pane: the top row (editor/history) or
+                // the bottom row (results), per the tab's current focus.
+                let top_focused = matches!(
+                    state.tabs[idx].focus,
+                    crate::features::sql_workspace::sql_tab::state::SqlFocus::Editor
+                        | crate::features::sql_workspace::sql_tab::state::SqlFocus::History
+                );
+                dirty |= state.tabs[idx].nudge_editor_top_height(plus, top_focused);
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
         SqlTabMessage::SetHistoryWidth { tab_id, width } => {
             // `width` is the total History zone width (from splitter A to the
             // right edge). When the detail is visible the zone = list + detail +

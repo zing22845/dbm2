@@ -19,6 +19,10 @@ pub enum DiscoverMessage {
     /// Set the targets editor height in rows (drag the targets/results
     /// splitter).
     SetTargetsHeight { height: u16 },
+    /// Nudge the targets height by one step with `+` / `-` (`plus` is true for
+    /// `+`), growing the currently-focused pane (`top_focused` = the targets
+    /// editor is focused rather than the results list).
+    NudgeTargetsHeight { plus: bool, top_focused: bool },
     /// Start a discovery scan over the current targets.
     StartScan,
     /// Ask the in-flight scan to stop at the next host boundary (`c` key).

@@ -62,6 +62,13 @@ impl SqlTab {
         self.splitter.set_editor_top_height(height)
     }
 
+    /// Nudge the editor top-pane height with `+` / `-`, growing the focused
+    /// pane (`top_focused` = editor/history row focused). Returns `true` when
+    /// the split actually moved.
+    pub fn nudge_editor_top_height(&mut self, plus: bool, top_focused: bool) -> bool {
+        self.splitter.nudge_editor_top_height(plus, top_focused)
+    }
+
     /// Clamp and store the history pane width (columns).
     pub fn set_history_pane_width(&mut self, width: u16) {
         self.splitter.set_history_pane_width(width);

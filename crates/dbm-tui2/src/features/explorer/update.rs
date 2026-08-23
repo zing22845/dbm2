@@ -1,7 +1,7 @@
 //! Explorer feature update.
 
 use super::msg::ExplorerMessage;
-use super::state::ExplorerState;
+use super::state::{ExplorerPane, ExplorerState};
 use super::intent::ExplorerIntent;
 use super::effect::ExplorerEffect;
 use super::instances;
@@ -30,6 +30,12 @@ pub fn update(
             // change the split (e.g. at a clamp boundary) must not count as a
             // redundant redraw and inflate the waste metric.
             state.splitter.set_instances_height(height)
+        }
+        ExplorerMessage::NudgeInstancesHeight { plus } => {
+            // `+` grows the focused pane: the instances tree (top) or the
+            // objects tree (bottom).
+            let top_focused = state.pane == ExplorerPane::Instances;
+            state.splitter.nudge_instances_height(plus, top_focused)
         }
         ExplorerMessage::Instances(m) => {
             let instances::msg::InstancesMsg::Message(inner) = m;

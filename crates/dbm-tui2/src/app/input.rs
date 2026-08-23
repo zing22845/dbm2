@@ -500,6 +500,18 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
             tracing::debug!(pane = ?sub, "discover key: force-register (force=true)");
             Some(discover(DiscoverMessage::RegisterSelected { force: true }))
         }
+        // Horizontal-splitter adjust (`+` / `-`): `+` grows the focused pane
+        // (the targets editor on top or the results list below), `-` shrinks it.
+        // While a target cell is being edited these are literal input, handled
+        // by the targets pane above.
+        KeyCode::Char('+') => Some(discover(DiscoverMessage::NudgeTargetsHeight {
+            plus: true,
+            top_focused: sub == DiscoverPane::Targets,
+        })),
+        KeyCode::Char('-') => Some(discover(DiscoverMessage::NudgeTargetsHeight {
+            plus: false,
+            top_focused: sub == DiscoverPane::Targets,
+        })),
         _ => match sub {
             DiscoverPane::Engine => match code {
                 // `e`/`Enter` would switch the engine if there were more than
@@ -582,6 +594,20 @@ fn explorer_key(key: KeyEvent, sub: ExplorerPane, term_width: u16) -> Option<App
         return Some(AppMsg::Shell(ShellMsg::FocusChanged {
             pane: Pane::Explorer(next),
         }));
+    }
+    // Horizontal-splitter adjust (`+` / `-`): `+` grows the focused pane (the
+    // instances tree on top or the objects tree below), `-` shrinks it. `+`/`-`
+    // are not used by the trees (they expand/collapse with `l`/`h`), so they are
+    // safe to reserve for the splitter.
+    if !key.modifiers.contains(KeyModifiers::CONTROL) {
+        let plus = match key.code {
+            KeyCode::Char('+') => Some(true),
+            KeyCode::Char('-') => Some(false),
+            _ => None,
+        };
+        if let Some(plus) = plus {
+            return Some(explorer(ExplorerMessage::NudgeInstancesHeight { plus }));
+        }
     }
     match sub {
         ExplorerPane::Instances => instances_key(key, term_width),
@@ -747,6 +773,28 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
             return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
                 SqlTabMsg::Message(SqlTabMessage::NudgeHistoryWidth { tab_id, nudge }),
             ))));
+        }
+    }
+
+    // Horizontal-splitter adjust (`+` / `-`) works from any sub-pane: `+` grows
+    // the currently-focused pane (top editor/history row or bottom results),
+    // `-` shrinks it. In the editor's insert mode `+` / `-` are literal input,
+    // so the adjust only applies otherwise.
+    if !key.modifiers.contains(KeyModifiers::CONTROL) {
+        let editor_insert = tab.focus
+            == crate::features::sql_workspace::sql_tab::state::SqlFocus::Editor
+            && editor.editor.mode == edtui::EditorMode::Insert;
+        let plus = match key.code {
+            KeyCode::Char('+') => Some(true),
+            KeyCode::Char('-') => Some(false),
+            _ => None,
+        };
+        if let Some(plus) = plus {
+            if !editor_insert {
+                return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::NudgeEditorTopHeight { tab_id, plus }),
+                ))));
+            }
         }
     }
 

@@ -61,6 +61,11 @@ pub fn update(
             // redundant redraw and inflate the waste metric.
             state.splitter.set_targets_height(height)
         }
+        DiscoverMessage::NudgeTargetsHeight { plus, top_focused } => {
+            // `+` grows the focused pane: the targets editor (top) or the
+            // results list (bottom).
+            state.splitter.nudge_targets_height(plus, top_focused)
+        }
         DiscoverMessage::StartScan => {
             if let Some(config) = build_scan_config(&state) {
                 // A fresh shared cancel flag per scan; the effect and the
