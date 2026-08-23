@@ -159,6 +159,9 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // scan tick) rather than a real event. Such repaints must NOT feed the
     // FPS/waste estimates, so they are tracked separately from `needs_redraw`.
     let mut timed_redraw = false;
+    // TEMP-DEBUG: what most recently drove a repaint (key/mouse/action/timed),
+    // reported alongside zero-cell repaints to locate the waste source.
+    let mut last_repaint_cause = String::from("startup");
     // Watchdog: if the select loop ever spins (e.g. a select branch becomes
     // immediately ready), the loop would burn 100% CPU and freeze keyboard
     // input. Any real event (mouse/key/action) or a redraw resets this counter;
@@ -221,7 +224,23 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                 // reach this branch, so this only surfaces the event-driven
                 // dirty case.
                 if changed_cells == 0 {
-                    tracing::debug!("dirty redraw changed 0 cells (over-broad dirty?)");
+                    // TEMP-DEBUG: locate which state change triggers a
+                    // zero-cell repaint (inflates the waste metric).
+                    tracing::debug!(
+                        cause = %last_repaint_cause,
+                        focus = ?state.focus,
+                        modal = state.modal.is_some(),
+                        has_modal_kind = state.modal.as_ref().map(|m| format!("{:?}", m)),
+                        active_tab = state.sql.sql_tab.active_tab,
+                        tab_count = state.sql.sql_tab.tabs.len(),
+                        completion_open = state
+                            .sql
+                            .sql_tab
+                            .active_tab()
+                            .map(|t| t.editor.sql_completion.is_open())
+                            .unwrap_or(false),
+                        "TEMP-DEBUG dirty redraw changed 0 cells (over-broad dirty?)"
+                    );
                 }
                 state.perf.record_frame();
                 state.perf.record_redundancy(changed_cells);
@@ -259,6 +278,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     };
                     let msg = global.or_else(|| crate::app::input::key_to_msg(key, &state));
                     if let Some(msg) = msg {
+                        // TEMP-DEBUG
+                        last_repaint_cause = format!("key {key:?} -> {msg:?}");
                         // Repaint only if the round actually changed rendered
                         // state (dirty); an input dropped by the focus guard, or
                         // a no-op key, skips the redraw.
@@ -280,6 +301,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         "mouse event received"
                     );
                     let point = Position::new(mouse.column, mouse.row);
+                    // TEMP-DEBUG
+                    last_repaint_cause = format!("mouse {:?}", mouse.kind);
                     // Aggregated across the dispatched messages below: the round
                     // repaints only if one of them changed rendered state.
                     let mut dirty = false;
@@ -933,6 +956,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             }
             maybe_action = action_rx.recv() => {
                 if let Some(action) = maybe_action {
+                    // TEMP-DEBUG
+                    last_repaint_cause = format!("action {action:?}");
                     // Repaint only if the effect result changed rendered state.
                     let result = process_action_round(
                         &effect_runner,
