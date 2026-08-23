@@ -133,7 +133,8 @@ pub fn update(
                 schema.clone(),
                 default_database.as_deref(),
             );
-            if state.active_tab != before {
+            let focused_different_tab = state.active_tab != before;
+            if focused_different_tab {
                 state.close_active_context_picker();
             }
             if created {
@@ -162,7 +163,11 @@ pub fn update(
                     },
                 });
             }
-            dirty = true;
+            // Only repaint when focusing a connection actually changed the
+            // visible tab state (created a tab or switched to a different one).
+            // Re-activating the already-active connection must not count as a
+            // redundant redraw and inflate the waste metric.
+            dirty = created || focused_different_tab;
         }
         SqlTabMessage::SetActiveConnection { instance, connection } => {
             // Clear a leftover picker on the now-active tab (only when actually
@@ -650,6 +655,46 @@ mod tests {
         assert!(!dirty, "normal mode does not toggle TblCmp");
         assert!(!s.tabs[0].complete_table_names);
         assert!(!s.tabs[0].editor.complete_table_names);
+    }
+
+    #[test]
+    fn focus_connection_tab_is_not_dirty_when_already_focused() {
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        // Focus the same connection again: nothing visible changes (same tab,
+        // already active), so it must not repaint — otherwise every connection
+        // activate on an existing tab would inflate the waste metric.
+        let (s2, _i, _e, dirty) = update(
+            SqlTabMessage::FocusConnectionTab {
+                instance: "inst".into(),
+                connection: "c1".into(),
+                connection_id: "id1".into(),
+                database: None,
+                schema: None,
+                default_database: Some("postgres".into()),
+            },
+            s,
+        );
+        assert!(!dirty, "re-focusing the active tab must not repaint");
+        let _ = s2;
+    }
+
+    #[test]
+    fn focus_connection_tab_is_dirty_when_opening_a_new_tab() {
+        let s = SqlTabState::default();
+        let (s2, _i, _e, dirty) = update(
+            SqlTabMessage::FocusConnectionTab {
+                instance: "inst".into(),
+                connection: "c1".into(),
+                connection_id: "id1".into(),
+                database: None,
+                schema: None,
+                default_database: Some("postgres".into()),
+            },
+            s,
+        );
+        assert!(dirty, "opening a new tab must repaint");
+        assert_eq!(s2.tabs.len(), 1);
     }
 
     #[test]

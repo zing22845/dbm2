@@ -57,7 +57,11 @@ pub fn update(
         } => {
             state.completion_catalog.tables = tables;
             state.completion_catalog.columns_by_table = columns_by_table;
-            dirty = true;
+            // The completion catalog is only *rendered* while the completion
+            // popup is open. A load that arrives while the popup is closed (the
+            // usual case — it fires when a tab binds to a connection) changes no
+            // cells, so skip the repaint and avoid inflating the waste metric.
+            dirty = state.sql_completion.is_open();
         }
         EditorMessage::ContextPicker(m) => {
             let context_picker::msg::ContextPickerMsg::Message(inner) = m;
@@ -366,6 +370,48 @@ mod tests {
         // After typing, the completion popup should be open (s → SELECT etc.).
         assert!(state.sql_completion.is_open());
         assert_eq!(editor::editor_text(&state.editor), "s");
+    }
+
+    #[test]
+    fn catalog_loaded_is_not_dirty_while_popup_closed() {
+        // A `CatalogLoaded` that arrives while the completion popup is closed
+        // changes no rendered cells (the catalog is only drawn in the popup), so
+        // it must not mark the editor dirty — otherwise every connection-activate
+        // catalog load would inflate the waste metric.
+        let state = EditorState::with_sql("");
+        let (_s, _i, _e, dirty) = update(
+            EditorMessage::CatalogLoaded {
+                tables: vec!["users".into()],
+                columns_by_table: Default::default(),
+            },
+            state,
+        );
+        assert!(!dirty, "catalog load with popup closed must not repaint");
+    }
+
+    #[test]
+    fn catalog_loaded_is_dirty_while_popup_open() {
+        // While the completion popup is open the catalog is rendered, so a load
+        // must trigger a repaint. Open the popup the same way the
+        // `typing_triggers_completion_refresh` test does (type `is`).
+        let mut state = EditorState::with_sql("");
+        state.editor.mode = edtui::EditorMode::Insert;
+        for c in ['i', 's'] {
+            let (s, _i, _e, _d) = update(
+                EditorMessage::KeyEvent { key: char_key(c), tracked_caps_lock: false },
+                state,
+            );
+            state = s;
+        }
+        assert!(state.sql_completion.is_open(), "typing should open the popup");
+        let (_s, _i, _e, dirty) = update(
+            EditorMessage::CatalogLoaded {
+                tables: vec!["users".into()],
+                columns_by_table: Default::default(),
+            },
+            state,
+        );
+        assert!(dirty, "catalog load with popup open must repaint");
     }
 
     #[test]
