@@ -555,22 +555,28 @@ impl ObjectsState {
     }
 
     /// Re-derive the flattened rows from the catalog and expansion set, then
-    /// clamp the cursor and scroll to the new row count.
-    pub fn rebuild_rows(&mut self) {
-        self.rows = build_rows(
+    /// clamp the cursor and scroll to the new row count. Returns `true` when
+    /// the rendered rows actually changed, so callers can skip a redundant
+    /// repaint (e.g. an async catalog load that arrives while the objects tree
+    /// is not displaying the affected depth) without inflating the waste metric.
+    pub fn rebuild_rows(&mut self) -> bool {
+        let new_rows = build_rows(
             &self.catalog,
             &self.expanded,
             self.active_db.as_deref(),
             self.active_schema.as_deref(),
         );
+        let changed = new_rows != self.rows;
+        self.rows = new_rows;
         if self.rows.is_empty() {
             self.cursor = 0;
             self.scroll = 0;
-            return;
+            return changed;
         }
         self.cursor = self.cursor.min(self.rows.len() - 1);
         let max_scroll = self.rows.len().saturating_sub(1);
         self.scroll = self.scroll.min(max_scroll);
+        changed
     }
 }
 

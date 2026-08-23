@@ -96,8 +96,7 @@ pub fn update(
         }
         ObjectsMessage::DatabasesLoaded { databases } => {
             state.catalog.databases = CatalogList::Ready(databases);
-            state.rebuild_rows();
-            dirty = true;
+            dirty = state.rebuild_rows();
             // The active database (restored from the active SQL tab's schema) is
             // forced expanded, so fetch its schemas just like a manually-
             // expanded database. Without this, re-binding to a connection shows
@@ -116,8 +115,7 @@ pub fn update(
         }
         ObjectsMessage::DatabasesError { error } => {
             state.catalog.databases = CatalogList::Error(error);
-            state.rebuild_rows();
-            dirty = true;
+            dirty = state.rebuild_rows();
         }
         ObjectsMessage::SchemasLoaded { database, schemas } => {
             state
@@ -128,48 +126,42 @@ pub fn update(
             // activation) can now be validated: mark it active if present,
             // otherwise degrade to no active schema.
             state.resolve_pending_active_schema();
-            state.rebuild_rows();
-            dirty = true;
+            dirty = state.rebuild_rows();
         }
         ObjectsMessage::SchemasError { database, error } => {
             state
                 .catalog
                 .schemas
                 .insert(database, CatalogList::Error(error));
-            state.rebuild_rows();
-            dirty = true;
+            dirty = state.rebuild_rows();
         }
         ObjectsMessage::ExtensionsLoaded { database, extensions } => {
             state
                 .catalog
                 .extensions
                 .insert(database, CatalogList::Ready(extensions));
-            state.rebuild_rows();
-            dirty = true;
+            dirty = state.rebuild_rows();
         }
         ObjectsMessage::ExtensionsError { database, error } => {
             state
                 .catalog
                 .extensions
                 .insert(database, CatalogList::Error(error));
-            state.rebuild_rows();
-            dirty = true;
+            dirty = state.rebuild_rows();
         }
         ObjectsMessage::ObjectListLoaded { database, schema, kind, items } => {
             state.catalog.objects.insert(
                 (database, schema, kind),
                 CatalogList::Ready(items),
             );
-            state.rebuild_rows();
-            dirty = true;
+            dirty = state.rebuild_rows();
         }
         ObjectsMessage::ObjectListError { database, schema, kind, error } => {
             state.catalog.objects.insert(
                 (database, schema, kind),
                 CatalogList::Error(error),
             );
-            state.rebuild_rows();
-            dirty = true;
+            dirty = state.rebuild_rows();
         }
     }
     (state, intents, effects, dirty)
