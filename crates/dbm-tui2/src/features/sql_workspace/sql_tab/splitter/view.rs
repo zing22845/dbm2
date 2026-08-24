@@ -52,6 +52,12 @@ pub fn splitter_at_with_detail(
     if !detail_visible {
         return splitter_at(layout, x, y);
     }
+    // The horizontal splitter (editor+history row vs results) is unaffected
+    // by the detail panel — its row stays at the same track position — so
+    // the base layout's h_splitter rect is still valid for hit-testing.
+    if hit(layout.h_splitter, x, y) {
+        return Some(SqlSplitter::EditorResults);
+    }
     // A moves to the widened zone's left edge (the editor is shrunk); B sits
     // just right of the detail.
     let zone_x = history_zone_x(area, layout, detail_pane_width);
@@ -208,6 +214,23 @@ mod tests {
         let (tab_id, s) = sql_tab_splitter_at(&state, area, detail_split.x, detail_split.y + 1).unwrap();
         assert_eq!(tab_id, state.tabs[0].session.id);
         assert_eq!(s, SqlSplitter::HistoryDetail);
+    }
+
+    #[test]
+    fn splitter_at_with_detail_keeps_editor_results_hittable() {
+        let body = Rect::new(0, 1, 120, 39);
+        let layout = sql_tab_layout(body, 18, 24);
+        let detail_w = 40u16;
+        // When detail is visible, clicking on the horizontal splitter must
+        // still resolve to EditorResults — the h_splitter row geometry is
+        // unaffected by the detail panel expansion.
+        let result = splitter_at_with_detail(&layout, body, layout.h_splitter.x, layout.h_splitter.y, true, detail_w);
+        assert_eq!(result, Some(SqlSplitter::EditorResults));
+        // The vertical editor/history splitter must also still be hittable.
+        let zone_x = crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(body, &layout, detail_w);
+        let a_x = zone_x.saturating_sub(1);
+        let result_a = splitter_at_with_detail(&layout, body, a_x, layout.v_splitter.y, true, detail_w);
+        assert_eq!(result_a, Some(SqlSplitter::EditorHistory));
     }
 
     #[test]
