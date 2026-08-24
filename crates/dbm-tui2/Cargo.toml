@@ -30,3 +30,9 @@ tracing = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 unicode-width = { workspace = true }
+
+[lints.clippy]
+# Tests commonly build a state with `Foo::default()` then assign a few fields;
+# the struct-update rewrite the lint demands is more verbose and less readable
+# there. Production code stays warning-free either way.
+field_reassign_with_default = "allow"

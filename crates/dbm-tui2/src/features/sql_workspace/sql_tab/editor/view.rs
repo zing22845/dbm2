@@ -76,6 +76,7 @@ fn editor_mode_label(mode: edtui::EditorMode) -> &'static str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,

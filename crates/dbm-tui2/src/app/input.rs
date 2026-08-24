@@ -213,20 +213,17 @@ fn pane_jump_from_key(key: KeyEvent, state: &super::state::AppState) -> Option<A
     }
     // Suppress all letter jumps while typing in the SQL editor (insert mode),
     // mirroring the original dbm's `workspace_text_input_active`.
-    if let Pane::SQLWorkspace = state.focus {
-        if let Some(tab) = state
+    if let Pane::SQLWorkspace = state.focus
+        && let Some(tab) = state
             .sql
             .sql_tab
             .active_tab
             .and_then(|i| state.sql.sql_tab.tabs.get(i))
-        {
-            if tab.focus == SqlFocus::Editor
+            && tab.focus == SqlFocus::Editor
                 && matches!(tab.editor.editor.mode, edtui::EditorMode::Insert)
             {
                 return None;
             }
-        }
-    }
     match upper {
         // Workspace sub-panes.
         'S' => Some(focus_subpane(SqlFocus::Editor)),
@@ -259,6 +256,7 @@ fn focus_explorer(sub: crate::app_shell::nav::ExplorerPane) -> AppMsg {
 /// - editor → right: history; editor → down: results;
 /// - history → left: editor; history → down: results;
 /// - results → up: the previous editor/history pane (`upper_pane`).
+///
 /// Returns `None` when the move would leave the workspace (e.g. editor → left,
 /// which goes to the explorer; results/history → up/left boundaries).
 fn switch_subpane(dir: crate::app_shell::nav::PaneDir, sql: &SqlState) -> Option<AppMsg> {
@@ -306,9 +304,7 @@ pub fn paste_to_msg(contents: &str, state: &super::state::AppState) -> Option<Ap
         return None;
     }
     // SQL editor focused (no modal): paste into the active tab's buffer.
-    let Some(tab_id) = state.sql.sql_tab.active_tab else {
-        return None;
-    };
+    let tab_id = state.sql.sql_tab.active_tab?;
     if state.focus == Pane::SQLWorkspace
         && state.sql.sql_tab.tabs.get(tab_id).is_some_and(|t| t.focus == SqlFocus::Editor)
     {
@@ -470,15 +466,14 @@ fn discover_key(key: KeyEvent, sub: DiscoverPane, state: &DiscoverState) -> Opti
     // move between them — matching the footer hint. Left/Right (h/l) do not.
     // Non-navigation Ctrl chords (e.g. Ctrl+r = redo in the targets pane) must
     // fall through to the per-pane handler instead of being swallowed here.
-    if ctrl {
-        if let Some(dir) = pane_dir_from_key(&key) {
+    if ctrl
+        && let Some(dir) = pane_dir_from_key(&key) {
             return match dir {
                 PaneDir::Down => Some(discover(DiscoverMessage::Focus(sub.next()))),
                 PaneDir::Up => Some(discover(DiscoverMessage::Focus(sub.prev()))),
                 _ => None,
             };
         }
-    }
 
     match code {
         KeyCode::Esc => Some(discover(DiscoverMessage::RequestClose)),
@@ -795,13 +790,12 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
             KeyCode::Char('-') => Some(false),
             _ => None,
         };
-        if let Some(plus) = plus {
-            if !editor_insert {
+        if let Some(plus) = plus
+            && !editor_insert {
                 return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
                     SqlTabMsg::Message(SqlTabMessage::NudgeEditorTopHeight { tab_id, plus }),
                 ))));
             }
-        }
     }
 
     // Route the key to the focused sub-pane.
@@ -1642,16 +1636,14 @@ mod tests {
                 ))) => m,
                 other => panic!("unexpected msg for {code:?}: {other:?}"),
             };
-            let match_kind = match (&got, &expect) {
+            let match_kind = matches!(
+                (&got, &expect),
                 (InstancesMessage::Expand, InstancesMessage::Expand)
-                | (InstancesMessage::Collapse, InstancesMessage::Collapse)
-                | (InstancesMessage::ScrollHorizontal { .. }, InstancesMessage::ScrollHorizontal { .. })
-                | (InstancesMessage::Select, InstancesMessage::Select)
-                | (InstancesMessage::NewConnectionTab, InstancesMessage::NewConnectionTab) => {
-                    true
-                }
-                _ => false,
-            };
+                    | (InstancesMessage::Collapse, InstancesMessage::Collapse)
+                    | (InstancesMessage::ScrollHorizontal { .. }, InstancesMessage::ScrollHorizontal { .. })
+                    | (InstancesMessage::Select, InstancesMessage::Select)
+                    | (InstancesMessage::NewConnectionTab, InstancesMessage::NewConnectionTab)
+            );
             assert!(match_kind, "for {code:?}: got {got:?}, expected kind {expect:?}");
         }
     }
@@ -1679,13 +1671,13 @@ mod tests {
                 other => panic!("unexpected msg for {code:?}: {other:?}"),
             };
             // Compare discriminant (messages carry payload).
-            let match_kind = match (&got, &expect) {
+            let match_kind = matches!(
+                (&got, &expect),
                 (ObjectsMessage::Collapse, ObjectsMessage::Collapse)
-                | (ObjectsMessage::ScrollHorizontal { .. }, ObjectsMessage::ScrollHorizontal { .. })
-                | (ObjectsMessage::Select, ObjectsMessage::Select)
-                | (ObjectsMessage::Expand, ObjectsMessage::Expand) => true,
-                _ => false,
-            };
+                    | (ObjectsMessage::ScrollHorizontal { .. }, ObjectsMessage::ScrollHorizontal { .. })
+                    | (ObjectsMessage::Select, ObjectsMessage::Select)
+                    | (ObjectsMessage::Expand, ObjectsMessage::Expand)
+            );
             assert!(match_kind, "for {code:?}: got {got:?}, expected kind {expect:?}");
         }
     }

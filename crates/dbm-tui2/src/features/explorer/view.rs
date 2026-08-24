@@ -14,6 +14,7 @@ use crate::common::view::theme::Theme;
 use super::state::{ExplorerPane, ExplorerState};
 use super::instances::view as instances_view;
 use super::objects::view as objects_view;
+use super::splitter::view as splitter_view;
 
 /// Render the explorer parent pane: a bordered " Explorer " block wrapping the
 /// instances tree (top) and objects tree (bottom). `focused` controls whether
@@ -26,6 +27,8 @@ pub fn render(
     area: Rect,
     state: &ExplorerState,
     focused: bool,
+    splitter_hover: bool,
+    splitter_drag: bool,
 ) {
     let p = theme.palette();
 
@@ -50,6 +53,6 @@ pub fn render(
     let instances_focused = focused && state.pane == ExplorerPane::Instances;
     let objects_focused = focused && state.pane == ExplorerPane::Objects;
     instances_view::render(frame, theme, panes.instances, &state.instances, instances_focused);
-    super::splitter::view::render(frame, &panes, false, false);
+    splitter_view::render(frame, &panes, splitter_hover, splitter_drag);
     objects_view::render(frame, theme, panes.objects, &state.objects, objects_focused);
 }

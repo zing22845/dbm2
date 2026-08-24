@@ -36,6 +36,11 @@ pub struct AppState {
     /// workspace region (right).
     pub splitter: crate::features::app_splitter::state::AppSplitterState,
 
+    /// Splitter hover highlight state — which splitter the mouse cursor is
+    /// currently over. Updated on every `MouseMove` event; renders passively
+    /// read these booleans to decide which style the splitter line uses.
+    pub splitter_hover: SplitterHoverState,
+
     // --- Feature states ---
     pub header: HeaderState,
     pub explorer: ExplorerState,
@@ -44,6 +49,64 @@ pub struct AppState {
     pub sql: SqlState,
     pub footer: FooterState,
     pub perf: PerfState,
+}
+
+/// Which splitter regions the mouse cursor currently hovers over.
+/// Each field maps to one splitter line drawn on screen.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct SplitterHoverState {
+    // --- Hover booleans (set by MouseMove hit-testing) ---
+    /// App-level Explorer / workspace vertical splitter.
+    pub app_splitter: bool,
+    /// Explorer instances / objects horizontal splitter.
+    pub explorer_splitter: bool,
+    /// Discover targets / results horizontal splitter.
+    pub discover_splitter: bool,
+    /// SQL tab horizontal splitter (editor+history row vs results).
+    pub sql_editor_results: bool,
+    /// SQL tab vertical splitter (editor vs history).
+    pub sql_editor_history: bool,
+    /// History detail / list internal vertical splitter.
+    pub history_detail: bool,
+
+    // --- Drag booleans (set on splitter Down/Drag/Up events) ---
+    /// The app-level Explorer / workspace splitter is being dragged.
+    pub app_splitter_drag: bool,
+    /// The explorer instances / objects splitter is being dragged.
+    pub explorer_splitter_drag: bool,
+    /// The discover targets / results splitter is being dragged.
+    pub discover_splitter_drag: bool,
+    /// The SQL horizontal splitter (editor+history vs results) is being dragged.
+    pub sql_editor_results_drag: bool,
+    /// The SQL vertical splitter (editor vs history) is being dragged.
+    pub sql_editor_history_drag: bool,
+    /// The history detail / list internal splitter is being dragged.
+    pub sql_history_detail_drag: bool,
+}
+
+impl SplitterHoverState {
+    /// A copy of just the drag booleans, used to preserve active drags across a
+    /// hover recompute (see `update_splitter_hover`).
+    pub fn dragging_flags(&self) -> [bool; 6] {
+        [
+            self.app_splitter_drag,
+            self.explorer_splitter_drag,
+            self.discover_splitter_drag,
+            self.sql_editor_results_drag,
+            self.sql_editor_history_drag,
+            self.sql_history_detail_drag,
+        ]
+    }
+
+    /// Restore the drag booleans from a previously saved copy.
+    pub fn set_dragging_flags(&mut self, flags: [bool; 6]) {
+        self.app_splitter_drag = flags[0];
+        self.explorer_splitter_drag = flags[1];
+        self.discover_splitter_drag = flags[2];
+        self.sql_editor_results_drag = flags[3];
+        self.sql_editor_history_drag = flags[4];
+        self.sql_history_detail_drag = flags[5];
+    }
 }
 
 impl AppState {
@@ -110,6 +173,7 @@ impl Default for AppState {
             term_width: 0,
             term_height: 0,
             splitter: crate::features::app_splitter::state::AppSplitterState::default(),
+            splitter_hover: SplitterHoverState::default(),
             theme: crate::common::view::theme::dracula(),
             header: HeaderState::default(),
             explorer: ExplorerState::default(),

@@ -349,7 +349,7 @@ mod tests {
                 line.push_str(buf[(x, y)].symbol());
             }
             if line.contains("a") && !line.contains("Instances") {
-                found_y = Some(y as u16);
+                found_y = Some(y);
                 break;
             }
         }

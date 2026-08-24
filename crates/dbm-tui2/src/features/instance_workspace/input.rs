@@ -53,7 +53,8 @@ pub fn key_to_msg(key: KeyEvent, pane: IwPane, state: &IwState) -> Option<IwInpu
 /// Overview panel keys: move the cursor (j/k, ↑/↓), H-Scroll (←/→), refresh
 /// (`r`), and unregister (`u`) which requests a confirm modal.
 fn overview_key(key: KeyEvent, state: &IwState) -> Option<IwInput> {
-    let msg = match key.code {
+    
+    match key.code {
         KeyCode::Up | KeyCode::Char('k') => Some(overview(OverviewMessage::MoveCursor(-1))),
         KeyCode::Down | KeyCode::Char('j') => Some(overview(OverviewMessage::MoveCursor(1))),
         KeyCode::Char('u') => {
@@ -83,8 +84,7 @@ fn overview_key(key: KeyEvent, state: &IwState) -> Option<IwInput> {
             }
         }
         _ => None,
-    };
-    msg
+    }
 }
 
 /// Connections panel keys: navigate the list (j/k, ↑/↓), add (`a`), edit
@@ -93,9 +93,7 @@ fn connections_key(key: KeyEvent, state: &IwState) -> Option<IwInput> {
     // `d` opens a delete-confirm modal for the selected connection (matching
     // the original dbm); the actual delete is dispatched from the modal's `y`.
     if matches!(key.code, KeyCode::Char('d') | KeyCode::Delete) {
-        let Some(connection) = state.connections.selected_name() else {
-            return None;
-        };
+        let connection = state.connections.selected_name()?;
         return Some(IwInput::OpenDeleteConfirm {
             instance: state.instance_name.clone(),
             connection,

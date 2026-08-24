@@ -16,6 +16,7 @@ use crate::features::header::view as header_view;
 use crate::features::instance_workspace::view as iw_view;
 use crate::features::perf_monitor::view as perf_view;
 use crate::features::sql_workspace::view as sql_view;
+use crate::features::app_splitter::view as splitter_view;
 
 /// Top-level render: lays out the shell regions and delegates to each
 /// feature's `view::render`. Returns the editor's hardware cursor (when the
@@ -53,9 +54,9 @@ pub fn render(
     let workspace_focused = matches!(state.focus, Pane::SQLWorkspace)
         || matches!(state.focus, Pane::InstanceWorkspace(_));
     header_view::render(frame, &state.theme, chunks[0], &state.header, header_focused);
-    explorer_view::render(frame, &state.theme, body.explorer, &state.explorer, explorer_focused);
+    explorer_view::render(frame, &state.theme, body.explorer, &state.explorer, explorer_focused, state.splitter_hover.explorer_splitter, state.splitter_hover.explorer_splitter_drag);
     // Draw the resizable Explorer / workspace splitter strip.
-    crate::features::app_splitter::view::render(frame, &body, false, false);
+    splitter_view::render(frame, &body, state.splitter_hover.app_splitter, state.splitter_hover.app_splitter_drag);
     // The workspace region shows whichever workspace is active, driven by the
     // explorer tree's `active_workspace` marker (the original dbm's
     // `is_instance_workspace()`), not by keyboard focus. Opening a connection
@@ -68,7 +69,7 @@ pub fn render(
         None
     } else {
         tracing::debug!("render: begin sql_view");
-        let r = sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused);
+        let r = sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused, &state.splitter_hover);
         tracing::debug!("render: sql_view done");
         r
     };
@@ -90,7 +91,7 @@ pub fn render(
             75,
             &state.discover,
             |f, t, a, s| {
-                let c = discover_view::render(f, t, a, s, sub);
+                let c = discover_view::render(f, t, a, s, sub, state.splitter_hover.discover_splitter, state.splitter_hover.discover_splitter_drag);
                 *discover_caret_ref.borrow_mut() = c;
             },
         );

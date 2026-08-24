@@ -93,8 +93,8 @@ fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
         .sql_tab
         .tabs
         .iter()
-        .enumerate()
-        .map(|(_idx, tab)| {
+        
+        .map(|tab| {
             let session = &tab.session;
             let sql = crate::common::editor::editor_text(&tab.editor.editor);
             TuiTabSnapshot {
@@ -325,13 +325,12 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
             .tabs
             .get(active)
             .or_else(|| state.sql.sql_tab.tabs.first());
-        if let Some(s) = active_session {
-            if let (Some(instance), Some(connection)) = (&s.session.instance, &s.session.connection)
+        if let Some(s) = active_session
+            && let (Some(instance), Some(connection)) = (&s.session.instance, &s.session.connection)
             {
                 state.sql.sql_tab.active_connection =
                     Some((instance.clone(), connection.clone()));
             }
-        }
     }
 
     // Resolve the saved parent pane, then fold the persisted sub-pane
@@ -497,15 +496,14 @@ fn apply_instances_tree(
     // Locate the instance row and move the cursor onto it.
     let mut row = 0usize;
     for node in &state.explorer.instances.nodes {
-        if let Some(inst) = &node.instance {
-            if &inst.name == instance_name {
+        if let Some(inst) = &node.instance
+            && &inst.name == instance_name {
                 state.explorer.instances.cursor = row;
                 // Note: the instances tree does not vertically scroll (it renders
                 // all nodes from the top), so `scroll` stays 0. Setting it to the
                 // restored row here would make `row_at` offset every mouse click.
                 return;
             }
-        }
         row += 1;
         if node.expanded {
             row += node.connections.len();

@@ -134,13 +134,12 @@ fn refresh(
     // OFF, a non-explicit refresh closes the popup (no hint at all), matching
     // the original dbm's `table_completion_allowed` → `build_completion_state_inner`.
     // Only an explicit Shift+Tab request forces keyword completion here.
-    if matches!(context.intent, CompletionIntent::Table { .. }) && !complete_table_names {
-        if !explicit {
+    if matches!(context.intent, CompletionIntent::Table { .. }) && !complete_table_names
+        && !explicit {
             state.close();
             return;
         }
         // explicit: fall through to keyword completion (provider handles it).
-    }
 
     let referenced = extract_referenced_before(sql, cursor);
     let items = build_completion_items(

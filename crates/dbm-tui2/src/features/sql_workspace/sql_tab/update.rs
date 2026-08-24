@@ -235,7 +235,7 @@ pub fn update(
                 let tab = &state.tabs[idx];
                 let (instance, connection) = session_key(&tab.session);
                 let detail_visible = tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History
-                    && tab.history.store.entries(&instance, &connection).first().is_some();
+                    && !tab.history.store.entries(&instance, &connection).is_empty();
                 let list_w = if detail_visible {
                     // `width` is the whole zone (A to the right edge), which
                     // holds list + detail + splitter + the History border. The
@@ -309,12 +309,10 @@ pub fn update(
                 let detail_visible =
                     state.tabs[idx].focus
                         == crate::features::sql_workspace::sql_tab::state::SqlFocus::History
-                    && state.tabs[idx]
+                    && !state.tabs[idx]
                         .history
                         .store
-                        .entries(&instance, &connection)
-                        .first()
-                        .is_some();
+                        .entries(&instance, &connection).is_empty();
                 if detail_visible {
                     let tab = &state.tabs[idx];
                     let hi = tab
@@ -714,8 +712,7 @@ fn clamp_list_for_history_detail(tab: &mut super::state::SqlTab) -> bool {
         || tab.history
             .store
             .entries(&instance, &connection)
-            .first()
-            .is_none()
+            .is_empty()
     {
         return false;
     }

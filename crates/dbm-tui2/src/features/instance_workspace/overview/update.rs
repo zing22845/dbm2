@@ -18,21 +18,21 @@ pub fn update(
         OverviewMessage::Load { instance_name } => {
             let changed = state.instance_name != instance_name;
             state.instance_name = instance_name.clone();
-            return (
+            (
                 state,
                 Vec::new(),
                 vec![OverviewEffect::LoadInstance { instance_name }],
                 changed,
-            );
+            )
         }
         OverviewMessage::Reload => {
             let instance_name = state.instance_name.clone();
-            return (
+            (
                 state,
                 Vec::new(),
                 vec![OverviewEffect::LoadInstance { instance_name }],
                 false,
-            );
+            )
         }
         OverviewMessage::Loaded { instance } => {
             let dirty = state.instance.as_ref() != Some(instance.as_ref());

@@ -83,8 +83,8 @@ fn sync_objects_binding(
                 .get(instance_idx)
                 .and_then(|n| n.connections.get(conn_idx))
                 .map(|c| c.name.clone());
-            if let Some(connection) = connection {
-                if objects.bound_instance != instance || objects.bound_connection != connection {
+            if let Some(connection) = connection
+                && (objects.bound_instance != instance || objects.bound_connection != connection) {
                     return Some(AppMsg::Explorer(
                         crate::features::explorer::msg::ExplorerMsg::Message(
                             crate::features::explorer::msg::ExplorerMessage::Objects(
@@ -98,7 +98,6 @@ fn sync_objects_binding(
                         ),
                     ));
                 }
-            }
             None
         }
         _ => {

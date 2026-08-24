@@ -11,6 +11,7 @@ use super::state::DiscoverState;
 use super::engine::view as engine_view;
 use super::results::view as results_view;
 use super::targets::view as targets_view;
+use super::splitter::view as splitter_view;
 
 /// Render the discover feature: engine selector on top, with the targets editor
 /// and results list stacked vertically below (mirrors the original dbm layout,
@@ -23,6 +24,8 @@ pub fn render(
     area: Rect,
     state: &DiscoverState,
     focus: crate::app_shell::nav::DiscoverPane,
+    splitter_hover: bool,
+    splitter_drag: bool,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::{discover_engine_footer_text, discover_footer_text, draw_pane_footer};
@@ -78,7 +81,7 @@ pub fn render(
     let body = super::splitter::view::discover_body_layout(chunks[1], state.splitter.targets_height);
 
     let caret = targets_view::render(frame, theme, body.targets, &state.targets, focus);
-    super::splitter::view::render(frame, &body, false, false);
+    splitter_view::render(frame, &body, splitter_hover, splitter_drag);
     results_view::render(frame, theme, body.results, &state.results, focus);
 
     // Discover dialog footer: rendered directly (no separator dashes), so the

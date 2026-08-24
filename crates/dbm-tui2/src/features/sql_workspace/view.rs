@@ -15,6 +15,7 @@ use crate::common::view::theme::Theme;
 
 use super::state::SqlState;
 use super::sql_tab::view as sql_tab_view;
+use crate::app::state::SplitterHoverState;
 
 /// The outer block title for the SQL workspace, showing the active connection
 /// (matching the original dbm's `workspace_block_title_from_tree`): when a
@@ -39,6 +40,7 @@ pub fn render(
     area: Rect,
     state: &SqlState,
     focused: bool,
+    splitter_hover: &SplitterHoverState,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     let p = theme.palette();
     let outer = Block::default()
@@ -58,12 +60,36 @@ pub fn render(
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(footer_h)])
             .split(inner);
-        let cursor = sql_tab_view::render(frame, theme, chunks[0], &state.sql_tab, focused);
+        let cursor = sql_tab_view::render(
+            frame,
+            theme,
+            chunks[0],
+            &state.sql_tab,
+            focused,
+            splitter_hover.sql_editor_results,
+            splitter_hover.sql_editor_history,
+            splitter_hover.history_detail,
+            splitter_hover.sql_editor_results_drag,
+            splitter_hover.sql_editor_history_drag,
+            splitter_hover.sql_history_detail_drag,
+        );
         draw_footer(frame, theme, chunks[1], &hint);
         cursor
     } else {
         // Active connection has no visible tab: let sql_tab render its empty
         // state hint over the full area.
-        sql_tab_view::render(frame, theme, inner, &state.sql_tab, focused)
+        sql_tab_view::render(
+            frame,
+            theme,
+            inner,
+            &state.sql_tab,
+            focused,
+            splitter_hover.sql_editor_results,
+            splitter_hover.sql_editor_history,
+            splitter_hover.history_detail,
+            splitter_hover.sql_editor_results_drag,
+            splitter_hover.sql_editor_history_drag,
+            splitter_hover.sql_history_detail_drag,
+        )
     }
 }

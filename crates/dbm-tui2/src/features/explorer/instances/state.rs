@@ -784,15 +784,15 @@ mod tests {
         let mut s = InstancesState::default();
         s.set_instances(vec![inst("a"), inst("b")]);
         s.cursor = 0;
-        assert_eq!(s.nodes[1].expanded, false);
+        assert!(!s.nodes[1].expanded);
         assert!(s.toggle_expand_at(1), "marker click expands row 1");
-        assert_eq!(s.nodes[1].expanded, true);
+        assert!(s.nodes[1].expanded);
         assert_eq!(s.cursor, 0, "cursor must not move");
         // Mark node 1 loaded so a second click can collapse it.
         s.nodes[1].loaded = true;
         // Toggle again collapses it.
         assert!(s.toggle_expand_at(1), "marker click collapses row 1");
-        assert_eq!(s.nodes[1].expanded, false);
+        assert!(!s.nodes[1].expanded);
         assert_eq!(s.cursor, 0, "cursor still must not move");
     }
 
@@ -809,7 +809,7 @@ mod tests {
 
         // Collapsing instance a (row 0) hides c1, so b shifts up to row 1.
         assert!(s.toggle_expand_at(0), "collapses instance a");
-        assert_eq!(s.nodes[0].expanded, false);
+        assert!(!s.nodes[0].expanded);
         assert_eq!(
             s.cursor, 1,
             "cursor stays on instance b at its new row, not its old index"
@@ -817,7 +817,7 @@ mod tests {
 
         // Expanding instance a again puts c1 back; b shifts back down to row 2.
         assert!(s.toggle_expand_at(0), "expands instance a");
-        assert_eq!(s.nodes[0].expanded, true);
+        assert!(s.nodes[0].expanded);
         assert_eq!(
             s.cursor, 2,
             "cursor follows instance b back to its original row"
@@ -838,7 +838,7 @@ mod tests {
             s.nodes[0].expanded,
             "expanded-unloaded arrow click keeps the node expanded (to load)"
         );
-        assert_eq!(s.nodes[0].loaded, false, "loading happens via the effect");
+        assert!(!s.nodes[0].loaded, "loading happens via the effect");
     }
 
     #[test]

@@ -66,11 +66,10 @@ pub fn splitter_at_with_detail(
     if hit(editor_history, x, y) {
         return Some(SqlSplitter::EditorHistory);
     }
-    if let Some(r) = history_detail_splitter(area, layout, true, detail_pane_width) {
-        if hit(r, x, y) {
+    if let Some(r) = history_detail_splitter(area, layout, true, detail_pane_width)
+        && hit(r, x, y) {
             return Some(SqlSplitter::HistoryDetail);
         }
-    }
     None
 }
 
@@ -95,7 +94,7 @@ pub fn sql_tab_splitter_at(
     }
     let (instance, connection) = session_view_key(&tab.session);
     let detail_visible = tab.focus == SqlFocus::History
-        && tab.history.store.entries(&instance, &connection).first().is_some();
+        && !tab.history.store.entries(&instance, &connection).is_empty();
     let splitter = if detail_visible {
         splitter_at_with_detail(
             &layout,
@@ -155,7 +154,7 @@ pub fn sql_tab_splitter_resize_msg(
             // the stored width and the rendered zone disagree.
             let (instance, connection) = super::super::session::session_view_key(&tab.session);
             let detail_visible = tab.focus == super::super::state::SqlFocus::History
-                && tab.history.store.entries(&instance, &connection).first().is_some();
+                && !tab.history.store.entries(&instance, &connection).is_empty();
             let right_edge = if detail_visible {
                 body.right()
             } else {
@@ -177,8 +176,8 @@ pub fn render(
     h_splitter: Rect,
     v_splitter: Rect,
     hover_editor_results: bool,
-    hover_editor_history: bool,
     dragging_editor_results: bool,
+    hover_editor_history: bool,
     dragging_editor_history: bool,
 ) {
     draw(frame, h_splitter, SplitOrientation::Horizontal, hover_editor_results, dragging_editor_results);
@@ -259,5 +258,66 @@ mod tests {
         assert!(matches!(msg, SqlTabMessage::SetHistoryWidth { tab_id: t, .. } if t == tab_id));
         let msg = sql_tab_splitter_resize_msg(&state, area, tab_id, SqlSplitter::HistoryDetail, 80, 0).unwrap();
         assert!(matches!(msg, SqlTabMessage::SetHistoryDetailWidth { tab_id: t, .. } if t == tab_id));
+    }
+
+    #[test]
+    fn v_splitter_and_h_splitter_do_not_overlap() {
+        let body = Rect::new(0, 1, 120, 39);
+        let layout = sql_tab_layout(body, 18, 24);
+
+        assert_eq!(layout.h_splitter.height, 1);
+        assert_eq!(layout.v_splitter.width, 1);
+
+        // The h_splitter row must be BELOW the v_splitter bottom.
+        assert!(layout.h_splitter.y >= layout.v_splitter.bottom(),
+            "h_splitter at row {} should be at or below v_splitter bottom at row {}",
+            layout.h_splitter.y, layout.v_splitter.bottom());
+
+        // Hovering over the v_splitter must return EditorHistory, NOT EditorResults.
+        let vx = layout.v_splitter.x;
+        let vy = layout.v_splitter.y;
+        assert_eq!(splitter_at(&layout, vx, vy), Some(SqlSplitter::EditorHistory));
+        assert_eq!(splitter_at(&layout, vx, vy + layout.v_splitter.height - 1), Some(SqlSplitter::EditorHistory));
+
+        // Hovering over the h_splitter must return EditorResults.
+        let hx = layout.h_splitter.x;
+        let hy = layout.h_splitter.y;
+        assert_eq!(splitter_at(&layout, hx, hy), Some(SqlSplitter::EditorResults));
+    }
+
+    #[test]
+    fn v_splitter_hit_isolated_from_h_splitter_at_boundary() {
+        // When detail is visible, the v_splitter shifts but must still not
+        // overlap the h_splitter, and hit-testing must be unambiguous.
+        let body = Rect::new(0, 1, 120, 39);
+        let layout = sql_tab_layout(body, 18, 24);
+        let detail_w = 40u16;
+
+        // v_splitter hit at its top should NOT match h_splitter.
+        let zone_x = crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(body, &layout, detail_w);
+        let vx = zone_x.saturating_sub(1);
+        let vy = layout.v_splitter.y;
+        assert_eq!(
+            splitter_at_with_detail(&layout, body, vx, vy, true, detail_w),
+            Some(SqlSplitter::EditorHistory),
+            "top of shifted v_splitter must be EditorHistory"
+        );
+
+        // h_splitter hit must still work.
+        assert_eq!(
+            splitter_at_with_detail(&layout, body, layout.h_splitter.x, layout.h_splitter.y, true, detail_w),
+            Some(SqlSplitter::EditorResults),
+            "h_splitter must still be EditorResults"
+        );
+
+        // At the boundary row (v_splitter.bottom() == h_splitter.y),
+        // the hit must resolve to h_splitter, not v_splitter.
+        if layout.h_splitter.y == layout.v_splitter.bottom() {
+            assert_eq!(
+                splitter_at_with_detail(&layout, body, vx, layout.v_splitter.bottom(), true, detail_w),
+                Some(SqlSplitter::EditorResults),
+                "at boundary row, h_splitter should win"
+            );
+        }
     }
 }

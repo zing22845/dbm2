@@ -10,6 +10,7 @@ use super::store::SqlHistoryStore;
 
 /// The history feature state (the history list pane + detail preview).
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct HistoryState {
     /// The per-connection SQL history.
     pub store: SqlHistoryStore,
@@ -27,19 +28,6 @@ pub struct HistoryState {
     pub splitter: super::splitter::state::DetailSplitterState,
 }
 
-impl Default for HistoryState {
-    fn default() -> Self {
-        Self {
-            store: SqlHistoryStore::default(),
-            search: PaneSearch::default(),
-            cursor: 0,
-            v_scroll: 0,
-            h_scroll: 0,
-            detail: HistoryDetailState::default(),
-            splitter: super::splitter::state::DetailSplitterState::default(),
-        }
-    }
-}
 
 impl HistoryState {
     /// Indices of history entries matching the current filter.

@@ -448,6 +448,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 && crate::features::discover::splitter::view::splitter_at(&layout, point.x, point.y)
                             {
                                 discover_split_drag = true;
+                                state.splitter_hover.discover_splitter_drag = true;
                                 tracing::debug!("discover targets/results splitter drag started");
                             }
 
@@ -609,8 +610,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // original dbm.
                             if matches!(target_pane, Some(Pane::SQLWorkspace))
                                 && let Some(tab_area) = sql_tab_area_for_hit(size, &state)
-                            {
-                                if let Some(action) = crate::features::sql_workspace::sql_tab::view::sql_workspace_click(
+                                && let Some(action) = crate::features::sql_workspace::sql_tab::view::sql_workspace_click(
                                     &state.sql.sql_tab,
                                     tab_area,
                                     mouse.column,
@@ -627,7 +627,6 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         dirty |= result.dirty;
                                     }
                                 }
-                            }
 
                             // Inside the discover popup: map the click's row to a
                             // discover child pane and switch focus to it. This is
@@ -716,6 +715,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 }
                             {
                                 app_split_drag = true;
+                                state.splitter_hover.app_splitter_drag = true;
                                 tracing::debug!("app explorer/workspace splitter drag started");
                             }
 
@@ -745,6 +745,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 }
                             {
                                 explorer_split_drag = true;
+                                state.splitter_hover.explorer_splitter_drag = true;
                                 tracing::debug!("explorer instances/objects splitter drag started");
                             }
 
@@ -755,17 +756,28 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // supplies the area and the coordinates.
                             if state.focus == Pane::SQLWorkspace
                                 && let Some(tab_area) = sql_tab_area_for_hit(terminal.size()?, &state)
-                            {
-                                if let Some((tab_id, splitter)) = crate::features::sql_workspace::sql_tab::splitter::view::sql_tab_splitter_at(
+                                && let Some((tab_id, splitter)) = crate::features::sql_workspace::sql_tab::splitter::view::sql_tab_splitter_at(
                                     &state.sql.sql_tab,
                                     tab_area,
                                     point.x,
                                     point.y,
                                 ) {
                                     split_drag = Some((tab_id, splitter));
+                                    use crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter;
+                                    let sh = &mut state.splitter_hover;
+                                    match splitter {
+                                        SqlSplitter::EditorResults => {
+                                            sh.sql_editor_results_drag = true;
+                                        }
+                                        SqlSplitter::EditorHistory => {
+                                            sh.sql_editor_history_drag = true;
+                                        }
+                                        SqlSplitter::HistoryDetail => {
+                                            sh.sql_history_detail_drag = true;
+                                        }
+                                    }
                                     tracing::debug!(?splitter, "splitter drag started");
                                 }
-                            }
                         }
                         MouseEventKind::Drag(MouseButton::Left) => {
                             if discover_split_drag {
@@ -873,8 +885,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 // The feature resolves the drag to a resize
                                 // message; the shell only supplies the area and
                                 // the coordinates.
-                                if let Some(tab_area) = sql_tab_area_for_hit(size, &state) {
-                                    if let Some(msg) = crate::features::sql_workspace::sql_tab::splitter::view::sql_tab_splitter_resize_msg(
+                                if let Some(tab_area) = sql_tab_area_for_hit(size, &state)
+                                    && let Some(msg) = crate::features::sql_workspace::sql_tab::splitter::view::sql_tab_splitter_resize_msg(
                                         &state.sql.sql_tab,
                                         tab_area,
                                         tab_id,
@@ -899,24 +911,44 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         tracing::debug!("resize msg processed");
                                         dirty |= result.dirty;
                                     }
-                                }
                             }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
                             if explorer_split_drag {
                                 explorer_split_drag = false;
+                                state.splitter_hover.explorer_splitter_drag = false;
                                 tracing::debug!("explorer instances/objects splitter drag finished");
                             }
                             if discover_split_drag {
                                 discover_split_drag = false;
+                                state.splitter_hover.discover_splitter_drag = false;
                                 tracing::debug!("discover targets/results splitter drag finished");
                             }
                             if app_split_drag {
                                 app_split_drag = false;
+                                state.splitter_hover.app_splitter_drag = false;
                                 tracing::debug!("app explorer/workspace splitter drag finished");
                             }
                             if split_drag.take().is_some() {
+                                state.splitter_hover.sql_editor_results_drag = false;
+                                state.splitter_hover.sql_editor_history_drag = false;
+                                state.splitter_hover.sql_history_detail_drag = false;
                                 tracing::debug!("splitter drag finished");
+                            }
+                            // Re-evaluate hover after drag end — the cursor may
+                            // still be over a splitter.
+                            let size = terminal.size()?;
+                            if update_splitter_hover(&mut state, mouse.column, mouse.row, size) {
+                                dirty = true;
+                            }
+                        }
+                        MouseEventKind::Moved => {
+                            // Hover is a continuous gesture: only request a
+                            // redraw when some hover bit actually toggles,
+                            // avoiding wasteful repaints on every mouse pixel.
+                            let size = terminal.size()?;
+                            if update_splitter_hover(&mut state, mouse.column, mouse.row, size) {
+                                dirty = true;
                             }
                         }
                         _ => {
@@ -1607,9 +1639,7 @@ fn explorer_row_click_msgs(
     use crate::features::explorer::objects::msg::ObjectsMessage;
     // Use the live Explorer column width so a click inside the (resizable)
     // Explorer is mapped with the same geometry the render draws.
-    let Some(explorer) = app_explorer_rect(size, body_top, body_h, state) else {
-        return None;
-    };
+    let explorer = app_explorer_rect(size, body_top, body_h, state)?;
     if x < explorer.x || x >= explorer.right() {
         return None;
     }
@@ -1753,6 +1783,109 @@ fn normalize_splitter_tracks(state: &mut crate::app::state::AppState, size: rata
         state.discover.splitter.targets_min = layout.targets_min;
         state.discover.splitter.targets_max = layout.targets_max.max(layout.targets_min);
     }
+}
+
+/// Update splitter hover highlight state from a mouse position.
+///
+/// Hit-tests every visible splitter against `(x, y)` using the same geometry
+/// the renderers employ, so hover highlights exactly the same line that is
+/// drawn. Returns `true` when any hover bit actually changed (used to decide
+/// whether to request a redraw).
+fn update_splitter_hover(
+    state: &mut crate::app::state::AppState,
+    x: u16,
+    y: u16,
+    size: ratatui::layout::Size,
+) -> bool {
+    use crate::common::view::splitter::hit;
+
+    let before = state.splitter_hover;
+
+    // No hover highlight while a modal or the discover close-confirm is active.
+    let can_hover = state.modal.is_none() && !state.discover.close_confirm;
+
+    // Preserve the active drag flags — they are managed by the Down/Drag/Up
+    // event handlers and must survive a hover recompute (e.g. a `Moved` event
+    // arriving mid-drag). Only the hover bits are recomputed here.
+    let drag = before.dragging_flags();
+    state.splitter_hover = crate::app::state::SplitterHoverState::default();
+    state.splitter_hover.set_dragging_flags(drag);
+
+    if !can_hover {
+        return before != state.splitter_hover;
+    }
+
+    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let body_top = 3u16;
+    let body_h = size.height.saturating_sub(body_top).saturating_sub(footer_h);
+    if body_h < 3 {
+        return before != state.splitter_hover;
+    }
+
+    // --- App-level Explorer / workspace vertical splitter ---
+    if let Some(layout) = app_body_geometry(size, body_top, body_h, state) {
+        state.splitter_hover.app_splitter = hit(layout.v_splitter, x, y);
+    }
+
+    // --- Explorer instances / objects horizontal splitter ---
+    if matches!(state.focus, Pane::Explorer(_))
+        && let Some(explorer) = app_explorer_rect(size, body_top, body_h, state) {
+            let inner = Rect::new(
+                explorer.x.saturating_add(1),
+                explorer.y.saturating_add(1),
+                explorer.width.saturating_sub(2),
+                explorer.height.saturating_sub(2),
+            );
+            if inner.height >= 3 {
+                let layout = crate::features::explorer::splitter::view::explorer_body_layout(
+                    inner,
+                    state.explorer.splitter.instances_height,
+                );
+                state.splitter_hover.explorer_splitter = hit(layout.splitter, x, y);
+            }
+        }
+
+    // --- Discover targets / results horizontal splitter ---
+    if matches!(state.focus, Pane::Discover(_))
+        && let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state) {
+            let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75);
+            let body = crate::features::discover::view::discover_body_area(
+                discover_popup,
+                &state.discover,
+            );
+            if body.height >= 3 {
+                let layout = crate::features::discover::splitter::view::discover_body_layout(
+                    body,
+                    state.discover.splitter.targets_height,
+                );
+                state.splitter_hover.discover_splitter = hit(layout.splitter, x, y);
+            }
+        }
+
+    // --- SQL tab splitters ---
+    if state.focus == Pane::SQLWorkspace
+        && let Some(tab_area) = sql_tab_area_for_hit(size, state)
+        && let Some((_tab_id, splitter)) = crate::features::sql_workspace::sql_tab::splitter::view::sql_tab_splitter_at(
+            &state.sql.sql_tab,
+            tab_area,
+            x,
+            y,
+        ) {
+            // Hit-test resolved — mark the corresponding hover bit.
+            match splitter {
+                crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter::EditorResults => {
+                    state.splitter_hover.sql_editor_results = true;
+                }
+                crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter::EditorHistory => {
+                    state.splitter_hover.sql_editor_history = true;
+                }
+                crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter::HistoryDetail => {
+                    state.splitter_hover.history_detail = true;
+                }
+            }
+        }
+
+    before != state.splitter_hover
 }
 
 /// Map a click inside the discover popup to a discover child sub-pane
@@ -2304,6 +2437,8 @@ mod tests {
                     ratatui::layout::Rect::new(0, 3, 20, 45),
                     &state.explorer,
                     true,
+                    false,
+                    false,
                 );
             })
             .unwrap();
@@ -2317,7 +2452,7 @@ mod tests {
                 line.push_str(buf[(x, y)].symbol());
             }
             if line.contains("a") && !line.contains("Explorer") && !line.contains("Instances") {
-                first_y = Some(y as u16);
+                first_y = Some(y);
                 break;
             }
         }

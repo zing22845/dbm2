@@ -22,12 +22,14 @@ use super::detail::draw_history_detail;
 use super::splitter::state::clamp_detail_pane_width;
 use super::state::HistoryState;
 use super::store::history_one_line;
+use super::splitter::view as splitter_view;
 
 /// Render the History pane. The single History border + title wraps the whole
 /// `area` (both the list and, when `detail_visible`, the detail preview).
 /// `detail_visible` is computed by the caller from the original dbm's
 /// `detail_visible` condition (`workspace_pane == History` + has an entry);
 /// `detail_w` is the width of the detail pane (clamped to its allowed range).
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
@@ -38,6 +40,8 @@ pub fn render(
     focused: bool,
     detail_visible: bool,
     detail_w: u16,
+    splitter_hover: bool,
+    splitter_drag: bool,
 ) {
     let search_active = state.search.text_input_active();
     let list_footer = history_list_footer_text(search_active, state.search.has_filter(), true);
@@ -116,7 +120,7 @@ pub fn render(
             );
         }
         tracing::debug!("history: detail drawn");
-        super::splitter::view::render(frame, body_h[1], false, false);
+        splitter_view::render(frame, body_h[1], splitter_hover, splitter_drag);
         // Each sub-pane's footer is inside the shared border, wrapped to its
         // own column width.
         let footer_h = footer_height(&list_footer, list_w.saturating_sub(2))
@@ -136,7 +140,7 @@ pub fn render(
         (chunks[0], chunks[1])
     };
 
-    render_list_rows(frame, theme, list_area, state, &entries, &visible, cursor, focused);
+    render_list_rows(frame, theme, list_area, state, entries, &visible, cursor, focused);
 
     // The list footer hints (inside the shared border).
     draw_footer(frame, theme, list_footer_area, &list_footer);
@@ -144,6 +148,7 @@ pub fn render(
 
 /// Render the list rows (and its scrollbar) into `area`. Used inside the shared
 /// History border; the list does not draw its own border.
+#[allow(clippy::too_many_arguments)]
 fn render_list_rows(
     frame: &mut Frame,
     theme: &Theme,

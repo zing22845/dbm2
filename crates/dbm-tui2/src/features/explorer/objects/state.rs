@@ -177,16 +177,14 @@ impl ObjectsState {
         active_db: Option<&str>,
         active_schema: Option<&str>,
     ) -> bool {
-        if let Some(db) = active_db {
-            if key == Self::expand_key_database(db) {
+        if let Some(db) = active_db
+            && key == Self::expand_key_database(db) {
                 return true;
             }
-        }
-        if let (Some(db), Some(schema)) = (active_db, active_schema) {
-            if key == Self::expand_key_schema(db, schema) {
+        if let (Some(db), Some(schema)) = (active_db, active_schema)
+            && key == Self::expand_key_schema(db, schema) {
                 return true;
             }
-        }
         false
     }
 
@@ -483,7 +481,7 @@ impl ObjectsState {
             .map(|r| {
                 // Each row renders as "{indent}{marker} {label}"
                 // where indent = depth * 2 spaces, marker = ▸/▾/─/·
-                let indent = r.depth.saturating_mul(2) as usize;
+                let indent = r.depth.saturating_mul(2);
                 let marker_w = 1usize; // ▸/▾/─/· = 1 col each
                 let label_w = unicode_width::UnicodeWidthStr::width(r.label.as_str());
                 let total: usize = indent + marker_w + 1 + label_w; // +1 for space after marker

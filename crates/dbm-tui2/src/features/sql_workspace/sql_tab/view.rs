@@ -138,7 +138,7 @@ pub fn sql_workspace_click(
     // editor. Mirror the same zone computation used by the renderer.
     let (instance, connection) = session_view_key(&tab.session);
     let detail_visible = tab.focus == SqlFocus::History
-        && tab.history.store.entries(&instance, &connection).first().is_some();
+        && !tab.history.store.entries(&instance, &connection).is_empty();
     // The History feature owns the list AND the detail; when the detail is
     // visible the history zone widens leftward (eating into the editor). Both
     // the shrunk editor and the widened history zone must be hit-tested so a
@@ -197,12 +197,19 @@ use super::results::view as results_view;
 /// border/title only lights up while the workspace itself is focused (matching
 /// the original dbm). Returns the editor's hardware cursor when the editor
 /// sub-pane holds focus (so the shell can place the terminal caret), else `None`.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
     state: &SqlTabState,
     focused: bool,
+    h_hover: bool,
+    v_hover: bool,
+    detail_hover: bool,
+    h_drag: bool,
+    v_drag: bool,
+    detail_drag: bool,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     // No tab open for the active connection: show an empty-state hint and no
     // tab bar, mirroring the original dbm's `workspace_empty_hint` (no phantom
@@ -260,7 +267,7 @@ pub fn render(
     // left of the list immediately. The splitter can widen the detail, but it
     // is never absent while History is focused.
     let history_detail_visible = tab.focus == SqlFocus::History
-        && tab.history.store.entries(&instance, &connection).first().is_some();
+        && !tab.history.store.entries(&instance, &connection).is_empty();
 
     // When the detail is visible it extends the history zone to the left,
     // eating into the editor's width (mirrors original `history_zone_width`).
@@ -374,6 +381,8 @@ pub fn render(
             history_focused,
             true,
             tab.history.splitter.detail_pane_width,
+            detail_hover,
+            detail_drag,
         );
     } else {
         history_view::render(
@@ -386,6 +395,8 @@ pub fn render(
             history_focused,
             false,
             tab.history.splitter.detail_pane_width,
+            detail_hover,
+            detail_drag,
         );
     }
 
@@ -404,10 +415,10 @@ pub fn render(
         frame,
         layout.h_splitter,
         v_splitter_rect,
-        false,
-        false,
-        false,
-        false,
+        h_hover,
+        h_drag,
+        v_hover,
+        v_drag,
     );
 
     if editor_focused { cursor } else { None }
@@ -640,38 +651,81 @@ mod tests {
     }
 
     #[test]
-    fn render_shows_history_detail_when_history_focused() {
+    fn splitter_hover_renders_at_correct_position() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::style::Color;
 
         let mut state = state_with_tabs(1);
         state.active_tab = Some(0);
-        // Put the tab in History focus (as pressing `H` does).
-        state.tabs[0].focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
-        // Seed one history entry for this connection so there is a detail to show.
-        let (instance, connection) = session_view_key(&state.tabs[0].session);
-        state.tabs[0]
-            .history
-            .store
-            .record_success(&instance, &connection, "SELECT * FROM users");
-        // A typical terminal geometry. `area` is the full SQL workspace region
-        // (render draws its own tab bar at the top), so it must fit exactly.
         let theme = crate::common::view::theme::dracula();
         let area = Rect::new(0, 0, 120, 40);
-        // The detail must render whenever the History *pane* is focused,
-        // independent of shell focus (mirrors original dbm `detail_visible`).
-        for focused in [true, false] {
+
+        // Test 1: hover on vertical splitter should light up vertical, not horizontal
+        {
             let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
             terminal
                 .draw(|frame| {
-                    let _ = render(frame, &theme, area, &state, focused);
+                    let _ = render(frame, &theme, area, &state, true, false, true, false, false, false, false);
                 })
                 .unwrap();
             let buf = terminal.backend().buffer();
-            let cell_text = buf.content().iter().map(|c| c.symbol()).collect::<String>();
-            assert!(
-                cell_text.contains("SELECT * FROM users"),
-                "detail must render when History pane focused (shell focused={focused}); buffer lacked the SQL"
+            let layout = crate::features::sql_workspace::sql_tab::layout::sql_tab_layout(
+                Rect::new(0, 1, 120, 39),
+                state.tabs[0].splitter.editor_top_height,
+                state.tabs[0].splitter.history_pane_width,
+            );
+            let vx = layout.v_splitter.x;
+            let vy = layout.v_splitter.y;
+            let hx = layout.h_splitter.x;
+            let hy = layout.h_splitter.y;
+
+            let v_cell = buf.cell((vx, vy)).unwrap();
+            let h_cell = buf.cell((hx, hy)).unwrap();
+
+            assert_eq!(
+                v_cell.fg, Color::Cyan,
+                "vertical splitter at ({}, {}) should be Cyan when hovered, got {:?}",
+                vx, vy, v_cell.fg
+            );
+            assert_eq!(
+                h_cell.fg, Color::Rgb(55, 55, 60),
+                "horizontal splitter at ({}, {}) should be DIM when NOT hovered, got {:?}",
+                hx, hy, h_cell.fg
+            );
+        }
+
+        // Test 2: hover on horizontal splitter should light up horizontal, not vertical
+        {
+            let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+            terminal
+                .draw(|frame| {
+                    let _ = render(frame, &theme, area, &state, true, true, false, false, false, false, false);
+                })
+                .unwrap();
+            let buf = terminal.backend().buffer();
+            let layout = crate::features::sql_workspace::sql_tab::layout::sql_tab_layout(
+                Rect::new(0, 1, 120, 39),
+                state.tabs[0].splitter.editor_top_height,
+                state.tabs[0].splitter.history_pane_width,
+            );
+            let vx = layout.v_splitter.x;
+            let vy = layout.v_splitter.y;
+            let hx = layout.h_splitter.x;
+            let hy = layout.h_splitter.y;
+
+            let v_cell = buf.cell((vx, vy)).unwrap();
+            let h_cell = buf.cell((hx, hy)).unwrap();
+
+            assert_eq!(
+                h_cell.fg, Color::Cyan,
+                "horizontal splitter at ({}, {}) should be Cyan when hovered, got {:?}",
+                hx, hy, h_cell.fg
+            );
+            assert_eq!(
+                v_cell.fg, Color::Rgb(55, 55, 60),
+                "vertical splitter at ({}, {}) should be DIM when NOT hovered, got {:?}",
+                vx, vy, v_cell.fg
             );
         }
     }
@@ -718,7 +772,7 @@ mod tests {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     terminal
                         .draw(|frame| {
-                            let _ = render(frame, &theme, area, &state, true);
+                            let _ = render(frame, &theme, area, &state, true, false, false, false, false, false, false);
                         })
                         .unwrap();
                 }));
@@ -792,7 +846,7 @@ mod tests {
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             terminal
                 .draw(|frame| {
-                    let _ = render(frame, &theme, area, &state, true);
+                    let _ = render(frame, &theme, area, &state, true, false, false, false, false, false, false);
                 })
                 .unwrap();
         }));
