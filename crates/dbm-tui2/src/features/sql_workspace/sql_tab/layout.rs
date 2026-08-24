@@ -79,11 +79,11 @@ pub fn sql_tab_layout(area: Rect, editor_top_height: u16, history_width: u16) ->
 
     // Top row horizontal split: editor (left) + vertical splitter + history.
     let track_w = top_row.width;
-    // The editor always keeps MIN_SQL_PANE_WIDTH (plus the 1-col splitter), so
-    // history maxes out at `track_w - (MIN_SQL_PANE_WIDTH + 1)`. The bounds are
-    // exported so the history nudge/drag clamp to the exact values the layout
-    // accepts (stored and rendered widths never disagree).
-    let history_min = 12u16;
+    // History is bounded by [MIN_HISTORY_WIDTH, editor-min boundary]. The
+    // bounds are exported (and the min matches `set_history_pane_width`'s own
+    // clamp) so the history nudge/drag clamp to the exact values the layout
+    // accepts — stored and rendered widths never disagree.
+    let history_min = crate::features::sql_workspace::sql_tab::splitter::state::MIN_HISTORY_WIDTH;
     let history_max = track_w.saturating_sub(MIN_SQL_PANE_WIDTH + 1).max(history_min);
     let history_w = history_width.clamp(history_min, history_max);
     let top = Layout::default()

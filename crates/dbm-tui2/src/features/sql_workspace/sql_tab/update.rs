@@ -236,10 +236,17 @@ pub fn update(
                 } else {
                     width
                 };
-                // Clamp to the layout's actual history bounds (refreshed by the
-                // run loop); dragging past the boundary leaves the stored width
-                // unchanged (no redundant repaint).
-                let clamped = list_w.clamp(tab.splitter.history_min, tab.splitter.history_max);
+                // Clamp to the layout's actual history bounds intersected with
+                // the storage range [MIN_HISTORY_WIDTH, MAX_HISTORY_WIDTH]
+                // `set_history_pane_width` clamps to, so dragging past the
+                // boundary leaves the stored width unchanged (no redundant
+                // repaint) and never disagrees with the setter.
+                use crate::features::sql_workspace::sql_tab::splitter::state::{
+                    MAX_HISTORY_WIDTH, MIN_HISTORY_WIDTH,
+                };
+                let lo = tab.splitter.history_min.max(MIN_HISTORY_WIDTH);
+                let hi = tab.splitter.history_max.min(MAX_HISTORY_WIDTH);
+                let clamped = list_w.clamp(lo, hi);
                 let changed = tab.splitter.history_pane_width != clamped;
                 state.tabs[idx].set_history_pane_width(clamped);
                 dirty = changed;

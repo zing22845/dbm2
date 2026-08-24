@@ -70,9 +70,13 @@ impl SqlTabSplitterState {
         use crate::common::view::splitter::{WIDTH_NUDGE_STEP, width_delta_for_right_pane};
         let delta = width_delta_for_right_pane(nudge, WIDTH_NUDGE_STEP);
         let current = i32::from(self.history_pane_width);
-        let next = (current + i32::from(delta))
-            .clamp(i32::from(self.history_min), i32::from(self.history_max))
-            as u16;
+        // Bound by the layout's range, intersected with the storage range
+        // [MIN_HISTORY_WIDTH, MAX_HISTORY_WIDTH] `set_history_pane_width` clamps
+        // to, so the nudge target and the stored value always agree (a very wide
+        // track can make the layout's max exceed MAX_HISTORY_WIDTH).
+        let lo = i32::from(self.history_min.max(MIN_HISTORY_WIDTH));
+        let hi = i32::from(self.history_max.min(MAX_HISTORY_WIDTH));
+        let next = (current + i32::from(delta)).clamp(lo, hi) as u16;
         let changed = self.history_pane_width != next;
         self.set_history_pane_width(next);
         changed
@@ -219,5 +223,21 @@ mod tests {
             "growing past the editor min must not dirty"
         );
         assert_eq!(s.history_pane_width, 19);
+    }
+
+    #[test]
+    fn history_nudge_stops_at_min_width() {
+        let mut s = state();
+        s.history_min = MIN_HISTORY_WIDTH;
+        s.history_max = 60;
+        // `]` shrinks history (right side); down to the min then stop dirtying.
+        s.history_pane_width = 18;
+        assert!(s.nudge_history_width(crate::common::view::splitter::VerticalSplitterNudge::Right));
+        assert_eq!(s.history_pane_width, 16);
+        assert!(
+            !s.nudge_history_width(crate::common::view::splitter::VerticalSplitterNudge::Right),
+            "shrinking past the min must not dirty"
+        );
+        assert_eq!(s.history_pane_width, 16);
     }
 }
