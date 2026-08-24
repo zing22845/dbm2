@@ -78,13 +78,7 @@ pub fn render(
     let body = super::splitter::view::discover_body_layout(chunks[1], state.splitter.targets_height);
 
     let caret = targets_view::render(frame, theme, body.targets, &state.targets, focus);
-    crate::common::view::splitter::draw(
-        frame,
-        body.splitter,
-        crate::common::view::splitter::SplitOrientation::Horizontal,
-        false,
-        false,
-    );
+    super::splitter::view::render(frame, &body, false, false);
     results_view::render(frame, theme, body.results, &state.results, focus);
 
     // Discover dialog footer: rendered directly (no separator dashes), so the

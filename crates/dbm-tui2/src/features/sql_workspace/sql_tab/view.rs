@@ -6,7 +6,6 @@ use ratatui::text::Span;
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
-use crate::common::view::splitter::{SplitOrientation, draw};
 use crate::common::view::theme::Theme;
 
 use super::layout::sql_tab_layout;
@@ -395,11 +394,18 @@ pub fn render(
     // Draw the two draggable splitter strips. The editor/history splitter is
     // drawn at the (possibly shifted) editor right edge so it never lands
     // inside the history pane when the detail is visible.
-    draw(frame, layout.h_splitter, SplitOrientation::Horizontal, false, false);
-    draw(
+    let v_splitter_rect = Rect::new(
+        editor_history_splitter_x,
+        layout.v_splitter.y,
+        layout.v_splitter.width,
+        layout.v_splitter.height,
+    );
+    super::splitter::view::render(
         frame,
-        Rect::new(editor_history_splitter_x, layout.v_splitter.y, layout.v_splitter.width, layout.v_splitter.height),
-        SplitOrientation::Vertical,
+        layout.h_splitter,
+        v_splitter_rect,
+        false,
+        false,
         false,
         false,
     );

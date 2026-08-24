@@ -5,9 +5,9 @@
 //! run loop (to hit-test mouse drags) call [`discover_body_layout`].
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::Frame;
 
-use crate::common::view::splitter::clamp_split_px;
-use crate::common::view::splitter::hit;
+use crate::common::view::splitter::{clamp_split_px, draw, hit, SplitOrientation};
 
 /// The panes computed by [`discover_body_layout`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -76,6 +76,11 @@ pub fn targets_height_for_y(area: Rect, y: u16) -> u16 {
 /// materializing a persisted percentage back to rows.
 pub fn track_height(area: Rect) -> u16 {
     area.height
+}
+
+/// Render the discover targets/results horizontal splitter strip.
+pub fn render(frame: &mut Frame, layout: &DiscoverSplitLayout, hover: bool, dragging: bool) {
+    draw(frame, layout.splitter, SplitOrientation::Horizontal, hover, dragging);
 }
 
 #[cfg(test)]

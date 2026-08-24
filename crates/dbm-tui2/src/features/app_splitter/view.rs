@@ -5,8 +5,9 @@
 //! be found where it is drawn.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::Frame;
 
-use crate::common::view::splitter::hit;
+use crate::common::view::splitter::{draw, hit, SplitOrientation};
 
 use super::state::{MAX_EXPLORER_WIDTH, MIN_EXPLORER_WIDTH};
 
@@ -71,6 +72,11 @@ pub fn explorer_width_for_x(area: Rect, x: u16) -> u16 {
         .max(MIN_EXPLORER_WIDTH);
     x.saturating_sub(area.x)
         .clamp(MIN_EXPLORER_WIDTH, max_explorer)
+}
+
+/// Render the Explorer/workspace vertical splitter strip.
+pub fn render(frame: &mut Frame, layout: &AppBodyLayout, hover: bool, dragging: bool) {
+    draw(frame, layout.v_splitter, SplitOrientation::Vertical, hover, dragging);
 }
 
 #[cfg(test)]

@@ -10,7 +10,6 @@ use ratatui::layout::Rect;
 use ratatui::Frame;
 
 use crate::common::view::theme::Theme;
-use crate::common::view::splitter::{draw, SplitOrientation};
 
 use super::state::{ExplorerPane, ExplorerState};
 use super::instances::view as instances_view;
@@ -51,6 +50,6 @@ pub fn render(
     let instances_focused = focused && state.pane == ExplorerPane::Instances;
     let objects_focused = focused && state.pane == ExplorerPane::Objects;
     instances_view::render(frame, theme, panes.instances, &state.instances, instances_focused);
-    draw(frame, panes.splitter, SplitOrientation::Horizontal, false, false);
+    super::splitter::view::render(frame, &panes, false, false);
     objects_view::render(frame, theme, panes.objects, &state.objects, objects_focused);
 }

@@ -5,8 +5,9 @@
 //! lives here or in the `history::splitter` feature.
 
 use ratatui::layout::Rect;
+use ratatui::Frame;
 
-use crate::common::view::splitter::hit;
+use crate::common::view::splitter::{draw, hit, SplitOrientation};
 
 use super::super::state::SqlTabState;
 use super::super::msg::SqlTabMessage;
@@ -168,6 +169,20 @@ pub fn sql_tab_splitter_resize_msg(
             Some(SqlTabMessage::SetHistoryDetailWidth { tab_id, width })
         }
     }
+}
+
+/// Render the two SQL-tab splitter strips.
+pub fn render(
+    frame: &mut Frame,
+    h_splitter: Rect,
+    v_splitter: Rect,
+    hover_editor_results: bool,
+    hover_editor_history: bool,
+    dragging_editor_results: bool,
+    dragging_editor_history: bool,
+) {
+    draw(frame, h_splitter, SplitOrientation::Horizontal, hover_editor_results, dragging_editor_results);
+    draw(frame, v_splitter, SplitOrientation::Vertical, hover_editor_history, dragging_editor_history);
 }
 
 #[cfg(test)]

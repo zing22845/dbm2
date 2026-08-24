@@ -16,7 +16,6 @@ use ratatui::Frame;
 use crate::common::components::search::pane_search_title_line;
 use crate::common::view::hints::{draw_footer, footer_height, history_list_footer_text};
 use crate::common::view::pane_scrollbar::{draw_vertical_pane_scrollbar, pane_scroll_layout};
-use crate::common::view::splitter::{draw as draw_splitter, SplitOrientation};
 use crate::common::view::theme::Theme;
 
 use super::detail::draw_history_detail;
@@ -117,13 +116,7 @@ pub fn render(
             );
         }
         tracing::debug!("history: detail drawn");
-        draw_splitter(
-            frame,
-            body_h[1],
-            SplitOrientation::Vertical,
-            false,
-            false,
-        );
+        super::splitter::view::render(frame, body_h[1], false, false);
         // Each sub-pane's footer is inside the shared border, wrapped to its
         // own column width.
         let footer_h = footer_height(&list_footer, list_w.saturating_sub(2))

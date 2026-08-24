@@ -6,6 +6,9 @@
 //! `history_zone_width`). Dragging B re-allocates detail vs list.
 
 use ratatui::layout::Rect;
+use ratatui::Frame;
+
+use crate::common::view::splitter::{draw, SplitOrientation};
 
 use super::state::clamp_detail_pane_width;
 use crate::features::sql_workspace::sql_tab::layout::SqlTabLayout;
@@ -62,6 +65,11 @@ pub fn history_detail_splitter(
 pub fn detail_width_for_x(area: Rect, layout: &SqlTabLayout, detail_pane_width: u16, x: u16) -> u16 {
     let zone_x = history_zone_x(area, layout, detail_pane_width);
     x.saturating_sub(zone_x).saturating_sub(1)
+}
+
+/// Render the History detail/list vertical splitter strip.
+pub fn render(frame: &mut Frame, splitter: Rect, hover: bool, dragging: bool) {
+    draw(frame, splitter, SplitOrientation::Vertical, hover, dragging);
 }
 
 #[cfg(test)]

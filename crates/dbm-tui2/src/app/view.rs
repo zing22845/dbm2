@@ -55,13 +55,7 @@ pub fn render(
     header_view::render(frame, &state.theme, chunks[0], &state.header, header_focused);
     explorer_view::render(frame, &state.theme, body.explorer, &state.explorer, explorer_focused);
     // Draw the resizable Explorer / workspace splitter strip.
-    crate::common::view::splitter::draw(
-        frame,
-        body.v_splitter,
-        crate::common::view::splitter::SplitOrientation::Vertical,
-        false,
-        false,
-    );
+    crate::features::app_splitter::view::render(frame, &body, false, false);
     // The workspace region shows whichever workspace is active, driven by the
     // explorer tree's `active_workspace` marker (the original dbm's
     // `is_instance_workspace()`), not by keyboard focus. Opening a connection
