@@ -292,6 +292,29 @@ pub fn render(
             tab.history.splitter.detail_pane_width,
         )
         .min(max_zone_w);
+        // Reconcile the stored splitter values against the geometry this frame
+        // actually renders. When the History detail is visible the list pane
+        // must equal `zone - border - detail - splitter`; any drift here means
+        // the stored width and the rendered geometry disagree (which would cause
+        // redundant repaints at the drag limit), so surface it as a warning.
+        {
+            use crate::features::sql_workspace::sql_tab::history::splitter::state::clamp_detail_pane_width;
+            let d = clamp_detail_pane_width(tab.history.splitter.detail_pane_width);
+            let stored_list = tab.splitter.history_pane_width;
+            // The History border eats 2 columns before the detail/list split.
+            let rendered_list = zone_w.saturating_sub(2).saturating_sub(d).saturating_sub(1);
+            if stored_list != rendered_list {
+                tracing::warn!(
+                    zone_x,
+                    zone_w,
+                    max_zone_w,
+                    detail = d,
+                    stored_list,
+                    rendered_list,
+                    "sql_tab zone reconcile: stored list != rendered list"
+                );
+            }
+        }
         // The splitter sits just left of the widened history zone.
         editor_history_splitter_x = zone_x.saturating_sub(1);
         // Shrink the editor to end where the detail zone begins (minus the
@@ -656,11 +679,12 @@ mod tests {
         let area = Rect::new(0, 0, 120, 40);
         let layout = sql_tab_layout(area, 45, 30); // list = 30
 
-        // Detail at 40 -> zone = list(30) + 40 + 1 = 71 (list unchanged, editor
-        // yields). Widening to 56 grows the zone further — the list width
-        // (layout.history.width) is untouched; the editor absorbs the growth.
-        assert_eq!(history_zone_width(&layout, 40), 30 + 40 + 1);
-        assert_eq!(history_zone_width(&layout, 56), 30 + 56 + 1);
+        // Detail at 40 -> zone = list(30) + 40 + 1 + border 2 = 73 (list
+        // unchanged, editor yields). Widening to 56 grows the zone further — the
+        // list width (layout.history.width) is untouched; the editor absorbs the
+        // growth.
+        assert_eq!(history_zone_width(&layout, 40), 30 + 40 + 1 + 2);
+        assert_eq!(history_zone_width(&layout, 56), 30 + 56 + 1 + 2);
         assert_eq!(layout.history.width, 30, "the list width must not change");
     }
 

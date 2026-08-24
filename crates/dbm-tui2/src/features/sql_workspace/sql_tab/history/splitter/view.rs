@@ -12,12 +12,19 @@ use crate::features::sql_workspace::sql_tab::layout::SqlTabLayout;
 use crate::features::sql_workspace::sql_tab::splitter::state::MIN_SQL_PANE_WIDTH;
 
 /// The width of the History zone when the detail is visible: the list width
-/// plus the *actual* detail pane width plus a splitter. Dragging B re-allocates
-/// detail vs list within the zone; the zone itself is set by the editor/history
-/// splitter (A).
+/// plus the *actual* detail pane width plus the internal splitter, plus the
+/// History border that wraps the whole zone. Dragging B re-allocates detail vs
+/// list within the zone; the zone itself is set by the editor/history splitter
+/// (A).
+///
+/// The stored `layout.history.width` is the list pane's *outer* width (it
+/// carries the History border, exactly like the standalone history pane), so a
+/// visible detail adds `detail + splitter` content columns and the border adds
+/// 2. Including the border here keeps the rendered list width
+/// (`zone_w - 2 - detail - 1`) equal to the stored list width.
 pub fn history_zone_width(layout: &SqlTabLayout, detail_pane_width: u16) -> u16 {
     let detail_w = clamp_detail_pane_width(detail_pane_width);
-    layout.history.width + detail_w + 1
+    layout.history.width + detail_w + 1 + 2
 }
 
 /// The left edge of the widened History zone (it extends left of the base
@@ -66,8 +73,8 @@ mod tests {
     fn zone_width_and_splitter_move_with_detail() {
         let area = Rect::new(0, 0, 120, 40);
         let layout = sql_tab_layout(area, 45, 24);
-        // zone = list(24) + detail(40) + splitter.
-        assert_eq!(history_zone_width(&layout, 40), 24 + 40 + 1);
+        // zone = list(24) + detail(40) + splitter + the History border.
+        assert_eq!(history_zone_width(&layout, 40), 24 + 40 + 1 + 2);
         // A wider detail widens the zone (list stays fixed).
         assert!(history_zone_width(&layout, 56) > history_zone_width(&layout, 40));
         // No detail -> no internal splitter.

@@ -802,10 +802,17 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // shortcuts) also moves the shell focus into the SQL workspace, so
             // jumping from the explorer/header lands on the editor/results/
             // history sub-pane rather than leaving the shell focus behind.
+            //
+            // Only mark dirty when the shell focus *actually moves*. Clicking
+            // an already-focused sub-pane (e.g. the detail inside History while
+            // the workspace owns focus) sends a Focus message that changes
+            // nothing; unconditionally dirtying would render an identical frame
+            // (changed_cells == 0) and pollute the redundancy metric.
             if matches!(
                 inner,
                 SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Focus(_)))
-            ) {
+            ) && state.focus != Pane::SQLWorkspace
+            {
                 state.focus = Pane::SQLWorkspace;
                 result.dirty = true;
             }
@@ -1107,6 +1114,43 @@ mod tests {
         update(
             focus_changed_msg(Pane::SQLWorkspace),
             &mut state,
+        );
+        assert_eq!(state.focus, Pane::SQLWorkspace);
+    }
+
+    #[test]
+    fn focus_history_not_dirty_when_workspace_already_focused() {
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+        let focus_msg = |focus| AppMsg::Sql(
+            crate::features::sql_workspace::msg::SqlMsg::Message(
+                crate::features::sql_workspace::msg::SqlMessage::SqlTab(
+                    crate::features::sql_workspace::sql_tab::msg::SqlTabMsg::Message(
+                        crate::features::sql_workspace::sql_tab::msg::SqlTabMessage::Focus(focus),
+                    ),
+                ),
+            ),
+        );
+
+        // While the workspace already owns focus, a `Focus(History)` that
+        // doesn't change the sub-pane must not dirty — otherwise clicking an
+        // already-focused pane renders an identical frame (changed_cells == 0),
+        // a redundant repaint. The only dirty signal should come from the
+        // sql_tab itself when the sub-pane focus actually changes.
+        let mut state = AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        let result = update_unchecked(focus_msg(SqlFocus::History), &mut state);
+        assert!(
+            !result.dirty,
+            "no-op Focus(History) while the workspace is focused must not dirty"
+        );
+
+        // From another pane the same message moves the shell focus and dirtis.
+        let mut state = AppState::default();
+        state.focus = Pane::Header;
+        let result = update_unchecked(focus_msg(SqlFocus::History), &mut state);
+        assert!(
+            result.dirty,
+            "Focus(History) from another pane moves the shell focus and must dirty"
         );
         assert_eq!(state.focus, Pane::SQLWorkspace);
     }

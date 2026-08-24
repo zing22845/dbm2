@@ -141,7 +141,19 @@ pub fn sql_tab_splitter_resize_msg(
             Some(SqlTabMessage::SetEditorTopHeight { tab_id, height })
         }
         SqlSplitter::EditorHistory => {
-            let right_edge = layout.history.right();
+            // When the History detail is visible the history zone fills the
+            // body to its right edge (`history_zone_x` .. `area.right()`), so
+            // the zone width is measured to `area.right()`; otherwise the plain
+            // history pane's right edge. Measuring to the wrong edge would let
+            // the stored width and the rendered zone disagree.
+            let (instance, connection) = super::super::session::session_view_key(&tab.session);
+            let detail_visible = tab.focus == super::super::state::SqlFocus::History
+                && tab.history.store.entries(&instance, &connection).first().is_some();
+            let right_edge = if detail_visible {
+                body.right()
+            } else {
+                layout.history.right()
+            };
             let width = right_edge.saturating_sub(x);
             Some(SqlTabMessage::SetHistoryWidth { tab_id, width })
         }

@@ -51,7 +51,7 @@ pub fn update(
                 .active_tab
                 .and_then(|i| state.tabs.get_mut(i))
             {
-                let changed = tab.focus != focus;
+                let mut changed = tab.focus != focus;
                 // Track the sub-pane that was active before entering Results, so
                 // Ctrl+Up from Results returns to the previous editor/history
                 // pane (mirroring the original dbm's `workspace_upper_pane`).
@@ -61,6 +61,13 @@ pub fn update(
                     tab.upper_pane = tab.focus;
                 }
                 tab.focus = focus;
+                // Entering History makes the detail pane visible, which adds
+                // `detail + splitter` columns to the History zone. A list width
+                // that was legal while History was unfocused (up to
+                // `history_max`) can then overflow `history_max - detail` and
+                // squeeze the *rendered* list below its stored width. Re-clamp
+                // so storage and rendered geometry stay identical.
+                changed |= clamp_list_for_history_detail(tab);
                 dirty = changed;
             }
         }
@@ -230,9 +237,14 @@ pub fn update(
                 let detail_visible = tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History
                     && tab.history.store.entries(&instance, &connection).first().is_some();
                 let list_w = if detail_visible {
+                    // `width` is the whole zone (A to the right edge), which
+                    // holds list + detail + splitter + the History border. The
+                    // stored list width is the list pane's *outer* width (it
+                    // carries the border), so subtract detail + splitter + 2.
                     width
                         .saturating_sub(tab.history.splitter.detail_pane_width)
                         .saturating_sub(1) // splitter
+                        .saturating_sub(2) // History border (left + right)
                 } else {
                     width
                 };
@@ -245,7 +257,23 @@ pub fn update(
                     MAX_HISTORY_WIDTH, MIN_HISTORY_WIDTH,
                 };
                 let lo = tab.splitter.history_min.max(MIN_HISTORY_WIDTH);
-                let hi = tab.splitter.history_max.min(MAX_HISTORY_WIDTH);
+                let mut hi = tab.splitter.history_max.min(MAX_HISTORY_WIDTH);
+                // When the detail is visible the stored width is the *list*
+                // width (`zone - detail - splitter`). The zone's widest reach is
+                // `area.width - MIN_SQL_PANE_WIDTH` (the editor keeps its min
+                // width), so the list must stop at that minus the detail pane
+                // and the splitter — otherwise `history_zone_x` clamps the zone
+                // to a narrower maximum and the stored width disagrees with the
+                // rendered geometry (redundant repaints at the drag limit).
+                if detail_visible {
+                    // The list pane carries the History border, so its upper
+                    // bound is `history_max` (the no-detail list max) minus the
+                    // detail pane, splitter and the border it would otherwise
+                    // own.
+                    hi = hi
+                        .saturating_sub(tab.history.splitter.detail_pane_width)
+                        .saturating_sub(2); // History border
+                }
                 let clamped = list_w.clamp(lo, hi);
                 let changed = tab.splitter.history_pane_width != clamped;
                 state.tabs[idx].set_history_pane_width(clamped);
@@ -267,6 +295,41 @@ pub fn update(
                 let before = state.tabs[idx].history.splitter.detail_pane_width;
                 state.tabs[idx].history.splitter.set_detail_pane_width(width);
                 dirty = before != state.tabs[idx].history.splitter.detail_pane_width;
+                // The History zone holds list + detail + splitter, capped at
+                // `area.width - MIN_SQL_PANE_WIDTH` (the editor keeps its min
+                // width). Growing the detail past that boundary would squeeze
+                // the *rendered* list below its stored width (`history_zone_x`
+                // clamps the zone), so list and detail would disagree and the
+                // next drag would emit redundant repaints. Keep the list within
+                // `history_max - detail` — exactly the editor-min boundary.
+                use crate::features::sql_workspace::sql_tab::splitter::state::{
+                    MAX_HISTORY_WIDTH, MIN_HISTORY_WIDTH,
+                };
+                let (instance, connection) = session_key(&state.tabs[idx].session);
+                let detail_visible =
+                    state.tabs[idx].focus
+                        == crate::features::sql_workspace::sql_tab::state::SqlFocus::History
+                    && state.tabs[idx]
+                        .history
+                        .store
+                        .entries(&instance, &connection)
+                        .first()
+                        .is_some();
+                if detail_visible {
+                    let tab = &state.tabs[idx];
+                    let hi = tab
+                        .splitter
+                        .history_max
+                        .min(MAX_HISTORY_WIDTH)
+                        .saturating_sub(tab.history.splitter.detail_pane_width)
+                        .saturating_sub(2); // History border
+                    let lo = tab.splitter.history_min.max(MIN_HISTORY_WIDTH);
+                    if tab.splitter.history_pane_width > hi {
+                        let clamped = tab.splitter.history_pane_width.clamp(lo, hi);
+                        state.tabs[idx].splitter.history_pane_width = clamped;
+                        dirty = true;
+                    }
+                }
             } else {
                 warn_tab_missing(tab_id);
             }
@@ -315,6 +378,7 @@ pub fn update(
                 state.tabs[idx].history.pin_most_recent(&instance, &connection);
                 state.tabs[idx].focus = SqlFocus::History;
                 dirty = true;
+                dirty |= clamp_list_for_history_detail(&mut state.tabs[idx]);
             } else {
                 warn_tab_missing(tab_id);
             }
@@ -631,6 +695,42 @@ fn session_key(session: &super::session::TabSession) -> (String, String) {
         .or_else(|| session.connection_id.clone())
         .unwrap_or_default();
     (instance, connection)
+}
+
+/// When the History detail is visible the History zone is `list + detail +
+/// splitter`, capped at `max_zone_w = area.width - MIN_SQL_PANE_WIDTH` (the
+/// editor keeps its min width). A list width that was legal while History was
+/// unfocused (up to `history_max`) overflows once the detail appears, so the
+/// *rendered* list gets squeezed below its stored width (the zone clamps).
+/// Re-clamp the stored list to `history_max - detail` so storage and rendered
+/// geometry stay identical (no redundant repaints at the drag limit). Returns
+/// `true` when the stored width changed.
+fn clamp_list_for_history_detail(tab: &mut super::state::SqlTab) -> bool {
+    use crate::features::sql_workspace::sql_tab::splitter::state::{
+        MAX_HISTORY_WIDTH, MIN_HISTORY_WIDTH,
+    };
+    let (instance, connection) = session_key(&tab.session);
+    if tab.focus != crate::features::sql_workspace::sql_tab::state::SqlFocus::History
+        || tab.history
+            .store
+            .entries(&instance, &connection)
+            .first()
+            .is_none()
+    {
+        return false;
+    }
+    let hi = tab
+        .splitter
+        .history_max
+        .min(MAX_HISTORY_WIDTH)
+        .saturating_sub(tab.history.splitter.detail_pane_width)
+        .saturating_sub(2); // History border the detail pane takes over
+    if tab.splitter.history_pane_width <= hi {
+        return false;
+    }
+    let lo = tab.splitter.history_min.max(MIN_HISTORY_WIDTH);
+    tab.splitter.history_pane_width = tab.splitter.history_pane_width.clamp(lo, hi);
+    true
 }
 
 /// Log when a routed child message targets a `tab_id` that no longer exists
@@ -1080,18 +1180,109 @@ mod tests {
             .store
             .record_success("inst", "c1", "SELECT 1");
 
-        // zone = 100, detail = 40, splitter = 1 -> list = 100 - 40 - 1 = 59.
+        // zone = 100, detail = 40, splitter = 1, border = 2
+        // -> list = 100 - 40 - 1 - 2 = 57.
         let (s, _i, _e, _d) = update(
             SqlTabMessage::SetHistoryWidth { tab_id, width: 100 },
             s,
         );
         assert_eq!(
-            s.tabs[0].splitter.history_pane_width, 59,
+            s.tabs[0].splitter.history_pane_width, 57,
             "with the detail visible, A drags change the list, not the detail"
         );
         assert_eq!(
             s.tabs[0].history.splitter.detail_pane_width, 40,
             "the detail width must not change when dragging splitter A"
+        );
+    }
+
+    #[test]
+    fn set_history_width_with_detail_clamps_list_at_the_editor_min() {
+        // When the detail is visible the list may only grow until the zone
+        // reaches `area.width - MIN_SQL_PANE_WIDTH` (the editor keeps its min
+        // width). Dragging splitter A past that must clamp the list to
+        // `history_max - detail` and stop dirtying, so the stored width never
+        // disagrees with the rendered zone.
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        s.tabs[0].focus = SqlFocus::History;
+        s.tabs[0].history.splitter.detail_pane_width = 40;
+        // Simulate the layout's `history_max` for a 120-wide body:
+        // track - MIN_SQL_PANE_WIDTH - 1 = 120 - 20 - 1 = 99.
+        s.tabs[0].splitter.history_max = 99;
+        s.tabs[0]
+            .history
+            .store
+            .record_success("inst", "c1", "SELECT 1");
+
+        // A drag far past the zone limit: the zone max is 120 - 20 = 100, so
+        // the list can be at most 100 - 40 - 1 - 2 (border) = 57.
+        let (s, _i, _e, d) = update(
+            SqlTabMessage::SetHistoryWidth { tab_id, width: 150 },
+            s,
+        );
+        assert_eq!(
+            s.tabs[0].splitter.history_pane_width, 57,
+            "the list must clamp at history_max - detail - border (zone max - detail - splitter - border)"
+        );
+        assert!(d, "the width changed from its default, so this run is dirty");
+
+        // Re-dragging to the same extreme must not dirty (no redundant repaint).
+        let (s2, _i, _e, d2) = update(
+            SqlTabMessage::SetHistoryWidth { tab_id, width: 150 },
+            s,
+        );
+        assert_eq!(s2.tabs[0].splitter.history_pane_width, 57);
+        assert!(
+            !d2,
+            "dragging past the limit must not keep dirtying (would waste repaints)"
+        );
+    }
+
+    #[test]
+    fn growing_detail_reclamps_list_so_the_zone_stays_consistent() {
+        // With A (editor/history) already dragged to the limit, the list is
+        // `history_max - detail`. Growing the detail past the boundary (B drag)
+        // must re-clamp the list to `history_max - new_detail`, otherwise the
+        // rendered list is squeezed below its stored width and the next drag
+        // emits redundant repaints.
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        s.tabs[0].focus = SqlFocus::History;
+        s.tabs[0].history.splitter.detail_pane_width = 40;
+        s.tabs[0].splitter.history_max = 99; // 120-wide body: 120 - 20 - 1
+        s.tabs[0].splitter.history_pane_width = 57; // A already at the limit (99 - 40 - 2 border)
+        s.tabs[0]
+            .history
+            .store
+            .record_success("inst", "c1", "SELECT 1");
+
+        // Drag B to grow the detail to its max (72).
+        let (s, _i, _e, d) = update(
+            SqlTabMessage::SetHistoryDetailWidth { tab_id, width: 200 },
+            s,
+        );
+        assert_eq!(s.tabs[0].history.splitter.detail_pane_width, 72);
+        assert_eq!(
+            s.tabs[0].splitter.history_pane_width, 25,
+            "the list must shrink to history_max - detail - border = 99 - 72 - 2"
+        );
+        assert!(d, "both the detail and the list changed, so this run is dirty");
+
+        // Repeating the same drag must not dirty (no redundant repaint).
+        let (s2, _i, _e, d2) = update(
+            SqlTabMessage::SetHistoryDetailWidth { tab_id, width: 200 },
+            s,
+        );
+        assert_eq!(s2.tabs[0].history.splitter.detail_pane_width, 72);
+        assert_eq!(s2.tabs[0].splitter.history_pane_width, 25);
+        assert!(
+            !d2,
+            "repeating the same extreme drag must not dirty (would waste repaints)"
         );
     }
 
@@ -1111,5 +1302,45 @@ mod tests {
             s,
         );
         assert_eq!(s.tabs[0].splitter.history_pane_width, 80);
+    }
+
+    #[test]
+    fn focusing_history_clamps_an_oversized_list_to_the_detail_boundary() {
+        // A list width that was legal while History was unfocused (up to
+        // `history_max`) becomes illegal the moment the detail appears: the
+        // zone is `list + detail + splitter`, so entering History must re-clamp
+        // the list to `history_max - detail`, or the rendered list would be
+        // squeezed below its stored width (a source of redundant repaints).
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        // Detail not yet visible: list was dragged up to history_max = 93.
+        s.tabs[0].focus = SqlFocus::Editor;
+        s.tabs[0].splitter.history_pane_width = 93;
+        s.tabs[0].splitter.history_max = 93; // 114-wide body: 114 - 20 - 1
+        s.tabs[0].history.splitter.detail_pane_width = 40;
+        s.tabs[0]
+            .history
+            .store
+            .record_success("inst", "c1", "SELECT 1");
+
+        // Enter History -> the detail pane shows, so the list must give way.
+        let (s, _i, _e, d) = update(SqlTabMessage::Focus(SqlFocus::History), s);
+        assert_eq!(
+            s.tabs[0].splitter.history_pane_width, 51,
+            "entering History must clamp the list to history_max - detail - border = 93 - 40 - 2"
+        );
+        assert!(
+            d,
+            "focusing History with an oversized list must mark the state dirty once"
+        );
+
+        // A second, no-op focus (list already within bounds) must not dirty.
+        let (s2, _i, _e, d2) = update(SqlTabMessage::Focus(SqlFocus::History), s);
+        assert_eq!(s2.tabs[0].splitter.history_pane_width, 51);
+        assert!(
+            !d2,
+            "re-entering History when the list is already legal must not dirty"
+        );
     }
 }
