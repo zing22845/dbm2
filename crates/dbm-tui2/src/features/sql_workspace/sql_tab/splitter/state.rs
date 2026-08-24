@@ -123,16 +123,19 @@ impl SqlTabSplitterState {
     /// split actually moved.
     ///
     /// The target is clamped to the layout's actual `[editor_top_min,
-    /// editor_top_max]`, so nudging past the boundary leaves the stored height
-    /// unchanged and does not trigger a redundant repaint.
+    /// editor_top_max]` intersected with the storage range `[1, 1000]`
+    /// `set_editor_top_height` clamps to, so the nudge target and the stored
+    /// value always agree (no redundant repaint at the boundary).
     pub fn nudge_editor_top_height(&mut self, plus: bool, top_focused: bool) -> bool {
         use crate::common::view::splitter::WIDTH_NUDGE_STEP;
         // `+` grows the focused pane; the top height moves opposite to a
         // bottom focus.
         let grow_top = if plus { top_focused } else { !top_focused };
         let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
+        let lo = self.editor_top_min.max(1);
+        let hi = self.editor_top_max.min(1000);
         let next = (self.editor_top_height as i16 + delta)
-            .clamp(self.editor_top_min as i16, self.editor_top_max as i16)
+            .clamp(lo as i16, hi as i16)
             as u16;
         self.set_editor_top_height(next)
     }

@@ -69,11 +69,12 @@ impl ExplorerSplitterState {
         use crate::common::view::splitter::WIDTH_NUDGE_STEP;
         let grow_top = if plus { top_focused } else { !top_focused };
         let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
-        // Clamp to the layout's actual bounds so nudging past the boundary
-        // leaves the stored height unchanged (no redundant repaint).
-        let next = (self.instances_height as i16 + delta)
-            .clamp(self.instances_min as i16, self.instances_max as i16)
-            as u16;
+        // Clamp to the layout's actual bounds intersected with the storage
+        // range `set_instances_height` clamps to, so the target and stored value
+        // always agree (no redundant repaint at the boundary).
+        let lo = self.instances_min.max(1);
+        let hi = self.instances_max.min(1000);
+        let next = (self.instances_height as i16 + delta).clamp(lo as i16, hi as i16) as u16;
         self.set_instances_height(next)
     }
 }
