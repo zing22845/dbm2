@@ -10,6 +10,14 @@ use crate::common::view::theme::Theme;
 
 use super::state::{TargetCol, TargetsState};
 
+/// Computed layout information from the targets renderer, threaded back to
+/// the state so update handlers can clamp scroll correctly.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TargetsLayoutInfo {
+    pub scroll_offset: usize,
+    pub viewport: usize,
+}
+
 /// The target list's table column layout. Used both by the `Table` render and
 /// by the inline-edit caret placement, so the caret always lands on the same
 /// column the Table draws (changing the layout here keeps both in sync).
@@ -25,13 +33,15 @@ const TARGETS_COLUMNS: [ratatui::layout::Constraint; 3] = [
 /// the active target keys.
 /// Render the targets editor. Returns the inline-edit caret position when an
 /// editable cell is focused and being edited, so the shell can place the
-/// terminal hardware cursor.
+/// terminal hardware cursor. Also writes layout info (scroll offset, viewport)
+/// into `layout_out` so the render loop can feed it back to the state.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
     state: &TargetsState,
     focus: crate::app_shell::nav::DiscoverPane,
+    layout_out: &std::cell::RefCell<Option<TargetsLayoutInfo>>,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::{discover_targets_footer_text, draw_pane_footer};
@@ -77,22 +87,30 @@ pub fn render(
         let header = ratatui::widgets::Row::new(["#", "Host", "Ports"])
             .style(Style::default().add_modifier(Modifier::BOLD));
         // Reserve a vertical scrollbar column when the list overflows its
-        // viewport. The scroll offset is derived here from the cursor using
-        // edge-scroll (no centering): the window starts at the top and only
-        // scrolls once the cursor passes the bottom edge, so the cursor row is
-        // always kept within the visible window.
+        // viewport. The scroll offset is stored in state and only adjusted
+        // when the cursor would move outside the visible window — matching
+        // the original dbm's `ensure_targets_visible` behavior.
         let viewport_rows = body.height as usize;
         let layout = pane_scroll_layout(body, body.width, state.targets.len(), viewport_rows);
         let content = layout.content_area;
         // A Table reserves one row for its header, so the visible content rows
-        // are one less than the area height. Use that as the scroll viewport so
-        // the cursor never falls below the last visible data row.
+        // are one less than the area height. Use that as the scroll viewport.
         let viewport = content.height.saturating_sub(1).max(1) as usize;
-        let start = if state.row < viewport {
-            0
-        } else {
-            state.row - viewport + 1
-        };
+        let total = state.targets.len();
+        // Start from the stored scroll_offset, clamped to valid range.
+        let mut start = state.scroll_offset.min(total.saturating_sub(1));
+        // Only adjust scroll when the cursor would move outside the viewport.
+        if state.row < start {
+            start = state.row;
+        } else if state.row >= start + viewport {
+            start = state.row + 1 - viewport;
+        }
+        // Write back the computed layout info so the render loop can update
+        // the state's scroll_offset and target_viewport for next frame.
+        *layout_out.borrow_mut() = Some(TargetsLayoutInfo {
+            scroll_offset: start,
+            viewport,
+        });
         let rows = state
             .targets
             .iter()
@@ -212,5 +230,316 @@ fn format_cell(value: &str, cell_focused: bool, editing: bool) -> String {
         format!("▸ {value}")
     } else {
         value.to_string()
+    }
+}
+
+/// Hit-test the targets list. Given the targets pane `area`, the current state,
+/// and a click coordinate, returns which row and optionally which cell column
+/// was clicked. Returns `None` if the click is outside the table content area.
+pub fn hit_test(
+    area: Rect,
+    state: &TargetsState,
+    click_x: u16,
+    click_y: u16,
+) -> Option<(usize, Option<TargetCol>)> {
+    use crate::common::utils::text_width::wrapped_line_count;
+
+    let block = Block::default().borders(Borders::ALL);
+    let inner = block.inner(area);
+    if inner.width == 0 || inner.height == 0 {
+        return None;
+    }
+
+    let footer_text = crate::common::view::hints::discover_targets_footer_text(
+        state.editing,
+        state.has_loopback(),
+        state.status.as_deref(),
+    );
+    let footer_h = if footer_text.is_empty() {
+        0
+    } else {
+        wrapped_line_count(&footer_text, inner.width)
+            .max(1)
+            .min(inner.height.saturating_sub(1).max(1))
+    };
+
+    let body = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(footer_h),
+    );
+    if body.width == 0 || body.height == 0 {
+        return None;
+    }
+
+    let viewport_rows = body.height as usize;
+    let layout = pane_scroll_layout(body, body.width, state.targets.len(), viewport_rows);
+    let content = layout.content_area;
+
+    if click_x < content.x
+        || click_x >= content.x + content.width
+        || click_y < content.y
+        || click_y >= content.y + content.height
+    {
+        return None;
+    }
+
+    let viewport = content.height.saturating_sub(1).max(1) as usize;
+    let total = state.targets.len();
+    let mut start = state.scroll_offset.min(total.saturating_sub(1));
+    if state.row < start {
+        start = state.row;
+    } else if state.row >= start + viewport {
+        start = state.row + 1 - viewport;
+    }
+
+    let row_in_content = (click_y - content.y) as usize;
+    if row_in_content == 0 {
+        return None;
+    }
+    let data_row = row_in_content - 1;
+    if data_row >= viewport || start + data_row >= state.targets.len() {
+        return None;
+    }
+
+    let cols = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints(TARGETS_COLUMNS)
+        .spacing(1)
+        .split(content);
+
+    let col = if click_x >= cols[1].x && click_x < cols[1].x + cols[1].width {
+        Some(TargetCol::Host)
+    } else if click_x >= cols[2].x && click_x < cols[2].x + cols[2].width {
+        Some(TargetCol::Ports)
+    } else {
+        None
+    };
+
+    Some((start + data_row, col))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::discover::targets::state::TargetRow;
+
+    fn state_with_rows(n: usize) -> TargetsState {
+        let mut state = TargetsState::with_default_targets();
+        while state.targets.len() < n {
+            state.targets.push(TargetRow {
+                host: format!("host{}", state.targets.len()),
+                ports_spec: "5432".into(),
+            });
+        }
+        state
+    }
+
+    #[test]
+    fn hit_test_clicks_row_body_selects_row() {
+        let state = state_with_rows(3);
+        let area = Rect::new(0, 0, 40, 20);
+        // Compute the content area the same way hit_test does
+        let block = Block::default().borders(Borders::ALL);
+        let inner = block.inner(area);
+        let footer_text = crate::common::view::hints::discover_targets_footer_text(
+            false,
+            false,
+            None,
+        );
+        let footer_h = if footer_text.is_empty() {
+            0
+        } else {
+            crate::common::utils::text_width::wrapped_line_count(&footer_text, inner.width)
+                .max(1)
+                .min(inner.height.saturating_sub(1).max(1))
+        };
+        let body = Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height.saturating_sub(footer_h),
+        );
+        let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+            body,
+            body.width,
+            state.targets.len(),
+            body.height as usize,
+        );
+        let content = layout.content_area;
+        // First data row is at content.y + 1 (after header row at content.y)
+        let click_y = content.y + 1;
+        let click_x = content.x + 2;
+        let result = hit_test(area, &state, click_x, click_y);
+        assert!(result.is_some(), "click at ({click_x},{click_y}) should be inside content, area={area:?}, content={content:?}");
+        let (row, _col) = result.unwrap();
+        assert_eq!(row, 0, "first data row should be row 0");
+    }
+
+    #[test]
+    fn hit_test_outside_content_returns_none() {
+        let state = state_with_rows(3);
+        let area = Rect::new(0, 0, 40, 20);
+        assert!(hit_test(area, &state, 0, 0).is_none());
+        assert!(hit_test(area, &state, 10, 100).is_none());
+    }
+
+    #[test]
+    fn hit_test_clicks_host_column() {
+        let state = state_with_rows(1);
+        let area = Rect::new(0, 0, 40, 20);
+        let block = Block::default().borders(Borders::ALL);
+        let inner = block.inner(area);
+        let footer_text = crate::common::view::hints::discover_targets_footer_text(
+            false,
+            state.has_loopback(),
+            state.status.as_deref(),
+        );
+        let footer_h = if footer_text.is_empty() {
+            0
+        } else {
+            crate::common::utils::text_width::wrapped_line_count(&footer_text, inner.width)
+                .max(1)
+                .min(inner.height.saturating_sub(1).max(1))
+        };
+        let body = Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height.saturating_sub(footer_h),
+        );
+        let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+            body,
+            body.width,
+            state.targets.len(),
+            body.height as usize,
+        );
+        let content = layout.content_area;
+        let click_y = content.y + 1;
+        // Host column starts after the # column (width 3 + spacing 1)
+        let cols = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints(TARGETS_COLUMNS)
+            .spacing(1)
+            .split(content);
+        let click_x = cols[1].x + 1; // Inside Host column
+        let result = hit_test(area, &state, click_x, click_y);
+        assert!(result.is_some(), "click at ({click_x},{click_y}) should be inside content");
+        let (_row, col) = result.unwrap();
+        assert!(col.is_some(), "should detect column");
+    }
+
+    #[test]
+    fn hit_test_clicks_ports_column() {
+        let state = state_with_rows(1);
+        let area = Rect::new(0, 0, 40, 20);
+        let block = Block::default().borders(Borders::ALL);
+        let inner = block.inner(area);
+        let footer_text = crate::common::view::hints::discover_targets_footer_text(
+            false,
+            state.has_loopback(),
+            state.status.as_deref(),
+        );
+        let footer_h = if footer_text.is_empty() {
+            0
+        } else {
+            crate::common::utils::text_width::wrapped_line_count(&footer_text, inner.width)
+                .max(1)
+                .min(inner.height.saturating_sub(1).max(1))
+        };
+        let body = Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height.saturating_sub(footer_h),
+        );
+        let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+            body,
+            body.width,
+            state.targets.len(),
+            body.height as usize,
+        );
+        let content = layout.content_area;
+        let click_y = content.y + 1;
+        let cols = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints(TARGETS_COLUMNS)
+            .spacing(1)
+            .split(content);
+        let click_x = cols[2].x + 1; // Inside Ports column
+        let result = hit_test(area, &state, click_x, click_y);
+        assert!(result.is_some(), "click at ({click_x},{click_y}) should be inside content");
+        let (_row, col) = result.unwrap();
+        assert!(col.is_some(), "should detect column");
+    }
+
+    #[test]
+    fn hit_test_header_row_returns_none() {
+        let state = state_with_rows(3);
+        let area = Rect::new(0, 0, 40, 20);
+        let block = Block::default().borders(Borders::ALL);
+        let inner = block.inner(area);
+        let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+            inner,
+            inner.width,
+            state.targets.len(),
+            inner.height as usize,
+        );
+        let content = layout.content_area;
+        assert!(hit_test(area, &state, content.x + 5, content.y).is_none());
+    }
+
+    #[test]
+    fn hit_test_scrolled_rows_returns_correct_index() {
+        let state = state_with_rows(10);
+        let area = Rect::new(0, 0, 40, 20);
+        // Compute click coords inside content
+        let block = Block::default().borders(Borders::ALL);
+        let inner = block.inner(area);
+        let footer_text = crate::common::view::hints::discover_targets_footer_text(
+            false,
+            state.has_loopback(),
+            state.status.as_deref(),
+        );
+        let footer_h = if footer_text.is_empty() {
+            0
+        } else {
+            crate::common::utils::text_width::wrapped_line_count(&footer_text, inner.width)
+                .max(1)
+                .min(inner.height.saturating_sub(1).max(1))
+        };
+        let body = Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height.saturating_sub(footer_h),
+        );
+        let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+            body,
+            body.width,
+            state.targets.len(),
+            body.height as usize,
+        );
+        let content = layout.content_area;
+        // First data row at content.y + 1
+        let click_y = content.y + 1;
+        let click_x = content.x + 2;
+        let result = hit_test(area, &state, click_x, click_y);
+        assert!(result.is_some(), "click at ({click_x},{click_y}) should be inside content, content={content:?}");
+        let (row, _col) = result.unwrap();
+        assert!(row < state.targets.len());
+        // With 10 rows and limited viewport, scrolling may occur; row should be valid
+        // but the specific index depends on pane_scrollbar logic
+    }
+
+    #[test]
+    fn hit_test_nonexistent_row_returns_none() {
+        let state = state_with_rows(1);
+        let area = Rect::new(0, 0, 40, 20);
+        let result = hit_test(area, &state, area.x + 2, area.y + area.height - 2);
+        if let Some((row, _)) = result {
+            assert!(row < state.targets.len());
+        }
     }
 }

@@ -209,13 +209,22 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             // the draw closure (which returns `()`), then place the terminal
             // hardware cursor accordingly (edtui hides its own in-buffer caret).
             let editor_cursor = std::cell::RefCell::new(None);
+            let targets_layout = std::cell::RefCell::new(None);
             tracing::debug!("render: begin terminal.draw");
             terminal.draw(|frame| {
-                let c = render(frame, &state);
+                let (c, t) = render(frame, &state);
                 *editor_cursor.borrow_mut() = c;
+                *targets_layout.borrow_mut() = t;
             })?;
             tracing::debug!("render: terminal.draw done");
             crate::common::editor::apply_hardware_cursor(editor_cursor.into_inner())?;
+            // Feed back the computed targets layout (scroll offset, viewport)
+            // to the state so update handlers can clamp scroll correctly.
+            if let Some(info) = targets_layout.into_inner() {
+                let targets = &mut state.discover.targets;
+                targets.scroll_offset = info.scroll_offset;
+                targets.target_viewport = info.viewport;
+            }
             let changed_cells = terminal.backend_mut().last_changed_cells();
             if real_redraw {
                 // Debug assertion (non-fatal): a real redraw (one asked for by
@@ -661,6 +670,83 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 tracing::debug!(to = ?next, "mouse click switched discover sub-pane");
                             }
 
+                            // Inside the discover popup's targets pane: row/cell
+                            // selection on single click, begin-edit on double
+                            // click (matching original dbm behavior).
+                            if let Pane::Discover(sub) = state.focus
+                                && !state.discover.close_confirm
+                                && !discover_split_drag
+                                && matches!(
+                                    sub,
+                                    crate::app_shell::nav::DiscoverPane::Targets
+                                )
+                                && let Some(workspace) =
+                                    workspace_rect_for_hit(size, body_top, body_h, &state)
+                                && let discover_popup =
+                                    crate::common::view::modal::popup_rect(workspace, 75, 75)
+                                && let body = crate::features::discover::view::discover_body_area(
+                                    discover_popup,
+                                    &state.discover,
+                                )
+                                && !body.is_empty()
+                                && let layout = crate::features::discover::splitter::view::discover_body_layout(
+                                    body,
+                                    state.discover.splitter.targets_height,
+                                )
+                                && layout.targets.contains(point)
+                            {
+                                use crate::features::discover::targets::{
+                                    msg::{TargetsMessage, TargetsMsg},
+                                    view,
+                                };
+                                if let Some((row, col)) =
+                                    view::hit_test(layout.targets, &state.discover.targets, mouse.column, mouse.row)
+                                {
+                                    let msg = if is_double_click {
+                                        if let Some(col) = col {
+                                            AppMsg::Discover(
+                                                crate::features::discover::msg::DiscoverMsg::Message(
+                                                    crate::features::discover::msg::DiscoverMessage::Targets(
+                                                        TargetsMsg::Message(TargetsMessage::BeginEditCell { row, col }),
+                                                    ),
+                                                ),
+                                            )
+                                        } else {
+                                            AppMsg::Discover(
+                                                crate::features::discover::msg::DiscoverMsg::Message(
+                                                    crate::features::discover::msg::DiscoverMessage::Targets(
+                                                        TargetsMsg::Message(TargetsMessage::SelectRow { row }),
+                                                    ),
+                                                ),
+                                            )
+                                        }
+                                    } else if let Some(col) = col {
+                                        AppMsg::Discover(
+                                            crate::features::discover::msg::DiscoverMsg::Message(
+                                                crate::features::discover::msg::DiscoverMessage::Targets(
+                                                    TargetsMsg::Message(TargetsMessage::SelectCell { row, col }),
+                                                ),
+                                            ),
+                                        )
+                                    } else {
+                                        AppMsg::Discover(
+                                            crate::features::discover::msg::DiscoverMsg::Message(
+                                                crate::features::discover::msg::DiscoverMessage::Targets(
+                                                    TargetsMsg::Message(TargetsMessage::SelectRow { row }),
+                                                ),
+                                            ),
+                                        )
+                                    };
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
                             // Left-click on the header `Discover` button activates
                             // it, in addition to moving focus to the header.
                             let header_area = Rect::new(0, 0, size.width, 3);
@@ -949,6 +1035,63 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             let size = terminal.size()?;
                             if update_splitter_hover(&mut state, mouse.column, mouse.row, size) {
                                 dirty = true;
+                            }
+                        }
+                        // Scroll wheel: route to the discover targets pane
+                        // when the click position is inside it, matching the
+                        // original dbm's scroll behavior.
+                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                            if matches!(state.focus, Pane::Discover(crate::app_shell::nav::DiscoverPane::Targets))
+                                && !state.discover.close_confirm =>
+                        {
+                            let size = terminal.size()?;
+                            let footer_h =
+                                footer_view::footer_height(&state.footer, size.width);
+                            let body_top = 3u16;
+                            let body_h =
+                                size.height.saturating_sub(body_top).saturating_sub(footer_h);
+                            if let Some(workspace) =
+                                workspace_rect_for_hit(size, body_top, body_h, &state)
+                                && let discover_popup =
+                                    crate::common::view::modal::popup_rect(workspace, 75, 75)
+                                && let body = crate::features::discover::view::discover_body_area(
+                                    discover_popup,
+                                    &state.discover,
+                                )
+                                && !body.is_empty()
+                                && let layout = crate::features::discover::splitter::view::discover_body_layout(
+                                    body,
+                                    state.discover.splitter.targets_height,
+                                )
+                                && layout.targets.contains(point)
+                            {
+                                use crate::features::discover::targets::msg::{
+                                    TargetsMessage, TargetsMsg,
+                                };
+                                let msg = match mouse.kind {
+                                    MouseEventKind::ScrollUp => AppMsg::Discover(
+                                        crate::features::discover::msg::DiscoverMsg::Message(
+                                            crate::features::discover::msg::DiscoverMessage::Targets(
+                                                TargetsMsg::Message(TargetsMessage::MoveUp),
+                                            ),
+                                        ),
+                                    ),
+                                    MouseEventKind::ScrollDown => AppMsg::Discover(
+                                        crate::features::discover::msg::DiscoverMsg::Message(
+                                            crate::features::discover::msg::DiscoverMessage::Targets(
+                                                TargetsMsg::Message(TargetsMessage::MoveDown),
+                                            ),
+                                        ),
+                                    ),
+                                    _ => unreachable!(),
+                                };
+                                let result = process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    msg,
+                                    &mut state,
+                                );
+                                dirty |= result.dirty;
                             }
                         }
                         _ => {

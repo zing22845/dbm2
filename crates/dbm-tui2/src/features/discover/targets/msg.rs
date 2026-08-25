@@ -40,6 +40,12 @@ pub enum TargetsMessage {
     /// Programmatically commit a cell value (used by the shell for validation
     /// feedback).
     CommitCell { row: usize, col: TargetCol, value: String },
+    /// Select a specific row (mouse click on a row).
+    SelectRow { row: usize },
+    /// Select a specific cell (mouse click on a cell).
+    SelectCell { row: usize, col: TargetCol },
+    /// Begin edit on a specific cell (double-click on a cell).
+    BeginEditCell { row: usize, col: TargetCol },
 }
 
 /// Feature message envelope (central-router compatible).

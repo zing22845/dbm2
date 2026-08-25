@@ -26,12 +26,20 @@ pub fn update(
         TargetsMessage::MoveUp => {
             let before = state.row;
             state.row = state.row.saturating_sub(1);
-            state.row != before
+            let changed = state.row != before;
+            if changed {
+                state.ensure_row_visible(state.row);
+            }
+            changed
         }
         TargetsMessage::MoveDown => {
             let before = state.row;
             state.row = (state.row + 1).min(state.targets.len().saturating_sub(1));
-            state.row != before
+            let changed = state.row != before;
+            if changed {
+                state.ensure_row_visible(state.row);
+            }
+            changed
         }
         TargetsMessage::MoveColHost => {
             let changed = state.col != TargetCol::Host;
@@ -59,6 +67,8 @@ pub fn update(
             );
             state.row = insert_at;
             state.col = TargetCol::Host;
+            state.clamp_scroll();
+            state.ensure_row_visible(state.row);
             true
         }
         TargetsMessage::DeleteRow => {
@@ -66,6 +76,8 @@ pub fn update(
                 push_undo(&mut state);
                 state.targets.remove(state.row);
                 state.row = state.row.min(state.targets.len().saturating_sub(1));
+                state.clamp_scroll();
+                state.ensure_row_visible(state.row);
                 true
             } else {
                 false
@@ -147,11 +159,15 @@ pub fn update(
             // newly shown (holding `u` must not repaint every repeat).
             let before = state.status.clone();
             let dirty = undo_targets(&mut state);
+            state.clamp_scroll();
+            state.ensure_row_visible(state.row);
             dirty || state.status != before
         }
         TargetsMessage::Redo => {
             let before = state.status.clone();
             let dirty = redo_targets(&mut state);
+            state.clamp_scroll();
+            state.ensure_row_visible(state.row);
             dirty || state.status != before
         }
         TargetsMessage::Paste(contents) => {
@@ -160,7 +176,10 @@ pub fn update(
                 state.edit_cursor += contents.len();
                 true
             } else {
-                paste_targets(&mut state, &contents)
+                let dirty = paste_targets(&mut state, &contents);
+                state.clamp_scroll();
+                state.ensure_row_visible(state.row);
+                dirty
             }
         }
         TargetsMessage::CommitCell { row, col, value } => {
@@ -173,6 +192,53 @@ pub fn update(
             } else {
                 false
             }
+        }
+        TargetsMessage::SelectRow { row } => {
+            if state.editing {
+                commit_edit(&mut state);
+            }
+            let row = row.min(state.targets.len().saturating_sub(1));
+            let changed = state.row != row;
+            state.row = row;
+            if changed {
+                state.ensure_row_visible(state.row);
+            }
+            changed
+        }
+        TargetsMessage::SelectCell { row, col } => {
+            if state.editing {
+                commit_edit(&mut state);
+            }
+            let row = row.min(state.targets.len().saturating_sub(1));
+            let changed = state.row != row || state.col != col;
+            state.row = row;
+            state.col = col;
+            if state.row != row {
+                state.ensure_row_visible(state.row);
+            }
+            changed
+        }
+        TargetsMessage::BeginEditCell { row, col } => {
+            if state.editing {
+                commit_edit(&mut state);
+            }
+            let row = row.min(state.targets.len().saturating_sub(1));
+            let mut changed = state.row != row || state.col != col;
+            state.row = row;
+            state.col = col;
+            if changed {
+                state.ensure_row_visible(state.row);
+            }
+            if let Some(r) = state.targets.get(state.row) {
+                state.editing = true;
+                state.edit_buf = match state.col {
+                    TargetCol::Host => r.host.clone(),
+                    TargetCol::Ports => r.ports_spec.clone(),
+                };
+                state.edit_cursor = state.edit_buf.len();
+                changed = true;
+            }
+            changed
         }
     };
     if !is_paste {

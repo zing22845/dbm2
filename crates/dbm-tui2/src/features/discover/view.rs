@@ -18,6 +18,7 @@ use super::splitter::view as splitter_view;
 /// where targets sits above results and they are separated by a splitter row).
 /// Each pane's border highlights when it owns focus, and the discover dialog
 /// gets a footer (pane nav + scan/close hints) across the bottom.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
@@ -26,6 +27,7 @@ pub fn render(
     focus: crate::app_shell::nav::DiscoverPane,
     splitter_hover: bool,
     splitter_drag: bool,
+    targets_layout_out: &std::cell::RefCell<Option<targets_view::TargetsLayoutInfo>>,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::{discover_engine_footer_text, discover_footer_text, draw_pane_footer};
@@ -80,7 +82,7 @@ pub fn render(
     // `splitter` child feature (targets height in rows).
     let body = super::splitter::view::discover_body_layout(chunks[1], state.splitter.targets_height);
 
-    let caret = targets_view::render(frame, theme, body.targets, &state.targets, focus);
+    let caret = targets_view::render(frame, theme, body.targets, &state.targets, focus, targets_layout_out);
     splitter_view::render(frame, &body, splitter_hover, splitter_drag);
     results_view::render(frame, theme, body.results, &state.results, focus);
 

@@ -22,8 +22,9 @@ pub enum TargetCol {
 ///
 /// Owns the editable target list plus the editing machinery (inline cell edit,
 /// undo/redo stacks) and the cursor position. Pure-functional update is in
-/// `super::update`. The list's scroll offset is derived at render time from the
-/// cursor (kept visible), not stored here.
+/// `super::update`. The list's scroll offset is stored here and adjusted
+/// after cursor movement to keep the cursor visible (matching the original
+/// dbm's `ensure_targets_visible`).
 #[derive(Debug, Clone, Default)]
 pub struct TargetsState {
     /// The editable target rows.
@@ -50,6 +51,13 @@ pub struct TargetsState {
     /// rows were added / undone). Rendered as a status line in the targets
     /// footer and cleared on the next action or a fresh edit.
     pub status: Option<String>,
+    /// First visible row index in the scroll viewport. Only changes when the
+    /// cursor would move outside the viewport — the scroll does NOT follow
+    /// every cursor movement (matching the original dbm).
+    pub scroll_offset: usize,
+    /// Last computed viewport height (data rows, excluding the header).
+    /// Updated from the render loop so update handlers can clamp scroll.
+    pub target_viewport: usize,
 }
 
 
@@ -92,5 +100,47 @@ impl TargetsState {
         self.targets
             .iter()
             .any(|r| dbm_discovery::is_loopback_host(&r.host))
+    }
+
+    /// Adjust `scroll_offset` so that `row` remains visible within the
+    /// viewport. The scroll is NOT forced to follow every cursor movement —
+    /// it only changes when `row` would fall outside `[scroll_offset,
+    /// scroll_offset + viewport)`. Mirrors the original dbm's
+    /// `ensure_targets_visible`.
+    pub fn ensure_row_visible(&mut self, row: usize) {
+        let viewport = self.target_viewport;
+        if viewport == 0 {
+            return;
+        }
+        let viewport = viewport.max(1);
+        let total = self.targets.len();
+        if total == 0 || viewport >= total {
+            self.scroll_offset = 0;
+            return;
+        }
+        let scroll = self.scroll_offset.min(total.saturating_sub(1));
+        if row < scroll {
+            self.scroll_offset = row;
+        } else if row >= scroll + viewport {
+            self.scroll_offset = row + 1 - viewport;
+        }
+        // else: row is already visible, do not change scroll
+    }
+
+    /// Clamp `scroll_offset` to a valid range after list mutations.
+    pub fn clamp_scroll(&mut self) {
+        let viewport = self.target_viewport;
+        if viewport == 0 {
+            return;
+        }
+        let viewport = viewport.max(1);
+        let total = self.targets.len();
+        if total == 0 {
+            self.scroll_offset = 0;
+            return;
+        }
+        let max_start = total.saturating_sub(viewport);
+        self.scroll_offset = self.scroll_offset.min(max_start);
+        self.row = self.row.min(total.saturating_sub(1));
     }
 }

@@ -25,7 +25,10 @@ use crate::features::app_splitter::view as splitter_view;
 pub fn render(
     frame: &mut ratatui::Frame,
     state: &AppState,
-) -> Option<crate::common::editor::EditorHardwareCursor> {
+) -> (
+    Option<crate::common::editor::EditorHardwareCursor>,
+    Option<crate::features::discover::targets::view::TargetsLayoutInfo>,
+) {
     // The footer height is dynamic: one line of hints plus the (wrapped) status
     // line when present.
     let footer_h = footer_view::footer_height(&state.footer, frame.area().width);
@@ -81,6 +84,7 @@ pub fn render(
     // region while it is focused. Its inline-edit caret is captured here and
     // takes precedence over the editor caret underneath.
     let mut discover_caret = None;
+    let targets_layout_ref = std::cell::RefCell::new(None);
     if let Pane::Discover(sub) = state.focus {
         let discover_caret_ref = std::cell::RefCell::new(None);
         crate::common::view::modal::render_modal_popup(
@@ -91,7 +95,7 @@ pub fn render(
             75,
             &state.discover,
             |f, t, a, s| {
-                let c = discover_view::render(f, t, a, s, sub, state.splitter_hover.discover_splitter, state.splitter_hover.discover_splitter_drag);
+                let c = discover_view::render(f, t, a, s, sub, state.splitter_hover.discover_splitter, state.splitter_hover.discover_splitter_drag, &targets_layout_ref);
                 *discover_caret_ref.borrow_mut() = c;
             },
         );
@@ -103,11 +107,11 @@ pub fn render(
         // Generic titled popup for the picker/confirm/commit-preview modals.
         render_popup_modal(frame, &state.theme, workspace, modal);
         // A modal overlays the workspace, so the editor caret is hidden.
-        return None;
+        return (None, targets_layout_ref.into_inner());
     }
     // The discover overlay's inline-edit caret wins over the editor caret
     // underneath when discover is focused.
-    discover_caret.or(editor_cursor)
+    (discover_caret.or(editor_cursor), targets_layout_ref.into_inner())
 }
 
 /// Render the footer row: the global footer hints on the left (flexible width)
