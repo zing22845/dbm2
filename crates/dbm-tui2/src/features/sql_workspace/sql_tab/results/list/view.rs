@@ -1,5 +1,8 @@
 //! Results list sub-module rendering: the action bar, the result table,
 //! the pagination toolbar, and the list footer.
+//!
+//! The entire list (action bar + table + pagination + footer) is wrapped
+//! in a single outer `Block` that matches the original dbm layout.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -18,7 +21,8 @@ use super::state::ListState;
 use super::super::pagination::{RESULTS_PAGINATION_BAR_HEIGHT, pagination_toolbar_line};
 use super::super::state::QueryResultData;
 
-/// Render the list sub-feature: action bar + table + pagination + footer.
+/// Render the list sub-feature: action bar + table + pagination + footer,
+/// all wrapped inside a single outer Block with borders and title.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
@@ -46,13 +50,34 @@ pub fn render(
     let total_rows = result.total_rows;
     let row_count = state.row_count();
 
+    // Outer Block: wraps action bar + table + pagination + footer, matching
+    // the original dbm results layout.
+    let title = pane_search_title_line(
+        " [R] Results",
+        &state.search,
+        true,
+        false,
+        Style::default().fg(p.muted),
+        state.row,
+        state.row_count(),
+        None,
+        None,
+        Some(Style::default().fg(if focused { p.accent } else { p.muted })),
+    );
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(p.active_border(focused));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
     let search_active = state.search.text_input_active();
     let hint = crate::common::view::hints::results_pane_footer_text(
         search_active,
         detail_open,
         "",
     );
-    let footer_h = footer_height(&hint, area.width).min(area.height.saturating_sub(4));
+    let footer_h = footer_height(&hint, inner.width).min(inner.height.saturating_sub(4));
 
     let pagination_h = if row_count > 0 {
         RESULTS_PAGINATION_BAR_HEIGHT
@@ -68,7 +93,7 @@ pub fn render(
                 Constraint::Length(pagination_h),
                 Constraint::Length(footer_h),
             ])
-            .split(area)
+            .split(inner)
     } else {
         Layout::default()
             .direction(Direction::Vertical)
@@ -76,7 +101,7 @@ pub fn render(
                 Constraint::Min(1),
                 Constraint::Length(footer_h),
             ])
-            .split(area)
+            .split(inner)
     };
 
     let content = chunks[0];
@@ -99,7 +124,7 @@ pub fn render(
     draw_action_bar(frame, list_chunks[0], &model, bar_scroll, p);
     render_table(frame, theme, list_chunks[1], state, result, focused);
 
-    // Pagination toolbar (full width, below the content area).
+    // Pagination toolbar (full width, below the content area, inside the Block).
     if let Some(pag_area) = pagination_area {
         let toolbar = pagination_toolbar_line(
             state.row_limit,
@@ -114,7 +139,7 @@ pub fn render(
         frame.render_widget(Paragraph::new(toolbar), pag_area);
     }
 
-    // Results list footer (full width).
+    // Results list footer (full width, inside the Block).
     draw_footer(frame, theme, footer_area, &hint);
 }
 
@@ -167,33 +192,17 @@ fn render_empty(frame: &mut Frame, theme: &Theme, area: Rect, focused: bool) {
     );
 }
 
+/// Render the result table body directly into `area` (no own Block/borders).
+/// The outer Block with title is created by the caller (`render`).
 fn render_table(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
     state: &ListState,
     result: &QueryResultData,
-    focused: bool,
+    _focused: bool,
 ) {
     let p = theme.palette();
-    let title = pane_search_title_line(
-        " [R] Results",
-        &state.search,
-        true,
-        false,
-        Style::default().fg(p.muted),
-        state.row,
-        state.row_count(),
-        None,
-        None,
-        Some(Style::default().fg(if focused { p.accent } else { p.muted })),
-    );
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(p.active_border(focused));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
 
     if result.columns.is_empty() {
         let affected = result.rows_affected;
@@ -206,17 +215,17 @@ fn render_table(
                 text,
                 Style::default().fg(p.fg),
             ))),
-            inner,
+            area,
         );
         return;
     }
 
     let row_count = state.row_count();
     let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
-        inner,
-        inner.width,
+        area,
+        area.width,
         row_count,
-        inner.height as usize,
+        area.height as usize,
     );
     let table_area = layout.content_area;
     let visible_rows = (table_area.height as usize).min(row_count.max(1));
