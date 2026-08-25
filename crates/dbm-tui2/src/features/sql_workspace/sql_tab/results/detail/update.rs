@@ -4,6 +4,7 @@ use super::msg::DetailMessage;
 use super::state::DetailState;
 use super::intent::DetailIntent;
 use super::effect::DetailEffect;
+use super::super::detail_edit::detail_draft_dirty;
 
 pub fn update(
     msg: DetailMessage,
@@ -20,6 +21,19 @@ pub fn update(
                 state.scroll = state.scroll.saturating_sub(delta.unsigned_abs() as usize);
             }
             state.scroll != before
+        }
+        DetailMessage::SetDraft { text } => {
+            state.draft = text.clone();
+            state.dirty = detail_draft_dirty(&text, &state.baseline);
+            true
+        }
+        DetailMessage::LoadCell { value } => {
+            state.load_cell(&value);
+            true
+        }
+        DetailMessage::ClearDraft => {
+            state.clear_draft();
+            true
         }
     };
     (state, intents, effects, dirty)

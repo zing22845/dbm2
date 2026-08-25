@@ -1,16 +1,21 @@
-//! Results detail sub-module rendering (read-only cell body preview).
+//! Results detail sub-module rendering: read-only cell body preview with
+//! optional action buttons (Save/Discard when editing) and a detail footer.
 
-use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::common::components::line_numbers;
 use crate::common::utils::text_width;
+use crate::common::view::hints::{draw_footer, footer_height};
 use crate::common::view::theme::Theme;
 
 use super::state::DetailState;
+
+/// Height of the detail action buttons row (when editing).
+const DETAIL_ACTION_BTNS_HEIGHT: u16 = 1;
 
 fn wrap_plain_line(line: &str, width: usize) -> Vec<Line<'static>> {
     if width == 0 {
@@ -67,14 +72,48 @@ fn build_detail_lines(body: &str, text_width: u16) -> Vec<Line<'static>> {
     out
 }
 
-/// Render the read-only cell body preview. `focused` toggles the border accent.
+/// Build the detail footer hint text.
+fn detail_footer_text(detail: &DetailState, edit_active: bool) -> String {
+    if edit_active {
+        if detail.dirty {
+            " Detail  | Ctrl-S:save  Ctrl-D:discard  Esc:leave"
+        } else {
+            " Detail  | [edit mode]  Esc:leave"
+        }
+    } else {
+        " Detail  | Enter:close"
+    }
+    .to_string()
+}
+
+/// Build the detail action buttons line (Save/Discard when editing).
+fn detail_action_buttons_line(detail: &DetailState, edit_active: bool) -> Option<Line<'static>> {
+    if !edit_active || !detail.dirty {
+        return None;
+    }
+    let p = String::from(" [Ctrl-S] Save   [Ctrl-D] Discard");
+    Some(Line::from(vec![
+        Span::styled(
+            p,
+            Style::default().fg(Color::Yellow),
+        ),
+    ]))
+}
+
+/// Render the detail sub-pane with its own border, optional action buttons,
+/// body area with scroll, and a detail footer.
+///
+/// `edit_active` is passed from the parent (list state) since edit mode is
+/// owned by the list sub-feature.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
-    state: &DetailState,
+    detail: &DetailState,
     body: &str,
     title: String,
+    edit_active: bool,
     focused: bool,
 ) {
     if area.width == 0 || area.height == 0 {
@@ -94,14 +133,52 @@ pub fn render(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let viewport = inner.height as usize;
-    let display_lines = build_detail_lines(body, inner.width);
-    let mut detail_state = state.clone();
-    detail_state.clamp_scroll(display_lines.len(), viewport);
+    let has_action_btns = edit_active && detail.dirty;
+    let footer_h = footer_height(&detail_footer_text(detail, edit_active), inner.width).min(3);
+
+    let chunks = if has_action_btns {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(DETAIL_ACTION_BTNS_HEIGHT),
+                Constraint::Min(0),
+                Constraint::Length(footer_h),
+            ])
+            .split(inner)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(footer_h),
+            ])
+            .split(inner)
+    };
+
+    let body_area = if has_action_btns { chunks[1] } else { chunks[0] };
+    let footer_area = if has_action_btns { chunks[2] } else { chunks[1] };
+
+    // Detail action buttons (only when editing and dirty).
+    if has_action_btns
+        && let Some(line) = detail_action_buttons_line(detail, edit_active)
+    {
+        frame.render_widget(Paragraph::new(line), chunks[0]);
+    }
+
+    // Detail body.
+    let viewport = body_area.height as usize;
+    let display_lines = build_detail_lines(body, body_area.width);
+    let lines_total = display_lines.len();
+    let mut detail_state = detail.clone();
+    detail_state.clamp_scroll(lines_total, viewport);
     let visible: Vec<Line> = display_lines
         .into_iter()
         .skip(detail_state.scroll)
         .take(viewport.max(1))
         .collect();
-    frame.render_widget(Paragraph::new(visible), inner);
+    frame.render_widget(Paragraph::new(visible), body_area);
+
+    // Detail footer.
+    let hint = detail_footer_text(detail, edit_active);
+    draw_footer(frame, theme, footer_area, &hint);
 }

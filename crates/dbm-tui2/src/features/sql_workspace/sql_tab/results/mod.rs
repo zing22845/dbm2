@@ -4,6 +4,7 @@ pub mod edit;
 pub mod edit_sql;
 pub mod effect;
 pub mod intent;
+pub mod list;
 pub mod msg;
 pub mod pagination;
 pub mod state;

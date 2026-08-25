@@ -395,8 +395,8 @@ pub fn update(
                     .schema
                     .clone()
                     .unwrap_or_else(|| "public".to_string());
-                let page = state.tabs[idx].results.page.max(1);
-                let row_limit = state.tabs[idx].results.row_limit;
+                let page = state.tabs[idx].results.list.page.max(1);
+                let row_limit = state.tabs[idx].results.list.row_limit;
                 let results_state = std::mem::take(&mut state.tabs[idx].results);
                 let (s, i, e, d) = results::update::update(
                     results::msg::ResultsMessage::RunQuery {
@@ -500,8 +500,8 @@ pub fn update(
                     .clone()
                     .unwrap_or_else(|| "public".to_string());
                 let tab_id = state.tabs[idx].session.id;
-                let page = state.tabs[idx].results.page.max(1);
-                let row_limit = state.tabs[idx].results.row_limit;
+                let page = state.tabs[idx].results.list.page.max(1);
+                let row_limit = state.tabs[idx].results.list.row_limit;
                 let results_state = std::mem::take(&mut state.tabs[idx].results);
                 let (rs, ri, re, _rd) = results::update::update(
                     results::msg::ResultsMessage::RunQuery {
@@ -623,13 +623,13 @@ pub fn update(
                 // and query text were stored by the preceding `RunQuery`.
                 if matches!(&inner, results::msg::ResultsMessage::SetResult { .. }) {
                     let rs = &state.tabs[idx].results;
-                    if !rs.last_sql.is_empty() {
+                    if !rs.list.last_sql.is_empty() {
                         intents.push(SqlTabIntent::History {
                             tab_id,
                             intent: history::intent::HistoryIntent::RecordSuccess {
-                                instance: rs.last_instance.clone(),
-                                connection: rs.last_connection.clone(),
-                                sql: rs.last_sql.clone(),
+                                instance: rs.list.last_instance.clone(),
+                                connection: rs.list.last_connection.clone(),
+                                sql: rs.list.last_sql.clone(),
                             },
                         });
                     }
@@ -1073,9 +1073,9 @@ mod tests {
         s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
         let tab_id = s.tabs[0].session.id;
         // Simulate the connection context stored by the preceding `RunQuery`.
-        s.tabs[0].results.last_instance = "inst".into();
-        s.tabs[0].results.last_connection = "c1".into();
-        s.tabs[0].results.last_sql = "SELECT 1".into();
+        s.tabs[0].results.list.last_instance = "inst".into();
+        s.tabs[0].results.list.last_connection = "c1".into();
+        s.tabs[0].results.list.last_sql = "SELECT 1".into();
 
         let (_s, intents, _e, _dirty) = update(
             SqlTabMessage::Results {
@@ -1111,7 +1111,7 @@ mod tests {
         let mut s = SqlTabState::default();
         s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
         let tab_id = s.tabs[0].session.id;
-        s.tabs[0].results.last_sql = "SELECT 1".into();
+        s.tabs[0].results.list.last_sql = "SELECT 1".into();
 
         let (_s, intents, _e, _dirty) = update(
             SqlTabMessage::Results {

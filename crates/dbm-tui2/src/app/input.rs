@@ -891,20 +891,20 @@ fn sql_results(msg: SqlResultsMessage, tab_id: usize) -> AppMsg {
 fn results_key(key: KeyEvent, tab_id: usize, results: &crate::features::sql_workspace::sql_tab::results::state::ResultsState) -> Option<AppMsg> {
     // Refresh re-runs the last query using the stored connection context.
     if key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL) {
-        let needs = !results.last_sql.is_empty()
-            && !results.last_instance.is_empty()
-            && !results.last_connection.is_empty();
+        let needs = !results.list.last_sql.is_empty()
+            && !results.list.last_instance.is_empty()
+            && !results.list.last_connection.is_empty();
         return if needs {
             Some(sql_results(
                 SqlResultsMessage::RunQuery {
-                    instance: results.last_instance.clone(),
-                    connection: results.last_connection.clone(),
-                    database: results.last_database.clone(),
-                    schema: results.last_schema.clone(),
-                    sql: results.last_sql.clone(),
-                    paginated: results.paginated,
-                    page: results.page,
-                    row_limit: results.row_limit,
+                    instance: results.list.last_instance.clone(),
+                    connection: results.list.last_connection.clone(),
+                    database: results.list.last_database.clone(),
+                    schema: results.list.last_schema.clone(),
+                    sql: results.list.last_sql.clone(),
+                    paginated: results.list.paginated,
+                    page: results.list.page,
+                    row_limit: results.list.row_limit,
                 },
                 tab_id,
             ))
@@ -920,38 +920,38 @@ fn results_key(key: KeyEvent, tab_id: usize, results: &crate::features::sql_work
             tab_id,
         )),
         // Exit edit mode / clear selection.
-        KeyCode::Esc if key.modifiers.is_empty() && results.edit.editing => {
+        KeyCode::Esc if key.modifiers.is_empty() && results.list.edit.editing => {
             Some(sql_results(SqlResultsMessage::ExitEdit, tab_id))
         }
         // Commit edits: open a preview modal with the built statements, then
         // `y`/`Enter` confirms and dispatches `Commit`.
         KeyCode::Char('s')
-            if key.modifiers.contains(KeyModifiers::CONTROL) && results.edit.editing =>
+            if key.modifiers.contains(KeyModifiers::CONTROL) && results.list.edit.editing =>
         {
-            let statements = results.build_commit_statements().ok();
+            let statements = results.list.build_commit_statements().ok();
             statements.map(|statements| {
                 AppMsg::OpenModal(super::state::ModalKind::ResultsEditCommitPreview { statements })
             })
         }
         // Roll back edits.
         KeyCode::Char('u')
-            if key.modifiers.contains(KeyModifiers::CONTROL) && results.edit.editing =>
+            if key.modifiers.contains(KeyModifiers::CONTROL) && results.list.edit.editing =>
         {
             Some(sql_results(SqlResultsMessage::Rollback, tab_id))
         }
         // Insert / duplicate / delete rows (edit mode only).
         KeyCode::Char('i')
-            if key.modifiers.contains(KeyModifiers::ALT) && results.edit.editing =>
+            if key.modifiers.contains(KeyModifiers::ALT) && results.list.edit.editing =>
         {
             Some(sql_results(SqlResultsMessage::AddRow, tab_id))
         }
         KeyCode::Char('p')
-            if key.modifiers.contains(KeyModifiers::ALT) && results.edit.editing =>
+            if key.modifiers.contains(KeyModifiers::ALT) && results.list.edit.editing =>
         {
             Some(sql_results(SqlResultsMessage::DupRow, tab_id))
         }
         KeyCode::Char('d')
-            if key.modifiers.is_empty() && results.edit.editing =>
+            if key.modifiers.is_empty() && results.list.edit.editing =>
         {
             Some(sql_results(SqlResultsMessage::DelRow, tab_id))
         }
@@ -967,7 +967,7 @@ fn results_key(key: KeyEvent, tab_id: usize, results: &crate::features::sql_work
         // Row-limit picker modal.
         KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(AppMsg::OpenModal(super::state::ModalKind::ResultsRowLimitPicker {
-                current: results.row_limit,
+                current: results.list.row_limit,
                 limits: crate::features::sql_workspace::sql_tab::results::pagination::RESULTS_ROW_LIMIT_PRESETS
                     .to_vec(),
             }))
@@ -975,11 +975,11 @@ fn results_key(key: KeyEvent, tab_id: usize, results: &crate::features::sql_work
         // Page input modal.
         KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::ALT) => {
             let total_pages = crate::features::sql_workspace::sql_tab::results::pagination::max_page(
-                results.result.as_ref().and_then(|r| r.total_rows),
-                results.row_limit,
+                results.list.result.as_ref().and_then(|r| r.total_rows),
+                results.list.row_limit,
             );
             Some(AppMsg::OpenModal(super::state::ModalKind::ResultsPageInput {
-                current_page: results.page,
+                current_page: results.list.page,
                 total_pages,
             }))
         }

@@ -14,6 +14,7 @@ use crate::common::utils::sql_editability::{
     EditabilityReason,
 };
 use super::detail::effect::DetailEffect;
+use super::list::effect::ListEffect;
 use super::edit_sql::EditTarget;
 use super::state::QueryResultData;
 
@@ -77,6 +78,7 @@ pub enum ResultsEffect {
         result_columns: Vec<String>,
     },
     Detail(DetailEffect),
+    List(ListEffect),
 }
 
 impl Effect for ResultsEffect {
@@ -233,6 +235,7 @@ impl Effect for ResultsEffect {
                     }]
                 }
                 ResultsEffect::Detail(_) => Vec::new(),
+                ResultsEffect::List(_) => Vec::new(),
             }
         })
     }

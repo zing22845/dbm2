@@ -1,22 +1,27 @@
 //! Results feature messages.
+//!
+//! Supports both direct variants (for external callers like `input.rs` and
+//! `sql_tab/update.rs`) and routed variants (`List(ListMsg)`, `Detail(DetailMsg)`)
+//! for internal sub-feature routing.
 
 use crossterm::event::KeyEvent;
 
 use super::detail::msg::DetailMsg;
 use super::edit_sql::EditTarget;
+use super::list::msg::ListMessage;
+pub use super::list::msg::ListMsg;
 use super::state::QueryResultData;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResultsMessage {
-    /// Set the latest query result (replaces any previous result).
+    // ---- Direct variants (for external callers) ----
+    /// Set the latest query result.
     SetResult { result: QueryResultData, paginated: bool },
-    /// The editability of the current result was resolved (edit target or the
-    /// reason it cannot be edited).
+    /// The editability of the current result was resolved.
     EditabilityReady { target: Option<EditTarget>, blocked: Option<String> },
-    /// Clear the current result (e.g. after a failed query).
+    /// Clear the current result.
     ClearResult,
-    /// A query failed: clear the current result and store `message` to be shown
-    /// (in red) in the results pane, mirroring the original dbm's `query_error`.
+    /// A query failed.
     QueryError { message: String },
     /// Move the cell selection by `(dr, dc)`.
     MoveSelection { dr: i32, dc: i32 },
@@ -24,9 +29,9 @@ pub enum ResultsMessage {
     BeginSearch,
     /// Forward a key while search input is active.
     SearchKey(KeyEvent),
-    /// Reset the result selection / scroll (after a new result).
+    /// Reset the result selection / scroll.
     ResetSelection,
-    /// Run a SQL query against the tab's connection (emits a RunQuery effect).
+    /// Run a SQL query.
     RunQuery {
         instance: String,
         connection: String,
@@ -39,26 +44,29 @@ pub enum ResultsMessage {
     },
     /// Enter / toggle edit mode.
     EnterEdit,
-    /// Exit edit mode (clears the session).
+    /// Exit edit mode.
     ExitEdit,
     /// Roll back all edits.
     Rollback,
     /// Add a pending insert row.
     AddRow,
-    /// Duplicate the selected row as a pending insert.
+    /// Duplicate the selected row.
     DupRow,
     /// Delete the selected row.
     DelRow,
     /// Set the detail draft text (edited cell value).
     SetDetailDraft { text: String },
-    /// Apply a new rows-per-page limit (from the row-limit picker modal).
+    /// Apply a new rows-per-page limit.
     SetRowLimit { limit: usize },
-    /// Jump to a page (from the page-input modal).
+    /// Jump to a page.
     SetPage { page: usize },
-    /// Commit the current edits against the tab's connection (emits a
-    /// transaction-executing `ResultsEffect::Commit`).
+    /// Commit the current edits.
     Commit,
-    /// Forward to the detail sub-module.
+
+    // ---- Routed variants (for internal sub-feature routing) ----
+    /// Route to the list sub-feature.
+    List(ListMsg),
+    /// Route to the detail sub-feature.
     Detail(DetailMsg),
 }
 
@@ -73,8 +81,84 @@ impl From<ResultsMessage> for ResultsMsg {
     }
 }
 
+impl From<ListMsg> for ResultsMsg {
+    fn from(m: ListMsg) -> Self {
+        ResultsMsg::Message(ResultsMessage::List(m))
+    }
+}
+
 impl From<DetailMsg> for ResultsMsg {
     fn from(m: DetailMsg) -> Self {
         ResultsMsg::Message(ResultsMessage::Detail(m))
+    }
+}
+
+impl ResultsMessage {
+    /// Convert a direct variant into its `List(ListMessage)` equivalent.
+    pub fn into_list_message(self) -> ListMessage {
+        match self {
+            ResultsMessage::SetResult { result, paginated } => {
+                ListMessage::SetResult { result, paginated }
+            }
+            ResultsMessage::EditabilityReady { target, blocked } => {
+                ListMessage::EditabilityReady { target, blocked }
+            }
+            ResultsMessage::ClearResult => ListMessage::ClearResult,
+            ResultsMessage::QueryError { message } => ListMessage::QueryError { message },
+            ResultsMessage::MoveSelection { dr, dc } => ListMessage::MoveSelection { dr, dc },
+            ResultsMessage::BeginSearch => ListMessage::BeginSearch,
+            ResultsMessage::SearchKey(key) => ListMessage::SearchKey(key),
+            ResultsMessage::ResetSelection => ListMessage::ResetSelection,
+            ResultsMessage::RunQuery {
+                instance,
+                connection,
+                database,
+                schema,
+                sql,
+                paginated,
+                page,
+                row_limit,
+            } => ListMessage::RunQuery {
+                instance,
+                connection,
+                database,
+                schema,
+                sql,
+                paginated,
+                page,
+                row_limit,
+            },
+            ResultsMessage::EnterEdit => ListMessage::EnterEdit,
+            ResultsMessage::ExitEdit => ListMessage::ExitEdit,
+            ResultsMessage::Rollback => ListMessage::Rollback,
+            ResultsMessage::AddRow => ListMessage::AddRow,
+            ResultsMessage::DupRow => ListMessage::DupRow,
+            ResultsMessage::DelRow => ListMessage::DelRow,
+            ResultsMessage::SetRowLimit { limit } => ListMessage::SetRowLimit { limit },
+            ResultsMessage::SetPage { page } => ListMessage::SetPage { page },
+            ResultsMessage::Commit => ListMessage::Commit,
+            ResultsMessage::SetDetailDraft { .. } => {
+                // This is a cross-feature message; handled separately.
+                ListMessage::ResetSelection // placeholder, should not be called
+            }
+            ResultsMessage::List(_) | ResultsMessage::Detail(_) => {
+                panic!("into_list_message called on already-routed message")
+            }
+        }
+    }
+
+    /// Whether this is a direct variant that should be routed to the list
+    /// sub-feature (most direct variants).
+    pub fn is_list_direct(&self) -> bool {
+        !matches!(
+            self,
+            ResultsMessage::Detail(_) | ResultsMessage::SetDetailDraft { .. }
+        )
+    }
+
+    /// Whether this is a direct variant that should be routed to the detail
+    /// sub-feature.
+    pub fn is_detail_direct(&self) -> bool {
+        matches!(self, ResultsMessage::SetDetailDraft { .. })
     }
 }
