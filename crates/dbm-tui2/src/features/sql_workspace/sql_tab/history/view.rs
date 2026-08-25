@@ -223,7 +223,9 @@ impl HistoryState {
     fn visible_indices_for(&self, entries: &[String]) -> Vec<usize> {
         self.search.matching_indices(entries)
     }
+}
 
+impl HistoryState {
     /// The SQL text selected by the history cursor, if any.
     fn selected_sql(&self, instance: &str, connection: &str) -> Option<String> {
         let entries = self.store.entries(instance, connection);

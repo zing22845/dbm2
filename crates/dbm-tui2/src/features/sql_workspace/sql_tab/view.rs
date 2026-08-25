@@ -35,6 +35,8 @@ pub enum SqlClickAction {
     },
     /// Click inside a picker column area (not on a row): switch the focused column.
     ContextPickerColumn(crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn),
+    /// Double-click inside the history pane: apply the selected entry to the editor.
+    HistoryApply,
 }
 
 /// Hit-test a click at `(x, y)` inside the SQL workspace's tab-bar + body
@@ -171,6 +173,13 @@ pub fn sql_workspace_click(
         editor_hit = contains(layout.editor, x, y);
         history_hit = contains(layout.history, x, y);
     }
+
+    // Double-click inside the history pane applies the selected entry to the editor
+    // (same as pressing Enter).
+    if is_double_click && history_hit {
+        return Some(SqlClickAction::HistoryApply);
+    }
+
     let focus = if editor_hit {
         SqlFocus::Editor
     } else if history_hit {
@@ -851,5 +860,100 @@ mod tests {
                 .unwrap();
         }));
         assert!(r.is_ok(), "sql_tab render hung/panicked at history_w=84 with editor text");
+    }
+
+    #[test]
+    fn double_click_history_row_returns_history_apply() {
+        use crate::features::sql_workspace::sql_tab::layout::sql_tab_layout;
+
+        let mut state = state_with_tabs(1);
+        state.active_tab = Some(0);
+        let tab = &mut state.tabs[0];
+        tab.focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
+        tab.session.instance = Some("inst".to_string());
+        tab.session.connection = Some("conn".to_string());
+        tab.session.database = Some("postgres".to_string());
+
+        tab.history.store.record_success("inst", "conn", "SELECT 1");
+        tab.history.store.record_success("inst", "conn", "SELECT 2");
+        tab.history.store.record_success("inst", "conn", "SELECT 3");
+
+        let area = ratatui::layout::Rect::new(0, 0, 80, 20);
+        let layout = sql_tab_layout(
+            area,
+            tab.splitter.editor_top_height,
+            tab.splitter.history_pane_width,
+        );
+
+        // Click inside the history pane (the widened history zone when detail
+        // is visible). Double-click should return HistoryApply.
+        let click_x = layout.history.x + 2;
+        let click_y = layout.history.y + 2;
+        let action = sql_workspace_click(&state, area, click_x, click_y, true);
+        assert!(
+            matches!(action, Some(SqlClickAction::HistoryApply)),
+            "double-click inside history pane must return HistoryApply, got {action:?}"
+        );
+    }
+
+    #[test]
+    fn single_click_history_row_focuses_pane() {
+        use crate::features::sql_workspace::sql_tab::layout::sql_tab_layout;
+
+        let mut state = state_with_tabs(1);
+        state.active_tab = Some(0);
+        let tab = &mut state.tabs[0];
+        tab.focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
+        tab.session.instance = Some("inst".to_string());
+        tab.session.connection = Some("conn".to_string());
+
+        tab.history.store.record_success("inst", "conn", "SELECT 1");
+        tab.history.store.record_success("inst", "conn", "SELECT 2");
+
+        let area = ratatui::layout::Rect::new(0, 0, 80, 20);
+        let layout = sql_tab_layout(
+            area,
+            tab.splitter.editor_top_height,
+            tab.splitter.history_pane_width,
+        );
+
+        // Single click (not double) should just focus the history pane.
+        let click_x = layout.history.x + 2;
+        let click_y = layout.history.y + 2;
+        let action = sql_workspace_click(&state, area, click_x, click_y, false);
+        assert!(
+            matches!(action, Some(SqlClickAction::FocusSubPane(SqlFocus::History))),
+            "single click on history row must focus pane, got {action:?}"
+        );
+    }
+
+    #[test]
+    fn double_click_history_row_outside_list_does_not_apply() {
+        use crate::features::sql_workspace::sql_tab::layout::sql_tab_layout;
+
+        let mut state = state_with_tabs(1);
+        state.active_tab = Some(0);
+        let tab = &mut state.tabs[0];
+        tab.focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
+        tab.session.instance = Some("inst".to_string());
+        tab.session.connection = Some("conn".to_string());
+
+        tab.history.store.record_success("inst", "conn", "SELECT 1");
+
+        let area = ratatui::layout::Rect::new(0, 0, 80, 20);
+        let layout = sql_tab_layout(
+            area,
+            tab.splitter.editor_top_height,
+            tab.splitter.history_pane_width,
+        );
+
+        // Double-click outside the history pane (in the results pane).
+        let click_x = layout.results.x + 2;
+        let click_y = layout.results.y + 2;
+        let action = sql_workspace_click(&state, area, click_x, click_y, true);
+        assert!(
+            !matches!(action, Some(SqlClickAction::HistoryApply)),
+            "double-click outside history must not return HistoryApply"
+        );
     }
 }

@@ -2004,6 +2004,18 @@ fn sql_click_msgs(
             };
             vec![picker(tab_id, ContextPickerMessage::MoveColumn(column))]
         }
+        SqlClickAction::HistoryApply => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::history::msg::{HistoryMessage, HistoryMsg};
+            vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::History {
+                    tab_id,
+                    msg: HistoryMsg::Message(HistoryMessage::Apply),
+                },
+            ))))]
+        }
     }
 }
 
