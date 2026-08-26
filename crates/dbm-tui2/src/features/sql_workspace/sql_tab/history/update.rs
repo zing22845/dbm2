@@ -4,11 +4,17 @@
 //! cursor movement, `/` search, apply (recall intent) and detail scrolling are
 //! all pure; the list selection and detail scroll are reconciled against the
 //! available history for the tab's connection.
+//!
+//! The `SqlHistoryStore` is shared at the `SqlTabState` level (per connection),
+//! so it is passed as a read-only parameter rather than stored in `HistoryState`.
+//! `RecordSuccess` is intercepted by the parent and applied directly to the
+//! shared store before routing other messages here.
 
 use crate::common::components::search::PaneSearchInput;
 
 use super::msg::HistoryMessage;
 use super::state::HistoryState;
+use super::store::SqlHistoryStore;
 use super::intent::HistoryIntent;
 use super::effect::HistoryEffect;
 use super::detail::{clamp_detail_scroll, scroll_on_selection_change};
@@ -18,9 +24,15 @@ use super::detail::{clamp_detail_scroll, scroll_on_selection_change};
 /// The returned `bool` is `dirty`: whether the rendered history list or detail
 /// changed. Cursor/detail navigation reports `false` at a boundary; `Apply`
 /// only pushes a recall intent (the editor update handles the change).
+///
+/// Note: `RecordSuccess` is handled by the parent `SqlTabState::update`
+/// because the store is shared across all tabs. Only UI-affecting messages
+/// (MoveCursor, SearchKey, Apply, ScrollDetail) are processed here.
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     msg: HistoryMessage,
     mut state: HistoryState,
+    store: &SqlHistoryStore,
     instance: &str,
     connection: &str,
     // The sql of the currently selected entry (for detail scroll reconciliation).
@@ -29,22 +41,15 @@ pub fn update(
     detail_viewport: usize,
 ) -> (HistoryState, Vec<HistoryIntent>, Vec<HistoryEffect>, bool) {
     let mut intents = Vec::new();
-    let mut effects = Vec::new();
+    let effects = Vec::new();
 
     let dirty = match msg {
-        HistoryMessage::RecordSuccess { instance, connection, sql } => {
-            state.store.record_success(&instance, &connection, &sql);
-            // Persist to the SQLite store (mirrors the original dbm). The
-            // in-memory store is already updated above; this is fire-and-forget.
-            effects.push(HistoryEffect::PersistSuccess {
-                instance,
-                connection,
-                sql,
-            });
+        HistoryMessage::RecordSuccess { .. } => {
+            // Handled by parent: store is shared at SqlTabState level.
             true
         }
         HistoryMessage::MoveCursor { delta } => {
-            move_cursor(&mut state, instance, connection, delta)
+            move_cursor(&mut state, store, instance, connection, delta)
         }
         HistoryMessage::BeginSearch => {
             state.search.reset();
@@ -52,11 +57,11 @@ pub fn update(
             true
         }
         HistoryMessage::SearchKey(key) => {
-            handle_search_key(&mut state, instance, connection, key);
+            handle_search_key(&mut state, store, instance, connection, key);
             true
         }
         HistoryMessage::Apply => {
-            if let Some(sql) = state.selected_entry(instance, connection) {
+            if let Some(sql) = state.selected_entry(store, instance, connection) {
                 intents.push(HistoryIntent::Recall { sql });
             }
             false
@@ -83,11 +88,12 @@ pub fn update(
 /// detail scroll (jump to first match when filtered).
 fn move_cursor(
     state: &mut HistoryState,
+    store: &SqlHistoryStore,
     instance: &str,
     connection: &str,
     delta: i32,
 ) -> bool {
-    let visible_len = state.visible_indices(instance, connection).len();
+    let visible_len = state.visible_indices(store, instance, connection).len();
     if visible_len == 0 {
         return false;
     }
@@ -102,7 +108,7 @@ fn move_cursor(
         state.h_scroll = 0;
     }
     // Reconcile detail scroll to the newly selected entry.
-    if let Some(sql) = state.selected_entry(instance, connection) {
+    if let Some(sql) = state.selected_entry(store, instance, connection) {
         scroll_on_selection_change(&mut state.detail, &sql, &state.search, 40, 8);
     }
     moved
@@ -111,6 +117,7 @@ fn move_cursor(
 /// Handle a search-input key (query changes, navigation, etc.).
 fn handle_search_key(
     state: &mut HistoryState,
+    store: &SqlHistoryStore,
     instance: &str,
     connection: &str,
     key: crossterm::event::KeyEvent,
@@ -129,7 +136,7 @@ fn handle_search_key(
     };
 
     if let PaneSearchInput::Navigate { forward } = action {
-        move_cursor(state, instance, connection, if forward { 1 } else { -1 });
+        move_cursor(state, store, instance, connection, if forward { 1 } else { -1 });
         return;
     }
 
@@ -138,7 +145,7 @@ fn handle_search_key(
         state.v_scroll = 0;
     }
 
-    if let Some(sql) = state.selected_entry(instance, connection) {
+    if let Some(sql) = state.selected_entry(store, instance, connection) {
         scroll_on_selection_change(&mut state.detail, &sql, &state.search, 40, 8);
     }
 }

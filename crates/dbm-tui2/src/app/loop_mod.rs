@@ -2810,13 +2810,11 @@ mod tests {
                     None,
                     None,
                 );
+                state.sql.sql_tab.history_store.record_success("inst", "c1", "SELECT * FROM users");
                 let tab = &mut state.sql.sql_tab.tabs[0];
                 tab.focus = SqlFocus::History;
                 tab.splitter.history_pane_width = history_w;
                 tab.history.splitter.detail_pane_width = detail_w;
-                tab.history
-                    .store
-                    .record_success("inst", "c1", "SELECT * FROM users");
                 // Give the editor real SQL content so it is exercised at the
                 // narrow width the widened history zone leaves it.
                 tab.editor = crate::features::sql_workspace::sql_tab::editor::state::EditorState::with_sql(

@@ -67,7 +67,7 @@ pub fn update(
                 // `history_max`) can then overflow `history_max - detail` and
                 // squeeze the *rendered* list below its stored width. Re-clamp
                 // so storage and rendered geometry stay identical.
-                changed |= clamp_list_for_history_detail(tab);
+                changed |= clamp_list_for_history_detail(tab, &state.history_store);
                 dirty = changed;
             }
         }
@@ -235,7 +235,7 @@ pub fn update(
                 let tab = &state.tabs[idx];
                 let (instance, connection) = session_key(&tab.session);
                 let detail_visible = tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History
-                    && !tab.history.store.entries(&instance, &connection).is_empty();
+                    && !state.history_store.entries(&instance, &connection).is_empty();
                 let list_w = if detail_visible {
                     // `width` is the whole zone (A to the right edge), which
                     // holds list + detail + splitter + the History border. The
@@ -282,13 +282,9 @@ pub fn update(
                 warn_tab_missing(tab_id);
             }
         }
-        SqlTabMessage::SetHistoryStore { tab_id, store } => {
-            if let Some(idx) = state.index_of(tab_id) {
-                state.tabs[idx].history.store = store;
-                dirty = true;
-            } else {
-                warn_tab_missing(tab_id);
-            }
+        SqlTabMessage::SetHistoryStore { tab_id: _, store } => {
+            state.history_store = store;
+            dirty = true;
         }
         SqlTabMessage::SetHistoryDetailWidth { tab_id, width } => {
             if let Some(idx) = state.index_of(tab_id) {
@@ -309,10 +305,7 @@ pub fn update(
                 let detail_visible =
                     state.tabs[idx].focus
                         == crate::features::sql_workspace::sql_tab::state::SqlFocus::History
-                    && !state.tabs[idx]
-                        .history
-                        .store
-                        .entries(&instance, &connection).is_empty();
+                    && !state.history_store.entries(&instance, &connection).is_empty();
                 if detail_visible {
                     let tab = &state.tabs[idx];
                     let hi = tab
@@ -373,10 +366,10 @@ pub fn update(
             // to the History pane so the recall list is interactive.
             if let Some(idx) = state.index_of(tab_id) {
                 let (instance, connection) = session_key(&state.tabs[idx].session);
-                state.tabs[idx].history.pin_most_recent(&instance, &connection);
+                state.tabs[idx].history.pin_most_recent(&state.history_store, &instance, &connection);
                 state.tabs[idx].focus = SqlFocus::History;
                 dirty = true;
-                dirty |= clamp_list_for_history_detail(&mut state.tabs[idx]);
+                dirty |= clamp_list_for_history_detail(&mut state.tabs[idx], &state.history_store);
             } else {
                 warn_tab_missing(tab_id);
             }
@@ -654,27 +647,59 @@ pub fn update(
             let history::msg::HistoryMsg::Message(inner) = msg;
             if let Some(idx) = state.index_of(tab_id) {
                 let (instance, connection) = session_key(&state.tabs[idx].session);
-                let history_state = std::mem::take(&mut state.tabs[idx].history);
-                let selected_sql = history_state.selected_entry(&instance, &connection);
-                let (s, i, e, d) = history::update::update(
-                    inner,
-                    history_state,
-                    &instance,
-                    &connection,
-                    selected_sql,
-                    super::history::detail::detail_text_width(40),
-                    8,
-                );
-                state.tabs[idx].history = s;
-                dirty = d;
-                intents.extend(
-                    i.into_iter()
-                        .map(|intent| SqlTabIntent::History { tab_id, intent }),
-                );
-                effects.extend(
-                    e.into_iter()
-                        .map(|effect| SqlTabEffect::History { tab_id, effect }),
-                );
+
+                // Intercept RecordSuccess at parent level: update the shared
+                // history store (per connection, shared across all tabs) and
+                // emit the persist effect.
+                if let history::msg::HistoryMessage::RecordSuccess { ref instance, ref connection, ref sql } = inner {
+                    state.history_store.record_success(instance, connection, sql);
+                    effects.push(SqlTabEffect::History {
+                        tab_id,
+                        effect: history::effect::HistoryEffect::PersistSuccess {
+                            instance: instance.clone(),
+                            connection: connection.clone(),
+                            sql: sql.clone(),
+                        },
+                    });
+                    // The current tab's cursor/detail may need updating too.
+                    let history_state = std::mem::take(&mut state.tabs[idx].history);
+                    let selected_sql = history_state.selected_entry(&state.history_store, instance.as_str(), connection.as_str());
+                    let (s, _i, _e, _d) = history::update::update(
+                        history::msg::HistoryMessage::RecordSuccess { instance: instance.clone(), connection: connection.clone(), sql: sql.clone() },
+                        history_state,
+                        &state.history_store,
+                        instance.as_str(),
+                        connection.as_str(),
+                        selected_sql,
+                        super::history::detail::detail_text_width(40),
+                        8,
+                    );
+                    state.tabs[idx].history = s;
+                    dirty = true;
+                } else {
+                    let history_state = std::mem::take(&mut state.tabs[idx].history);
+                    let selected_sql = history_state.selected_entry(&state.history_store, instance.as_str(), connection.as_str());
+                    let (s, i, e, d) = history::update::update(
+                        inner,
+                        history_state,
+                        &state.history_store,
+                        instance.as_str(),
+                        connection.as_str(),
+                        selected_sql,
+                        super::history::detail::detail_text_width(40),
+                        8,
+                    );
+                    state.tabs[idx].history = s;
+                    dirty = d;
+                    intents.extend(
+                        i.into_iter()
+                            .map(|intent| SqlTabIntent::History { tab_id, intent }),
+                    );
+                    effects.extend(
+                        e.into_iter()
+                            .map(|effect| SqlTabEffect::History { tab_id, effect }),
+                    );
+                }
             } else {
                 warn_tab_missing(tab_id);
             }
@@ -703,14 +728,13 @@ fn session_key(session: &super::session::TabSession) -> (String, String) {
 /// Re-clamp the stored list to `history_max - detail` so storage and rendered
 /// geometry stay identical (no redundant repaints at the drag limit). Returns
 /// `true` when the stored width changed.
-fn clamp_list_for_history_detail(tab: &mut super::state::SqlTab) -> bool {
+fn clamp_list_for_history_detail(tab: &mut super::state::SqlTab, store: &history::store::SqlHistoryStore) -> bool {
     use crate::features::sql_workspace::sql_tab::splitter::state::{
         MAX_HISTORY_WIDTH, MIN_HISTORY_WIDTH,
     };
     let (instance, connection) = session_key(&tab.session);
     if tab.focus != crate::features::sql_workspace::sql_tab::state::SqlFocus::History
-        || tab.history
-            .store
+        || store
             .entries(&instance, &connection)
             .is_empty()
     {
@@ -1139,9 +1163,7 @@ mod tests {
         s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
         let tab_id = s.tabs[0].session.id;
         // Seed history so there is an entry to pin.
-        s.tabs[0]
-            .history
-            .store
+        s.history_store
             .record_success("inst", "c1", "SELECT 1");
 
         let (s, _i, _e, _d) = update(SqlTabMessage::EnterHistoryRecall { tab_id }, s);
@@ -1172,9 +1194,7 @@ mod tests {
         s.tabs[0].history.splitter.detail_pane_width = 40;
         s.tabs[0].splitter.history_pane_width = 24;
         s.tabs[0].splitter.history_max = 200; // so the drag width isn't clamped
-        s.tabs[0]
-            .history
-            .store
+        s.history_store
             .record_success("inst", "c1", "SELECT 1");
 
         // zone = 100, detail = 40, splitter = 1, border = 2
@@ -1209,9 +1229,7 @@ mod tests {
         // Simulate the layout's `history_max` for a 120-wide body:
         // track - MIN_SQL_PANE_WIDTH - 1 = 120 - 20 - 1 = 99.
         s.tabs[0].splitter.history_max = 99;
-        s.tabs[0]
-            .history
-            .store
+        s.history_store
             .record_success("inst", "c1", "SELECT 1");
 
         // A drag far past the zone limit: the zone max is 120 - 20 = 100, so
@@ -1253,9 +1271,7 @@ mod tests {
         s.tabs[0].history.splitter.detail_pane_width = 40;
         s.tabs[0].splitter.history_max = 99; // 120-wide body: 120 - 20 - 1
         s.tabs[0].splitter.history_pane_width = 57; // A already at the limit (99 - 40 - 2 border)
-        s.tabs[0]
-            .history
-            .store
+        s.history_store
             .record_success("inst", "c1", "SELECT 1");
 
         // Drag B to grow the detail to its max (72).
@@ -1316,9 +1332,7 @@ mod tests {
         s.tabs[0].splitter.history_pane_width = 93;
         s.tabs[0].splitter.history_max = 93; // 114-wide body: 114 - 20 - 1
         s.tabs[0].history.splitter.detail_pane_width = 40;
-        s.tabs[0]
-            .history
-            .store
+        s.history_store
             .record_success("inst", "c1", "SELECT 1");
 
         // Enter History -> the detail pane shows, so the list must give way.

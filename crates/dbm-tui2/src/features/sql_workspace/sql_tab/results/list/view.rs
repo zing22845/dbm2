@@ -5,7 +5,7 @@
 //! in a single outer `Block` that matches the original dbm layout.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -14,8 +14,13 @@ use crate::common::components::search::pane_search_title_line;
 use crate::common::view::action_bar::{
     RESULTS_ACTION_BAR_HEIGHT, ResultsToolbarModel, action_bar_width, draw_action_bar,
 };
+use crate::common::view::format::{
+    RESULTS_HEADER_HEIGHT, RESULTS_ROW_CONTENT_HEIGHT, RESULTS_ROW_HEIGHT,
+    column_type_label, results_col_text_view,
+};
 use crate::common::view::hints::{draw_footer, footer_height};
 use crate::common::view::theme::Theme;
+use crate::common::view::pane_scrollbar::pane_scroll_layout;
 
 use super::state::ListState;
 use super::super::pagination::{RESULTS_PAGINATION_BAR_HEIGHT, pagination_toolbar_line};
@@ -194,6 +199,11 @@ fn render_empty(frame: &mut Frame, theme: &Theme, area: Rect, focused: bool) {
 
 /// Render the result table body directly into `area` (no own Block/borders).
 /// The outer Block with title is created by the caller (`render`).
+///
+/// Layout (matching original dbm):
+///   Header: 2 lines (name + type label) + 1 separator = 3 rows total
+///   Each data row: 1 content line + 1 separator = 2 rows total
+///   Column borders: │ character between columns
 fn render_table(
     frame: &mut Frame,
     theme: &Theme,
@@ -221,74 +231,208 @@ fn render_table(
     }
 
     let row_count = state.row_count();
-    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
-        area,
-        area.width,
-        row_count,
-        area.height as usize,
-    );
+    let col_widths = &state.col_widths;
+    let num_cols = result.columns.len();
+    let h_scroll = state.h_scroll as u16;
+
+    // Vertical scrollbar layout.
+    let layout = pane_scroll_layout(area, area.width, row_count, area.height as usize);
     let table_area = layout.content_area;
-    let visible_rows = (table_area.height as usize).min(row_count.max(1));
-    let start_row = state.row.saturating_sub(visible_rows.saturating_sub(1) / 2);
 
-    // Header.
-    let header: Vec<Span> = result
-        .columns
-        .iter()
-        .enumerate()
-        .map(|(i, meta)| {
-            let name = meta.name.clone();
-            let style = if i == state.col {
-                Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(p.muted)
+    if table_area.height < RESULTS_HEADER_HEIGHT {
+        return;
+    }
+
+    // Determine how many data rows are visible.
+    let visible_data_rows = if row_count > 0 {
+        usize::from(table_area.height.saturating_sub(RESULTS_HEADER_HEIGHT) / RESULTS_ROW_HEIGHT)
+    } else {
+        0
+    };
+
+    // Scroll to keep selected row visible if it falls outside the viewport.
+    let max_scroll = row_count.saturating_sub(visible_data_rows);
+    let mut v_scroll = state.row;
+    if v_scroll > max_scroll {
+        v_scroll = max_scroll;
+    }
+
+    // Row separator style (subtle grid line).
+    let grid_style = Style::default().fg(p.muted);
+
+    // ---- HEADER (3 lines) ----
+    // Line 0: column names (bold)
+    // Line 1: type labels (green)
+    // Line 2: separator
+    for col in 0..num_cols {
+        let Some(meta) = result.columns.get(col) else { break };
+        let Some(tv) = results_col_text_view(col, col_widths, table_area.width, h_scroll) else {
+            continue;
+        };
+        if tv.text_w == 0 {
+            continue;
+        }
+
+        // Column name (bold).
+        let name_style = if col == state.col {
+            Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(p.fg).add_modifier(Modifier::BOLD)
+        };
+        let name = crate::common::view::format::truncate_cell_display_from(
+            &meta.name,
+            tv.table_text_skip,
+            tv.text_w,
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(name, name_style))),
+            Rect::new(table_area.x + tv.table_text_skip, table_area.y, tv.text_w, 1),
+        );
+
+        // Type label (green).
+        let type_label = column_type_label(meta);
+        let type_text = crate::common::view::format::truncate_cell_display_from(
+            &type_label,
+            tv.table_text_skip,
+            tv.text_w,
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                type_text,
+                Style::default().fg(Color::Green),
+            ))),
+            Rect::new(
+                table_area.x + tv.table_text_skip,
+                table_area.y + 1,
+                tv.text_w,
+                1,
+            ),
+        );
+
+        // Column border (│) at the right edge of this column.
+        let col_right = crate::common::view::format::col_x_end(col, col_widths);
+        let border_x = table_area.x.saturating_add(col_right as u16).saturating_sub(1);
+        if border_x >= table_area.x && border_x < table_area.x + table_area.width {
+            for y in table_area.y..(table_area.y + RESULTS_HEADER_HEIGHT).min(table_area.bottom()) {
+                frame
+                    .buffer_mut()
+                    .set_string(border_x, y, "│", grid_style);
+            }
+        }
+    }
+
+    // Horizontal separator after header.
+    let sep_y = table_area.y + RESULTS_HEADER_HEIGHT - 1;
+    if sep_y < table_area.bottom() {
+        for x in table_area.x..table_area.right() {
+            frame.buffer_mut().set_string(x, sep_y, "─", grid_style);
+        }
+    }
+
+    // ---- DATA ROWS ----
+    for vis in 0..visible_data_rows {
+        let row_idx = v_scroll + vis;
+        if row_idx >= row_count {
+            break;
+        }
+        let y_base = table_area
+            .y
+            .saturating_add(RESULTS_HEADER_HEIGHT)
+            .saturating_add(vis as u16 * RESULTS_ROW_HEIGHT);
+
+        // Row content area (1 line).
+        let row_content_area = Rect::new(
+            table_area.x,
+            y_base,
+            table_area.width,
+            RESULTS_ROW_CONTENT_HEIGHT,
+        );
+
+        // Row background (highlight if selected).
+        let row_selected = row_idx == state.row;
+        if row_selected {
+            frame.render_widget(
+                ratatui::widgets::Block::default().style(Style::default().bg(p.selection_bg)),
+                row_content_area,
+            );
+        }
+
+        // Draw each cell.
+        for col in 0..num_cols {
+            let Some(tv) = results_col_text_view(col, col_widths, table_area.width, h_scroll) else {
+                continue;
             };
-            Span::styled(name, style)
-        })
-        .collect();
-    frame.render_widget(Paragraph::new(Line::from(header)), table_area);
+            if tv.text_w == 0 {
+                continue;
+            }
 
-    // Rows (windowed).
-    let row_lines: Vec<Line> = result
-        .rows
-        .iter()
-        .skip(start_row)
-        .take(visible_rows)
-        .enumerate()
-        .map(|(off, row)| {
-            let row_idx = start_row + off;
-            let spans: Vec<Span> = row
-                .iter()
-                .enumerate()
-                .map(|(i, v)| {
-                    let in_selected_row = row_idx == state.row;
-                    let selected_cell = in_selected_row && i == state.col;
-                    let style = if selected_cell {
-                        Style::default()
-                            .fg(p.fg)
-                            .bg(p.selection_cell_bg)
-                            .add_modifier(Modifier::BOLD)
-                    } else if in_selected_row {
-                        Style::default().fg(p.fg).bg(p.selection_bg)
-                    } else {
-                        Style::default().fg(p.fg)
-                    };
-                    Span::styled(format!("{v} "), style)
-                })
-                .collect();
-            Line::from(spans)
-        })
-        .collect();
-    frame.render_widget(Paragraph::new(row_lines), table_area);
+            let value = result
+                .rows
+                .get(row_idx)
+                .and_then(|r| r.get(col))
+                .map(String::as_str)
+                .unwrap_or("");
+
+            let is_active = state.col == col;
+            let base_style = if row_selected && is_active {
+                Style::default()
+                    .fg(p.fg)
+                    .bg(p.selection_cell_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else if row_selected {
+                Style::default().fg(p.fg)
+            } else if is_active {
+                Style::default()
+                    .fg(p.accent)
+                    .bg(p.selection_cell_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(p.fg)
+            };
+
+            let text = crate::common::view::format::truncate_cell_display_from(
+                value,
+                tv.table_text_skip,
+                tv.text_w,
+            );
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(text, base_style))),
+                Rect::new(
+                    table_area.x + tv.table_text_skip,
+                    y_base,
+                    tv.text_w,
+                    RESULTS_ROW_CONTENT_HEIGHT,
+                ),
+            );
+
+            // Column border for this row.
+            let col_right = crate::common::view::format::col_x_end(col, col_widths);
+            let border_x = table_area.x.saturating_add(col_right as u16).saturating_sub(1);
+            if border_x >= table_area.x && border_x < table_area.x + table_area.width {
+                for y in y_base..(y_base + RESULTS_ROW_HEIGHT).min(table_area.bottom()) {
+                    frame
+                        .buffer_mut()
+                        .set_string(border_x, y, "│", grid_style);
+                }
+            }
+        }
+
+        // Row separator line.
+        let row_sep_y = y_base + RESULTS_ROW_CONTENT_HEIGHT;
+        if row_sep_y < table_area.bottom() {
+            for x in table_area.x..table_area.right() {
+                frame.buffer_mut().set_string(x, row_sep_y, "─", grid_style);
+            }
+        }
+    }
 
     // Vertical scrollbar for the table rows.
     if let Some(bar) = layout.v_scrollbar {
-        let max_scroll = row_count.saturating_sub(visible_rows);
         crate::common::view::pane_scrollbar::draw_vertical_pane_scrollbar(
             frame,
             bar,
-            start_row,
-            visible_rows,
+            v_scroll,
+            visible_data_rows,
             max_scroll,
             p,
             false,

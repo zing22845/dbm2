@@ -94,7 +94,7 @@ pub fn sql_tab_splitter_at(
     }
     let (instance, connection) = session_view_key(&tab.session);
     let detail_visible = tab.focus == SqlFocus::History
-        && !tab.history.store.entries(&instance, &connection).is_empty();
+        && !state.history_store.entries(&instance, &connection).is_empty();
     let splitter = if detail_visible {
         splitter_at_with_detail(
             &layout,
@@ -154,7 +154,7 @@ pub fn sql_tab_splitter_resize_msg(
             // the stored width and the rendered zone disagree.
             let (instance, connection) = super::super::session::session_view_key(&tab.session);
             let detail_visible = tab.focus == super::super::state::SqlFocus::History
-                && !tab.history.store.entries(&instance, &connection).is_empty();
+                && !state.history_store.entries(&instance, &connection).is_empty();
             let right_edge = if detail_visible {
                 body.right()
             } else {
@@ -213,9 +213,7 @@ mod tests {
         state.active_tab = Some(0);
         state.tabs[0].focus = SqlFocus::History;
         let (instance, connection) = session_view_key(&state.tabs[0].session);
-        state.tabs[0]
-            .history
-            .store
+        state.history_store
             .record_success(&instance, &connection, "SELECT 1");
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);

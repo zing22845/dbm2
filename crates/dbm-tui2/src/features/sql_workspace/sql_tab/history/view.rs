@@ -21,7 +21,7 @@ use crate::common::view::theme::Theme;
 use super::detail::draw_history_detail;
 use super::splitter::state::clamp_detail_pane_width;
 use super::state::HistoryState;
-use super::store::history_one_line;
+use super::store::{SqlHistoryStore, history_one_line};
 use super::splitter::view as splitter_view;
 
 /// Render the History pane. The single History border + title wraps the whole
@@ -35,6 +35,7 @@ pub fn render(
     theme: &Theme,
     area: Rect,
     state: &HistoryState,
+    store: &SqlHistoryStore,
     instance: &str,
     connection: &str,
     focused: bool,
@@ -47,8 +48,8 @@ pub fn render(
     let list_footer = history_list_footer_text(search_active, state.search.has_filter(), true);
 
     let p = theme.palette();
-    let entries = state.store.entries(instance, connection);
-    let visible = state.visible_indices_for(entries);
+    let entries = store.entries(instance, connection);
+    let visible = state.visible_indices(store, instance, connection);
     let cursor = state.cursor.min(visible.len().saturating_sub(1));
 
     // The footer width depends on which sub-pane it belongs to: when the detail
@@ -102,9 +103,9 @@ pub fn render(
         tracing::debug!("history: split done inner={inner:?} detail={:?} list={:?}", body_h[0], body_h[2]);
         // Detail preview of the selected / pinned / first statement.
         if let Some(sql) = state
-            .selected_sql(instance, connection)
+            .selected_entry(store, instance, connection)
             .or_else(|| state.detail.pinned_sql.clone())
-            .or_else(|| state.store.entries(instance, connection).first().cloned())
+            .or_else(|| store.entries(instance, connection).first().cloned())
         {
             let mut content = Rect::default();
             let mut v_bar = Rect::default();
@@ -215,22 +216,5 @@ fn render_list_rows(
             p,
             false,
         );
-    }
-}
-
-impl HistoryState {
-    /// Indices into `entries` matching the current search (all when no filter).
-    fn visible_indices_for(&self, entries: &[String]) -> Vec<usize> {
-        self.search.matching_indices(entries)
-    }
-}
-
-impl HistoryState {
-    /// The SQL text selected by the history cursor, if any.
-    fn selected_sql(&self, instance: &str, connection: &str) -> Option<String> {
-        let entries = self.store.entries(instance, connection);
-        let visible = self.visible_indices_for(entries);
-        let &idx = visible.get(self.cursor)?;
-        entries.get(idx).cloned()
     }
 }

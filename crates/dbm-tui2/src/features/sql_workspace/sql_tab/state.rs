@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use super::session::TabSession;
 use super::editor::state::EditorState;
 use super::history::state::HistoryState;
+use super::history::store::SqlHistoryStore;
 use super::results::state::ResultsState;
 
 /// Which sub-pane of the SQL tab currently owns the keyboard focus. The editor
@@ -96,6 +97,8 @@ pub struct SqlTabState {
     connection_last_tab: HashMap<(String, String), usize>,
     /// Which connection's tabs are currently visible in the tab bar.
     pub active_connection: Option<(String, String)>,
+    /// Per-connection SQL history store shared across all tabs.
+    pub history_store: SqlHistoryStore,
 }
 
 impl SqlTabState {

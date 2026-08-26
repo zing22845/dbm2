@@ -3,6 +3,7 @@
 //! Owns the query result, cell selection, search, pagination, and edit session.
 
 use crate::common::components::search::PaneSearch;
+use crate::common::view::format::init_results_layout;
 
 use super::super::edit::ResultsEditState;
 use super::super::edit_sql::EditTarget;
@@ -44,6 +45,8 @@ pub struct ListState {
     pub edit_target: Option<EditTarget>,
     /// Why the current result cannot be edited, if it cannot.
     pub edit_blocked_reason: Option<String>,
+    /// Auto-sized column widths computed from the current result.
+    pub col_widths: Vec<u16>,
 }
 
 impl ListState {
@@ -218,6 +221,12 @@ impl ListState {
     /// Commit-row count for the current edit session.
     pub fn commit_row_count(&self) -> usize {
         super::super::edit::commit_row_count(&self.edit)
+    }
+
+    /// Replace the current result and recompute column widths.
+    pub fn set_result(&mut self, result: QueryResultData) {
+        self.col_widths = init_results_layout(&result.columns, &result.rows);
+        self.result = Some(result);
     }
 }
 

@@ -36,10 +36,8 @@ pub fn restore_session(state: &mut AppState) -> anyhow::Result<Vec<Box<dyn Erase
         Vec::new()
     };
     if let Some(map) = loaded {
-        for tab in &mut state.sql.sql_tab.tabs {
-            tab.history.store =
-                crate::features::sql_workspace::sql_tab::history::store::SqlHistoryStore::from_map(map.clone());
-        }
+        state.sql.sql_tab.history_store =
+            crate::features::sql_workspace::sql_tab::history::store::SqlHistoryStore::from_map(map);
     }
     Ok(effects)
 }

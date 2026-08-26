@@ -53,6 +53,18 @@ impl From<dbm_core::ColumnMeta> for ColumnInfo {
     }
 }
 
+impl crate::common::view::format::ResultColumn for ColumnInfo {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn type_name(&self) -> &str {
+        &self.type_name
+    }
+    fn type_display(&self) -> &str {
+        &self.type_display
+    }
+}
+
 pub struct CompletionInput<'a> {
     pub engine: SqlEngine,
     pub tables: &'a [String],

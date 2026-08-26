@@ -140,7 +140,7 @@ pub fn sql_workspace_click(
     // editor. Mirror the same zone computation used by the renderer.
     let (instance, connection) = session_view_key(&tab.session);
     let detail_visible = tab.focus == SqlFocus::History
-        && !tab.history.store.entries(&instance, &connection).is_empty();
+        && !state.history_store.entries(&instance, &connection).is_empty();
     // The History feature owns the list AND the detail; when the detail is
     // visible the history zone widens leftward (eating into the editor). Both
     // the shrunk editor and the widened history zone must be hit-tested so a
@@ -276,7 +276,7 @@ pub fn render(
     // left of the list immediately. The splitter can widen the detail, but it
     // is never absent while History is focused.
     let history_detail_visible = tab.focus == SqlFocus::History
-        && !tab.history.store.entries(&instance, &connection).is_empty();
+        && !state.history_store.entries(&instance, &connection).is_empty();
 
     // When the detail is visible it extends the history zone to the left,
     // eating into the editor's width (mirrors original `history_zone_width`).
@@ -385,6 +385,7 @@ pub fn render(
             theme,
             history_zone,
             &tab.history,
+            &state.history_store,
             &instance,
             &connection,
             history_focused,
@@ -399,6 +400,7 @@ pub fn render(
             theme,
             layout.history,
             &tab.history,
+            &state.history_store,
             &instance,
             &connection,
             history_focused,
@@ -773,9 +775,7 @@ mod tests {
                 state.tabs[0].splitter.history_pane_width = history_w;
                 state.tabs[0].history.splitter.detail_pane_width = detail_w;
                 let (instance, connection) = session_view_key(&state.tabs[0].session);
-                state.tabs[0]
-                    .history
-                    .store
+                state.history_store
                     .record_success(&instance, &connection, "SELECT * FROM users");
                 let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -799,9 +799,7 @@ mod tests {
         state.active_tab = Some(0);
         state.tabs[0].focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
         let (instance, connection) = session_view_key(&state.tabs[0].session);
-        state.tabs[0]
-            .history
-            .store
+        state.history_store
             .record_success(&instance, &connection, "SELECT * FROM users");
 
         let area = Rect::new(0, 0, 120, 40);
@@ -843,9 +841,7 @@ mod tests {
             "SELECT * FROM \"测试表\" WHERE id = 1 AND name ILIKE '%foo%' ORDER BY created_at DESC",
         );
         let (instance, connection) = session_view_key(&state.tabs[0].session);
-        state.tabs[0]
-            .history
-            .store
+        state.history_store
             .record_success(&instance, &connection, "SELECT * FROM users");
         let theme = crate::common::view::theme::dracula();
         // Match the real workspace width (80% of 160 minus the border) so the
@@ -868,15 +864,14 @@ mod tests {
 
         let mut state = state_with_tabs(1);
         state.active_tab = Some(0);
+        state.history_store.record_success("inst", "conn", "SELECT 1");
+        state.history_store.record_success("inst", "conn", "SELECT 2");
+        state.history_store.record_success("inst", "conn", "SELECT 3");
         let tab = &mut state.tabs[0];
         tab.focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
         tab.session.instance = Some("inst".to_string());
         tab.session.connection = Some("conn".to_string());
         tab.session.database = Some("postgres".to_string());
-
-        tab.history.store.record_success("inst", "conn", "SELECT 1");
-        tab.history.store.record_success("inst", "conn", "SELECT 2");
-        tab.history.store.record_success("inst", "conn", "SELECT 3");
 
         let area = ratatui::layout::Rect::new(0, 0, 80, 20);
         let layout = sql_tab_layout(
@@ -902,13 +897,12 @@ mod tests {
 
         let mut state = state_with_tabs(1);
         state.active_tab = Some(0);
+        state.history_store.record_success("inst", "conn", "SELECT 1");
+        state.history_store.record_success("inst", "conn", "SELECT 2");
         let tab = &mut state.tabs[0];
         tab.focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
         tab.session.instance = Some("inst".to_string());
         tab.session.connection = Some("conn".to_string());
-
-        tab.history.store.record_success("inst", "conn", "SELECT 1");
-        tab.history.store.record_success("inst", "conn", "SELECT 2");
 
         let area = ratatui::layout::Rect::new(0, 0, 80, 20);
         let layout = sql_tab_layout(
@@ -933,12 +927,11 @@ mod tests {
 
         let mut state = state_with_tabs(1);
         state.active_tab = Some(0);
+        state.history_store.record_success("inst", "conn", "SELECT 1");
         let tab = &mut state.tabs[0];
         tab.focus = crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
         tab.session.instance = Some("inst".to_string());
         tab.session.connection = Some("conn".to_string());
-
-        tab.history.store.record_success("inst", "conn", "SELECT 1");
 
         let area = ratatui::layout::Rect::new(0, 0, 80, 20);
         let layout = sql_tab_layout(

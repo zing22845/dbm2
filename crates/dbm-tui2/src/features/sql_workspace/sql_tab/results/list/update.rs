@@ -16,7 +16,7 @@ pub fn update(
     let mut effects = Vec::new();
     let dirty = match msg {
         ListMessage::SetResult { result, paginated } => {
-            state.result = Some(result);
+            state.set_result(result);
             state.query_error = None;
             state.paginated = paginated;
             state.row = 0;
@@ -53,6 +53,7 @@ pub fn update(
         ListMessage::ClearResult => {
             let changed = state.result.is_some();
             state.result = None;
+            state.col_widths.clear();
             state.query_error = None;
             state.row = 0;
             state.col = 0;
@@ -64,6 +65,7 @@ pub fn update(
             let changed = state.result.is_some()
                 || state.query_error.as_deref() != Some(message.as_str());
             state.result = None;
+            state.col_widths.clear();
             state.query_error = Some(message);
             state.row = 0;
             state.col = 0;
