@@ -279,31 +279,18 @@ fn render_table(
     };
 
     // Auto-adjust h_scroll to keep cursor anchored: only scroll when cursor
-    // exits the visible viewport (not always anchored to first column).
+    // exits the visible viewport (based on pixel positions, not column
+    // indices — handles wide columns that are the sole visible column).
     let viewport_width = table_area.width as usize;
     let mut h_scroll_val = state_h_scroll;
     if viewport_width > 0 && !col_widths.is_empty() {
         let view_right = h_scroll_val.saturating_add(viewport_width);
-        let mut leftmost_visible = None;
-        let mut rightmost_visible = None;
-        for c in 0..num_cols {
-            let col_left = crate::common::view::format::col_x_start(c, col_widths);
-            let col_right = crate::common::view::format::col_x_end(c, col_widths);
-            // Column is visible if it overlaps the viewport.
-            if col_right > h_scroll_val && col_left < view_right {
-                if leftmost_visible.is_none() {
-                    leftmost_visible = Some(c);
-                }
-                rightmost_visible = Some(c);
-            }
-        }
-        if let (Some(left_col), Some(right_col)) = (leftmost_visible, rightmost_visible) {
-            if state_col > right_col {
-                h_scroll_val = crate::common::view::format::col_x_end(state_col, col_widths)
-                    .saturating_sub(viewport_width);
-            } else if state_col < left_col {
-                h_scroll_val = crate::common::view::format::col_x_start(state_col, col_widths);
-            }
+        let cur_col_left = crate::common::view::format::col_x_start(state_col, col_widths);
+        let cur_col_right = crate::common::view::format::col_x_end(state_col, col_widths);
+        if cur_col_right <= h_scroll_val {
+            h_scroll_val = cur_col_left;
+        } else if cur_col_left >= view_right {
+            h_scroll_val = cur_col_right.saturating_sub(viewport_width);
         }
         let max_h = crate::common::view::format::results_max_h_scroll(table_width, table_area.width) as usize;
         h_scroll_val = h_scroll_val.min(max_h);

@@ -144,13 +144,12 @@ impl ListState {
         self.row != prev_row || self.col != prev_col
     }
 
-    /// Auto-adjust h_scroll to keep column `self.col` visible and anchored.
+    /// Auto-adjust h_scroll to keep cursor column visible and anchored.
     /// Called during update when the column changes.
     ///
-    /// When viewport_width is known: only scroll when cursor exits the
-    /// visible viewport (anchored behavior, matching vertical scroll).
-    /// When viewport_width is unknown (0): skip — the rendering pass will
-    /// auto-adjust h_scroll.
+    /// Uses pixel-position comparison (not column indices) so that wide
+    /// columns which are the sole visible column don't cause spurious
+    /// left-scroll when moving to the previous column.
     pub fn auto_scroll_h(&mut self) {
         if self.col_widths.is_empty() {
             return;
@@ -161,33 +160,15 @@ impl ListState {
         let viewport = self.viewport_width as usize;
         let view_right = self.h_scroll.saturating_add(viewport);
 
-        // Find leftmost and rightmost visible columns.
-        let num_cols = self.col_widths.len();
-        let mut leftmost_visible = None;
-        let mut rightmost_visible = None;
-        for c in 0..num_cols {
-            let col_left = crate::common::view::format::col_x_start(c, &self.col_widths);
-            let col_right = crate::common::view::format::col_x_end(c, &self.col_widths);
-            // Column is visible if it overlaps the viewport.
-            if col_right > self.h_scroll && col_left < view_right {
-                if leftmost_visible.is_none() {
-                    leftmost_visible = Some(c);
-                }
-                rightmost_visible = Some(c);
-            }
+        let cur_col_left = crate::common::view::format::col_x_start(self.col, &self.col_widths);
+        let cur_col_right = crate::common::view::format::col_x_end(self.col, &self.col_widths);
+
+        if cur_col_right <= self.h_scroll {
+            self.h_scroll = cur_col_left;
+        } else if cur_col_left >= view_right {
+            self.h_scroll = cur_col_right.saturating_sub(viewport);
         }
 
-        // If cursor column is beyond the visible range, scroll to anchor it.
-        if let (Some(left_col), Some(right_col)) = (leftmost_visible, rightmost_visible) {
-            if self.col > right_col {
-                let col_right = crate::common::view::format::col_x_end(self.col, &self.col_widths);
-                self.h_scroll = col_right.saturating_sub(viewport);
-            } else if self.col < left_col {
-                self.h_scroll = crate::common::view::format::col_x_start(self.col, &self.col_widths);
-            }
-        }
-
-        // Clamp to max valid scroll.
         let table_w = crate::common::view::format::results_table_width(&self.col_widths) as usize;
         let max = table_w.saturating_sub(viewport);
         self.h_scroll = self.h_scroll.min(max);
