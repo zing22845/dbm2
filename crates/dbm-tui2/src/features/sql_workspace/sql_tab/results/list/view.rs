@@ -273,6 +273,11 @@ fn render_table(
             continue;
         }
 
+        // Column's screen x = logical start + h_scroll skip.
+        let col_x = table_area.x
+            + crate::common::view::format::col_x_start(col, col_widths) as u16
+            + tv.table_text_skip;
+
         // Column name (bold).
         let name_style = if col == state.col {
             Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
@@ -286,7 +291,7 @@ fn render_table(
         );
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(name, name_style))),
-            Rect::new(table_area.x + tv.table_text_skip, table_area.y, tv.text_w, 1),
+            Rect::new(col_x, table_area.y, tv.text_w, 1),
         );
 
         // Type label (green).
@@ -301,17 +306,16 @@ fn render_table(
                 type_text,
                 Style::default().fg(Color::Green),
             ))),
-            Rect::new(
-                table_area.x + tv.table_text_skip,
-                table_area.y + 1,
-                tv.text_w,
-                1,
-            ),
+            Rect::new(col_x, table_area.y + 1, tv.text_w, 1),
         );
 
         // Column border (│) at the right edge of this column.
         let col_right = crate::common::view::format::col_x_end(col, col_widths);
-        let border_x = table_area.x.saturating_add(col_right as u16).saturating_sub(1);
+        let border_x = table_area
+            .x
+            .saturating_add(col_right as u16)
+            .saturating_sub(h_scroll)
+            .saturating_sub(1);
         if border_x >= table_area.x && border_x < table_area.x + table_area.width {
             for y in table_area.y..(table_area.y + RESULTS_HEADER_HEIGHT).min(table_area.bottom()) {
                 frame
@@ -395,19 +399,21 @@ fn render_table(
                 tv.table_text_skip,
                 tv.text_w,
             );
+            let col_x = table_area.x
+                + crate::common::view::format::col_x_start(col, col_widths) as u16
+                + tv.table_text_skip;
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(text, base_style))),
-                Rect::new(
-                    table_area.x + tv.table_text_skip,
-                    y_base,
-                    tv.text_w,
-                    RESULTS_ROW_CONTENT_HEIGHT,
-                ),
+                Rect::new(col_x, y_base, tv.text_w, RESULTS_ROW_CONTENT_HEIGHT),
             );
 
             // Column border for this row.
             let col_right = crate::common::view::format::col_x_end(col, col_widths);
-            let border_x = table_area.x.saturating_add(col_right as u16).saturating_sub(1);
+            let border_x = table_area
+                .x
+                .saturating_add(col_right as u16)
+                .saturating_sub(h_scroll)
+                .saturating_sub(1);
             if border_x >= table_area.x && border_x < table_area.x + table_area.width {
                 for y in y_base..(y_base + RESULTS_ROW_HEIGHT).min(table_area.bottom()) {
                     frame
