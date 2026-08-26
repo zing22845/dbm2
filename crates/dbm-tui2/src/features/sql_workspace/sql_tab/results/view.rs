@@ -29,6 +29,15 @@ pub fn render(
     let p = theme.palette();
 
     if state.detail_open {
+        let body = state.list.selected_cell().unwrap_or_default();
+        let col_name = state.list.selected_column_name().unwrap_or("").to_string();
+        let title = format!(
+            " [{}] row {}",
+            if col_name.is_empty() { "?" } else { &col_name },
+            state.list.row + 1
+        );
+        let edit_editing = state.list.edit.editing;
+
         let detail_w = state.detail.pane_width;
         let split = Layout::default()
             .direction(Direction::Horizontal)
@@ -49,14 +58,7 @@ pub fn render(
         );
 
         // Draw the detail pane (right).
-        let body = state.list.selected_cell().unwrap_or_default();
-        let col_name = state.list.selected_column_name().unwrap_or("").to_string();
-        let title = format!(
-            " [{}] row {}",
-            if col_name.is_empty() { "?" } else { &col_name },
-            state.list.row + 1
-        );
-        detail_view::render(frame, theme, split[2], &state.detail, &body, title, state.list.edit.editing, focused);
+        detail_view::render(frame, theme, split[2], &state.detail, &body, title, edit_editing, focused);
     } else {
         // No detail: the content area is just the list.
         list_view::render(frame, theme, area, &state.list, focused, false);

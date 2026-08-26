@@ -2,6 +2,8 @@
 //!
 //! Owns the query result, cell selection, search, pagination, and edit session.
 
+use std::cell::Cell;
+
 use crate::common::components::search::PaneSearch;
 use crate::common::view::format::init_results_layout;
 
@@ -31,13 +33,16 @@ pub struct ListState {
     /// Whether the result came from a paginated query.
     pub paginated: bool,
     /// Horizontal scroll offset of the result table.
-    pub h_scroll: usize,
+    /// Uses `Cell` for interior mutability: the view writes the computed
+    /// anchored scroll back here so the next frame starts from the correct
+    /// position (fixes the stale h_scroll issue).
+    pub h_scroll: Cell<usize>,
     /// Vertical scroll offset (index of first visible data row).
-    pub v_scroll: usize,
+    pub v_scroll: Cell<usize>,
     /// Number of data rows that fit in the current viewport.
-    pub viewport_rows: usize,
+    pub viewport_rows: Cell<usize>,
     /// Width of the visible table area (columns viewport) in characters.
-    pub viewport_width: u16,
+    pub viewport_width: Cell<u16>,
     /// The row-edit session (snapshots / dirty cells / deleted / new rows).
     pub edit: ResultsEditState,
     /// The SQL text of the last run query (kept for editability analysis).
@@ -123,15 +128,15 @@ impl ListState {
             // Scroll only when the cursor exits the visible viewport.
             // When viewport_rows is unknown (0), skip scrolling — the view
             // will auto-adjust v_scroll during render.
-            if self.viewport_rows > 0 {
-                let vr = self.viewport_rows;
-                let vs = self.v_scroll;
+            let vr = self.viewport_rows.get();
+            if vr > 0 {
+                let vs = self.v_scroll.get();
                 if self.row >= vs + vr {
-                    self.v_scroll = self.row.saturating_sub(vr.saturating_sub(1));
+                    self.v_scroll.set(self.row.saturating_sub(vr.saturating_sub(1)));
                 } else if self.row < vs {
-                    self.v_scroll = self.row;
+                    self.v_scroll.set(self.row);
                 }
-                self.v_scroll = self.v_scroll.min(row_count.saturating_sub(1));
+                self.v_scroll.set(self.v_scroll.get().min(row_count.saturating_sub(1)));
             }
         }
         if dc != 0 {
@@ -154,39 +159,43 @@ impl ListState {
         if self.col_widths.is_empty() {
             return;
         }
-        if self.viewport_width == 0 {
+        let vp = self.viewport_width.get();
+        if vp == 0 {
             return;
         }
-        let viewport = self.viewport_width as usize;
-        let view_right = self.h_scroll.saturating_add(viewport);
+        let viewport = vp as usize;
+        let scroll = self.h_scroll.get();
+        let view_right = scroll.saturating_add(viewport);
 
         let cur_col_left = crate::common::view::format::col_x_start(self.col, &self.col_widths);
         let cur_col_right = crate::common::view::format::col_x_end(self.col, &self.col_widths);
 
-        if cur_col_right <= self.h_scroll {
-            self.h_scroll = cur_col_left;
+        let mut new_scroll = scroll;
+        if cur_col_right <= scroll {
+            new_scroll = cur_col_left;
         } else if cur_col_left >= view_right {
-            self.h_scroll = cur_col_right.saturating_sub(viewport);
+            new_scroll = cur_col_right.saturating_sub(viewport);
         }
 
         let table_w = crate::common::view::format::results_table_width(&self.col_widths) as usize;
         let max = table_w.saturating_sub(viewport);
-        self.h_scroll = self.h_scroll.min(max);
+        new_scroll = new_scroll.min(max);
+        self.h_scroll.set(new_scroll);
     }
 
     /// Update the viewport dimensions (called from the rendering pass).
     pub fn set_viewport(&mut self, rows: usize, width: u16) {
-        self.viewport_rows = rows.max(1);
-        self.viewport_width = width;
+        self.viewport_rows.set(rows.max(1));
+        self.viewport_width.set(width);
         // Clamp v_scroll to the new viewport.
         let row_count = self.row_count();
-        let max = row_count.saturating_sub(self.viewport_rows);
-        self.v_scroll = self.v_scroll.min(max);
+        let max = row_count.saturating_sub(self.viewport_rows.get());
+        self.v_scroll.set(self.v_scroll.get().min(max));
         // Clamp h_scroll to the new viewport.
         if !self.col_widths.is_empty() {
             let table_w = crate::common::view::format::results_table_width(&self.col_widths) as usize;
             let max_h = table_w.saturating_sub(width as usize);
-            self.h_scroll = self.h_scroll.min(max_h);
+            self.h_scroll.set(self.h_scroll.get().min(max_h));
         }
     }
 

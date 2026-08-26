@@ -245,7 +245,8 @@ pub fn render(
     // Tab bar: only render tabs belonging to the active connection.
     let visible = state.visible_tab_indices();
     let sessions: Vec<TabSession> = state.tabs.iter().map(|t| t.session.clone()).collect();
-    super::tab::render(frame, theme, chunks[0], &sessions, &visible, state.active_tab);
+    let active_tab_idx = state.active_tab;
+    super::tab::render(frame, theme, chunks[0], &sessions, &visible, active_tab_idx);
 
     let body_area = chunks[1];
     let Some(tab) = state.active_tab() else {

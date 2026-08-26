@@ -176,6 +176,13 @@ impl SqlTabState {
         self.active_tab.and_then(|i| self.tabs.get(i))
     }
 
+    /// Mutable version of `active_tab`, used by views that need to sync
+    /// computed viewport info (scroll offsets) back into the tab's state.
+    pub fn active_tab_mut(&mut self) -> Option<&mut SqlTab> {
+        let i = self.active_tab?;
+        self.tabs.get_mut(i)
+    }
+
     /// The currently active connection `(instance, connection)`, if any.
     pub fn active_connection(&self) -> Option<(&str, &str)> {
         self.active_connection

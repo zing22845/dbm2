@@ -21,7 +21,7 @@ pub fn update(
             state.paginated = paginated;
             state.row = 0;
             state.col = 0;
-            state.h_scroll = 0;
+            state.h_scroll.set(0);
             state.search.reset();
             state.edit_target = None;
             state.edit_blocked_reason = None;
@@ -90,11 +90,11 @@ pub fn update(
             true
         }
         ListMessage::ResetSelection => {
-            let changed = state.row != 0 || state.col != 0 || state.h_scroll != 0
+            let changed = state.row != 0 || state.col != 0 || state.h_scroll.get() != 0
                 || state.search.active;
             state.row = 0;
             state.col = 0;
-            state.h_scroll = 0;
+            state.h_scroll.set(0);
             state.search.reset();
             changed
         }

@@ -24,7 +24,6 @@ use crate::common::view::pane_scrollbar::pane_scroll_layout;
 
 use super::state::ListState;
 use super::super::pagination::{RESULTS_PAGINATION_BAR_HEIGHT, pagination_toolbar_line};
-use super::super::state::QueryResultData;
 
 /// Render the list sub-feature: action bar + table + pagination + footer,
 /// all wrapped inside a single outer Block with borders and title.
@@ -55,9 +54,7 @@ pub fn render(
     let total_rows = result.total_rows;
     let row_count = state.row_count();
     let state_row = state.row;
-    let state_col = state.col;
-    let state_h_scroll = state.h_scroll;
-    let state_v_scroll = state.v_scroll;
+    let state_h_scroll = state.h_scroll.get();
 
     // Outer Block: wraps action bar + table + pagination + footer, matching
     // the original dbm results layout.
@@ -156,12 +153,7 @@ pub fn render(
         frame,
         theme,
         list_chunks[1],
-        result,
-        &state.col_widths,
-        state_row,
-        state_col,
-        state_h_scroll,
-        state_v_scroll,
+        state,
         focused,
     );
 
@@ -225,18 +217,28 @@ fn render_empty(frame: &mut Frame, theme: &Theme, area: Rect, focused: bool) {
 ///   Header: 2 lines (name + type label) + 1 separator = 3 rows total
 ///   Each data row: 1 content line + 1 separator = 2 rows total
 ///   Column borders: │ character between columns
+///
+/// After computing the auto-adjusted h_scroll / v_scroll that keeps the cursor
+/// anchored inside the viewport, the values are synced back into `state` so
+/// the next frame starts from the correct scroll position (fixes the stale
+/// h_scroll problem where state.h_scroll was never updated from the view).
 fn render_table(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
-    result: &QueryResultData,
-    col_widths: &[u16],
-    state_row: usize,
-    state_col: usize,
-    state_h_scroll: usize,
-    state_v_scroll: usize,
+    state: &ListState,
     _focused: bool,
 ) {
+    // Extract all needed values first to avoid borrow conflicts.
+    let result = match state.result.as_ref() {
+        Some(r) => r,
+        None => return,
+    };
+    let col_widths = &state.col_widths;
+    let state_row = state.row;
+    let state_col = state.col;
+    let state_h_scroll = state.h_scroll.get();
+    let state_v_scroll = state.v_scroll.get();
     let p = theme.palette();
 
     if result.columns.is_empty() {
@@ -517,4 +519,12 @@ fn render_table(
             false,
         );
     }
+
+    // Sync computed scroll values and viewport info back to state so the next
+    // frame starts from the correct position (fixes stale h_scroll issue).
+    // Uses Cell for interior mutability — allows writing through &ListState.
+    state.h_scroll.set(h_scroll_val);
+    state.v_scroll.set(v_scroll);
+    state.viewport_width.set(table_area.width);
+    state.viewport_rows.set(visible_data_rows);
 }
