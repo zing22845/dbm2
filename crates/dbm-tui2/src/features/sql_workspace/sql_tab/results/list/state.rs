@@ -36,6 +36,8 @@ pub struct ListState {
     pub v_scroll: usize,
     /// Number of data rows that fit in the current viewport.
     pub viewport_rows: usize,
+    /// Width of the visible table area (columns viewport) in characters.
+    pub viewport_width: u16,
     /// The row-edit session (snapshots / dirty cells / deleted / new rows).
     pub edit: ResultsEditState,
     /// The SQL text of the last run query (kept for editability analysis).
@@ -142,37 +144,69 @@ impl ListState {
         self.row != prev_row || self.col != prev_col
     }
 
-    /// Auto-adjust h_scroll to keep column `self.col` visible.
+    /// Auto-adjust h_scroll to keep column `self.col` visible and anchored.
     /// Called during update when the column changes.
     ///
-    /// Only handles left-scroll (column moves left of viewport).
-    /// Right-scroll (column moves right of viewport) is handled
-    /// by the rendering pass where viewport width is known.
+    /// When viewport_width is known: only scroll when cursor exits the
+    /// visible viewport (anchored behavior, matching vertical scroll).
+    /// When viewport_width is unknown (0): skip — the rendering pass will
+    /// auto-adjust h_scroll.
     pub fn auto_scroll_h(&mut self) {
         if self.col_widths.is_empty() {
             return;
         }
-        let col_x = crate::common::view::format::col_x_start(self.col, &self.col_widths);
-        let col_right = crate::common::view::format::col_x_end(self.col, &self.col_widths);
+        if self.viewport_width == 0 {
+            return;
+        }
+        let viewport = self.viewport_width as usize;
+        let view_right = self.h_scroll.saturating_add(viewport);
 
-        // If column is entirely to the left of the viewport, scroll to it.
-        if col_right <= self.h_scroll {
-            self.h_scroll = col_x;
+        // Find leftmost and rightmost visible columns.
+        let num_cols = self.col_widths.len();
+        let mut leftmost_visible = None;
+        let mut rightmost_visible = None;
+        for c in 0..num_cols {
+            let col_left = crate::common::view::format::col_x_start(c, &self.col_widths);
+            let col_right = crate::common::view::format::col_x_end(c, &self.col_widths);
+            // Column is visible if it overlaps the viewport.
+            if col_right > self.h_scroll && col_left < view_right {
+                if leftmost_visible.is_none() {
+                    leftmost_visible = Some(c);
+                }
+                rightmost_visible = Some(c);
+            }
+        }
+
+        // If cursor column is beyond the visible range, scroll to anchor it.
+        if let (Some(left_col), Some(right_col)) = (leftmost_visible, rightmost_visible) {
+            if self.col > right_col {
+                let col_right = crate::common::view::format::col_x_end(self.col, &self.col_widths);
+                self.h_scroll = col_right.saturating_sub(viewport);
+            } else if self.col < left_col {
+                self.h_scroll = crate::common::view::format::col_x_start(self.col, &self.col_widths);
+            }
         }
 
         // Clamp to max valid scroll.
-        let table_w = crate::common::view::format::results_table_width(&self.col_widths);
-        let max = table_w.saturating_sub(1) as usize;
+        let table_w = crate::common::view::format::results_table_width(&self.col_widths) as usize;
+        let max = table_w.saturating_sub(viewport);
         self.h_scroll = self.h_scroll.min(max);
     }
 
     /// Update the viewport dimensions (called from the rendering pass).
-    pub fn set_viewport(&mut self, rows: usize) {
+    pub fn set_viewport(&mut self, rows: usize, width: u16) {
         self.viewport_rows = rows.max(1);
+        self.viewport_width = width;
         // Clamp v_scroll to the new viewport.
         let row_count = self.row_count();
         let max = row_count.saturating_sub(self.viewport_rows);
         self.v_scroll = self.v_scroll.min(max);
+        // Clamp h_scroll to the new viewport.
+        if !self.col_widths.is_empty() {
+            let table_w = crate::common::view::format::results_table_width(&self.col_widths) as usize;
+            let max_h = table_w.saturating_sub(width as usize);
+            self.h_scroll = self.h_scroll.min(max_h);
+        }
     }
 
     /// Enter edit mode with the current result rows as snapshots.

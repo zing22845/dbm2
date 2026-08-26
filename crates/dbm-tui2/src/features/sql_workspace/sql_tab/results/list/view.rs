@@ -257,7 +257,6 @@ fn render_table(
 
     let row_count = result.rows.len();
     let num_cols = result.columns.len();
-    let h_scroll = state_h_scroll as u16;
 
     // Compute actual table content width to detect horizontal overflow.
     let table_width = crate::common::view::format::results_table_width(col_widths);
@@ -278,6 +277,38 @@ fn render_table(
     } else {
         0
     };
+
+    // Auto-adjust h_scroll to keep cursor anchored: only scroll when cursor
+    // exits the visible viewport (not always anchored to first column).
+    let viewport_width = table_area.width as usize;
+    let mut h_scroll_val = state_h_scroll;
+    if viewport_width > 0 && !col_widths.is_empty() {
+        let view_right = h_scroll_val.saturating_add(viewport_width);
+        let mut leftmost_visible = None;
+        let mut rightmost_visible = None;
+        for c in 0..num_cols {
+            let col_left = crate::common::view::format::col_x_start(c, col_widths);
+            let col_right = crate::common::view::format::col_x_end(c, col_widths);
+            // Column is visible if it overlaps the viewport.
+            if col_right > h_scroll_val && col_left < view_right {
+                if leftmost_visible.is_none() {
+                    leftmost_visible = Some(c);
+                }
+                rightmost_visible = Some(c);
+            }
+        }
+        if let (Some(left_col), Some(right_col)) = (leftmost_visible, rightmost_visible) {
+            if state_col > right_col {
+                h_scroll_val = crate::common::view::format::col_x_end(state_col, col_widths)
+                    .saturating_sub(viewport_width);
+            } else if state_col < left_col {
+                h_scroll_val = crate::common::view::format::col_x_start(state_col, col_widths);
+            }
+        }
+        let max_h = crate::common::view::format::results_max_h_scroll(table_width, table_area.width) as usize;
+        h_scroll_val = h_scroll_val.min(max_h);
+    }
+    let h_scroll = h_scroll_val as u16;
 
     // Auto-adjust v_scroll to keep cursor anchored: only scroll when cursor
     // exits the visible viewport (not always anchored to first row).
@@ -492,7 +523,7 @@ fn render_table(
         crate::common::view::pane_scrollbar::draw_horizontal_pane_scrollbar(
             frame,
             bar,
-            state_h_scroll,
+            h_scroll as usize,
             table_area.width as usize,
             max_h_scroll as usize,
             p,

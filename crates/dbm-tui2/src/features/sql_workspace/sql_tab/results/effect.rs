@@ -80,7 +80,7 @@ pub enum ResultsEffect {
     Detail(DetailEffect),
     List(ListEffect),
     /// Sync the viewport dimensions after render (pure state update).
-    SyncViewport { rows: usize },
+    SyncViewport { rows: usize, width: u16 },
 }
 
 impl Effect for ResultsEffect {

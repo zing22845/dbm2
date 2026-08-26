@@ -180,8 +180,8 @@ pub fn update(
             }
             false
         }
-        ListMessage::SyncViewport { rows } => {
-            state.set_viewport(rows);
+        ListMessage::SyncViewport { rows, width } => {
+            state.set_viewport(rows, width);
             false
         }
     };
