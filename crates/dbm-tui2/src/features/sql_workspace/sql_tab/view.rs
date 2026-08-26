@@ -37,6 +37,10 @@ pub enum SqlClickAction {
     ContextPickerColumn(crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn),
     /// Double-click inside the history pane: apply the selected entry to the editor.
     HistoryApply,
+    /// Single-click on a history list row: move cursor to that row index.
+    HistoryRowClicked { index: usize },
+    /// Click/drag on the history horizontal scrollbar.
+    HistoryHScrollbar { x: u16, max_scroll: usize, viewport_width: usize },
 }
 
 /// Hit-test a click at `(x, y)` inside the SQL workspace's tab-bar + body
@@ -180,6 +184,22 @@ pub fn sql_workspace_click(
         return Some(SqlClickAction::HistoryApply);
     }
 
+    // Single-click on a history list row: move the cursor to that row.
+    // When History is not yet focused, the action handler will also switch
+    // focus to History in the same step.
+    if !is_double_click && history_hit
+        && let Some(idx) = history_row_hit(state, tab, &layout, x, y, detail_visible)
+    {
+        return Some(SqlClickAction::HistoryRowClicked { index: idx });
+    }
+
+    // Click/drag on the history horizontal scrollbar.
+    if !is_double_click && history_hit
+        && let Some(action) = history_h_scrollbar_hit(state, tab, &layout, x, y, detail_visible)
+    {
+        return Some(action);
+    }
+
     let focus = if editor_hit {
         SqlFocus::Editor
     } else if history_hit {
@@ -194,6 +214,183 @@ pub fn sql_workspace_click(
 
 fn contains(r: ratatui::layout::Rect, x: u16, y: u16) -> bool {
     x >= r.x && x < r.x.saturating_add(r.width) && y >= r.y && y < r.y.saturating_add(r.height)
+}
+
+/// Try to hit-test a history list row at `(x, y)`. Returns the visible row
+/// index if the click is on a list row, `None` otherwise.
+fn history_row_hit(
+    state: &SqlTabState,
+    tab: &crate::features::sql_workspace::sql_tab::state::SqlTab,
+    layout: &crate::features::sql_workspace::sql_tab::layout::SqlTabLayout,
+    x: u16,
+    y: u16,
+    detail_visible: bool,
+) -> Option<usize> {
+    let (instance, connection) = session_view_key(&tab.session);
+    let detail_w = if detail_visible {
+        crate::features::sql_workspace::sql_tab::history::splitter::state::clamp_detail_pane_width(
+            tab.history.splitter.detail_pane_width,
+        )
+    } else {
+        0
+    };
+
+    // Compute the history zone (matching the geometry used by the renderer and
+    // the hit-test above). When detail is visible the zone widens leftward.
+    let history_zone = if detail_visible {
+        let body_area = ratatui::layout::Rect {
+            x: layout.editor.x,
+            y: layout.editor.y.saturating_sub(1), // approximate — not exact
+            width: layout.editor.width + 1 + layout.history.width,
+            height: layout.editor.height,
+        };
+        let zone_x = crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(
+            body_area,
+            layout,
+            tab.history.splitter.detail_pane_width,
+        );
+        let zone_w = crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_width(
+            layout,
+            tab.history.splitter.detail_pane_width,
+        );
+        ratatui::layout::Rect::new(zone_x, layout.history.y, zone_w, layout.history.height)
+    } else {
+        layout.history
+    };
+
+    // The history pane's inner area (minus border).
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL);
+    let inner = block.inner(history_zone);
+
+    // Compute the list footer height.
+    let list_footer = crate::common::view::hints::history_list_footer_text(
+        tab.history.search.text_input_active(),
+        tab.history.search.has_filter(),
+        true,
+    );
+    let list_w = if detail_visible {
+        history_zone.width
+            .saturating_sub(detail_w)
+            .saturating_sub(1) // detail + splitter
+    } else {
+        history_zone.width
+    };
+    let footer_h = crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
+        .min(inner.height.saturating_sub(3));
+
+    crate::features::sql_workspace::sql_tab::history::view::row_hit_at(
+        inner,
+        &tab.history,
+        &state.history_store,
+        &instance,
+        &connection,
+        x,
+        y,
+        detail_visible,
+        detail_w,
+        footer_h,
+    )
+}
+
+/// Check if a click at `(x, y)` hits the history list's horizontal scrollbar.
+/// Returns the `HistoryHScrollbar` action with the scrollbar geometry if so.
+#[allow(clippy::too_many_arguments)]
+fn history_h_scrollbar_hit(
+    state: &SqlTabState,
+    tab: &crate::features::sql_workspace::sql_tab::state::SqlTab,
+    layout: &crate::features::sql_workspace::sql_tab::layout::SqlTabLayout,
+    x: u16,
+    y: u16,
+    detail_visible: bool,
+) -> Option<SqlClickAction> {
+    let (instance, connection) = session_view_key(&tab.session);
+    let detail_w = if detail_visible {
+        crate::features::sql_workspace::sql_tab::history::splitter::state::clamp_detail_pane_width(
+            tab.history.splitter.detail_pane_width,
+        )
+    } else {
+        0
+    };
+
+    let history_zone = if detail_visible {
+        let body_area = ratatui::layout::Rect {
+            x: layout.editor.x,
+            y: layout.editor.y.saturating_sub(1),
+            width: layout.editor.width + 1 + layout.history.width,
+            height: layout.editor.height,
+        };
+        let zone_x = crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(
+            body_area,
+            layout,
+            tab.history.splitter.detail_pane_width,
+        );
+        let zone_w = crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_width(
+            layout,
+            tab.history.splitter.detail_pane_width,
+        );
+        ratatui::layout::Rect::new(zone_x, layout.history.y, zone_w, layout.history.height)
+    } else {
+        layout.history
+    };
+
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL);
+    let inner = block.inner(history_zone);
+
+    let list_footer = crate::common::view::hints::history_list_footer_text(
+        tab.history.search.text_input_active(),
+        tab.history.search.has_filter(),
+        true,
+    );
+    let list_w = if detail_visible {
+        history_zone.width.saturating_sub(detail_w).saturating_sub(1)
+    } else {
+        history_zone.width
+    };
+    let footer_h = crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
+        .min(inner.height.saturating_sub(3));
+
+    let list_area = crate::features::sql_workspace::sql_tab::history::view::compute_list_area(
+        inner,
+        detail_visible,
+        detail_w,
+        footer_h,
+    );
+
+    let visible = tab.history.visible_indices(&state.history_store, &instance, &connection);
+    let selected_full_width = tab.history
+        .selected_entry(&state.history_store, &instance, &connection)
+        .as_deref()
+        .map(|sql| crate::features::sql_workspace::sql_tab::history::store::history_line_display_width(sql) as usize + 2)
+        .unwrap_or(0);
+
+    let needs_h = selected_full_width > list_area.width as usize;
+    if !needs_h {
+        return None;
+    }
+
+    // Compute h_scrollbar area using pane_scroll_layout to find its rect.
+    let viewport_rows = list_area.height as usize;
+    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        list_area,
+        selected_full_width as u16,
+        visible.len(),
+        viewport_rows.max(1),
+    );
+    let h_bar = layout.h_scrollbar?;
+
+    if crate::common::view::pane_scrollbar::point_in_bar(h_bar, x, y) {
+        let content_w = layout.content_area.width as usize;
+        let max_scroll = selected_full_width.saturating_sub(content_w);
+        Some(SqlClickAction::HistoryHScrollbar {
+            x,
+            max_scroll,
+            viewport_width: content_w,
+        })
+    } else {
+        None
+    }
 }
 
 use super::history::view as history_view;

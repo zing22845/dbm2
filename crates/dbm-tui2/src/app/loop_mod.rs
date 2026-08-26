@@ -144,6 +144,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // meaningful while the explorer owns focus).
     let mut explorer_split_drag = false;
 
+    // Whether the history list horizontal scrollbar is being dragged.
+    // Stores the scrollbar geometry so we can convert drag coordinates to
+    // scroll positions without re-computing the layout each frame.
+    let mut history_h_scrollbar_drag: Option<(usize, usize)> = None;
+
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
     // lives outside `AppState` because it is transient interaction state, like
@@ -626,6 +631,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.row,
                                     is_double_click,
                                 ) {
+                                    // If the click was on the h_scrollbar, start dragging.
+                                    if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::HistoryHScrollbar {
+                                        x: _,
+                                        max_scroll,
+                                        viewport_width,
+                                    } = action
+                                    {
+                                        history_h_scrollbar_drag = Some((viewport_width, max_scroll));
+                                    }
                                     for msg in sql_click_msgs(&state.sql.sql_tab, action) {
                                         let result = process_message_round(
                                             &effect_runner,
@@ -998,8 +1012,30 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         dirty |= result.dirty;
                                     }
                             }
+
+                            // History list h_scrollbar drag: compute the scroll
+                            // position from the current drag x-coordinate.
+                            if let Some((viewport_width, max_scroll)) = history_h_scrollbar_drag {
+                                let position = scrollbar_x_to_position(point.x, viewport_width, max_scroll);
+                                if let Some(active_tab) = state.sql.sql_tab.active_tab {
+                                    use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+                                    use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+                                    use crate::features::sql_workspace::sql_tab::history::msg::{HistoryMessage, HistoryMsg};
+                                    let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                                        SqlTabMessage::History {
+                                            tab_id: active_tab,
+                                            msg: HistoryMsg::Message(HistoryMessage::SetHScroll { position }),
+                                        },
+                                    ))));
+                                    let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                    dirty |= result.dirty;
+                                } else {
+                                    history_h_scrollbar_drag = None;
+                                }
+                            }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
+                            history_h_scrollbar_drag = None;
                             if explorer_split_drag {
                                 explorer_split_drag = false;
                                 state.splitter_hover.explorer_splitter_drag = false;
@@ -2159,7 +2195,59 @@ fn sql_click_msgs(
                 },
             ))))]
         }
+        SqlClickAction::HistoryRowClicked { index } => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::history::msg::{HistoryMessage, HistoryMsg};
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            let mut msgs = vec![
+                // Switch focus to History pane first (no-op if already focused).
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Focus(SqlFocus::History),
+                )))),
+            ];
+            msgs.push(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::History {
+                    tab_id,
+                    msg: HistoryMsg::Message(HistoryMessage::SetCursor { index }),
+                },
+            )))));
+            msgs
+        }
+        SqlClickAction::HistoryHScrollbar { x, max_scroll, viewport_width } => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::history::msg::{HistoryMessage, HistoryMsg};
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            let position = scrollbar_x_to_position(x, viewport_width, max_scroll);
+            vec![
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Focus(SqlFocus::History),
+                )))),
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::History {
+                        tab_id,
+                        msg: HistoryMsg::Message(HistoryMessage::SetHScroll { position }),
+                    },
+                )))),
+            ]
+        }
     }
+}
+
+/// Map a click x-coordinate inside a horizontal scrollbar track to the
+/// corresponding scroll position.
+fn scrollbar_x_to_position(x: u16, viewport_width: usize, max_scroll: usize) -> usize {
+    if max_scroll == 0 || viewport_width == 0 {
+        return 0;
+    }
+    let rel_x = x as usize;
+    let total = viewport_width + max_scroll;
+    // Position in the scroll range [0, max_scroll]
+    let pos = (rel_x * max_scroll) / total.max(1);
+    pos.min(max_scroll)
 }
 
 /// Convert a SQL workspace action into the corresponding workspace message,

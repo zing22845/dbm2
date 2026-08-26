@@ -9,6 +9,8 @@ pub enum HistoryMessage {
     RecordSuccess { instance: String, connection: String, sql: String },
     /// Move the list cursor by `delta` (`-1`/`+1`).
     MoveCursor { delta: i32 },
+    /// Set the list cursor to an absolute index (from a mouse click).
+    SetCursor { index: usize },
     /// Begin `/` search input.
     BeginSearch,
     /// Forward a key while search input is active.
@@ -19,6 +21,10 @@ pub enum HistoryMessage {
     ScrollDetail { delta: i32 },
     /// Scroll the detail preview by half a page.
     ScrollDetailPage { down: bool },
+    /// Scroll the list rows horizontally by `delta` cells (`-1`/`+1`).
+    ScrollHScroll { delta: i32 },
+    /// Set the list horizontal scroll to an absolute position (from scrollbar drag).
+    SetHScroll { position: usize },
 }
 
 /// Feature message envelope (central-router compatible).

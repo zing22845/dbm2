@@ -51,6 +51,9 @@ pub fn update(
         HistoryMessage::MoveCursor { delta } => {
             move_cursor(&mut state, store, instance, connection, delta)
         }
+        HistoryMessage::SetCursor { index } => {
+            set_cursor(&mut state, store, instance, connection, index)
+        }
         HistoryMessage::BeginSearch => {
             state.search.reset();
             state.search.start();
@@ -78,6 +81,12 @@ pub fn update(
             } else {
                 false
             }
+        }
+        HistoryMessage::ScrollHScroll { delta } => {
+            scroll_hscroll(&mut state, store, instance, connection, delta)
+        }
+        HistoryMessage::SetHScroll { position } => {
+            set_hscroll(&mut state, store, instance, connection, position)
         }
     };
 
@@ -108,6 +117,30 @@ fn move_cursor(
         state.h_scroll = 0;
     }
     // Reconcile detail scroll to the newly selected entry.
+    if let Some(sql) = state.selected_entry(store, instance, connection) {
+        scroll_on_selection_change(&mut state.detail, &sql, &state.search, 40, 8);
+    }
+    moved
+}
+
+/// Set the list cursor to an absolute visible row index (from a mouse click).
+fn set_cursor(
+    state: &mut HistoryState,
+    store: &SqlHistoryStore,
+    instance: &str,
+    connection: &str,
+    index: usize,
+) -> bool {
+    let visible_len = state.visible_indices(store, instance, connection).len();
+    if visible_len == 0 {
+        return false;
+    }
+    let next = index.min(visible_len.saturating_sub(1));
+    let moved = next != state.cursor;
+    if moved {
+        state.cursor = next;
+        state.h_scroll = 0;
+    }
     if let Some(sql) = state.selected_entry(store, instance, connection) {
         scroll_on_selection_change(&mut state.detail, &sql, &state.search, 40, 8);
     }
@@ -148,6 +181,60 @@ fn handle_search_key(
     if let Some(sql) = state.selected_entry(store, instance, connection) {
         scroll_on_selection_change(&mut state.detail, &sql, &state.search, 40, 8);
     }
+}
+
+/// Horizontal scroll of the list rows by `delta` cells, clamped to the
+/// maximum scroll width of the currently visible rows.
+fn scroll_hscroll(
+    state: &mut HistoryState,
+    store: &SqlHistoryStore,
+    instance: &str,
+    connection: &str,
+    delta: i32,
+) -> bool {
+    let max = max_h_scroll_for_selection(state, store, instance, connection);
+    let before = state.h_scroll;
+    if delta > 0 {
+        state.h_scroll = (state.h_scroll as u32)
+            .saturating_add(delta as u32)
+            .min(max as u32) as usize;
+    } else {
+        state.h_scroll = state.h_scroll.saturating_sub(delta.unsigned_abs() as usize);
+    }
+    state.h_scroll != before
+}
+
+/// Set the list horizontal scroll to an absolute position (from scrollbar drag).
+fn set_hscroll(
+    state: &mut HistoryState,
+    store: &SqlHistoryStore,
+    instance: &str,
+    connection: &str,
+    position: usize,
+) -> bool {
+    let max = max_h_scroll_for_selection(state, store, instance, connection);
+    let before = state.h_scroll;
+    state.h_scroll = position.min(max);
+    state.h_scroll != before
+}
+
+/// Compute the maximum horizontal scroll for the currently selected history
+/// entry, based on its display width minus the visible viewport width.
+fn max_h_scroll_for_selection(
+    state: &HistoryState,
+    store: &SqlHistoryStore,
+    instance: &str,
+    connection: &str,
+) -> usize {
+    let visible = state.visible_indices(store, instance, connection);
+    let max_idx = visible.iter().copied().max().unwrap_or(0);
+    let entries = store.entries(instance, connection);
+    let max_width = entries
+        .get(max_idx)
+        .map(|sql| super::store::history_line_display_width(sql) as usize)
+        .unwrap_or(0);
+    let min_viewport = 10usize;
+    max_width.saturating_sub(min_viewport)
 }
 
 /// Scroll the detail preview by `delta` lines (clamped to content).

@@ -997,6 +997,8 @@ fn history_key(
     let msg = match key.code {
         KeyCode::Up => HistoryMessage::MoveCursor { delta: -1 },
         KeyCode::Down => HistoryMessage::MoveCursor { delta: 1 },
+        KeyCode::Left => HistoryMessage::ScrollHScroll { delta: -1 },
+        KeyCode::Right => HistoryMessage::ScrollHScroll { delta: 1 },
         KeyCode::Enter => HistoryMessage::Apply,
         KeyCode::Char('/') if key.modifiers.is_empty() => HistoryMessage::BeginSearch,
         _ => return None,

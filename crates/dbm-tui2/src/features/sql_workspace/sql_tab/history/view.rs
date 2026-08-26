@@ -12,10 +12,13 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use crate::common::components::search::pane_search_title_line;
 use crate::common::view::hints::{draw_footer, footer_height, history_list_footer_text};
-use crate::common::view::pane_scrollbar::{draw_vertical_pane_scrollbar, pane_scroll_layout};
+use crate::common::view::pane_scrollbar::{
+    draw_horizontal_pane_scrollbar, draw_vertical_pane_scrollbar, pane_scroll_layout,
+};
 use crate::common::view::theme::Theme;
 
 use super::detail::draw_history_detail;
@@ -176,13 +179,38 @@ fn render_list_rows(
         );
         return;
     }
+
+    // Determine the content width of the currently selected row.
+    // The horizontal scrollbar only appears when the selected entry overflows.
+    let selected_idx = visible.get(cursor).copied().and_then(|idx| entries.get(idx));
+    let selected_width = selected_idx
+        .map(|sql| super::store::history_line_display_width(sql) as usize)
+        .unwrap_or(0);
+    let selected_full_width = selected_width + 2; // prefix width
+
     let viewport_rows = list_area.height as usize;
-    let layout = pane_scroll_layout(list_area, list_area.width, visible.len(), viewport_rows);
+
+    // Determine if h_scrollbar is needed (only when selected row overflows).
+    // We compute layout with the full content width first to reserve h_scrollbar space.
+    let layout = pane_scroll_layout(list_area, selected_full_width as u16, visible.len(), viewport_rows);
     let content = layout.content_area;
+    let content_w = content.width as usize;
+
+    let needs_h = selected_full_width > content_w;
+    let effective_layout = if needs_h {
+        layout
+    } else {
+        pane_scroll_layout(list_area, 0, visible.len(), viewport_rows)
+    };
+    let content = effective_layout.content_area;
     let viewport = content.height.max(1) as usize;
     let start = cursor.saturating_sub(viewport / 2);
     let end = (start + viewport).min(visible.len());
     let start = end.saturating_sub(viewport);
+
+    // Compute the h_scroll position for the selected row (used for the scrollbar thumb).
+    // We track per-row h_scroll so each row scrolls independently to show its full text.
+    let selected_h_scroll = state.h_scroll;
 
     let lines: Vec<Line> = visible[start..end]
         .iter()
@@ -191,21 +219,70 @@ fn render_list_rows(
             let sql = &entries[idx];
             let selected = start + row == cursor;
             let prefix = if selected { "▸ " } else { "  " };
-            let text = format!("{prefix}{}", history_one_line(sql));
+            let line_text = history_one_line(sql);
+            let line_width = UnicodeWidthStr::width(line_text);
+
+            // Per-row h_scroll: selected row uses state.h_scroll, others stay at 0.
+            let row_h_scroll = if selected {
+                selected_h_scroll
+            } else {
+                0
+            };
+
+            let content_w = content.width as usize;
+            // Column width = prefix (2) + text
+            let full_width = 2 + line_width;
+
+            let (display_text, _truncated) = if full_width <= content_w {
+                // Fits: show the full line
+                let text = format!("{prefix}{}", line_text);
+                (text, false)
+            } else {
+                // Needs horizontal scroll: show scrolled view with optional "..."
+                let max_scroll = full_width.saturating_sub(content_w);
+                let scroll = row_h_scroll.min(max_scroll);
+                let visible_end = (scroll + content_w).min(full_width);
+
+                if scroll == 0 {
+                    // Truncate at the right edge with "..."
+                    let avail = content_w.saturating_sub(3);
+                    let shown_text = truncate_display(line_text, avail, 2);
+                    let text = format!("{prefix}{shown_text}...");
+                    (text, true)
+                } else if visible_end >= full_width {
+                    // Already scrolled to the end
+                    let shown_text = skip_display(line_text, scroll.saturating_sub(2));
+                    let text = format!("{}{}", prefix, shown_text);
+                    (text, true)
+                } else {
+                    // Middle of scroll: show skip + truncate with "..."
+                    let skip = scroll.saturating_sub(2);
+                    let avail = content_w.saturating_sub(3).saturating_sub(if skip > 0 { 3 } else { 0 });
+                    let shown_text = truncate_display(
+                        &line_text[skip..],
+                        avail,
+                        0,
+                    );
+                    let prefix_str = if skip > 0 { "..." } else { prefix };
+                    let text = format!("{}{}...", prefix_str, shown_text);
+                    (text, true)
+                }
+            };
+
             let style = if selected {
                 Style::default()
                     .fg(p.fg)
                     .bg(p.selection_bg)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(p.fg)
+                Style::default().fg(p.muted).bg(p.bg)
             };
-            Line::from(Span::styled(text, style))
+            Line::from(Span::styled(display_text, style))
         })
         .collect();
     frame.render_widget(Paragraph::new(lines), content);
 
-    if let Some(bar) = layout.v_scrollbar {
+    if let Some(bar) = effective_layout.v_scrollbar {
         let max_scroll = visible.len().saturating_sub(viewport);
         draw_vertical_pane_scrollbar(
             frame,
@@ -217,4 +294,156 @@ fn render_list_rows(
             false,
         );
     }
+
+    if let Some(bar) = effective_layout.h_scrollbar {
+        let max_h = selected_full_width.saturating_sub(content.width as usize);
+        draw_horizontal_pane_scrollbar(
+            frame,
+            bar,
+            selected_h_scroll,
+            content.width as usize,
+            max_h,
+            p,
+            false,
+        );
+    }
+}
+
+/// Truncate a display string to `avail` width cells, handling the prefix offset.
+fn truncate_display(text: &str, avail: usize, prefix_width: usize) -> String {
+    use unicode_width::UnicodeWidthStr;
+    let total_avail = avail.saturating_sub(prefix_width);
+    if total_avail == 0 {
+        return String::new();
+    }
+    let mut result = String::new();
+    let mut width = 0usize;
+    for ch in text.chars() {
+        let w = UnicodeWidthStr::width(ch.to_string().as_str());
+        if width + w > total_avail {
+            break;
+        }
+        result.push(ch);
+        width += w;
+    }
+    result
+}
+
+/// Skip `n` characters from the start of the text (for horizontal scroll).
+fn skip_display(text: &str, skip: usize) -> String {
+    use unicode_width::UnicodeWidthStr;
+    if skip == 0 {
+        return text.to_string();
+    }
+    let mut result = String::new();
+    let mut width = 0usize;
+    for ch in text.chars() {
+        let w = UnicodeWidthStr::width(ch.to_string().as_str());
+        if width >= skip {
+            result.push(ch);
+        }
+        width += w;
+    }
+    result
+}
+
+/// Hit-test: given the history pane's `inner` area, compute which visible
+/// row index was clicked at `(x, y)`. Returns `None` when the click is
+/// outside the list content (scrollbar, footer, detail pane, etc.).
+///
+/// `detail_visible` and `detail_w` must match the rendering geometry so the
+/// list area is computed identically.
+#[allow(clippy::too_many_arguments)]
+pub fn row_hit_at(
+    inner: Rect,
+    state: &HistoryState,
+    store: &SqlHistoryStore,
+    instance: &str,
+    connection: &str,
+    x: u16,
+    y: u16,
+    detail_visible: bool,
+    detail_w: u16,
+    list_footer_height: u16,
+) -> Option<usize> {
+    let visible = state.visible_indices(store, instance, connection);
+    if visible.is_empty() {
+        return None;
+    }
+
+    let list_area = compute_list_area(inner, detail_visible, detail_w, list_footer_height);
+    if !contains(list_area, x, y) {
+        return None;
+    }
+
+    let cursor = state.cursor.min(visible.len().saturating_sub(1));
+    let viewport_rows = list_area.height as usize;
+    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        list_area,
+        list_area.width,
+        visible.len(),
+        viewport_rows.max(1),
+    );
+    let content = layout.content_area;
+    if !contains(content, x, y) {
+        return None;
+    }
+
+    let viewport = content.height.max(1) as usize;
+    let start = cursor.saturating_sub(viewport / 2);
+    let end = (start + viewport).min(visible.len());
+    let start = end.saturating_sub(viewport);
+
+    let y_offset = y.saturating_sub(content.y) as usize;
+    let row_in_viewport = y_offset.min(viewport.saturating_sub(1));
+    let visible_idx = start + row_in_viewport;
+
+    if visible_idx < visible.len() {
+        Some(visible_idx)
+    } else {
+        None
+    }
+}
+
+/// Compute the list area (content + optional footer) inside the History
+/// pane's `inner` rect, mirroring the renderer's split logic.
+pub fn compute_list_area(
+    inner: Rect,
+    detail_visible: bool,
+    detail_w: u16,
+    list_footer_height: u16,
+) -> Rect {
+    if detail_visible {
+        let clamped_detail = super::splitter::state::clamp_detail_pane_width(detail_w)
+            .min(inner.width.saturating_sub(2));
+        let body_w = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([
+                ratatui::layout::Constraint::Length(clamped_detail),
+                ratatui::layout::Constraint::Length(1),
+                ratatui::layout::Constraint::Min(0),
+            ])
+            .split(inner);
+        let list_col = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                ratatui::layout::Constraint::Min(1),
+                ratatui::layout::Constraint::Length(list_footer_height),
+            ])
+            .split(body_w[2]);
+        list_col[0]
+    } else {
+        let chunks = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .constraints([
+                ratatui::layout::Constraint::Min(1),
+                ratatui::layout::Constraint::Length(list_footer_height),
+            ])
+            .split(inner);
+        chunks[0]
+    }
+}
+
+fn contains(r: Rect, x: u16, y: u16) -> bool {
+    x >= r.x && x < r.x.saturating_add(r.width) && y >= r.y && y < r.y.saturating_add(r.height)
 }
