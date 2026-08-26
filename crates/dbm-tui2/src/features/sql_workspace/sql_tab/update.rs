@@ -355,7 +355,11 @@ pub fn update(
                     editor_state,
                 );
                 state.tabs[idx].editor = s;
-                dirty = d;
+                // After recalling a history entry, focus returns to the editor
+                // so the user can immediately start editing the recalled SQL.
+                state.tabs[idx].focus = SqlFocus::Editor;
+                dirty = true;
+                dirty |= d;
             } else {
                 warn_tab_missing(tab_id);
             }
