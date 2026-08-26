@@ -75,7 +75,7 @@ pub fn update(
         }
         ListMessage::MoveSelection { dr, dc } => {
             let changed = state.move_selection(dr, dc);
-            if dc != 0 {
+            if changed && dc != 0 {
                 state.auto_scroll_h();
             }
             changed
