@@ -74,7 +74,11 @@ pub fn update(
             changed
         }
         ListMessage::MoveSelection { dr, dc } => {
-            state.move_selection(dr, dc)
+            let changed = state.move_selection(dr, dc);
+            if dc != 0 {
+                state.auto_scroll_h();
+            }
+            changed
         }
         ListMessage::BeginSearch => {
             state.search.reset();
@@ -174,6 +178,10 @@ pub fn update(
                     statements,
                 });
             }
+            false
+        }
+        ListMessage::SyncViewport { rows } => {
+            state.set_viewport(rows);
             false
         }
     };

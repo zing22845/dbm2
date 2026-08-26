@@ -54,6 +54,10 @@ pub fn render(
 
     let total_rows = result.total_rows;
     let row_count = state.row_count();
+    let state_row = state.row;
+    let state_col = state.col;
+    let state_h_scroll = state.h_scroll;
+    let state_v_scroll = state.v_scroll;
 
     // Outer Block: wraps action bar + table + pagination + footer, matching
     // the original dbm results layout.
@@ -63,8 +67,8 @@ pub fn render(
         true,
         false,
         Style::default().fg(p.muted),
-        state.row,
-        state.row_count(),
+        state_row,
+        row_count,
         None,
         None,
         Some(Style::default().fg(if focused { p.accent } else { p.muted })),
@@ -114,9 +118,30 @@ pub fn render(
     let footer_area = if pagination_h > 0 { chunks[2] } else { chunks[1] };
 
     // Content area: action bar + table.
-    let model = toolbar_model(state);
-    let max_bar_scroll = action_bar_width(&model).saturating_sub(content.width);
-    let bar_scroll = state.h_scroll.min(max_bar_scroll as usize) as u16;
+    let has_result = state.result.is_some();
+    let editable = state.editable();
+    let commit_n = state.commit_row_count();
+    let edit_active = state.edit.editing;
+    let edit_dirty = state.edit.is_dirty();
+    let edit_reason = state.edit_blocked_reason.clone();
+    let row_limit = state.row_limit;
+    let page = state.page;
+    let (bar_scroll_max, model) = {
+        let model = ResultsToolbarModel {
+            refresh_enabled: has_result,
+            edit_enabled: editable,
+            edit_active,
+            commit_enabled: edit_active && commit_n > 0,
+            rollback_enabled: edit_active && edit_dirty,
+            commit_n,
+            edit_reason,
+        };
+        (
+            action_bar_width(&model).saturating_sub(content.width),
+            model,
+        )
+    };
+    let bar_scroll = state_h_scroll.min(bar_scroll_max as usize) as u16;
 
     let list_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -127,13 +152,24 @@ pub fn render(
         .split(content);
 
     draw_action_bar(frame, list_chunks[0], &model, bar_scroll, p);
-    render_table(frame, theme, list_chunks[1], state, result, focused);
+    render_table(
+        frame,
+        theme,
+        list_chunks[1],
+        result,
+        &state.col_widths,
+        state_row,
+        state_col,
+        state_h_scroll,
+        state_v_scroll,
+        focused,
+    );
 
     // Pagination toolbar (full width, below the content area, inside the Block).
     if let Some(pag_area) = pagination_area {
         let toolbar = pagination_toolbar_line(
-            state.row_limit,
-            state.page,
+            row_limit,
+            page,
             total_rows,
             row_count,
             false,
@@ -146,21 +182,6 @@ pub fn render(
 
     // Results list footer (full width, inside the Block).
     draw_footer(frame, theme, footer_area, &hint);
-}
-
-/// Derive the toolbar enable/disable model from the current result/edit state.
-fn toolbar_model(state: &ListState) -> ResultsToolbarModel {
-    let has_result = state.result.is_some();
-    let commit_n = state.commit_row_count();
-    ResultsToolbarModel {
-        refresh_enabled: has_result,
-        edit_enabled: state.editable(),
-        edit_active: state.edit.editing,
-        commit_enabled: state.edit.editing && commit_n > 0,
-        rollback_enabled: state.edit.editing && state.edit.is_dirty(),
-        commit_n,
-        edit_reason: state.edit_blocked_reason.clone(),
-    }
 }
 
 fn render_error(frame: &mut Frame, theme: &Theme, area: Rect, focused: bool, message: &str) {
@@ -208,8 +229,12 @@ fn render_table(
     frame: &mut Frame,
     theme: &Theme,
     area: Rect,
-    state: &ListState,
     result: &QueryResultData,
+    col_widths: &[u16],
+    state_row: usize,
+    state_col: usize,
+    state_h_scroll: usize,
+    state_v_scroll: usize,
     _focused: bool,
 ) {
     let p = theme.palette();
@@ -230,13 +255,17 @@ fn render_table(
         return;
     }
 
-    let row_count = state.row_count();
-    let col_widths = &state.col_widths;
+    let row_count = result.rows.len();
     let num_cols = result.columns.len();
-    let h_scroll = state.h_scroll as u16;
+    let h_scroll = state_h_scroll as u16;
 
-    // Vertical scrollbar layout.
-    let layout = pane_scroll_layout(area, area.width, row_count, area.height as usize);
+    // Compute actual table content width to detect horizontal overflow.
+    let table_width = crate::common::view::format::results_table_width(col_widths);
+    let max_h_scroll = crate::common::view::format::results_max_h_scroll(table_width, area.width);
+
+    // Reserve scrollbar area: pass the table's content width so h_scrollbar is
+    // shown only when columns overflow the viewport.
+    let layout = pane_scroll_layout(area, table_width, row_count, area.height as usize);
     let table_area = layout.content_area;
 
     if table_area.height < RESULTS_HEADER_HEIGHT {
@@ -250,12 +279,17 @@ fn render_table(
         0
     };
 
-    // Scroll to keep selected row visible if it falls outside the viewport.
-    let max_scroll = row_count.saturating_sub(visible_data_rows);
-    let mut v_scroll = state.row;
-    if v_scroll > max_scroll {
-        v_scroll = max_scroll;
+    // Auto-adjust v_scroll to keep cursor anchored: only scroll when cursor
+    // exits the visible viewport (not always anchored to first row).
+    let vr = visible_data_rows.max(1);
+    let max_scroll = row_count.saturating_sub(vr);
+    let mut v_scroll = state_v_scroll.min(max_scroll);
+    if state_row >= v_scroll + vr {
+        v_scroll = state_row.saturating_sub(vr.saturating_sub(1));
+    } else if state_row < v_scroll {
+        v_scroll = state_row;
     }
+    v_scroll = v_scroll.min(max_scroll);
 
     // Row separator style (subtle grid line).
     let grid_style = Style::default().fg(p.muted);
@@ -273,13 +307,17 @@ fn render_table(
             continue;
         }
 
-        // Column's screen x = logical start + h_scroll skip.
-        let col_x = table_area.x
-            + crate::common::view::format::col_x_start(col, col_widths) as u16
-            + tv.table_text_skip;
+        // Column's screen x = text_vis_left − h_scroll (matching original dbm).
+        let col_x = table_area
+            .x
+            .saturating_add(
+                crate::common::view::format::col_x_start(col, col_widths) as u16
+                    + tv.table_text_skip,
+            )
+            .saturating_sub(h_scroll);
 
         // Column name (bold).
-        let name_style = if col == state.col {
+        let name_style = if col == state_col {
             Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(p.fg).add_modifier(Modifier::BOLD)
@@ -353,7 +391,7 @@ fn render_table(
         );
 
         // Row background (highlight if selected).
-        let row_selected = row_idx == state.row;
+        let row_selected = row_idx == state_row;
         if row_selected {
             frame.render_widget(
                 ratatui::widgets::Block::default().style(Style::default().bg(p.selection_bg)),
@@ -377,7 +415,7 @@ fn render_table(
                 .map(String::as_str)
                 .unwrap_or("");
 
-            let is_active = state.col == col;
+            let is_active = state_col == col;
             let base_style = if row_selected && is_active {
                 Style::default()
                     .fg(p.fg)
@@ -399,9 +437,13 @@ fn render_table(
                 tv.table_text_skip,
                 tv.text_w,
             );
-            let col_x = table_area.x
-                + crate::common::view::format::col_x_start(col, col_widths) as u16
-                + tv.table_text_skip;
+            let col_x = table_area
+                .x
+                .saturating_add(
+                    crate::common::view::format::col_x_start(col, col_widths) as u16
+                        + tv.table_text_skip,
+                )
+                .saturating_sub(h_scroll);
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(text, base_style))),
                 Rect::new(col_x, y_base, tv.text_w, RESULTS_ROW_CONTENT_HEIGHT),
@@ -440,6 +482,19 @@ fn render_table(
             v_scroll,
             visible_data_rows,
             max_scroll,
+            p,
+            false,
+        );
+    }
+
+    // Horizontal scrollbar for columns that overflow the viewport.
+    if let Some(bar) = layout.h_scrollbar {
+        crate::common::view::pane_scrollbar::draw_horizontal_pane_scrollbar(
+            frame,
+            bar,
+            state_h_scroll,
+            table_area.width as usize,
+            max_h_scroll as usize,
             p,
             false,
         );

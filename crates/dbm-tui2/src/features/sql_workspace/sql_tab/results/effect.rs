@@ -79,6 +79,8 @@ pub enum ResultsEffect {
     },
     Detail(DetailEffect),
     List(ListEffect),
+    /// Sync the viewport dimensions after render (pure state update).
+    SyncViewport { rows: usize },
 }
 
 impl Effect for ResultsEffect {
@@ -236,6 +238,7 @@ impl Effect for ResultsEffect {
                 }
                 ResultsEffect::Detail(_) => Vec::new(),
                 ResultsEffect::List(_) => Vec::new(),
+                ResultsEffect::SyncViewport { .. } => Vec::new(),
             }
         })
     }

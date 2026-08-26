@@ -52,6 +52,8 @@ pub enum ListMessage {
     },
     /// Commit the current edits.
     Commit,
+    /// Synchronise the viewport dimensions (called after render).
+    SyncViewport { rows: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

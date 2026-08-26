@@ -62,6 +62,8 @@ pub enum ResultsMessage {
     SetPage { page: usize },
     /// Commit the current edits.
     Commit,
+    /// Synchronise the viewport dimensions.
+    SyncViewport { rows: usize },
 
     // ---- Routed variants (for internal sub-feature routing) ----
     /// Route to the list sub-feature.
@@ -137,6 +139,7 @@ impl ResultsMessage {
             ResultsMessage::SetRowLimit { limit } => ListMessage::SetRowLimit { limit },
             ResultsMessage::SetPage { page } => ListMessage::SetPage { page },
             ResultsMessage::Commit => ListMessage::Commit,
+            ResultsMessage::SyncViewport { rows } => ListMessage::SyncViewport { rows },
             ResultsMessage::SetDetailDraft { .. } => {
                 // This is a cross-feature message; handled separately.
                 ListMessage::ResetSelection // placeholder, should not be called
