@@ -104,7 +104,7 @@ pub fn draw_completion_popup_at(
         .skip(start)
         .take(visible)
         .enumerate()
-        .map(|(row, item)| completion_line(item, start + row == state.selected, p.fg, p.selection_bg, p.muted))
+        .map(|(row, item)| completion_line(item, start + row == state.selected, p.selection_text, p.selection_bg, p.muted))
         .collect();
     frame.render_widget(Paragraph::new(lines), inner);
     popup

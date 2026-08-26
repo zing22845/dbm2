@@ -80,8 +80,11 @@ pub fn render(
                 let style = if selected {
                     // A unified row-selection background (mirroring the original
                     // dbm's connections selection) over the test-status fg.
+                    // Substitute selection_text for the default fg so text stays
+                    // legible on the light selection background.
+                    let fg = if color == p.fg { p.selection_text } else { color };
                     Style::default()
-                        .fg(color)
+                        .fg(fg)
                         .bg(p.selection_bg)
                         .add_modifier(Modifier::BOLD)
                 } else {

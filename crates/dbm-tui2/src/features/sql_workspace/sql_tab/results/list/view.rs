@@ -269,6 +269,10 @@ fn render_table(
     let layout = pane_scroll_layout(area, table_width, row_count, area.height as usize);
     let table_area = layout.content_area;
 
+    // Visible content width: when columns don't fill the viewport, avoid
+    // rendering empty space beyond the last column (matching original dbm).
+    let content_width = table_width.min(table_area.width);
+
     if table_area.height < RESULTS_HEADER_HEIGHT {
         return;
     }
@@ -338,7 +342,10 @@ fn render_table(
 
         // Column name (bold).
         let name_style = if col == state_col {
-            Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(p.selection_text)
+                .bg(p.selection_bg)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(p.fg).add_modifier(Modifier::BOLD)
         };
@@ -352,18 +359,20 @@ fn render_table(
             Rect::new(col_x, table_area.y, tv.text_w, 1),
         );
 
-        // Type label (green).
+        // Type label: dark grey on selection bg for hierarchy, green otherwise.
         let type_label = column_type_label(meta);
+        let type_style = if col == state_col {
+            Style::default().fg(p.selection_text).bg(p.selection_bg).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        };
         let type_text = crate::common::view::format::truncate_cell_display_from(
             &type_label,
             tv.table_text_skip,
             tv.text_w,
         );
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                type_text,
-                Style::default().fg(Color::Green),
-            ))),
+            Paragraph::new(Line::from(Span::styled(type_text, type_style))),
             Rect::new(col_x, table_area.y + 1, tv.text_w, 1),
         );
 
@@ -386,7 +395,8 @@ fn render_table(
     // Horizontal separator after header.
     let sep_y = table_area.y + RESULTS_HEADER_HEIGHT - 1;
     if sep_y < table_area.bottom() {
-        for x in table_area.x..table_area.right() {
+        let sep_right = table_area.x.saturating_add(content_width);
+        for x in table_area.x..sep_right.min(table_area.right()) {
             frame.buffer_mut().set_string(x, sep_y, "─", grid_style);
         }
     }
@@ -402,11 +412,12 @@ fn render_table(
             .saturating_add(RESULTS_HEADER_HEIGHT)
             .saturating_add(vis as u16 * RESULTS_ROW_HEIGHT);
 
-        // Row content area (1 line).
+        // Row content area — only spans the actual column content width
+        // (not the full viewport) to avoid empty-column appearance.
         let row_content_area = Rect::new(
             table_area.x,
             y_base,
-            table_area.width,
+            content_width,
             RESULTS_ROW_CONTENT_HEIGHT,
         );
 
@@ -438,16 +449,11 @@ fn render_table(
             let is_active = state_col == col;
             let base_style = if row_selected && is_active {
                 Style::default()
-                    .fg(p.fg)
+                    .fg(p.selection_focus_text)
                     .bg(p.selection_cell_bg)
                     .add_modifier(Modifier::BOLD)
-            } else if row_selected {
-                Style::default().fg(p.fg)
-            } else if is_active {
-                Style::default()
-                    .fg(p.accent)
-                    .bg(p.selection_cell_bg)
-                    .add_modifier(Modifier::BOLD)
+            } else if row_selected || is_active {
+                Style::default().fg(p.selection_text).bg(p.selection_bg)
             } else {
                 Style::default().fg(p.fg)
             };
@@ -488,7 +494,8 @@ fn render_table(
         // Row separator line.
         let row_sep_y = y_base + RESULTS_ROW_CONTENT_HEIGHT;
         if row_sep_y < table_area.bottom() {
-            for x in table_area.x..table_area.right() {
+            let sep_right = table_area.x.saturating_add(content_width);
+            for x in table_area.x..sep_right.min(table_area.right()) {
                 frame.buffer_mut().set_string(x, row_sep_y, "─", grid_style);
             }
         }

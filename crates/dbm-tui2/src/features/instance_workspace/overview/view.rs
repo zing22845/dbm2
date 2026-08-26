@@ -137,7 +137,7 @@ pub fn render(
         let selected = row_idx == cursor;
         let style = if selected {
             Style::default()
-                .fg(p.fg)
+                .fg(p.selection_text)
                 .bg(p.selection_bg)
                 .add_modifier(Modifier::BOLD)
         } else {

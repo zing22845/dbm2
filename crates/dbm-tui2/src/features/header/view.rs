@@ -37,14 +37,13 @@ pub fn discover_button_rect(area: Rect) -> Option<Rect> {
 pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &HeaderState, focused: bool) {
     let p = theme.palette();
 
-    // The Discover button's foreground always matches the explorer instance
-    // text color (`p.fg`), whether or not the header owns the shell focus; the
-    // only distinction is the background. When the header is focused (and the
-    // cursor is on the button) the background becomes the instances cursor-row
-    // `selection_bg`, mirroring how a focused instance row is highlighted.
+    // The Discover button's foreground matches the explorer instance row:
+    // `p.fg` when unfocused, `p.selection_text` when focused (so it stays legible
+    // on the light selection background). The background only appears when
+    // the header owns the shell focus.
     let discover_focused = state.button == 0 && focused;
     let discover_style = Style::default()
-        .fg(p.fg)
+        .fg(if discover_focused { p.selection_text } else { p.fg })
         .bg(if discover_focused {
             p.selection_bg
         } else {
@@ -180,15 +179,16 @@ mod tests {
         assert_eq!(cell.fg, p.fg, "button fg matches the instance font color");
         assert_eq!(cell.bg, ratatui::style::Color::Reset, "no bg when unfocused");
 
-        // Focused: same foreground, but the instances cursor-row selection
-        // background is applied.
+        // Focused: foreground switches to selection_text for legibility on the
+        // light selection background, with the instances cursor-row selection
+        // background applied.
         terminal
             .draw(|frame| {
                 render(frame, &theme, area, &HeaderState::default(), true)
             })
             .unwrap();
         let cell = &terminal.backend().buffer()[(r.x, r.y)];
-        assert_eq!(cell.fg, p.fg, "fg stays the instance color when focused");
+        assert_eq!(cell.fg, p.selection_text, "fg uses selection_text when focused for legibility on light bg");
         assert_eq!(
             cell.bg, p.selection_bg,
             "focused button bg matches the instances cursor background"

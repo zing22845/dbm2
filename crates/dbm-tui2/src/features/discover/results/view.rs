@@ -74,7 +74,7 @@ pub fn render(
             let checked = result_selection_glyph(item.already_registered, state.selected.contains(&idx));
             let style = if row_focused {
                 Style::default()
-                    .fg(p.fg)
+                    .fg(p.selection_text)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(p.fg)

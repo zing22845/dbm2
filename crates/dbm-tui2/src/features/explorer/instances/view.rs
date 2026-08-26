@@ -121,7 +121,7 @@ pub fn render(
         // row it keeps its selection background and the regular active color.
         let style = if focused {
             Style::default()
-                .fg(if active { p.active_fg } else { p.fg })
+                .fg(if active { p.selection_focus_text } else { p.selection_text })
                 .bg(p.selection_bg)
                 .add_modifier(Modifier::BOLD)
         } else if active {
@@ -148,7 +148,7 @@ pub fn render(
                 // highlighted.
                 let cstyle = if conn_focused {
                     Style::default()
-                        .fg(if conn_active { p.active_fg } else { p.fg })
+                        .fg(if conn_active { p.selection_focus_text } else { p.selection_text })
                         .bg(p.selection_bg)
                         .add_modifier(Modifier::BOLD)
                 } else if conn_active {

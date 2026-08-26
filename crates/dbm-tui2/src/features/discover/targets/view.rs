@@ -197,9 +197,8 @@ pub fn render(
 fn row_style(theme: &Theme) -> Style {
     let p = theme.palette();
     Style::default()
-        .fg(p.fg)
+        .fg(p.selection_text)
         .bg(p.selection_bg)
-        .add_modifier(Modifier::BOLD)
 }
 
 /// Style for a host/ports cell: editing cells get a distinct edit background,
@@ -213,11 +212,11 @@ fn cell_style(theme: &Theme, row_sel: bool, cell_focused: bool, editing: bool) -
         // The active cell gets a stronger background so it stands out from
         // the selected row's other fields (which share selection_bg).
         Style::default()
-            .fg(p.fg)
+            .fg(p.selection_focus_text)
             .bg(p.selection_cell_bg)
             .add_modifier(Modifier::BOLD)
     } else if row_sel {
-        Style::default().fg(p.fg).bg(p.selection_bg)
+        Style::default().fg(p.selection_text).bg(p.selection_bg)
     } else {
         Style::default().fg(p.fg)
     }

@@ -50,6 +50,14 @@ pub struct Palette {
     /// row (e.g. the cursor cell of a SQL results grid), so the focused field
     /// stands out from its row-mates which share `selection_bg`.
     pub selection_cell_bg: Color,
+    /// Foreground color for text in a selected row (non-active cells).
+    /// Mirrors the original dbm's `selection_text` — dark grey on a light selection
+    /// background so the selected-row label stays legible.
+    pub selection_text: Color,
+    /// Foreground color for the focused / active cell inside a selected row.
+    /// Mirrors the original dbm's `selection_focus_text` — a strong accent (e.g. dark
+    /// blue) on the `selection_cell_bg` background to mark the cursor cell.
+    pub selection_focus_text: Color,
     /// Success / positive status.
     pub success: Color,
     /// Warning status.
@@ -98,6 +106,8 @@ impl Palette {
             selection: p.selection,
             selection_bg: p.selection,
             selection_cell_bg: p.selection,
+            selection_text: p.fg,
+            selection_focus_text: p.accent,
             success: p.success,
             warning: p.warning,
             error: p.error,
@@ -140,15 +150,19 @@ impl Theme {
     pub fn from_ratatui(name: &'static str, dark_name: ThemeName, light_name: ThemeName) -> Self {
         let mut dark = Palette::from_ratatui(&dark_name.palette());
         let mut light = Palette::from_ratatui(&light_name.palette());
-        // A unified, visible row-selection background per mode: dark gets a
-        // mid-blue-grey a step up from the background, light mirrors the
-        // original dbm's connections selection (light blue-grey `228,234,245`).
-        dark.selection_bg = Color::Rgb(0x3b, 0x42, 0x52);
-        light.selection_bg = Color::Rgb(0xe4, 0xea, 0xf5);
-        // The active cell inside the selected row is one step stronger so it
-        // stands out from its row-mates.
-        dark.selection_cell_bg = Color::Rgb(0x4c, 0x56, 0x6a);
-        light.selection_cell_bg = Color::Rgb(0xc5, 0xcf, 0xe6);
+        // Match original dbm's results-theme colours: light selection
+        // backgrounds with dark grey text and dark-blue focus cell text.
+        // These are the same for both dark and light modes — the results grid
+        // is always rendered as a light "island" regardless of the overall
+        // terminal theme (matching the original dbm design).
+        dark.selection_bg = Color::Rgb(0xfa, 0xfc, 0xff);
+        light.selection_bg = Color::Rgb(0xfa, 0xfc, 0xff);
+        dark.selection_cell_bg = Color::Rgb(0xe4, 0xea, 0xf5);
+        light.selection_cell_bg = Color::Rgb(0xe4, 0xea, 0xf5);
+        dark.selection_text = Color::Rgb(0x34, 0x37, 0x40);
+        light.selection_text = Color::Rgb(0x34, 0x37, 0x40);
+        dark.selection_focus_text = Color::Rgb(0x1c, 0x48, 0x8c);
+        light.selection_focus_text = Color::Rgb(0x1c, 0x48, 0x8c);
         Theme {
             name,
             is_dark: true,
@@ -174,8 +188,10 @@ pub fn dracula() -> Theme {
             // Bright green — readable on the blue-grey selection background.
             active_fg: Color::Rgb(0x50, 0xfa, 0x7b),
             selection: Color::Rgb(0x44, 0x47, 0x5a),
-            selection_bg: Color::Rgb(0x3d, 0x40, 0x52),
-            selection_cell_bg: Color::Rgb(0x55, 0x5a, 0x73),
+            selection_bg: Color::Rgb(0xfa, 0xfc, 0xff),
+            selection_cell_bg: Color::Rgb(0xe4, 0xea, 0xf5),
+            selection_text: Color::Rgb(0x34, 0x37, 0x40),
+            selection_focus_text: Color::Rgb(0x1c, 0x48, 0x8c),
             success: Color::Rgb(0x50, 0xfa, 0x7b),   // green
             warning: Color::Rgb(0xf1, 0xfa, 0x8c),   // yellow
             error: Color::Rgb(0xff, 0x55, 0x55),     // red
@@ -193,8 +209,10 @@ pub fn dracula() -> Theme {
             // Deep green — readable on the light blue-grey selection background.
             active_fg: Color::Rgb(0x1a, 0xb0, 0x4c),
             selection: Color::Rgb(0xcf, 0xc9, 0xc2),
-            selection_bg: Color::Rgb(0xe4, 0xea, 0xf5),
-            selection_cell_bg: Color::Rgb(0xc5, 0xcf, 0xe6),
+            selection_bg: Color::Rgb(0xfa, 0xfc, 0xff),
+            selection_cell_bg: Color::Rgb(0xe4, 0xea, 0xf5),
+            selection_text: Color::Rgb(0x34, 0x37, 0x40),
+            selection_focus_text: Color::Rgb(0x1c, 0x48, 0x8c),
             success: Color::Rgb(0x1a, 0xb0, 0x4c),
             warning: Color::Rgb(0xa5, 0x8a, 0x00),
             error: Color::Rgb(0xd3, 0x2f, 0x2f),
@@ -220,8 +238,10 @@ pub fn nord() -> Theme {
             // Aurora green (nord14) — readable on the nord1 selection bg.
             active_fg: Color::Rgb(0xa3, 0xbe, 0x8c),
             selection: Color::Rgb(0x43, 0x4c, 0x5e),
-            selection_bg: Color::Rgb(0x3b, 0x42, 0x52),
-            selection_cell_bg: Color::Rgb(0x4c, 0x56, 0x6a),
+            selection_bg: Color::Rgb(0xfa, 0xfc, 0xff),
+            selection_cell_bg: Color::Rgb(0xe4, 0xea, 0xf5),
+            selection_text: Color::Rgb(0x34, 0x37, 0x40),
+            selection_focus_text: Color::Rgb(0x1c, 0x48, 0x8c),
             success: Color::Rgb(0xa3, 0xbe, 0x8c),   // nord14
             warning: Color::Rgb(0xeb, 0xcb, 0x8b),   // nord13
             error: Color::Rgb(0xbf, 0x61, 0x6a),     // nord11
@@ -239,8 +259,10 @@ pub fn nord() -> Theme {
             // Darker aurora green (nord10) — readable on the light selection bg.
             active_fg: Color::Rgb(0x5e, 0x81, 0xac),
             selection: Color::Rgb(0xd8, 0xde, 0xe9),
-            selection_bg: Color::Rgb(0xd8, 0xde, 0xe9),
-            selection_cell_bg: Color::Rgb(0xc2, 0xcd, 0xde),
+            selection_bg: Color::Rgb(0xfa, 0xfc, 0xff),
+            selection_cell_bg: Color::Rgb(0xe4, 0xea, 0xf5),
+            selection_text: Color::Rgb(0x34, 0x37, 0x40),
+            selection_focus_text: Color::Rgb(0x1c, 0x48, 0x8c),
             success: Color::Rgb(0x5e, 0x81, 0xac),
             warning: Color::Rgb(0xdb, 0xa0, 0x0d),
             error: Color::Rgb(0xbf, 0x61, 0x6a),

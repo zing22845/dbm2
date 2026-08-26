@@ -104,7 +104,7 @@ pub fn render(
         // the cursor row keeps its selection highlight underneath.
         let style = if focused {
             Style::default()
-                .fg(if row.active { p.active_fg } else { p.fg })
+                .fg(if row.active { p.selection_focus_text } else { p.selection_text })
                 .bg(p.selection_bg)
                 .add_modifier(Modifier::BOLD)
         } else if row.active {

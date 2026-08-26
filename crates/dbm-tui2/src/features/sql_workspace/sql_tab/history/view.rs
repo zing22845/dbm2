@@ -8,7 +8,7 @@
 //! draw their own outer borders — the History pane provides it.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -271,11 +271,10 @@ fn render_list_rows(
 
             let style = if selected {
                 Style::default()
-                    .fg(p.fg)
+                    .fg(p.selection_text)
                     .bg(p.selection_bg)
-                    .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(p.muted).bg(p.bg)
+                Style::default().fg(p.fg)
             };
             Line::from(Span::styled(display_text, style))
         })
