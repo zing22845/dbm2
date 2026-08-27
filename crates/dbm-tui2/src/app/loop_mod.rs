@@ -875,6 +875,9 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         SqlSplitter::HistoryDetail => {
                                             sh.sql_history_detail_drag = true;
                                         }
+                                        SqlSplitter::ResultsDetail => {
+                                            sh.sql_results_detail_drag = true;
+                                        }
                                     }
                                     tracing::debug!(?splitter, "splitter drag started");
                                 }
@@ -1055,6 +1058,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 state.splitter_hover.sql_editor_results_drag = false;
                                 state.splitter_hover.sql_editor_history_drag = false;
                                 state.splitter_hover.sql_history_detail_drag = false;
+                                state.splitter_hover.sql_results_detail_drag = false;
                                 tracing::debug!("splitter drag finished");
                             }
                             // Re-evaluate hover after drag end — the cursor may
@@ -2061,6 +2065,9 @@ fn update_splitter_hover(
                 crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter::HistoryDetail => {
                     state.splitter_hover.history_detail = true;
                 }
+                crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter::ResultsDetail => {
+                    state.splitter_hover.results_detail = true;
+                }
             }
         }
 
@@ -2230,6 +2237,42 @@ fn sql_click_msgs(
                     SqlTabMessage::History {
                         tab_id,
                         msg: HistoryMsg::Message(HistoryMessage::SetHScroll { position }),
+                    },
+                )))),
+            ]
+        }
+        SqlClickAction::ResultsCellClicked { row, col } => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            vec![
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Focus(SqlFocus::Results),
+                )))),
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        tab_id,
+                        msg: ResultsMsg::Message(ResultsMessage::SetSelection { row, col }),
+                    },
+                )))),
+            ]
+        }
+        SqlClickAction::ResultsOpenDetail => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            vec![
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Focus(SqlFocus::Results),
+                )))),
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        tab_id,
+                        msg: ResultsMsg::Message(ResultsMessage::ToggleDetail),
                     },
                 )))),
             ]

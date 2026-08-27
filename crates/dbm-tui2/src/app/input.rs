@@ -771,6 +771,13 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
                     SqlTabMsg::Message(SqlTabMessage::NudgeHistoryDetailWidth { tab_id, nudge }),
                 ))));
             }
+            if tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::Results
+                && tab.results.detail_open
+            {
+                return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::NudgeResultsDetailWidth { tab_id, nudge }),
+                ))));
+            }
             return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
                 SqlTabMsg::Message(SqlTabMessage::NudgeHistoryWidth { tab_id, nudge }),
             ))));
@@ -914,6 +921,10 @@ fn results_key(key: KeyEvent, tab_id: usize, results: &crate::features::sql_work
     }
 
     match key.code {
+        // Toggle detail inspect mode.
+        KeyCode::Enter if key.modifiers.is_empty() => {
+            Some(sql_results(SqlResultsMessage::ToggleDetail, tab_id))
+        }
         // Toggle edit mode.
         KeyCode::Char('i') if key.modifiers.is_empty() => Some(sql_results(
             SqlResultsMessage::EnterEdit,

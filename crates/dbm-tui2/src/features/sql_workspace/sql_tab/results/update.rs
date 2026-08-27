@@ -42,6 +42,25 @@ pub fn update(
             state.list.apply_cell_value(state.list.row, state.list.col, text);
             (state, intents, effects, true)
         }
+        ResultsMessage::ToggleDetail => {
+            state.toggle_detail();
+            if !state.detail_open {
+                let detail_state = std::mem::take(&mut state.detail);
+                let (ds, _di, _de, _dd) = super::detail::update::update(
+                    super::detail::msg::DetailMessage::ClearDraft,
+                    detail_state,
+                );
+                state.detail = ds;
+            } else if let Some(value) = state.list.selected_cell() {
+                let detail_state = std::mem::take(&mut state.detail);
+                let (ds, _di, _de, _dd) = super::detail::update::update(
+                    super::detail::msg::DetailMessage::LoadCell { value },
+                    detail_state,
+                );
+                state.detail = ds;
+            }
+            (state, intents, effects, true)
+        }
         other => {
             let list_msg = other.into_list_message();
             let dirty = route_to_list(list_msg, &mut state, &mut effects);
@@ -60,7 +79,7 @@ fn route_to_list(
     let is_rollback = matches!(msg, ListMessage::Rollback);
     let is_enter_edit = matches!(msg, ListMessage::EnterEdit);
     let is_exit_edit = matches!(msg, ListMessage::ExitEdit);
-    let is_move = matches!(msg, ListMessage::MoveSelection { .. });
+    let is_move = matches!(msg, ListMessage::MoveSelection { .. } | ListMessage::SetSelection { .. });
     let resets_detail_scroll = matches!(
         msg,
         ListMessage::SetResult { .. }
@@ -111,6 +130,16 @@ fn route_to_list(
     }
     if is_move || resets_detail_scroll {
         state.detail.scroll = 0;
+    }
+    if is_move && state.detail_open
+        && let Some(value) = state.list.selected_cell()
+    {
+        let detail_state = std::mem::take(&mut state.detail);
+        let (ds, _di, _de, _dd) = super::detail::update::update(
+            super::detail::msg::DetailMessage::LoadCell { value },
+            detail_state,
+        );
+        state.detail = ds;
     }
 
     d

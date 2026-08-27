@@ -1,16 +1,16 @@
 //! Results list sub-module rendering: the action bar, the result table,
 //! the pagination toolbar, and the list footer.
 //!
-//! The entire list (action bar + table + pagination + footer) is wrapped
-//! in a single outer `Block` that matches the original dbm layout.
+//! The outer Block with border + title is drawn by the parent
+//! `super::render()` — this module renders borderless content into the
+//! already-inner area.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::common::components::search::pane_search_title_line;
 use crate::common::view::action_bar::{
     RESULTS_ACTION_BAR_HEIGHT, ResultsToolbarModel, action_bar_width, draw_action_bar,
 };
@@ -26,7 +26,7 @@ use super::state::ListState;
 use super::super::pagination::{RESULTS_PAGINATION_BAR_HEIGHT, pagination_toolbar_line};
 
 /// Render the list sub-feature: action bar + table + pagination + footer,
-/// all wrapped inside a single outer Block with borders and title.
+/// borderless — the outer Block is drawn by the parent `results::render()`.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
@@ -42,40 +42,21 @@ pub fn render(
 
     // A failed query is shown as red error text.
     if let Some(message) = state.query_error.as_deref() {
-        render_error(frame, theme, area, focused, message);
+        render_error(frame, theme, area, message);
         return;
     }
 
     let Some(result) = state.result.as_ref() else {
-        render_empty(frame, theme, area, focused);
+        render_empty(frame, theme, area);
         return;
     };
 
     let total_rows = result.total_rows;
     let row_count = state.row_count();
-    let state_row = state.row;
     let state_h_scroll = state.h_scroll.get();
 
-    // Outer Block: wraps action bar + table + pagination + footer, matching
-    // the original dbm results layout.
-    let title = pane_search_title_line(
-        " [R] Results",
-        &state.search,
-        true,
-        false,
-        Style::default().fg(p.muted),
-        state_row,
-        row_count,
-        None,
-        None,
-        Some(Style::default().fg(if focused { p.accent } else { p.muted })),
-    );
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(p.active_border(focused));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    // `area` is already the inner area of the outer Results Block.
+    let inner = area;
 
     let search_active = state.search.text_input_active();
     let hint = crate::common::view::hints::results_pane_footer_text(
@@ -176,37 +157,25 @@ pub fn render(
     draw_footer(frame, theme, footer_area, &hint);
 }
 
-fn render_error(frame: &mut Frame, theme: &Theme, area: Rect, focused: bool, message: &str) {
+fn render_error(frame: &mut Frame, theme: &Theme, area: Rect, message: &str) {
     let p = theme.palette();
-    let block = Block::default()
-        .title(" [R] Results ")
-        .borders(Borders::ALL)
-        .border_style(p.active_border(focused));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             message,
             Style::default().fg(p.error),
         ))),
-        inner,
+        area,
     );
 }
 
-fn render_empty(frame: &mut Frame, theme: &Theme, area: Rect, focused: bool) {
+fn render_empty(frame: &mut Frame, theme: &Theme, area: Rect) {
     let p = theme.palette();
-    let block = Block::default()
-        .title(" [R] Results ")
-        .borders(Borders::ALL)
-        .border_style(p.active_border(focused));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             "Run a query to see results",
             Style::default().fg(p.muted),
         ))),
-        inner,
+        area,
     );
 }
 
@@ -534,4 +503,145 @@ fn render_table(
     state.v_scroll.set(v_scroll);
     state.viewport_width.set(table_area.width);
     state.viewport_rows.set(visible_data_rows);
+}
+
+/// Hit-test a click at `(x, y)` inside the list's **inner** area (already
+/// inside the outer Results Block). Returns `Some((row, col))` when the
+/// click lands on a data cell (not header, action bar, pagination, footer,
+/// or scrollbar), or `None` otherwise.
+///
+/// Replicates the geometry used by [`render`] and [`render_table`] so the
+/// hit-test matches what the user sees exactly.
+pub fn cell_hit_at(
+    inner: Rect,
+    state: &ListState,
+    x: u16,
+    y: u16,
+    footer_height: u16,
+) -> Option<(usize, usize)> {
+    if inner.width == 0 || inner.height == 0 {
+        return None;
+    }
+
+    let result = state.result.as_ref()?;
+    if result.columns.is_empty() || result.rows.is_empty() {
+        return None;
+    }
+
+    let col_widths = &state.col_widths;
+
+    // Split inner → content + pagination + footer (same as render()).
+    let pagination_h = if state.row_count() > 0 {
+        RESULTS_PAGINATION_BAR_HEIGHT
+    } else {
+        0
+    };
+
+    let chunks = if pagination_h > 0 {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(pagination_h),
+                Constraint::Length(footer_height),
+            ])
+            .split(inner)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(footer_height),
+            ])
+            .split(inner)
+    };
+    let content = chunks[0];
+
+    // Split content → action bar + table area.
+    let list_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(RESULTS_ACTION_BAR_HEIGHT),
+            Constraint::Min(0),
+        ])
+        .split(content);
+    let table_area = list_chunks[1];
+
+    // Click must be inside table_area, excluding scrollbars.
+    if !contains(table_area, x, y) {
+        return None;
+    }
+
+    let row_count = result.rows.len();
+    let table_width = crate::common::view::format::results_table_width(col_widths);
+    let layout = pane_scroll_layout(table_area, table_width, row_count, table_area.height as usize);
+    if !contains(layout.content_area, x, y) {
+        return None;
+    }
+
+    let viewport_width = layout.content_area.width as usize;
+    let viewport_height = layout.content_area.height as usize;
+    if viewport_width == 0 || viewport_height <= usize::from(RESULTS_HEADER_HEIGHT) {
+        return None;
+    }
+
+    // Compute scrolls (mirroring render_table logic).
+    let max_h_scroll = crate::common::view::format::results_max_h_scroll(table_width, layout.content_area.width) as usize;
+    let state_h_scroll = state.h_scroll.get();
+    let mut h_scroll_val = state_h_scroll.min(max_h_scroll);
+    let state_row = state.row;
+
+    let num_cols = result.columns.len();
+    if h_scroll_val > 0 && !col_widths.is_empty() {
+        let view_right = h_scroll_val.saturating_add(viewport_width);
+        let cur_col_left = crate::common::view::format::col_x_start(state.col, col_widths);
+        let cur_col_right = crate::common::view::format::col_x_end(state.col, col_widths);
+        if cur_col_right <= h_scroll_val {
+            h_scroll_val = cur_col_left;
+        } else if cur_col_left >= view_right {
+            h_scroll_val = cur_col_right.saturating_sub(viewport_width);
+        }
+        h_scroll_val = h_scroll_val.min(max_h_scroll);
+    }
+
+    let visible_data_rows = viewport_height.saturating_sub(usize::from(RESULTS_HEADER_HEIGHT))
+        / usize::from(RESULTS_ROW_HEIGHT);
+    let vr = visible_data_rows.max(1);
+    let max_scroll = row_count.saturating_sub(vr);
+    let mut v_scroll = state.v_scroll.get().min(max_scroll);
+    if state_row >= v_scroll + vr {
+        v_scroll = state_row.saturating_sub(vr.saturating_sub(1));
+    } else if state_row < v_scroll {
+        v_scroll = state_row;
+    }
+    v_scroll = v_scroll.min(max_scroll);
+
+    // Hit-test row: y relative to content_area, minus header.
+    let rel_y = y.saturating_sub(layout.content_area.y);
+    if rel_y < RESULTS_HEADER_HEIGHT {
+        return None;
+    }
+    let rel_data_y = rel_y.saturating_sub(RESULTS_HEADER_HEIGHT);
+    let row_in_viewport = rel_data_y / RESULTS_ROW_HEIGHT;
+    let row_idx = v_scroll + usize::from(row_in_viewport);
+    if row_idx >= row_count {
+        return None;
+    }
+
+    // Hit-test column: x relative to content_area, accounting for h_scroll.
+    let rel_x = x.saturating_sub(layout.content_area.x) as usize;
+    let col_sx = rel_x.saturating_add(h_scroll_val);
+    for col in 0..num_cols {
+        let start = crate::common::view::format::col_x_start(col, col_widths);
+        let end = crate::common::view::format::col_x_end(col, col_widths);
+        if col_sx >= start && col_sx < end {
+            return Some((row_idx, col));
+        }
+    }
+
+    None
+}
+
+fn contains(r: Rect, x: u16, y: u16) -> bool {
+    x >= r.x && x < r.x.saturating_add(r.width) && y >= r.y && y < r.y.saturating_add(r.height)
 }

@@ -17,6 +17,8 @@ pub enum ListMessage {
     QueryError { message: String },
     /// Move the cell selection by `(dr, dc)`.
     MoveSelection { dr: i32, dc: i32 },
+    /// Set the cell selection to an absolute `(row, col)` (from a mouse click).
+    SetSelection { row: usize, col: usize },
     /// Begin `/` search input.
     BeginSearch,
     /// Forward a key while search input is active.

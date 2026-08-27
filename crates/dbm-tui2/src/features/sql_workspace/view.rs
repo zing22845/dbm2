@@ -72,6 +72,8 @@ pub fn render(
             splitter_hover.sql_editor_results_drag,
             splitter_hover.sql_editor_history_drag,
             splitter_hover.sql_history_detail_drag,
+            splitter_hover.results_detail,
+            splitter_hover.sql_results_detail_drag,
         );
         draw_footer(frame, theme, chunks[1], &hint);
         cursor
@@ -90,6 +92,8 @@ pub fn render(
             splitter_hover.sql_editor_results_drag,
             splitter_hover.sql_editor_history_drag,
             splitter_hover.sql_history_detail_drag,
+            splitter_hover.results_detail,
+            splitter_hover.sql_results_detail_drag,
         )
     }
 }

@@ -337,6 +337,29 @@ pub fn update(
                 warn_tab_missing(tab_id);
             }
         }
+        SqlTabMessage::SetResultsDetailWidth { tab_id, width } => {
+            if let Some(idx) = state.index_of(tab_id) {
+                let before = state.tabs[idx].results.splitter.detail_pane_width;
+                state.tabs[idx].results.splitter.set_detail_pane_width(width);
+                dirty = before != state.tabs[idx].results.splitter.detail_pane_width;
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
+        SqlTabMessage::NudgeResultsDetailWidth { tab_id, nudge } => {
+            if let Some(idx) = state.index_of(tab_id) {
+                // Results detail is on the RIGHT side of its splitter, so the
+                // delta flips sign vs. History detail (which is on the left).
+                let delta =
+                    crate::common::view::splitter::width_delta_for_right_pane(nudge, crate::common::view::splitter::WIDTH_NUDGE_STEP);
+                let next = (state.tabs[idx].results.splitter.detail_pane_width as i16 + delta).max(0) as u16;
+                let before = state.tabs[idx].results.splitter.detail_pane_width;
+                state.tabs[idx].results.splitter.set_detail_pane_width(next);
+                dirty = before != state.tabs[idx].results.splitter.detail_pane_width;
+            } else {
+                warn_tab_missing(tab_id);
+            }
+        }
         SqlTabMessage::NudgeHistoryWidth { tab_id, nudge } => {
             if let Some(idx) = state.index_of(tab_id) {
                 // The width is clamped to the live editor+history track so the

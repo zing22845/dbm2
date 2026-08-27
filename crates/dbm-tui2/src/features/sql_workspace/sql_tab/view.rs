@@ -41,6 +41,10 @@ pub enum SqlClickAction {
     HistoryRowClicked { index: usize },
     /// Click/drag on the history horizontal scrollbar.
     HistoryHScrollbar { x: u16, max_scroll: usize, viewport_width: usize },
+    /// Single-click on a results list cell: move cursor to that `(row, col)`.
+    ResultsCellClicked { row: usize, col: usize },
+    /// Double-click inside the results pane: toggle the detail inspect mode.
+    ResultsOpenDetail,
 }
 
 /// Hit-test a click at `(x, y)` inside the SQL workspace's tab-bar + body
@@ -198,6 +202,61 @@ pub fn sql_workspace_click(
         && let Some(action) = history_h_scrollbar_hit(state, tab, &layout, x, y, detail_visible)
     {
         return Some(action);
+    }
+
+    // Results pane cell click handling (single-click: select cell; double-click: open detail).
+    // The Results area has an outer Block with 1-col borders, so we first
+    // compute the inner area, then delegate split logic to the splitter
+    // sub-feature — only the list sub-pane responds to cell clicks.
+    let results_hit = contains(layout.results, x, y);
+    if results_hit {
+        // Step 1: subtract outer Block borders (1 col on each side).
+        let block_inner = ratatui::layout::Rect {
+            x: layout.results.x.saturating_add(1),
+            y: layout.results.y.saturating_add(1),
+            width: layout.results.width.saturating_sub(2),
+            height: layout.results.height.saturating_sub(2),
+        };
+
+        // Step 2: delegate split geometry to the splitter sub-feature.
+        let (list_inner, _splitter_rect, _detail_inner) =
+            crate::features::sql_workspace::sql_tab::results::splitter::view::split_inner(
+                block_inner,
+                tab.results.detail_open,
+                tab.results.splitter.detail_pane_width,
+            );
+
+        // Step 3: only the list sub-pane responds to cell clicks.
+        if contains(list_inner, x, y)
+            && tab.results.list.result.is_some()
+            && tab.results.list.row_count() > 0
+        {
+            let search_active = tab.results.list.search.text_input_active();
+            let hint = crate::common::view::hints::results_pane_footer_text(
+                search_active,
+                tab.results.detail_open,
+                "",
+            );
+            let footer_h =
+                crate::common::view::hints::footer_height(&hint, list_inner.width)
+                    .min(list_inner.height.saturating_sub(4));
+
+            if is_double_click && !tab.results.detail_open {
+                return Some(SqlClickAction::ResultsOpenDetail);
+            } else if let Some((row, col)) =
+                crate::features::sql_workspace::sql_tab::results::list::view::cell_hit_at(
+                    list_inner,
+                    &tab.results.list,
+                    x,
+                    y,
+                    footer_h,
+                )
+            {
+                return Some(SqlClickAction::ResultsCellClicked { row, col });
+            }
+        }
+        // Click in Block borders, splitter, or detail sub-pane → fall through
+        // to focus-change logic below.
     }
 
     let focus = if editor_hit {
@@ -416,6 +475,8 @@ pub fn render(
     h_drag: bool,
     v_drag: bool,
     detail_drag: bool,
+    results_detail_hover: bool,
+    results_detail_drag: bool,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     // No tab open for the active connection: show an empty-state hint and no
     // tab bar, mirroring the original dbm's `workspace_empty_hint` (no phantom
@@ -462,7 +523,7 @@ pub fn render(
     let layout = sql_tab_layout(body_area, tab.splitter.editor_top_height, tab.splitter.history_pane_width);
     if layout.editor.width == 0 {
         // Area too small to split: show a single results pane.
-        results_view::render(frame, theme, body_area, &tab.results, results_focused);
+        results_view::render(frame, theme, body_area, &tab.results, results_focused, results_detail_hover, results_detail_drag);
         return None;
     }
 
@@ -609,7 +670,7 @@ pub fn render(
         );
     }
 
-    results_view::render(frame, theme, layout.results, &tab.results, results_focused);
+    results_view::render(frame, theme, layout.results, &tab.results, results_focused, results_detail_hover, results_detail_drag);
 
     // Draw the two draggable splitter strips. The editor/history splitter is
     // drawn at the (possibly shifted) editor right edge so it never lands
@@ -875,7 +936,7 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
             terminal
                 .draw(|frame| {
-                    let _ = render(frame, &theme, area, &state, true, false, true, false, false, false, false);
+                    let _ = render(frame, &theme, area, &state, true, false, true, false, false, false, false, false, false);
                 })
                 .unwrap();
             let buf = terminal.backend().buffer();
@@ -909,7 +970,7 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
             terminal
                 .draw(|frame| {
-                    let _ = render(frame, &theme, area, &state, true, true, false, false, false, false, false);
+                    let _ = render(frame, &theme, area, &state, true, true, false, false, false, false, false, false, false);
                 })
                 .unwrap();
             let buf = terminal.backend().buffer();
@@ -979,7 +1040,7 @@ mod tests {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     terminal
                         .draw(|frame| {
-                            let _ = render(frame, &theme, area, &state, true, false, false, false, false, false, false);
+                            let _ = render(frame, &theme, area, &state, true, false, false, false, false, false, false, false, false);
                         })
                         .unwrap();
                 }));
@@ -1049,7 +1110,7 @@ mod tests {
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             terminal
                 .draw(|frame| {
-                    let _ = render(frame, &theme, area, &state, true, false, false, false, false, false, false);
+                    let _ = render(frame, &theme, area, &state, true, false, false, false, false, false, false, false, false);
                 })
                 .unwrap();
         }));

@@ -4,7 +4,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::common::components::line_numbers;
@@ -120,18 +120,22 @@ pub fn render(
         return;
     }
     let p = theme.palette();
-    let border = if focused {
-        Style::default().fg(p.border_active)
-    } else {
-        Style::default().fg(p.border)
-    };
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(border)
-        .style(Style::default().bg(p.surface));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
+
+    // Title line inside the outer Results block — no own border.
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            title,
+            Style::default().fg(if focused { p.accent } else { p.muted }),
+        ))),
+        chunks[0],
+    );
+
+    let inner = chunks[1];
 
     let has_action_btns = edit_active && detail.dirty;
     let footer_h = footer_height(&detail_footer_text(detail, edit_active), inner.width).min(3);

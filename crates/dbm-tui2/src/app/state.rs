@@ -68,6 +68,8 @@ pub struct SplitterHoverState {
     pub sql_editor_history: bool,
     /// History detail / list internal vertical splitter.
     pub history_detail: bool,
+    /// Results detail / list internal vertical splitter.
+    pub results_detail: bool,
 
     // --- Drag booleans (set on splitter Down/Drag/Up events) ---
     /// The app-level Explorer / workspace splitter is being dragged.
@@ -82,12 +84,14 @@ pub struct SplitterHoverState {
     pub sql_editor_history_drag: bool,
     /// The history detail / list internal splitter is being dragged.
     pub sql_history_detail_drag: bool,
+    /// The results detail / list internal splitter is being dragged.
+    pub sql_results_detail_drag: bool,
 }
 
 impl SplitterHoverState {
     /// A copy of just the drag booleans, used to preserve active drags across a
     /// hover recompute (see `update_splitter_hover`).
-    pub fn dragging_flags(&self) -> [bool; 6] {
+    pub fn dragging_flags(&self) -> [bool; 7] {
         [
             self.app_splitter_drag,
             self.explorer_splitter_drag,
@@ -95,17 +99,19 @@ impl SplitterHoverState {
             self.sql_editor_results_drag,
             self.sql_editor_history_drag,
             self.sql_history_detail_drag,
+            self.sql_results_detail_drag,
         ]
     }
 
     /// Restore the drag booleans from a previously saved copy.
-    pub fn set_dragging_flags(&mut self, flags: [bool; 6]) {
+    pub fn set_dragging_flags(&mut self, flags: [bool; 7]) {
         self.app_splitter_drag = flags[0];
         self.explorer_splitter_drag = flags[1];
         self.discover_splitter_drag = flags[2];
         self.sql_editor_results_drag = flags[3];
         self.sql_editor_history_drag = flags[4];
         self.sql_history_detail_drag = flags[5];
+        self.sql_results_detail_drag = flags[6];
     }
 }
 

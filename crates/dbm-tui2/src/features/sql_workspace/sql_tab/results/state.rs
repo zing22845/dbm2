@@ -1,10 +1,11 @@
 //! Results feature state.
 //!
-//! Composes the `list` and `detail` sub-feature states plus the parent-level
-//! `detail_open` flag that controls horizontal layout splitting.
+//! Composes the `list`, `detail`, and `splitter` sub-feature states plus the
+//! parent-level `detail_open` flag that controls horizontal layout splitting.
 
 use super::detail::state::DetailState;
 use super::list::state::ListState;
+use super::splitter::state::SplitterState;
 
 /// An `Eq` projection of `dbm_core::QueryResult` so it can travel through the
 /// (Eq-based) message router. `ColumnInfo` is the `Eq` column metadata used by
@@ -32,8 +33,10 @@ impl From<dbm_core::QueryResult> for QueryResultData {
 pub struct ResultsState {
     /// The list sub-feature state (result, selection, pagination, edit).
     pub list: ListState,
-    /// The detail sub-feature state (scroll, pane width, draft).
+    /// The detail sub-feature state (scroll, draft).
     pub detail: DetailState,
+    /// The internal list/detail splitter state (detail pane width).
+    pub splitter: SplitterState,
     /// Whether the detail sub-pane is open (inspect mode). When open, the
     /// results content area splits horizontally into list + detail panes.
     pub detail_open: bool,

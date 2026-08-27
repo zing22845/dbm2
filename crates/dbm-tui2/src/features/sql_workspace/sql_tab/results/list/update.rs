@@ -80,6 +80,20 @@ pub fn update(
             }
             changed
         }
+        ListMessage::SetSelection { row, col } => {
+            let result = state.result.as_ref();
+            let max_row = result.map(|r| r.rows.len().saturating_sub(1)).unwrap_or(0);
+            let max_col = result.map(|r| r.columns.len().saturating_sub(1)).unwrap_or(0);
+            let row = row.min(max_row);
+            let col = col.min(max_col);
+            let changed = state.row != row || state.col != col;
+            state.row = row;
+            state.col = col;
+            if changed {
+                state.auto_scroll_h();
+            }
+            changed
+        }
         ListMessage::BeginSearch => {
             state.search.reset();
             state.search.start();

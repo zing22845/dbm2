@@ -7,6 +7,7 @@ pub mod intent;
 pub mod list;
 pub mod msg;
 pub mod pagination;
+pub mod splitter;
 pub mod state;
 pub mod update;
 pub mod view;

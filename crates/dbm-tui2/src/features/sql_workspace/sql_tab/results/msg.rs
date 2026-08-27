@@ -25,6 +25,8 @@ pub enum ResultsMessage {
     QueryError { message: String },
     /// Move the cell selection by `(dr, dc)`.
     MoveSelection { dr: i32, dc: i32 },
+    /// Set the cell selection to an absolute `(row, col)` (from a mouse click).
+    SetSelection { row: usize, col: usize },
     /// Begin `/` search input.
     BeginSearch,
     /// Forward a key while search input is active.
@@ -62,6 +64,8 @@ pub enum ResultsMessage {
     SetPage { page: usize },
     /// Commit the current edits.
     Commit,
+    /// Toggle the detail sub-pane open/close (inspect mode).
+    ToggleDetail,
     /// Synchronise the viewport dimensions.
     SyncViewport { rows: usize, width: u16 },
 
@@ -108,6 +112,7 @@ impl ResultsMessage {
             ResultsMessage::ClearResult => ListMessage::ClearResult,
             ResultsMessage::QueryError { message } => ListMessage::QueryError { message },
             ResultsMessage::MoveSelection { dr, dc } => ListMessage::MoveSelection { dr, dc },
+            ResultsMessage::SetSelection { row, col } => ListMessage::SetSelection { row, col },
             ResultsMessage::BeginSearch => ListMessage::BeginSearch,
             ResultsMessage::SearchKey(key) => ListMessage::SearchKey(key),
             ResultsMessage::ResetSelection => ListMessage::ResetSelection,
@@ -140,9 +145,8 @@ impl ResultsMessage {
             ResultsMessage::SetPage { page } => ListMessage::SetPage { page },
             ResultsMessage::Commit => ListMessage::Commit,
             ResultsMessage::SyncViewport { rows, width } => ListMessage::SyncViewport { rows, width },
-            ResultsMessage::SetDetailDraft { .. } => {
-                // This is a cross-feature message; handled separately.
-                ListMessage::ResetSelection // placeholder, should not be called
+            ResultsMessage::SetDetailDraft { .. } | ResultsMessage::ToggleDetail => {
+                ListMessage::ResetSelection
             }
             ResultsMessage::List(_) | ResultsMessage::Detail(_) => {
                 panic!("into_list_message called on already-routed message")

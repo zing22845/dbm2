@@ -25,6 +25,8 @@ pub enum SqlSplitter {
     EditorHistory,
     /// Vertical splitter inside the History pane: detail preview vs list (B).
     HistoryDetail,
+    /// Vertical splitter inside the Results pane: list vs detail preview.
+    ResultsDetail,
 }
 
 /// The splitter the position `(x, y)` is on, if any, in a static layout.
@@ -95,7 +97,7 @@ pub fn sql_tab_splitter_at(
     let (instance, connection) = session_view_key(&tab.session);
     let detail_visible = tab.focus == SqlFocus::History
         && !state.history_store.entries(&instance, &connection).is_empty();
-    let splitter = if detail_visible {
+    let mut splitter = if detail_visible {
         splitter_at_with_detail(
             &layout,
             body,
@@ -107,10 +109,23 @@ pub fn sql_tab_splitter_at(
     } else {
         splitter_at(&layout, x, y)
     };
-    // B is only draggable while History has focus (the detail is only shown then).
-    let splitter = splitter.filter(|s| {
+    // History Detail (B) is only draggable while History has focus.
+    splitter = splitter.filter(|s| {
         !matches!(s, SqlSplitter::HistoryDetail) || tab.focus == SqlFocus::History
     });
+    // Results-internal detail/list splitter (C) — independent of History, hit
+    // only when results detail is open AND Results has focus.
+    if splitter.is_none() && tab.results.detail_open && tab.focus == SqlFocus::Results {
+        use crate::features::sql_workspace::sql_tab::results::splitter::view::results_detail_splitter;
+        if let Some(r) = results_detail_splitter(
+            layout.results,
+            true,
+            tab.results.splitter.detail_pane_width,
+        ) && hit(r, x, y)
+        {
+            splitter = Some(SqlSplitter::ResultsDetail);
+        }
+    }
     Some((tab.session.id, splitter?))
 }
 
@@ -166,6 +181,14 @@ pub fn sql_tab_splitter_resize_msg(
         SqlSplitter::HistoryDetail => {
             let width = detail_width_for_x(body, &layout, tab.history.splitter.detail_pane_width, x);
             Some(SqlTabMessage::SetHistoryDetailWidth { tab_id, width })
+        }
+        SqlSplitter::ResultsDetail => {
+            use crate::features::sql_workspace::sql_tab::results::splitter::view::{
+                block_inner, detail_width_for_x,
+            };
+            let inner = block_inner(layout.results);
+            let width = detail_width_for_x(inner, tab.results.splitter.detail_pane_width, x);
+            Some(SqlTabMessage::SetResultsDetailWidth { tab_id, width })
         }
     }
 }

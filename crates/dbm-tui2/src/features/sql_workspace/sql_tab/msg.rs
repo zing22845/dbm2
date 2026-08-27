@@ -94,6 +94,9 @@ pub enum SqlTabMessage {
     /// splitter). The total History zone width stays constant; only the
     /// detail-vs-list split re-allocates.
     SetHistoryDetailWidth { tab_id: usize, width: u16 },
+    /// Set the Results detail pane width (dragging the Results-internal
+    /// detail/list splitter).
+    SetResultsDetailWidth { tab_id: usize, width: u16 },
     /// Replace the tab's in-memory SQL history store with a freshly loaded
     /// snapshot (issued when persisted history is loaded for a tab).
     SetHistoryStore {
@@ -103,6 +106,12 @@ pub enum SqlTabMessage {
     /// Nudge the History detail pane width by one keyboard step (`[` shrinks,
     /// `]` grows — the detail is the LEFT side of the internal splitter).
     NudgeHistoryDetailWidth {
+        tab_id: usize,
+        nudge: crate::common::view::splitter::VerticalSplitterNudge,
+    },
+    /// Nudge the Results detail pane width (same `[` shrinks, `]` grows
+    /// convention — detail is on the RIGHT side so `]` shrinks the detail).
+    NudgeResultsDetailWidth {
         tab_id: usize,
         nudge: crate::common::view::splitter::VerticalSplitterNudge,
     },
