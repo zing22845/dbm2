@@ -41,7 +41,7 @@ pub fn render(
     state: &SqlState,
     focused: bool,
     splitter_hover: &SplitterHoverState,
-) -> Option<crate::common::editor::EditorHardwareCursor> {
+) -> (Option<crate::common::editor::EditorHardwareCursor>, Option<usize>) {
     let p = theme.palette();
     let outer = Block::default()
         .title(workspace_title(state))
@@ -60,7 +60,7 @@ pub fn render(
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(footer_h)])
             .split(inner);
-        let cursor = sql_tab_view::render(
+        let (cursor, v_scroll) = sql_tab_view::render(
             frame,
             theme,
             chunks[0],
@@ -76,7 +76,7 @@ pub fn render(
             splitter_hover.sql_results_detail_drag,
         );
         draw_footer(frame, theme, chunks[1], &hint);
-        cursor
+        (cursor, v_scroll)
     } else {
         // Active connection has no visible tab: let sql_tab render its empty
         // state hint over the full area.

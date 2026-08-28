@@ -14,6 +14,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
+use crate::common::components::line_numbers;
 use crate::common::components::search::pane_search_title_line;
 use crate::common::view::hints::{draw_footer, footer_height, history_list_footer_text};
 use crate::common::view::pane_scrollbar::{
@@ -46,7 +47,7 @@ pub fn render(
     detail_w: u16,
     splitter_hover: bool,
     splitter_drag: bool,
-) {
+) -> Option<usize> {
     let search_active = state.search.text_input_active();
     let list_footer = history_list_footer_text(search_active, state.search.has_filter(), true);
 
@@ -89,7 +90,7 @@ pub fn render(
     frame.render_widget(block, area);
 
     if inner.width == 0 || inner.height == 0 {
-        return;
+        return None;
     }
 
     let (list_area, list_footer_area) = if detail_visible {
@@ -144,10 +145,12 @@ pub fn render(
         (chunks[0], chunks[1])
     };
 
-    render_list_rows(frame, theme, list_area, state, entries, &visible, cursor, focused);
+    let v_scroll_out = render_list_rows(frame, theme, list_area, state, entries, &visible, cursor, focused);
 
     // The list footer hints (inside the shared border).
     draw_footer(frame, theme, list_footer_area, &list_footer);
+
+    v_scroll_out
 }
 
 /// Render the list rows (and its scrollbar) into `area`. Used inside the shared
@@ -162,7 +165,7 @@ fn render_list_rows(
     visible: &[usize],
     cursor: usize,
     _focused: bool,
-) {
+) -> Option<usize> {
     let p = theme.palette();
     if visible.is_empty() {
         let hint = if state.search.has_filter() {
@@ -177,101 +180,115 @@ fn render_list_rows(
             ))),
             list_area,
         );
-        return;
+        return None;
     }
 
-    // Determine the content width of the currently selected row.
-    // The horizontal scrollbar only appears when the selected entry overflows.
+    // --- Split list_area into [gutter | inner_content] -----------------------
+    //
+    // The gutter is a fixed left column displaying right-aligned row numbers
+    // (edtui Absolute gutter style, DarkGray). It never scrolls — only the
+    // inner_content to its right participates in horizontal scrolling.
+    // This matches history detail / editor gutter behavior.
+    let gutter_w = line_numbers::gutter_width(visible.len());
+    let (gutter_rect, inner_content) = if list_area.width > gutter_w {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(gutter_w), Constraint::Min(1)])
+            .split(list_area);
+        (chunks[0], chunks[1])
+    } else {
+        (Rect::default(), list_area)
+    };
+
+    // --- Horizontal scroll only considers SQL text width (no gutter) ----------
     let selected_idx = visible.get(cursor).copied().and_then(|idx| entries.get(idx));
     let selected_width = selected_idx
         .map(|sql| super::store::history_line_display_width(sql) as usize)
         .unwrap_or(0);
-    let selected_full_width = selected_width + 2; // prefix width
 
-    let viewport_rows = list_area.height as usize;
-
-    // Determine if h_scrollbar is needed (only when selected row overflows).
-    // We compute layout with the full content width first to reserve h_scrollbar space.
-    let layout = pane_scroll_layout(list_area, selected_full_width as u16, visible.len(), viewport_rows);
+    let viewport_rows = inner_content.height as usize;
+    let layout = pane_scroll_layout(inner_content, selected_width as u16, visible.len(), viewport_rows);
     let content = layout.content_area;
     let content_w = content.width as usize;
-
-    let needs_h = selected_full_width > content_w;
+    let needs_h = selected_width > content_w;
     let effective_layout = if needs_h {
         layout
     } else {
-        pane_scroll_layout(list_area, 0, visible.len(), viewport_rows)
+        pane_scroll_layout(inner_content, 0, visible.len(), viewport_rows)
     };
     let content = effective_layout.content_area;
     let viewport = content.height.max(1) as usize;
-    let start = cursor.saturating_sub(viewport / 2);
-    let end = (start + viewport).min(visible.len());
-    let start = end.saturating_sub(viewport);
 
-    // Compute the h_scroll position for the selected row (used for the scrollbar thumb).
-    // We track per-row h_scroll so each row scrolls independently to show its full text.
+    // Discover-style scroll anchor: v_scroll is the viewport start row. The
+    // cursor only pushes the viewport when it would fall outside the current
+    // window.
+    let total = visible.len();
+    let max_start = total.saturating_sub(viewport);
+    let mut start = state.v_scroll.min(max_start);
+    if cursor < start {
+        start = cursor;
+    } else if cursor >= start + viewport {
+        start = cursor + 1 - viewport;
+    }
+    let end = (start + viewport).min(total);
+    let reconciled_start = start;
+
     let selected_h_scroll = state.h_scroll;
 
+    // --- Gutter lines (fixed, no horizontal scroll) --------------------------
+    let gutter_style = line_numbers::gutter_style(); // DarkGray
+    let mut gutter_lines: Vec<Line> = Vec::new();
+    for (row, _) in visible[start..end].iter().enumerate() {
+        let row_num = start + row + 1;
+        let selected = start + row == cursor;
+        let num_span = if selected {
+            Span::styled(
+                line_numbers::format_gutter(row_num, gutter_w),
+                Style::default()
+                    .fg(p.selection_text)
+                    .bg(p.selection_bg),
+            )
+        } else {
+            Span::styled(line_numbers::format_gutter(row_num, gutter_w), gutter_style)
+        };
+        gutter_lines.push(Line::from(num_span));
+    }
+    if !gutter_rect.is_empty() {
+        frame.render_widget(Paragraph::new(gutter_lines), gutter_rect);
+    }
+
+    // --- SQL content lines (horizontal scroll lives here) --------------------
     let lines: Vec<Line> = visible[start..end]
         .iter()
         .enumerate()
         .map(|(row, &idx)| {
             let sql = &entries[idx];
             let selected = start + row == cursor;
-            let prefix = if selected { "▸ " } else { "  " };
             let line_text = history_one_line(sql);
             let line_width = UnicodeWidthStr::width(line_text);
 
             // Per-row h_scroll: selected row uses state.h_scroll, others stay at 0.
-            let row_h_scroll = if selected {
-                selected_h_scroll
-            } else {
-                0
-            };
+            let row_h_scroll = if selected { selected_h_scroll } else { 0 };
 
             let content_w = content.width as usize;
-            // Column width = prefix (2) + text
-            let full_width = 2 + line_width;
+            // Clamp: the update layer returns a generous upper bound (≈
+            // line_width), but the real max is `line_width - content_w`.
+            let max_scroll = line_width.saturating_sub(content_w);
+            let scroll = row_h_scroll.min(max_scroll);
+            let right_overflow = scroll + content_w < line_width;
+            let right_label_w = if right_overflow { 3 } else { 0 };
+            let text_budget = content_w.saturating_sub(right_label_w);
 
-            let (display_text, _truncated) = if full_width <= content_w {
-                // Fits: show the full line
-                let text = format!("{prefix}{}", line_text);
-                (text, false)
+            let shown_text = if scroll > 0 {
+                // Scroll: skip left portion of the SQL text.
+                skip_display(line_text, scroll)
             } else {
-                // Needs horizontal scroll: show scrolled view with optional "..."
-                let max_scroll = full_width.saturating_sub(content_w);
-                let scroll = row_h_scroll.min(max_scroll);
-                let visible_end = (scroll + content_w).min(full_width);
-
-                if scroll == 0 {
-                    // Truncate at the right edge with "..."
-                    let avail = content_w.saturating_sub(3);
-                    let shown_text = truncate_display(line_text, avail, 2);
-                    let text = format!("{prefix}{shown_text}...");
-                    (text, true)
-                } else if visible_end >= full_width {
-                    // Already scrolled to the end: show prefix + the last
-                    // (content_w - 2) chars of line_text. `scroll` is an offset
-                    // into the full content (prefix + line_text), so skipping
-                    // `scroll` display-widths into line_text lands exactly at
-                    // the position where prefix + tail fits content_w.
-                    let shown_text = skip_display(line_text, scroll);
-                    let text = format!("{}{}", prefix, shown_text);
-                    (text, true)
-                } else {
-                    // Middle of scroll: show skip + truncate with "..."
-                    let skip = scroll.saturating_sub(2);
-                    let avail = content_w.saturating_sub(3).saturating_sub(if skip > 0 { 3 } else { 0 });
-                    let shown_text = truncate_display(
-                        &line_text[skip..],
-                        avail,
-                        0,
-                    );
-                    let prefix_str = if skip > 0 { "..." } else { prefix };
-                    let text = format!("{}{}...", prefix_str, shown_text);
-                    (text, true)
-                }
+                line_text.to_string()
             };
+            let shown_text = truncate_display(&shown_text, text_budget, 0);
+
+            let right_label = if right_overflow { "..." } else { "" };
+            let display_text = format!("{shown_text}{right_label}");
 
             let style = if selected {
                 Style::default()
@@ -299,17 +316,20 @@ fn render_list_rows(
     }
 
     if let Some(bar) = effective_layout.h_scrollbar {
-        let max_h = selected_full_width.saturating_sub(content.width as usize);
+        let max_h = selected_width.saturating_sub(content.width as usize);
+        let thumb_pos = selected_h_scroll.min(max_h);
         draw_horizontal_pane_scrollbar(
             frame,
             bar,
-            selected_h_scroll,
+            thumb_pos,
             content.width as usize,
             max_h,
             p,
             false,
         );
     }
+
+    Some(reconciled_start)
 }
 
 /// Truncate a display string to `avail` width cells, handling the prefix offset.

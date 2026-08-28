@@ -28,6 +28,7 @@ pub fn render(
 ) -> (
     Option<crate::common::editor::EditorHardwareCursor>,
     Option<crate::features::discover::targets::view::TargetsLayoutInfo>,
+    Option<usize>,
 ) {
     // The footer height is dynamic: one line of hints plus the (wrapped) status
     // line when present.
@@ -67,9 +68,9 @@ pub fn render(
     // the instance workspace to the SQL workspace. With no active workspace we
     // still show the SQL workspace (its empty-state hint) — the "connection
     // zone" the original dbm keeps visible after the last tab closes.
-    let editor_cursor = if state.explorer.instances.active_is_instance() {
+    let (editor_cursor, history_v_scroll) = if state.explorer.instances.active_is_instance() {
         iw_view::render(frame, &state.theme, workspace, &state.iw, workspace_focused);
-        None
+        (None, None)
     } else {
         tracing::debug!("render: begin sql_view");
         let r = sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused, &state.splitter_hover);
@@ -107,11 +108,11 @@ pub fn render(
         // Generic titled popup for the picker/confirm/commit-preview modals.
         render_popup_modal(frame, &state.theme, workspace, modal);
         // A modal overlays the workspace, so the editor caret is hidden.
-        return (None, targets_layout_ref.into_inner());
+        return (None, targets_layout_ref.into_inner(), history_v_scroll);
     }
     // The discover overlay's inline-edit caret wins over the editor caret
     // underneath when discover is focused.
-    (discover_caret.or(editor_cursor), targets_layout_ref.into_inner())
+    (discover_caret.or(editor_cursor), targets_layout_ref.into_inner(), history_v_scroll)
 }
 
 /// Render the footer row: the global footer hints on the left (flexible width)

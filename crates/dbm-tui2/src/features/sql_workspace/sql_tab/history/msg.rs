@@ -25,6 +25,9 @@ pub enum HistoryMessage {
     ScrollHScroll { delta: i32 },
     /// Set the list horizontal scroll to an absolute position (from scrollbar drag).
     SetHScroll { position: usize },
+    /// Set the list vertical scroll offset to an absolute position (from scrollbar drag).
+    /// The position represents the viewport's first visible row index.
+    SetVScroll { position: usize },
 }
 
 /// Feature message envelope (central-router compatible).

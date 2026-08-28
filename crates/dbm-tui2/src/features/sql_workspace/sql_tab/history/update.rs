@@ -88,6 +88,9 @@ pub fn update(
         HistoryMessage::SetHScroll { position } => {
             set_hscroll(&mut state, store, instance, connection, position)
         }
+        HistoryMessage::SetVScroll { position } => {
+            set_vscroll(&mut state, store, instance, connection, position)
+        }
     };
 
     (state, intents, effects, dirty)
@@ -218,8 +221,33 @@ fn set_hscroll(
     state.h_scroll != before
 }
 
-/// Compute the maximum horizontal scroll for the currently selected history
-/// entry, based on its display width minus the visible viewport width.
+/// Set the list vertical scroll offset (viewport start) to an absolute
+/// position from a scrollbar drag. Clamped to `[0, visible_len - viewport]`.
+/// The view reconciles cursor into the new viewport on the next render.
+fn set_vscroll(
+    state: &mut HistoryState,
+    store: &SqlHistoryStore,
+    instance: &str,
+    connection: &str,
+    position: usize,
+) -> bool {
+    let visible_len = state.visible_indices(store, instance, connection).len();
+    // A generous upper bound — the viewport size isn't known in the update
+    // layer, so we clamp to `visible_len - 1` (the renderer will further
+    // clamp to `visible_len - viewport`).
+    let max = visible_len.saturating_sub(1);
+    let before = state.v_scroll;
+    state.v_scroll = position.min(max);
+    state.v_scroll != before
+}
+
+/// Compute a generous upper bound for h_scroll of the currently selected
+/// history entry. The real, viewport-aware maximum is computed in the
+/// renderer as `line_width - content_w`, but the update layer does not know
+/// the current content width — so we return `line_width` which is always ≥
+/// the view's maximum, and let the renderer clamp. h_scroll counts display-
+/// width cells scrolled into the SQL text (gutter row numbers are fixed and
+/// do not participate in horizontal scroll).
 fn max_h_scroll_for_selection(
     state: &HistoryState,
     store: &SqlHistoryStore,
@@ -227,14 +255,12 @@ fn max_h_scroll_for_selection(
     connection: &str,
 ) -> usize {
     let visible = state.visible_indices(store, instance, connection);
-    let max_idx = visible.iter().copied().max().unwrap_or(0);
     let entries = store.entries(instance, connection);
-    let max_width = entries
-        .get(max_idx)
+    visible
+        .get(state.cursor)
+        .and_then(|&idx| entries.get(idx))
         .map(|sql| super::store::history_line_display_width(sql) as usize)
-        .unwrap_or(0);
-    let min_viewport = 10usize;
-    max_width.saturating_sub(min_viewport)
+        .unwrap_or(0)
 }
 
 /// Scroll the detail preview by `delta` lines (clamped to content).

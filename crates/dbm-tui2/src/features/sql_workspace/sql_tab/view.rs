@@ -40,7 +40,9 @@ pub enum SqlClickAction {
     /// Single-click on a history list row: move cursor to that row index.
     HistoryRowClicked { index: usize },
     /// Click/drag on the history horizontal scrollbar.
-    HistoryHScrollbar { x: u16, max_scroll: usize, viewport_width: usize },
+    HistoryHScrollbar { track_x: u16, x: u16, max_scroll: usize, viewport_width: usize },
+    /// Click/drag on the history list vertical scrollbar.
+    HistoryVScrollbar { track_y: u16, y: u16, max_scroll: usize, viewport_height: usize },
     /// Single-click on a results list cell: move cursor to that `(row, col)`.
     ResultsCellClicked { row: usize, col: usize },
     /// Double-click inside the results pane: toggle the detail inspect mode.
@@ -200,6 +202,13 @@ pub fn sql_workspace_click(
     // Click/drag on the history horizontal scrollbar.
     if !is_double_click && history_hit
         && let Some(action) = history_h_scrollbar_hit(state, tab, &layout, x, y, detail_visible)
+    {
+        return Some(action);
+    }
+
+    // Click/drag on the history vertical scrollbar.
+    if !is_double_click && history_hit
+        && let Some(action) = history_v_scrollbar_hit(state, tab, &layout, x, y, detail_visible)
     {
         return Some(action);
     }
@@ -418,22 +427,36 @@ fn history_h_scrollbar_hit(
     );
 
     let visible = tab.history.visible_indices(&state.history_store, &instance, &connection);
-    let selected_full_width = tab.history
+    let selected_width = tab.history
         .selected_entry(&state.history_store, &instance, &connection)
         .as_deref()
-        .map(|sql| crate::features::sql_workspace::sql_tab::history::store::history_line_display_width(sql) as usize + 2)
+        .map(|sql| crate::features::sql_workspace::sql_tab::history::store::history_line_display_width(sql) as usize)
         .unwrap_or(0);
 
-    let needs_h = selected_full_width > list_area.width as usize;
+    // Cut gutter off the left — scrollbar layout applies only to inner_content.
+    let gutter_w = crate::common::components::line_numbers::gutter_width(visible.len());
+    let inner_content = if list_area.width > gutter_w {
+        ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([
+                ratatui::layout::Constraint::Length(gutter_w),
+                ratatui::layout::Constraint::Min(1),
+            ])
+            .split(list_area)[1]
+    } else {
+        list_area
+    };
+
+    let needs_h = selected_width > inner_content.width as usize;
     if !needs_h {
         return None;
     }
 
     // Compute h_scrollbar area using pane_scroll_layout to find its rect.
-    let viewport_rows = list_area.height as usize;
+    let viewport_rows = inner_content.height as usize;
     let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
-        list_area,
-        selected_full_width as u16,
+        inner_content,
+        selected_width as u16,
         visible.len(),
         viewport_rows.max(1),
     );
@@ -441,11 +464,118 @@ fn history_h_scrollbar_hit(
 
     if crate::common::view::pane_scrollbar::point_in_bar(h_bar, x, y) {
         let content_w = layout.content_area.width as usize;
-        let max_scroll = selected_full_width.saturating_sub(content_w);
+        let max_scroll = selected_width.saturating_sub(content_w);
         Some(SqlClickAction::HistoryHScrollbar {
+            track_x: h_bar.x,
             x,
             max_scroll,
             viewport_width: content_w,
+        })
+    } else {
+        None
+    }
+}
+
+/// Returns the `HistoryVScrollbar` action with the scrollbar geometry if so.
+#[allow(clippy::too_many_arguments)]
+fn history_v_scrollbar_hit(
+    state: &SqlTabState,
+    tab: &crate::features::sql_workspace::sql_tab::state::SqlTab,
+    layout: &crate::features::sql_workspace::sql_tab::layout::SqlTabLayout,
+    x: u16,
+    y: u16,
+    detail_visible: bool,
+) -> Option<SqlClickAction> {
+    let (instance, connection) = session_view_key(&tab.session);
+    let detail_w = if detail_visible {
+        crate::features::sql_workspace::sql_tab::history::splitter::state::clamp_detail_pane_width(
+            tab.history.splitter.detail_pane_width,
+        )
+    } else {
+        0
+    };
+
+    let history_zone = if detail_visible {
+        let body_area = ratatui::layout::Rect {
+            x: layout.editor.x,
+            y: layout.editor.y.saturating_sub(1),
+            width: layout.editor.width + 1 + layout.history.width,
+            height: layout.editor.height,
+        };
+        let zone_x = crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(
+            body_area,
+            layout,
+            tab.history.splitter.detail_pane_width,
+        );
+        let zone_w = crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_width(
+            layout,
+            tab.history.splitter.detail_pane_width,
+        );
+        ratatui::layout::Rect::new(zone_x, layout.history.y, zone_w, layout.history.height)
+    } else {
+        layout.history
+    };
+
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL);
+    let inner = block.inner(history_zone);
+
+    let list_footer = crate::common::view::hints::history_list_footer_text(
+        tab.history.search.text_input_active(),
+        tab.history.search.has_filter(),
+        true,
+    );
+    let list_w = if detail_visible {
+        history_zone.width.saturating_sub(detail_w).saturating_sub(1)
+    } else {
+        history_zone.width
+    };
+    let footer_h = crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
+        .min(inner.height.saturating_sub(3));
+
+    let list_area = crate::features::sql_workspace::sql_tab::history::view::compute_list_area(
+        inner,
+        detail_visible,
+        detail_w,
+        footer_h,
+    );
+
+    let visible = tab.history.visible_indices(&state.history_store, &instance, &connection);
+
+    // Cut gutter off the left — v_scrollbar sits on inner_content's right edge.
+    let gutter_w = crate::common::components::line_numbers::gutter_width(visible.len());
+    let inner_content = if list_area.width > gutter_w {
+        ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Horizontal)
+            .constraints([
+                ratatui::layout::Constraint::Length(gutter_w),
+                ratatui::layout::Constraint::Min(1),
+            ])
+            .split(list_area)[1]
+    } else {
+        list_area
+    };
+
+    let viewport_rows = inner_content.height.max(1) as usize;
+    let max_scroll = visible.len().saturating_sub(viewport_rows);
+    if max_scroll == 0 {
+        return None;
+    }
+
+    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        inner_content,
+        0, // no horizontal content width needed for vertical hit-test
+        visible.len(),
+        viewport_rows,
+    );
+    let v_bar = layout.v_scrollbar?;
+
+    if crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y) {
+        Some(SqlClickAction::HistoryVScrollbar {
+            track_y: v_bar.y,
+            y,
+            max_scroll,
+            viewport_height: viewport_rows,
         })
     } else {
         None
@@ -477,7 +607,7 @@ pub fn render(
     detail_drag: bool,
     results_detail_hover: bool,
     results_detail_drag: bool,
-) -> Option<crate::common::editor::EditorHardwareCursor> {
+) -> (Option<crate::common::editor::EditorHardwareCursor>, Option<usize>) {
     // No tab open for the active connection: show an empty-state hint and no
     // tab bar, mirroring the original dbm's `workspace_empty_hint` (no phantom
     // "sql 0" tab, no editor / history / results panes). The hint differs based
@@ -489,7 +619,7 @@ pub fn render(
         );
         let para = Paragraph::new(Span::styled(hint, Style::default().fg(p.muted)));
         frame.render_widget(para, area);
-        return None;
+        return (None, None);
     }
 
     let chunks = Layout::default()
@@ -510,7 +640,7 @@ pub fn render(
     let Some(tab) = state.active_tab() else {
         // No open tab for the active connection: render an empty placeholder.
         frame.render_widget(Block::default().title("No open SQL tab"), body_area);
-        return None;
+        return (None, None);
     };
 
     // Layout mirrors the original dbm `sql_tab_layout` (ui.rs §11): editor +
@@ -524,7 +654,7 @@ pub fn render(
     if layout.editor.width == 0 {
         // Area too small to split: show a single results pane.
         results_view::render(frame, theme, body_area, &tab.results, results_focused, results_detail_hover, results_detail_drag);
-        return None;
+        return (None, None);
     }
 
     let (instance, connection) = session_view_key(&tab.session);
@@ -637,7 +767,7 @@ pub fn render(
 
     // The History feature owns both the list and the detail under a single
     // border; pass the full history zone and let it split internally.
-    if let Some(history_zone) = history_zone {
+    let history_v_scroll = if let Some(history_zone) = history_zone {
         tracing::debug!(?history_zone, detail_w = tab.history.splitter.detail_pane_width, "render: begin history_view");
         history_view::render(
             frame,
@@ -652,7 +782,7 @@ pub fn render(
             tab.history.splitter.detail_pane_width,
             detail_hover,
             detail_drag,
-        );
+        )
     } else {
         history_view::render(
             frame,
@@ -667,8 +797,8 @@ pub fn render(
             tab.history.splitter.detail_pane_width,
             detail_hover,
             detail_drag,
-        );
-    }
+        )
+    };
 
     results_view::render(frame, theme, layout.results, &tab.results, results_focused, results_detail_hover, results_detail_drag);
 
@@ -691,7 +821,8 @@ pub fn render(
         v_drag,
     );
 
-    if editor_focused { cursor } else { None }
+    let hw_cursor = if editor_focused { cursor } else { None };
+    (hw_cursor, history_v_scroll)
 }
 
 #[cfg(test)]
