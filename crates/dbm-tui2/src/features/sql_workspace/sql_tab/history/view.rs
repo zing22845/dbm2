@@ -250,8 +250,12 @@ fn render_list_rows(
                     let text = format!("{prefix}{shown_text}...");
                     (text, true)
                 } else if visible_end >= full_width {
-                    // Already scrolled to the end
-                    let shown_text = skip_display(line_text, scroll.saturating_sub(2));
+                    // Already scrolled to the end: show prefix + the last
+                    // (content_w - 2) chars of line_text. `scroll` is an offset
+                    // into the full content (prefix + line_text), so skipping
+                    // `scroll` display-widths into line_text lands exactly at
+                    // the position where prefix + tail fits content_w.
+                    let shown_text = skip_display(line_text, scroll);
                     let text = format!("{}{}", prefix, shown_text);
                     (text, true)
                 } else {
