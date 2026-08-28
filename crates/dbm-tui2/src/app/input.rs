@@ -733,15 +733,22 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         "sql_key received"
     );
 
-    // The context picker, when open, owns all keys.
-    if editor.context_picker.open {
+    // The context picker, when open, owns all keys — but only while the
+    // editor pane is actually focused. If focus was moved away (e.g. via
+    // mouse click to history) the picker must not keep intercepting keys.
+    if tab.focus == SqlFocus::Editor
+        && editor.context_picker.open
+    {
         return sql_context_picker_key(key, tab_id);
     }
 
     // The completion popup handles selection/apply/close when open. The key
     // mapping lives in the `sql_completion` feature (`key_to_msg`); the shell
     // only checks whether the popup is open and forwards a matching key.
-    if editor.sql_completion.is_open()
+    // Like the context picker, it must not capture keys when focus has left
+    // the editor pane.
+    if tab.focus == SqlFocus::Editor
+        && editor.sql_completion.is_open()
         && let Some(msg) = crate::features::sql_workspace::sql_tab::editor::sql_completion::view::key_to_msg(key)
     {
         return Some(sql_editor(EditorMessage::SqlCompletion(SqlCompletionMsg::Message(

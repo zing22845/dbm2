@@ -61,6 +61,19 @@ pub fn update(
                     tab.upper_pane = tab.focus;
                 }
                 tab.focus = focus;
+                // Close editor-owned popups when focus leaves the editor — they
+                // are children of the editor pane and must not keep intercepting
+                // keys while the user is interacting with history or results.
+                if focus != SqlFocus::Editor {
+                    if tab.editor.sql_completion.is_open() {
+                        tab.editor.sql_completion.close();
+                        changed = true;
+                    }
+                    if tab.editor.context_picker.open {
+                        tab.editor.context_picker.close();
+                        changed = true;
+                    }
+                }
                 // Entering History makes the detail pane visible, which adds
                 // `detail + splitter` columns to the History zone. A list width
                 // that was legal while History was unfocused (up to
