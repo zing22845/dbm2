@@ -1,31 +1,31 @@
-//! History feature update.
+//! History feature update (parent).
 //!
-//! Pure by-value transition over the history list + detail state. Recording,
-//! cursor movement, `/` search, apply (recall intent) and detail scrolling are
-//! all pure; the list selection and detail scroll are reconciled against the
-//! available history for the tab's connection.
-//!
-//! The `SqlHistoryStore` is shared at the `SqlTabState` level (per connection),
-//! so it is passed as a read-only parameter rather than stored in `HistoryState`.
-//! `RecordSuccess` is intercepted by the parent and applied directly to the
-//! shared store before routing other messages here.
+//! Routes `HistoryMessage` variants to the appropriate child feature
+//! update (list or detail) and handles cross-cutting concerns:
+//! - `RecordSuccess` stays at parent (needs shared SqlHistoryStore write).
+//! - `Apply` stays at parent (emits `Recall` intent, cursor→detail reconcile).
+//! - List navigation / search / scroll → `list::update`.
+//! - Detail scroll → `detail::update`.
+//! - After any cursor-affecting list message, reconcile detail scroll to
+//!   the newly selected entry (cross-feature coordination).
 
-use crate::common::components::search::PaneSearchInput;
-
+use super::detail::state::DetailState;
+use super::detail::update as detail_update;
+use super::effect::HistoryEffect;
+use super::intent::HistoryIntent;
+use super::list::state::ListState;
+use super::list::update as list_update;
 use super::msg::HistoryMessage;
 use super::state::HistoryState;
 use super::store::SqlHistoryStore;
-use super::intent::HistoryIntent;
-use super::effect::HistoryEffect;
-use super::detail::{clamp_detail_scroll, scroll_on_selection_change};
 
 /// Update the history feature state. Pure by-value transition.
 ///
-/// The returned `bool` is `dirty`: whether the rendered history list or detail
-/// changed. Cursor/detail navigation reports `false` at a boundary; `Apply`
-/// only pushes a recall intent (the editor update handles the change).
+/// The returned `bool` is `dirty`: whether the rendered history list or
+/// detail changed. Cursor/detail navigation reports `false` at a boundary;
+/// `Apply` only pushes a recall intent (the editor update handles the change).
 ///
-/// Note: `RecordSuccess` is handled by the parent `SqlTabState::update`
+/// Note: `RecordSuccess` is intercepted by the parent `SqlTabState::update`
 /// because the store is shared across all tabs. Only UI-affecting messages
 /// (MoveCursor, SearchKey, Apply, ScrollDetail) are processed here.
 #[allow(clippy::too_many_arguments)]
@@ -37,7 +37,7 @@ pub fn update(
     connection: &str,
     // The sql of the currently selected entry (for detail scroll reconciliation).
     selected_sql: Option<String>,
-    detail_text_width: u16,
+    detail_text_width_after: u16,
     detail_viewport: usize,
 ) -> (HistoryState, Vec<HistoryIntent>, Vec<HistoryEffect>, bool) {
     let mut intents = Vec::new();
@@ -48,240 +48,142 @@ pub fn update(
             // Handled by parent: store is shared at SqlTabState level.
             true
         }
+        // --- List messages: delegate to list::update, then reconcile detail ---
         HistoryMessage::MoveCursor { delta } => {
-            move_cursor(&mut state, store, instance, connection, delta)
+            let (new_list, list_dirty) = list_update::update(
+                super::list::msg::ListMessage::MoveCursor { delta },
+                state.list,
+                store,
+                instance,
+                connection,
+            );
+            state.list = new_list;
+            reconcile_detail_after_cursor_change(&mut state.detail, &state.list, store, instance, connection, detail_text_width_after, detail_viewport);
+            list_dirty
         }
         HistoryMessage::SetCursor { index } => {
-            set_cursor(&mut state, store, instance, connection, index)
+            let (new_list, list_dirty) = list_update::update(
+                super::list::msg::ListMessage::SetCursor { index },
+                state.list,
+                store,
+                instance,
+                connection,
+            );
+            state.list = new_list;
+            reconcile_detail_after_cursor_change(&mut state.detail, &state.list, store, instance, connection, detail_text_width_after, detail_viewport);
+            list_dirty
         }
         HistoryMessage::BeginSearch => {
-            state.search.reset();
-            state.search.start();
-            true
+            let (new_list, list_dirty) = list_update::update(
+                super::list::msg::ListMessage::BeginSearch,
+                state.list,
+                store,
+                instance,
+                connection,
+            );
+            state.list = new_list;
+            reconcile_detail_after_cursor_change(&mut state.detail, &state.list, store, instance, connection, detail_text_width_after, detail_viewport);
+            list_dirty
         }
         HistoryMessage::SearchKey(key) => {
-            handle_search_key(&mut state, store, instance, connection, key);
-            true
+            let (new_list, list_dirty) = list_update::update(
+                super::list::msg::ListMessage::SearchKey(key),
+                state.list,
+                store,
+                instance,
+                connection,
+            );
+            state.list = new_list;
+            reconcile_detail_after_cursor_change(&mut state.detail, &state.list, store, instance, connection, detail_text_width_after, detail_viewport);
+            list_dirty
         }
+        HistoryMessage::ScrollHScroll { delta } => {
+            let (new_list, list_dirty) = list_update::update(
+                super::list::msg::ListMessage::ScrollHScroll { delta },
+                state.list,
+                store,
+                instance,
+                connection,
+            );
+            state.list = new_list;
+            list_dirty
+        }
+        HistoryMessage::SetHScroll { position } => {
+            let (new_list, list_dirty) = list_update::update(
+                super::list::msg::ListMessage::SetHScroll { position },
+                state.list,
+                store,
+                instance,
+                connection,
+            );
+            state.list = new_list;
+            list_dirty
+        }
+        HistoryMessage::SetVScroll { position } => {
+            let (new_list, list_dirty) = list_update::update(
+                super::list::msg::ListMessage::SetVScroll { position },
+                state.list,
+                store,
+                instance,
+                connection,
+            );
+            state.list = new_list;
+            list_dirty
+        }
+        // --- Cross-cutting: Apply needs list state + emits intent ---
         HistoryMessage::Apply => {
-            if let Some(sql) = state.selected_entry(store, instance, connection) {
+            if let Some(sql) = state.list.selected_entry(store, instance, connection) {
                 intents.push(HistoryIntent::Recall { sql });
             }
             false
         }
+        // --- Detail messages: delegate to detail::update ---
         HistoryMessage::ScrollDetail { delta } => {
-            scroll_detail(&mut state, instance, connection, selected_sql.as_deref(), detail_text_width, detail_viewport, delta)
+            let (new_detail, detail_dirty) = detail_update::update(
+                super::detail::msg::DetailMessage::Scroll { delta },
+                state.detail,
+                selected_sql.as_deref().unwrap_or(""),
+                detail_text_width_after,
+                detail_viewport,
+            );
+            state.detail = new_detail;
+            detail_dirty
         }
         HistoryMessage::ScrollDetailPage { down } => {
-            let sql = selected_sql.as_deref();
-            if let Some(sql) = sql {
-                let before = state.detail.scroll;
-                super::detail::scroll_half_page(&mut state.detail, sql, detail_text_width, detail_viewport, down);
-                state.detail.scroll != before
-            } else {
-                false
-            }
-        }
-        HistoryMessage::ScrollHScroll { delta } => {
-            scroll_hscroll(&mut state, store, instance, connection, delta)
-        }
-        HistoryMessage::SetHScroll { position } => {
-            set_hscroll(&mut state, store, instance, connection, position)
-        }
-        HistoryMessage::SetVScroll { position } => {
-            set_vscroll(&mut state, store, instance, connection, position)
+            let (new_detail, detail_dirty) = detail_update::update(
+                super::detail::msg::DetailMessage::ScrollPage { down },
+                state.detail,
+                selected_sql.as_deref().unwrap_or(""),
+                detail_text_width_after,
+                detail_viewport,
+            );
+            state.detail = new_detail;
+            detail_dirty
         }
     };
 
     (state, intents, effects, dirty)
 }
 
-/// Move the list cursor, clamping to the filtered entries, and reconcile the
-/// detail scroll (jump to first match when filtered).
-fn move_cursor(
-    state: &mut HistoryState,
+/// Cross-feature reconciliation: after a list cursor change, scroll the
+/// detail preview to show the selected entry (and jump to first search
+/// match when filtered).
+fn reconcile_detail_after_cursor_change(
+    detail: &mut DetailState,
+    list: &ListState,
     store: &SqlHistoryStore,
     instance: &str,
     connection: &str,
-    delta: i32,
-) -> bool {
-    let visible_len = state.visible_indices(store, instance, connection).len();
-    if visible_len == 0 {
-        return false;
-    }
-    let next = if delta > 0 {
-        (state.cursor + 1).min(visible_len - 1)
-    } else {
-        state.cursor.saturating_sub(1)
-    };
-    let moved = next != state.cursor;
-    if moved {
-        state.cursor = next;
-        state.h_scroll = 0;
-    }
-    // Reconcile detail scroll to the newly selected entry.
-    if let Some(sql) = state.selected_entry(store, instance, connection) {
-        scroll_on_selection_change(&mut state.detail, &sql, &state.search, 40, 8);
-    }
-    moved
-}
-
-/// Set the list cursor to an absolute visible row index (from a mouse click).
-fn set_cursor(
-    state: &mut HistoryState,
-    store: &SqlHistoryStore,
-    instance: &str,
-    connection: &str,
-    index: usize,
-) -> bool {
-    let visible_len = state.visible_indices(store, instance, connection).len();
-    if visible_len == 0 {
-        return false;
-    }
-    let next = index.min(visible_len.saturating_sub(1));
-    let moved = next != state.cursor;
-    if moved {
-        state.cursor = next;
-        state.h_scroll = 0;
-    }
-    if let Some(sql) = state.selected_entry(store, instance, connection) {
-        scroll_on_selection_change(&mut state.detail, &sql, &state.search, 40, 8);
-    }
-    moved
-}
-
-/// Handle a search-input key (query changes, navigation, etc.).
-fn handle_search_key(
-    state: &mut HistoryState,
-    store: &SqlHistoryStore,
-    instance: &str,
-    connection: &str,
-    key: crossterm::event::KeyEvent,
+    text_width_after: u16,
+    viewport_lines: usize,
 ) {
-    let caps_lock = false;
-    let action = match key.code {
-        crossterm::event::KeyCode::Esc => {
-            state.search.reset();
-            PaneSearchInput::Cancelled
-        }
-        crossterm::event::KeyCode::Enter => {
-            state.search.end();
-            PaneSearchInput::Applied
-        }
-        _ => state.search.handle_key(&key, caps_lock),
-    };
-
-    if let PaneSearchInput::Navigate { forward } = action {
-        move_cursor(state, store, instance, connection, if forward { 1 } else { -1 });
-        return;
+    if let Some(sql) = list.selected_entry(store, instance, connection) {
+        detail_update::reconcile_on_selection_change(
+            detail,
+            &sql,
+            &list.search,
+            text_width_after,
+            viewport_lines,
+        );
     }
-
-    if matches!(action, PaneSearchInput::QueryChanged | PaneSearchInput::OptionsChanged) {
-        state.cursor = 0;
-        state.v_scroll = 0;
-    }
-
-    if let Some(sql) = state.selected_entry(store, instance, connection) {
-        scroll_on_selection_change(&mut state.detail, &sql, &state.search, 40, 8);
-    }
-}
-
-/// Horizontal scroll of the list rows by `delta` cells, clamped to the
-/// maximum scroll width of the currently visible rows.
-fn scroll_hscroll(
-    state: &mut HistoryState,
-    store: &SqlHistoryStore,
-    instance: &str,
-    connection: &str,
-    delta: i32,
-) -> bool {
-    let max = max_h_scroll_for_selection(state, store, instance, connection);
-    let before = state.h_scroll;
-    if delta > 0 {
-        state.h_scroll = (state.h_scroll as u32)
-            .saturating_add(delta as u32)
-            .min(max as u32) as usize;
-    } else {
-        state.h_scroll = state.h_scroll.saturating_sub(delta.unsigned_abs() as usize);
-    }
-    state.h_scroll != before
-}
-
-/// Set the list horizontal scroll to an absolute position (from scrollbar drag).
-fn set_hscroll(
-    state: &mut HistoryState,
-    store: &SqlHistoryStore,
-    instance: &str,
-    connection: &str,
-    position: usize,
-) -> bool {
-    let max = max_h_scroll_for_selection(state, store, instance, connection);
-    let before = state.h_scroll;
-    state.h_scroll = position.min(max);
-    state.h_scroll != before
-}
-
-/// Set the list vertical scroll offset (viewport start) to an absolute
-/// position from a scrollbar drag. Clamped to `[0, visible_len - viewport]`.
-/// The view reconciles cursor into the new viewport on the next render.
-fn set_vscroll(
-    state: &mut HistoryState,
-    store: &SqlHistoryStore,
-    instance: &str,
-    connection: &str,
-    position: usize,
-) -> bool {
-    let visible_len = state.visible_indices(store, instance, connection).len();
-    // A generous upper bound — the viewport size isn't known in the update
-    // layer, so we clamp to `visible_len - 1` (the renderer will further
-    // clamp to `visible_len - viewport`).
-    let max = visible_len.saturating_sub(1);
-    let before = state.v_scroll;
-    state.v_scroll = position.min(max);
-    state.v_scroll != before
-}
-
-/// Compute a generous upper bound for h_scroll of the currently selected
-/// history entry. The real, viewport-aware maximum is computed in the
-/// renderer as `line_width - content_w`, but the update layer does not know
-/// the current content width — so we return `line_width` which is always ≥
-/// the view's maximum, and let the renderer clamp. h_scroll counts display-
-/// width cells scrolled into the SQL text (gutter row numbers are fixed and
-/// do not participate in horizontal scroll).
-fn max_h_scroll_for_selection(
-    state: &HistoryState,
-    store: &SqlHistoryStore,
-    instance: &str,
-    connection: &str,
-) -> usize {
-    let visible = state.visible_indices(store, instance, connection);
-    let entries = store.entries(instance, connection);
-    visible
-        .get(state.cursor)
-        .and_then(|&idx| entries.get(idx))
-        .map(|sql| super::store::history_line_display_width(sql) as usize)
-        .unwrap_or(0)
-}
-
-/// Scroll the detail preview by `delta` lines (clamped to content).
-fn scroll_detail(
-    state: &mut HistoryState,
-    _instance: &str,
-    _connection: &str,
-    sql: Option<&str>,
-    detail_text_width: u16,
-    detail_viewport: usize,
-    delta: i32,
-) -> bool {
-    let Some(sql) = sql else {
-        return false;
-    };
-    let before = state.detail.scroll;
-    if delta > 0 {
-        state.detail.scroll = state.detail.scroll.saturating_add(delta as usize);
-    } else {
-        state.detail.scroll = state.detail.scroll.saturating_sub(delta.unsigned_abs() as usize);
-    }
-    clamp_detail_scroll(&mut state.detail, sql, detail_text_width, detail_viewport);
-    state.detail.scroll != before
 }

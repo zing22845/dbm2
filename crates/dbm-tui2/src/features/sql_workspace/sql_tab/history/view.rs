@@ -17,8 +17,8 @@ use crate::common::components::search::pane_search_title_line;
 use crate::common::view::hints::{draw_footer, footer_height, history_list_footer_text};
 use crate::common::view::theme::Theme;
 
-use super::detail::draw_history_detail;
-use super::list as list_view;
+use super::detail::view::draw_history_detail;
+use super::list::view as list_view;
 use super::splitter::state::clamp_detail_pane_width;
 use super::splitter::view as splitter_view;
 use super::state::HistoryState;
@@ -41,13 +41,13 @@ pub fn render(
     splitter_hover: bool,
     splitter_drag: bool,
 ) -> Option<usize> {
-    let search_active = state.search.text_input_active();
-    let list_footer = history_list_footer_text(search_active, state.search.has_filter(), true);
+    let search_active = state.list.search.text_input_active();
+    let list_footer = history_list_footer_text(search_active, state.list.search.has_filter(), true);
 
     let p = theme.palette();
     let entries = store.entries(instance, connection);
-    let visible = state.visible_indices(store, instance, connection);
-    let cursor = state.cursor.min(visible.len().saturating_sub(1));
+    let visible = state.list.visible_indices(store, instance, connection);
+    let cursor = state.list.cursor.min(visible.len().saturating_sub(1));
 
     let detail_w = if detail_visible {
         clamp_detail_pane_width(detail_w)
@@ -62,7 +62,7 @@ pub fn render(
 
     let title = pane_search_title_line(
         " [H] History",
-        &state.search,
+        &state.list.search,
         true,
         false,
         Style::default().fg(p.muted),
@@ -98,7 +98,7 @@ pub fn render(
         tracing::debug!("history: split done inner={inner:?} detail={:?} list={:?}", body_h[0], body_h[2]);
         // Detail preview of the selected / pinned / first statement.
         if let Some(sql) = state
-            .selected_entry(store, instance, connection)
+            .list.selected_entry(store, instance, connection)
             .or_else(|| state.detail.pinned_sql.clone())
             .or_else(|| store.entries(instance, connection).first().cloned())
         {
@@ -109,7 +109,7 @@ pub fn render(
                 body_h[0],
                 &sql,
                 &state.detail,
-                &state.search,
+                &state.list.search,
                 theme,
                 &mut content,
                 &mut v_bar,
@@ -137,7 +137,7 @@ pub fn render(
     };
 
     let v_scroll_out = list_view::render(
-        frame, theme, list_area, state, entries, &visible, cursor, focused,
+        frame, theme, list_area, &state.list, entries, &visible, cursor, focused,
     );
 
     // The list footer hints (inside the shared border).

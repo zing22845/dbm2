@@ -333,8 +333,8 @@ fn history_row_hit(
 
     // Compute the list footer height.
     let list_footer = crate::common::view::hints::history_list_footer_text(
-        tab.history.search.text_input_active(),
-        tab.history.search.has_filter(),
+        tab.history.list.search.text_input_active(),
+        tab.history.list.search.has_filter(),
         true,
     );
     let list_w = if detail_visible {
@@ -347,9 +347,9 @@ fn history_row_hit(
     let footer_h = crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
         .min(inner.height.saturating_sub(3));
 
-    crate::features::sql_workspace::sql_tab::history::list::row_hit_at(
+    crate::features::sql_workspace::sql_tab::history::list::view::row_hit_at(
         inner,
-        &tab.history,
+        &tab.history.list,
         &state.history_store,
         &instance,
         &connection,
@@ -407,8 +407,8 @@ fn history_h_scrollbar_hit(
     let inner = block.inner(history_zone);
 
     let list_footer = crate::common::view::hints::history_list_footer_text(
-        tab.history.search.text_input_active(),
-        tab.history.search.has_filter(),
+        tab.history.list.search.text_input_active(),
+        tab.history.list.search.has_filter(),
         true,
     );
     let list_w = if detail_visible {
@@ -419,16 +419,16 @@ fn history_h_scrollbar_hit(
     let footer_h = crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
         .min(inner.height.saturating_sub(3));
 
-    let list_area = crate::features::sql_workspace::sql_tab::history::list::compute_list_area(
+    let list_area = crate::features::sql_workspace::sql_tab::history::list::view::compute_list_area(
         inner,
         detail_visible,
         detail_w,
         footer_h,
     );
 
-    let visible = tab.history.visible_indices(&state.history_store, &instance, &connection);
+    let visible = tab.history.list.visible_indices(&state.history_store, &instance, &connection);
     let selected_width = tab.history
-        .selected_entry(&state.history_store, &instance, &connection)
+        .list.selected_entry(&state.history_store, &instance, &connection)
         .as_deref()
         .map(|sql| crate::features::sql_workspace::sql_tab::history::store::history_line_display_width(sql) as usize)
         .unwrap_or(0);
@@ -521,8 +521,8 @@ fn history_v_scrollbar_hit(
     let inner = block.inner(history_zone);
 
     let list_footer = crate::common::view::hints::history_list_footer_text(
-        tab.history.search.text_input_active(),
-        tab.history.search.has_filter(),
+        tab.history.list.search.text_input_active(),
+        tab.history.list.search.has_filter(),
         true,
     );
     let list_w = if detail_visible {
@@ -533,14 +533,14 @@ fn history_v_scrollbar_hit(
     let footer_h = crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
         .min(inner.height.saturating_sub(3));
 
-    let list_area = crate::features::sql_workspace::sql_tab::history::list::compute_list_area(
+    let list_area = crate::features::sql_workspace::sql_tab::history::list::view::compute_list_area(
         inner,
         detail_visible,
         detail_w,
         footer_h,
     );
 
-    let visible = tab.history.visible_indices(&state.history_store, &instance, &connection);
+    let visible = tab.history.list.visible_indices(&state.history_store, &instance, &connection);
 
     // Cut gutter off the left — v_scrollbar sits on inner_content's right edge.
     let gutter_w = crate::common::components::line_numbers::gutter_width(visible.len());

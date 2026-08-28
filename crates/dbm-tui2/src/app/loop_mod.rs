@@ -247,7 +247,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                 && let Some(tab_idx) = state.sql.sql_tab.active_tab
                 && let Some(tab) = state.sql.sql_tab.tabs.get_mut(tab_idx)
             {
-                tab.history.v_scroll = v_scroll;
+                tab.history.list.v_scroll = v_scroll;
             }
             let changed_cells = terminal.backend_mut().last_changed_cells();
             if real_redraw {

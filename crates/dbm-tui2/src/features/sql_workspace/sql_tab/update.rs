@@ -690,7 +690,7 @@ pub fn update(
                     });
                     // The current tab's cursor/detail may need updating too.
                     let history_state = std::mem::take(&mut state.tabs[idx].history);
-                    let selected_sql = history_state.selected_entry(&state.history_store, instance.as_str(), connection.as_str());
+                    let selected_sql = history_state.list.selected_entry(&state.history_store, instance.as_str(), connection.as_str());
                     let (s, _i, _e, _d) = history::update::update(
                         history::msg::HistoryMessage::RecordSuccess { instance: instance.clone(), connection: connection.clone(), sql: sql.clone() },
                         history_state,
@@ -698,14 +698,14 @@ pub fn update(
                         instance.as_str(),
                         connection.as_str(),
                         selected_sql,
-                        super::history::detail::detail_text_width(40),
+                        super::history::detail::view::detail_text_width(40),
                         8,
                     );
                     state.tabs[idx].history = s;
                     dirty = true;
                 } else {
                     let history_state = std::mem::take(&mut state.tabs[idx].history);
-                    let selected_sql = history_state.selected_entry(&state.history_store, instance.as_str(), connection.as_str());
+                    let selected_sql = history_state.list.selected_entry(&state.history_store, instance.as_str(), connection.as_str());
                     let (s, i, e, d) = history::update::update(
                         inner,
                         history_state,
@@ -713,7 +713,7 @@ pub fn update(
                         instance.as_str(),
                         connection.as_str(),
                         selected_sql,
-                        super::history::detail::detail_text_width(40),
+                        super::history::detail::view::detail_text_width(40),
                         8,
                     );
                     state.tabs[idx].history = s;
