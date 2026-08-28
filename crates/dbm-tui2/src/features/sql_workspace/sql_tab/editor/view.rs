@@ -101,15 +101,39 @@ pub fn editor_body_v_scrollbar_info(
     editor_body: Rect,
     editor_state: &edtui::EditorState,
 ) -> Option<(Rect, usize)> {
-    let row_count = editor::editor_display_row_count(editor_state, editor_body.width);
+    // Match edtui's actual wrap width: editor_body minus any reserved v-scrollbar
+    // minus the line-number gutter. We use the same provisional two-pass logic
+    // as the render path so both agree on row_count and max_scroll.
+    let gutter_w = editor::editor_line_number_gutter_width(editor_state);
     let viewport_rows = editor_body.height.max(1) as usize;
+
+    // Provisional wrap width assuming a scrollbar will be needed.
+    let provisional_wrap = editor_body
+        .width
+        .saturating_sub(1)
+        .saturating_sub(gutter_w)
+        .max(1) as usize;
+    let provisional_row_count = editor::editor_display_row_count(editor_state, provisional_wrap as u16);
+    let needs_v = provisional_row_count > viewport_rows;
+
+    let scrollbar_w: u16 = if needs_v { 1 } else { 0 };
+    let actual_wrap = editor_body
+        .width
+        .saturating_sub(scrollbar_w)
+        .saturating_sub(gutter_w)
+        .max(1);
+    let row_count = editor::editor_display_row_count(editor_state, actual_wrap);
     let max_scroll = row_count.saturating_sub(viewport_rows);
     if max_scroll == 0 {
         return None;
     }
     let layout = pane_scroll_layout(
         editor_body,
-        editor_body.width,
+        // content_width is the ACTUAL wrap width (the max line width that edtui
+        // uses internally). Passing this prevents pane_scroll_layout from falsely
+        // reserving an h-scrollbar when content_width would otherwise equal
+        // editor_body.width (which is wider than the actual wrapped content).
+        actual_wrap,
         row_count,
         viewport_rows,
     );
@@ -215,15 +239,42 @@ pub fn render(
     }
 
     // —— Scrollbar layout for the editor body ——
-    // We use wrap(true), so there is no horizontal scrollbar (content_width
-    // equals viewport width). The vertical scrollbar tracks the wrapped
-    // display row count against the visible viewport.
-    let row_count = editor::editor_display_row_count(&state.editor, editor_body.width);
+    // We use wrap(true), so edtui wraps lines to `content_main.width` which is
+    // `content_area.width - gutter_width`. We must compute row_count at THAT
+    // width, otherwise the scrollbar's max_scroll will be smaller than edtui's
+    // actual total visual rows — making the last lines unreachable by drag.
+    // Two-pass: first guess scrollbar width (1 col), compute row_count, then
+    // refine with the actual scrollbar decision.
+    let gutter_w = editor::editor_line_number_gutter_width(&state.editor);
+    let viewport_rows = editor_body.height.max(1) as usize;
+
+    // Pass 1: provisional row_count assuming v-scrollbar present.
+    let provisional_wrap = editor_body
+        .width
+        .saturating_sub(1)
+        .saturating_sub(gutter_w)
+        .max(1);
+    let provisional_row_count = editor::editor_display_row_count(&state.editor, provisional_wrap);
+    let needs_v = provisional_row_count > viewport_rows;
+
+    let scrollbar_w: u16 = if needs_v { 1 } else { 0 };
+    let actual_wrap = editor_body
+        .width
+        .saturating_sub(scrollbar_w)
+        .saturating_sub(gutter_w)
+        .max(1);
+    let row_count = editor::editor_display_row_count(&state.editor, actual_wrap);
+
     let scroll_layout = pane_scroll_layout(
         editor_body,
-        editor_body.width, // content_width == viewport width → no H scrollbar
+        // content_width = the actual wrap width edtui uses. This must NOT be
+        // editor_body.width, otherwise pane_scroll_layout's needs_h check
+        // (`content_width > main.width`) would falsely trigger an h-scrollbar
+        // whenever a v-scrollbar is present — editor_body.width is always 1 col
+        // wider than main.width when v_bar is reserved.
+        actual_wrap,
         row_count,
-        editor_body.height.max(1) as usize,
+        viewport_rows,
     );
 
     // Render the editor into the content area (minus scrollbar space).
