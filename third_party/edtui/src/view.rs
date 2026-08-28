@@ -525,17 +525,40 @@ impl Widget for EditorView<'_, '_> {
         }
 
         // Compute the final cursor position.
-        let final_cursor_position = cursor_position.unwrap_or(Position::new(
-            content_main.left(),
-            content_main.top() + self.state.cursor.row as u16,
-        ));
-
-        // Store the cursor screen position for external access.
-        self.state.view.cursor_screen_position = Some(final_cursor_position);
-
-        // Render the cursor on top.
-        if let Some(cell) = buf.cell_mut(final_cursor_position) {
-            cell.set_style(self.theme.cursor_style);
+        //
+        // When `scroll_locked` is true the user has manually scrolled (wheel
+        // or scrollbar drag) and the cursor is legitimately outside the
+        // visible viewport. In that case `cursor_position` stays `None`
+        // because the cursor row never fell inside the rendered range. We
+        // MUST NOT fabricate a cursor position here — doing so would paint
+        // a cursor cell outside the editor's content rect (which is the bug
+        // reported after adding manual scroll). Instead we leave
+        // `cursor_screen_position` unset and skip cursor styling entirely,
+        // so the cursor is simply invisible while scrolled out of view.
+        // This mirrors how vim and VS Code handle manual scroll away from
+        // the cursor.
+        if let Some(pos) = cursor_position {
+            self.state.view.cursor_screen_position = Some(pos);
+            if let Some(cell) = buf.cell_mut(pos) {
+                cell.set_style(self.theme.cursor_style);
+            }
+        } else if !self.state.view.scroll_locked {
+            // Default path (cursor-following is active): the cursor row is
+            // not in the current viewport even though scroll is unlocked.
+            // This shouldn't normally happen because update_viewport_vertical*
+            // keeps cursor in view, but provide a safe fallback so callers
+            // that read cursor_screen_position still get a value.
+            let final_cursor_position = Position::new(
+                content_main.left(),
+                content_main.top() + self.state.cursor.row as u16,
+            );
+            self.state.view.cursor_screen_position = Some(final_cursor_position);
+            if let Some(cell) = buf.cell_mut(final_cursor_position) {
+                cell.set_style(self.theme.cursor_style);
+            }
+        } else {
+            // scroll_locked && cursor out of viewport — hide the cursor.
+            self.state.view.cursor_screen_position = None;
         }
 
         // Save the total number of lines that are currently displayed on the viewport.
