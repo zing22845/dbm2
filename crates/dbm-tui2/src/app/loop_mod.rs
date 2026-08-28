@@ -149,6 +149,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // scroll positions without re-computing the layout each frame.
     let mut history_h_scrollbar_drag: Option<(u16, usize, usize)> = None;
     let mut history_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    let mut editor_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
 
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
@@ -670,6 +671,16 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     {
                                         history_v_scrollbar_drag = Some((track_y, viewport_height, max_scroll));
                                     }
+                                    // If the click was on the editor body's v_scrollbar, start dragging.
+                                    if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::EditorVScrollbar {
+                                        track_y,
+                                        y: _,
+                                        max_scroll,
+                                        viewport_height,
+                                    } = action
+                                    {
+                                        editor_v_scrollbar_drag = Some((track_y, viewport_height, max_scroll));
+                                    }
                                     for msg in sql_click_msgs(&state.sql.sql_tab, action) {
                                         let result = process_message_round(
                                             &effect_runner,
@@ -1090,10 +1101,33 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     history_v_scrollbar_drag = None;
                                 }
                             }
+
+                            // Editor body v_scrollbar drag: same linear mapping as
+                            // history — scrollbar thumb position IS the viewport start.
+                            if let Some((track_y, viewport_height, max_scroll)) = editor_v_scrollbar_drag {
+                                let rel_y = point.y.saturating_sub(track_y);
+                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                if let Some(active_tab) = state.sql.sql_tab.active_tab {
+                                    use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+                                    use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+                                    use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
+                                    let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                                        SqlTabMessage::Editor {
+                                            tab_id: active_tab,
+                                            msg: EditorMsg::Message(EditorMessage::SetVScroll { position: start }),
+                                        },
+                                    ))));
+                                    let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                    dirty |= result.dirty;
+                                } else {
+                                    editor_v_scrollbar_drag = None;
+                                }
+                            }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
                             history_h_scrollbar_drag = None;
                             history_v_scrollbar_drag = None;
+                            editor_v_scrollbar_drag = None;
                             if explorer_split_drag {
                                 explorer_split_drag = false;
                                 state.splitter_hover.explorer_splitter_drag = false;
@@ -1240,36 +1274,58 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     tab.splitter.editor_top_height,
                                     tab.splitter.history_pane_width,
                                 );
-                                // When detail is visible the History zone extends
-                                // leftward into the editor. For wheel routing we
-                                // compute the full zone rect (detail + list +
-                                // splitter) so wheel works anywhere inside it.
-                                let detail_visible = tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
-                                let zone_rect = if detail_visible {
-                                    use crate::features::sql_workspace::sql_tab::history::splitter::view::{history_zone_x, history_zone_width};
-                                    let zone_x = history_zone_x(tab_area, &layout, tab.history.splitter.detail_pane_width);
-                                    let zone_w = history_zone_width(&layout, tab.history.splitter.detail_pane_width);
-                                    ratatui::layout::Rect::new(zone_x, layout.history.y, zone_w, layout.history.height)
-                                } else {
-                                    layout.history
-                                };
-                                if zone_rect.contains(point) {
+                                // Route wheel to the editor body first (top-left
+                                // zone), then to history (right/bottom zone).
+                                // The two panes do not overlap.
+                                if layout.editor.contains(point) {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
-                                    use crate::features::sql_workspace::sql_tab::history::msg::{HistoryMessage, HistoryMsg};
+                                    use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
                                     let delta: i32 = match mouse.kind {
-                                        MouseEventKind::ScrollUp => -1,
-                                        MouseEventKind::ScrollDown => 1,
+                                        MouseEventKind::ScrollUp => -3,
+                                        MouseEventKind::ScrollDown => 3,
                                         _ => unreachable!(),
                                     };
                                     let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                                        SqlTabMessage::History {
+                                        SqlTabMessage::Editor {
                                             tab_id: tab_idx,
-                                            msg: HistoryMsg::Message(HistoryMessage::MoveCursor { delta }),
+                                            msg: EditorMsg::Message(EditorMessage::ScrollV { delta }),
                                         },
                                     ))));
                                     let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                                     dirty |= result.dirty;
+                                } else {
+                                    // When detail is visible the History zone extends
+                                    // leftward into the editor. For wheel routing we
+                                    // compute the full zone rect (detail + list +
+                                    // splitter) so wheel works anywhere inside it.
+                                    let detail_visible = tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
+                                    let zone_rect = if detail_visible {
+                                        use crate::features::sql_workspace::sql_tab::history::splitter::view::{history_zone_x, history_zone_width};
+                                        let zone_x = history_zone_x(tab_area, &layout, tab.history.splitter.detail_pane_width);
+                                        let zone_w = history_zone_width(&layout, tab.history.splitter.detail_pane_width);
+                                        ratatui::layout::Rect::new(zone_x, layout.history.y, zone_w, layout.history.height)
+                                    } else {
+                                        layout.history
+                                    };
+                                    if zone_rect.contains(point) {
+                                        use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+                                        use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+                                        use crate::features::sql_workspace::sql_tab::history::msg::{HistoryMessage, HistoryMsg};
+                                        let delta: i32 = match mouse.kind {
+                                            MouseEventKind::ScrollUp => -1,
+                                            MouseEventKind::ScrollDown => 1,
+                                            _ => unreachable!(),
+                                        };
+                                        let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                                            SqlTabMessage::History {
+                                                tab_id: tab_idx,
+                                                msg: HistoryMsg::Message(HistoryMessage::MoveCursor { delta }),
+                                            },
+                                        ))));
+                                        let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                        dirty |= result.dirty;
+                                    }
                                 }
                             }
                         }
@@ -2442,6 +2498,20 @@ fn sql_click_msgs(
                 return Vec::new();
             };
             vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::ToggleTableCompletion { tab_id }))))]
+        }
+        SqlClickAction::EditorVScrollbar { track_y, y, max_scroll, viewport_height } => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
+            let rel_y = y.saturating_sub(track_y);
+            let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+            vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    tab_id,
+                    msg: EditorMsg::Message(EditorMessage::SetVScroll { position: start }),
+                },
+            ))))]
         }
     }
 }

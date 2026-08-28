@@ -36,6 +36,14 @@ pub(crate) struct ViewState {
     pub(crate) cursor_screen_position: Option<Position>,
     /// Whether the editor is in single-line mode (blocks newline insertion).
     pub(crate) single_line: bool,
+    /// When `true`, `update_viewport_vertical{,_wrap}` and
+    /// `update_viewport_horizontal` skip the cursor-following adjustment
+    /// (they still clamp to `max_offset`). Set by external code that
+    /// performs manual scrollbar drags or wheel scrolling — the user has
+    /// intentionally scrolled away from the cursor and we must not snap
+    /// back during the next render. Re-engaged by the caller when editing
+    /// resumes (keyboard input / paste / buffer replacement).
+    pub(crate) scroll_locked: bool,
 }
 
 impl Default for ViewState {
@@ -49,6 +57,7 @@ impl Default for ViewState {
             line_numbers: LineNumbers::None,
             cursor_screen_position: None,
             single_line: false,
+            scroll_locked: false,
         }
     }
 }
@@ -97,6 +106,10 @@ impl ViewState {
             return self.viewport.x;
         };
 
+        if self.scroll_locked {
+            return self.viewport.x;
+        }
+
         // scroll left
         if cursor_col < self.viewport.x {
             self.viewport.x = cursor_col;
@@ -140,16 +153,18 @@ impl ViewState {
 
     /// Updates the view ports vertical offset.
     pub(crate) fn update_viewport_vertical(&mut self, height: usize, cursor_row: usize) -> usize {
-        let max_cursor_pos = height.saturating_sub(1) + self.viewport.y;
+        if !self.scroll_locked {
+            let max_cursor_pos = height.saturating_sub(1) + self.viewport.y;
 
-        // scroll up
-        if cursor_row < self.viewport.y {
-            self.viewport.y = cursor_row;
-        }
+            // scroll up
+            if cursor_row < self.viewport.y {
+                self.viewport.y = cursor_row;
+            }
 
-        // scroll down
-        if cursor_row >= max_cursor_pos {
-            self.viewport.y += cursor_row.saturating_sub(max_cursor_pos);
+            // scroll down
+            if cursor_row >= max_cursor_pos {
+                self.viewport.y += cursor_row.saturating_sub(max_cursor_pos);
+            }
         }
 
         self.viewport.y
@@ -177,12 +192,14 @@ impl ViewState {
         let max_offset = total_visual.saturating_sub(height);
         self.viewport.y = self.viewport.y.min(max_offset);
 
-        if cursor_visual < self.viewport.y {
-            self.viewport.y = cursor_visual;
-        } else {
-            let bottom = self.viewport.y + height.saturating_sub(1);
-            if cursor_visual > bottom {
-                self.viewport.y = cursor_visual.saturating_sub(height.saturating_sub(1));
+        if !self.scroll_locked {
+            if cursor_visual < self.viewport.y {
+                self.viewport.y = cursor_visual;
+            } else {
+                let bottom = self.viewport.y + height.saturating_sub(1);
+                if cursor_visual > bottom {
+                    self.viewport.y = cursor_visual.saturating_sub(height.saturating_sub(1));
+                }
             }
         }
 

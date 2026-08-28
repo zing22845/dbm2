@@ -11,6 +11,9 @@ use ratatui::Frame;
 use crate::common::components::search::pane_search_title_line;
 use crate::common::editor;
 use crate::common::view::hints::{draw_footer, footer_height, sql_pane_footer_text};
+use crate::common::view::pane_scrollbar::{
+    draw_vertical_pane_scrollbar, pane_scroll_layout,
+};
 use crate::common::view::theme::Theme;
 
 use super::state::EditorState;
@@ -86,6 +89,31 @@ pub fn tblcmp_rect(
     let chip_w = crate::common::utils::text_width::width(&chip_text) as u16;
     let x = area.x.saturating_add(1).saturating_add(total_w).saturating_sub(chip_w);
     Some(Rect::new(x, area.y, chip_w, 1))
+}
+
+/// Compute the editor body's scrollbar geometry for hit-testing and drag
+/// dispatch. Returns `Some((v_scrollbar_rect, max_scroll))` when a vertical
+/// scrollbar is actually visible (content rows exceed the viewport).
+///
+/// `editor_body` is the full body rect (inside the border block), the same
+/// area that `render` passes to `pane_scroll_layout`.
+pub fn editor_body_v_scrollbar_info(
+    editor_body: Rect,
+    editor_state: &edtui::EditorState,
+) -> Option<(Rect, usize)> {
+    let row_count = editor::editor_display_row_count(editor_state, editor_body.width);
+    let viewport_rows = editor_body.height.max(1) as usize;
+    let max_scroll = row_count.saturating_sub(viewport_rows);
+    if max_scroll == 0 {
+        return None;
+    }
+    let layout = pane_scroll_layout(
+        editor_body,
+        editor_body.width,
+        row_count,
+        viewport_rows,
+    );
+    layout.v_scrollbar.map(|bar| (bar, max_scroll))
 }
 
 /// The all-caps mode label shown in the editor header, matching the original
@@ -186,8 +214,38 @@ pub fn render(
         cp_view::render(frame, theme, picker_area, &state.context_picker);
     }
 
+    // —— Scrollbar layout for the editor body ——
+    // We use wrap(true), so there is no horizontal scrollbar (content_width
+    // equals viewport width). The vertical scrollbar tracks the wrapped
+    // display row count against the visible viewport.
+    let row_count = editor::editor_display_row_count(&state.editor, editor_body.width);
+    let scroll_layout = pane_scroll_layout(
+        editor_body,
+        editor_body.width, // content_width == viewport width → no H scrollbar
+        row_count,
+        editor_body.height.max(1) as usize,
+    );
+
+    // Render the editor into the content area (minus scrollbar space).
     let mut editor = state.editor.clone();
-    let cursor = editor::render_editor(&mut editor, editor_body, frame.buffer_mut());
+    let content_area = scroll_layout.content_area;
+    let cursor = editor::render_editor(&mut editor, content_area, frame.buffer_mut());
+
+    // Draw the vertical scrollbar thumb after render so its position reflects
+    // the final viewport_offset (edtui may nudge it to keep the cursor visible).
+    if let Some(v_bar) = scroll_layout.v_scrollbar {
+        let (_, scroll_y) = editor.viewport_offset();
+        let max_scroll = row_count.saturating_sub(content_area.height.max(1) as usize);
+        draw_vertical_pane_scrollbar(
+            frame,
+            v_bar,
+            scroll_y,
+            content_area.height.max(1) as usize,
+            max_scroll,
+            p,
+            false, // TODO: pass dragging state when editor scrollbar drag is wired
+        );
+    }
     // Anchor the completion popup to the editor cursor (its screen position) so
     // it follows the caret, matching the original dbm. `cursor.position` is the
     // absolute terminal position of the caret after rendering.

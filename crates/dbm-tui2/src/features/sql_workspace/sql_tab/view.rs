@@ -50,6 +50,8 @@ pub enum SqlClickAction {
     /// Click the editor header's `· TblCmp:ON/OFF` chip to toggle table-name
     /// completion (equivalent to Alt+Tab in insert mode).
     ToggleTableCompletion,
+    /// Click/drag on the editor body's vertical scrollbar.
+    EditorVScrollbar { track_y: u16, y: u16, max_scroll: usize, viewport_height: usize },
 }
 
 /// Hit-test a click at `(x, y)` inside the SQL workspace's tab-bar + body
@@ -227,6 +229,42 @@ pub fn sql_workspace_click(
         && let Some(action) = history_v_scrollbar_hit(state, tab, &layout, x, y, detail_visible)
     {
         return Some(action);
+    }
+
+    // —— Editor body vertical scrollbar hit-test ——
+    // Mirror the geometry the renderer uses: block inner → subtract picker
+    // overlay → subtract footer hints → editor body.
+    if !is_double_click && editor_hit {
+        use ratatui::widgets::{Block, Borders};
+        let editor_inner = Block::default().borders(Borders::ALL).inner(layout.editor);
+        let mut body_area = editor_inner;
+        if let Some(picker_area) = editor_view::context_picker_area(layout.editor, picker_open) {
+            body_area.y = picker_area.y + picker_area.height;
+            body_area.height = editor_inner.height.saturating_sub(picker_area.height);
+        }
+        let footer_h = crate::common::view::hints::footer_height(
+            &crate::common::view::hints::sql_pane_footer_text(
+                tab.editor.sql_search.text_input_active(),
+                tab.editor.sql_search.text_input_active(),
+                "",
+                tab.editor.sql_search.has_filter(),
+                tab.editor.complete_table_names,
+            ),
+            body_area.width,
+        )
+        .min(body_area.height.saturating_sub(1));
+        body_area.height = body_area.height.saturating_sub(footer_h);
+        if let Some((v_bar, max_scroll)) =
+            editor_view::editor_body_v_scrollbar_info(body_area, &tab.editor.editor)
+            && crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y)
+        {
+            return Some(SqlClickAction::EditorVScrollbar {
+                track_y: v_bar.y,
+                y,
+                max_scroll,
+                viewport_height: body_area.height.max(1) as usize,
+            });
+        }
     }
 
     // Results pane cell click handling (single-click: select cell; double-click: open detail).

@@ -212,6 +212,25 @@ impl EditorState {
     pub fn set_viewport_height(&mut self, height: usize) {
         self.view.update_num_rows(height);
     }
+
+    /// Whether the viewport is currently locked from cursor-following auto-scroll.
+    ///
+    /// When `true`, `update_viewport_vertical{,_wrap}` and
+    /// `update_viewport_horizontal` skip their cursor-adjustment logic during
+    /// the next render pass. External code that implements manual scrollbar
+    /// drags or wheel scrolling should lock the viewport while the user is
+    /// actively scrolling, then unlock when editing resumes.
+    #[must_use]
+    pub fn is_scroll_locked(&self) -> bool {
+        self.view.scroll_locked
+    }
+
+    /// Enable or disable the viewport cursor-following auto-scroll.
+    ///
+    /// See [`Self::is_scroll_locked`].
+    pub fn set_scroll_locked(&mut self, locked: bool) {
+        self.view.scroll_locked = locked;
+    }
 }
 
 #[cfg(test)]

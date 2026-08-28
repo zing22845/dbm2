@@ -38,6 +38,22 @@ pub enum EditorMessage {
     ContextPicker(ContextPickerMsg),
     /// Forward to the SQL completion sub-module.
     SqlCompletion(SqlCompletionMsg),
+
+    // —— Manual viewport scroll (drag / wheel) ——
+    /// Scroll the editor viewport vertically by `delta` display rows.
+    /// Positive = down, negative = up. Used by the scroll wheel.
+    ScrollV { delta: i32 },
+    /// Set the editor vertical viewport offset to `position` (display row).
+    /// Used by scrollbar drag.
+    SetVScroll { position: usize },
+    /// Scroll the editor viewport horizontally by `delta` columns.
+    /// Positive = right, negative = left. Note that edtui `wrap(true)` keeps
+    /// `viewport_offset.x` at 0 during cursor-following render, so this only
+    /// has effect when the editor is configured without wrapping — but we
+    /// provide the message path anyway for consistency.
+    ScrollH { delta: i32 },
+    /// Set the editor horizontal viewport offset to `position` (column).
+    SetHScroll { position: usize },
 }
 
 /// Feature message envelope (central-router compatible).

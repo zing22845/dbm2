@@ -22,6 +22,9 @@ pub fn update(
     let mut dirty = false;
     match msg {
         EditorMessage::KeyEvent { key, tracked_caps_lock } => {
+            // Editing resumes: re-enable cursor-following auto-scroll so
+            // subsequent edtui render keeps the cursor in view.
+            state.editor.set_scroll_locked(false);
             match handle_key(&mut state, key, tracked_caps_lock) {
                 Ok(changed) => dirty = changed,
                 // Ctrl+R escapes the buffer and opens history recall (mirrors the
@@ -30,11 +33,13 @@ pub fn update(
             }
         }
         EditorMessage::Paste { text } => {
+            state.editor.set_scroll_locked(false);
             crate::common::editor::paste_text(&mut state.handler, &mut state.editor, &text);
             refresh_completion(&mut state, false);
             dirty = true;
         }
         EditorMessage::SetSql { sql } => {
+            state.editor.set_scroll_locked(false);
             crate::common::editor::set_sql_text(&mut state.editor, &sql);
             state.sql_completion.close();
             dirty = true;
@@ -80,6 +85,34 @@ pub fn update(
             intents.extend(i.into_iter().map(EditorIntent::SqlCompletion));
             effects.extend(e.into_iter().map(EditorEffect::SqlCompletion));
             dirty = d;
+        }
+
+        // —— Manual viewport scroll ——
+        EditorMessage::ScrollV { delta } => {
+            let (x, y) = state.editor.viewport_offset();
+            let new_y = (y as i32 + delta).max(0) as usize;
+            state.editor.set_viewport_offset(x, new_y);
+            state.editor.set_scroll_locked(true);
+            dirty = true;
+        }
+        EditorMessage::SetVScroll { position } => {
+            let (x, _) = state.editor.viewport_offset();
+            state.editor.set_viewport_offset(x, position);
+            state.editor.set_scroll_locked(true);
+            dirty = true;
+        }
+        EditorMessage::ScrollH { delta } => {
+            let (x, y) = state.editor.viewport_offset();
+            let new_x = (x as i32 + delta).max(0) as usize;
+            state.editor.set_viewport_offset(new_x, y);
+            state.editor.set_scroll_locked(true);
+            dirty = true;
+        }
+        EditorMessage::SetHScroll { position } => {
+            let (_, y) = state.editor.viewport_offset();
+            state.editor.set_viewport_offset(position, y);
+            state.editor.set_scroll_locked(true);
+            dirty = true;
         }
     }
 
@@ -158,6 +191,9 @@ fn apply_completion(
     state.editor.cursor = edtui::Index2::new(new_row, new_col);
     state.editor.mode = edtui::EditorMode::Insert;
     state.editor.selection = None;
+    // Buffer and cursor changed — re-engage cursor-following auto-scroll so
+    // edtui keeps the inserted text in view during the next render.
+    state.editor.set_scroll_locked(false);
 }
 
 /// Byte offset of the `char_count`-th character from the start of `text`.
