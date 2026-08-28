@@ -165,6 +165,13 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // scan tick) rather than a real event. Such repaints must NOT feed the
     // FPS/waste estimates, so they are tracked separately from `needs_redraw`.
     let mut timed_redraw = false;
+    // Wheel debounce: macOS trackpad emits 2–4 crossterm wheel events per
+    // physical tick (≈1–3 ms apart). We only process the first event of each
+    // burst — subsequent same-direction events within the window are dropped.
+    // This gives the user one line per wheel tick, matching discover targets
+    // and every other app on the platform.
+    let mut last_wheel: Option<(std::time::Instant, i32)> = None;
+    const WHEEL_DEBOUNCE_MS: u128 = 15;
     // Watchdog: if the select loop ever spins (e.g. a select branch becomes
     // immediately ready), the loop would burn 100% CPU and freeze keyboard
     // input. Any real event (mouse/key/action) or a redraw resets this counter;
@@ -1132,6 +1139,22 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             if matches!(state.focus, Pane::Discover(crate::app_shell::nav::DiscoverPane::Targets))
                                 && !state.discover.close_confirm =>
                         {
+                            // Wheel debounce: collapse macOS trackpad burst events
+                            // so each physical tick maps to one MoveUp/Down.
+                            let dir: i32 = match mouse.kind {
+                                MouseEventKind::ScrollUp => -1,
+                                _ => 1,
+                            };
+                            let now = std::time::Instant::now();
+                            if let Some((t, d)) = last_wheel
+                                && d == dir
+                                && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                            {
+                                idle_iterations = 0;
+                                continue;
+                            }
+                            last_wheel = Some((now, dir));
+
                             let size = terminal.size()?;
                             let footer_h =
                                 footer_view::footer_height(&state.footer, size.width);
@@ -1191,6 +1214,21 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
                             if matches!(state.focus, Pane::SQLWorkspace) =>
                         {
+                            // Wheel debounce — same as discover targets above.
+                            let dir: i32 = match mouse.kind {
+                                MouseEventKind::ScrollUp => -1,
+                                _ => 1,
+                            };
+                            let now = std::time::Instant::now();
+                            if let Some((t, d)) = last_wheel
+                                && d == dir
+                                && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                            {
+                                idle_iterations = 0;
+                                continue;
+                            }
+                            last_wheel = Some((now, dir));
+
                             if let Some(size) = terminal.size().ok()
                                 && let Some(tab_area) = sql_tab_area_for_hit(size, &state)
                                 && let Some(tab_idx) = state.sql.sql_tab.active_tab
