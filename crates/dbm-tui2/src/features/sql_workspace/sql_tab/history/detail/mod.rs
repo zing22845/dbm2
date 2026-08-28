@@ -1,8 +1,12 @@
-//! History Detail section: full SQL preview inside the History pane.
+//! `history` child feature: the detail preview pane.
 //!
-//! Pure helpers (scroll, line counting, search matching, display-line building)
-//! plus the themed renderer. Rendering depends on the `Theme` palette and the
-//! shared line-number gutter component.
+//! Shows the full SQL of the selected history entry with line numbers,
+//! search-match highlighting, and independent vertical scroll. Owns
+//! `HistoryDetailState` (scroll offset, pinned SQL) and all helpers for
+//! line counting, wrapping, search-to-scroll mapping, and the themed
+//! renderer. Pure helpers + renderer — no message loop of its own; the
+//! parent `history` feature drives selection changes and calls the
+//! helpers when laying out the split [detail | splitter | list].
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};

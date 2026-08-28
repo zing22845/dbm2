@@ -1,6 +1,7 @@
 pub mod detail;
 pub mod effect;
 pub mod intent;
+pub mod list;
 pub mod msg;
 pub mod splitter;
 pub mod state;

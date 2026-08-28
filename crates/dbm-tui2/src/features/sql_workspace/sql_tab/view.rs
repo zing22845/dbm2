@@ -347,7 +347,7 @@ fn history_row_hit(
     let footer_h = crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
         .min(inner.height.saturating_sub(3));
 
-    crate::features::sql_workspace::sql_tab::history::view::row_hit_at(
+    crate::features::sql_workspace::sql_tab::history::list::row_hit_at(
         inner,
         &tab.history,
         &state.history_store,
@@ -419,7 +419,7 @@ fn history_h_scrollbar_hit(
     let footer_h = crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
         .min(inner.height.saturating_sub(3));
 
-    let list_area = crate::features::sql_workspace::sql_tab::history::view::compute_list_area(
+    let list_area = crate::features::sql_workspace::sql_tab::history::list::compute_list_area(
         inner,
         detail_visible,
         detail_w,
@@ -533,7 +533,7 @@ fn history_v_scrollbar_hit(
     let footer_h = crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
         .min(inner.height.saturating_sub(3));
 
-    let list_area = crate::features::sql_workspace::sql_tab::history::view::compute_list_area(
+    let list_area = crate::features::sql_workspace::sql_tab::history::list::compute_list_area(
         inner,
         detail_visible,
         detail_w,
