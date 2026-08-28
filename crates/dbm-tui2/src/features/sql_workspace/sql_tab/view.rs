@@ -47,6 +47,9 @@ pub enum SqlClickAction {
     ResultsCellClicked { row: usize, col: usize },
     /// Double-click inside the results pane: toggle the detail inspect mode.
     ResultsOpenDetail,
+    /// Click the editor header's `· TblCmp:ON/OFF` chip to toggle table-name
+    /// completion (equivalent to Alt+Tab in insert mode).
+    ToggleTableCompletion,
 }
 
 /// Hit-test a click at `(x, y)` inside the SQL workspace's tab-bar + body
@@ -142,6 +145,19 @@ pub fn sql_workspace_click(
                 PickerColumn::Schema
             };
             return Some(SqlClickAction::OpenContextPicker(column));
+        }
+        // A click on the `· TblCmp:ON/OFF` chip in INSERT mode toggles
+        // table-name completion (equivalent to Alt+Tab). Returns None outside
+        // INSERT mode — the chip is not rendered then.
+        if let Some(tblcmp) = editor_view::tblcmp_rect(
+            layout.editor,
+            tab.editor.editor.mode,
+            tab.session.database.as_deref(),
+            tab.session.schema.as_deref(),
+            tab.editor.complete_table_names,
+        ) && contains(tblcmp, x, y)
+        {
+            return Some(SqlClickAction::ToggleTableCompletion);
         }
     }
     // When the detail is visible it extends the history zone leftward (eating

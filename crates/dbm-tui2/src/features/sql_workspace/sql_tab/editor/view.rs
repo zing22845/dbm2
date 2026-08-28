@@ -65,6 +65,29 @@ pub fn context_trigger_rects(
     (db_rect, full_rect)
 }
 
+/// Hit-test rect for the `· TblCmp:ON` / `· TblCmp:OFF` chip appended to the
+/// editor title in INSERT mode. Returns `None` when not in INSERT mode (the
+/// chip is not rendered and Alt+Tab toggle is a no-op there anyway).
+pub fn tblcmp_rect(
+    area: Rect,
+    mode: edtui::EditorMode,
+    database: Option<&str>,
+    schema: Option<&str>,
+    complete_table_names: bool,
+) -> Option<Rect> {
+    if mode != edtui::EditorMode::Insert {
+        return None;
+    }
+    let db = database.filter(|d| !d.is_empty()).unwrap_or("…");
+    let schema = schema.filter(|s| !s.is_empty()).unwrap_or("…");
+    let full_title = format!(" [S] SQL [INSERT] · {db} › {schema} · TblCmp:{}", if complete_table_names { "ON" } else { "OFF" });
+    let chip_text = format!("· TblCmp:{}", if complete_table_names { "ON" } else { "OFF" });
+    let total_w = crate::common::utils::text_width::width(&full_title) as u16;
+    let chip_w = crate::common::utils::text_width::width(&chip_text) as u16;
+    let x = area.x.saturating_add(1).saturating_add(total_w).saturating_sub(chip_w);
+    Some(Rect::new(x, area.y, chip_w, 1))
+}
+
 /// The all-caps mode label shown in the editor header, matching the original
 /// dbm (`[INSERT]` / `[VISUAL]` / `[SEARCH]` / `[NORMAL]`).
 fn editor_mode_label(mode: edtui::EditorMode) -> &'static str {

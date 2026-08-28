@@ -2437,6 +2437,12 @@ fn sql_click_msgs(
                 )))),
             ]
         }
+        SqlClickAction::ToggleTableCompletion => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::ToggleTableCompletion { tab_id }))))]
+        }
     }
 }
 
