@@ -40,6 +40,11 @@ pub enum InstancesMessage {
     RefreshConnections { instance_idx: usize },
     /// Move the cursor to a specific visible row (mouse click).
     JumpTo { row: usize },
+    /// Programmatically set the viewport start (scrollbar drag / wheel).
+    /// Clamped to `[0, visible_count - viewport]`. Sets `scroll_locked = true`
+    /// so the discover-style anchor does not fight the manual scroll until
+    /// the next cursor move.
+    SetVScroll { position: usize },
 }
 
 /// Feature message envelope (central-router compatible).

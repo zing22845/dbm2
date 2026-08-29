@@ -54,6 +54,10 @@ pub struct InstancesState {
     pub cursor: usize,
     /// Scroll offset of the tree.
     pub scroll: usize,
+    /// Manual-scroll flag: when true, the discover-style cursor anchor is
+    /// skipped so a scrollbar drag keeps its position even if the cursor
+    /// would pull the viewport. Cleared on the next cursor move.
+    pub scroll_locked: bool,
     /// Horizontal scroll offset of the tree (`Left`/`Right`), matching the
     /// original dbm's tree horizontal scroll.
     pub h_scroll: u16,

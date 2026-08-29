@@ -108,9 +108,26 @@ pub fn update(
             }
             false
         }
-        InstancesMessage::MoveUp => state.move_up(),
-        InstancesMessage::MoveDown => state.move_down(),
-        InstancesMessage::JumpTo { row } => state.jump_to(row),
+        InstancesMessage::MoveUp => {
+            state.scroll_locked = false;
+            state.move_up()
+        }
+        InstancesMessage::MoveDown => {
+            state.scroll_locked = false;
+            state.move_down()
+        }
+        InstancesMessage::JumpTo { row } => {
+            state.scroll_locked = false;
+            state.jump_to(row)
+        }
+        InstancesMessage::SetVScroll { position } => {
+            let total = state.visible_count();
+            let clamped = position.min(total.saturating_sub(1));
+            let changed = state.scroll != clamped;
+            state.scroll = clamped;
+            state.scroll_locked = true;
+            changed
+        }
         InstancesMessage::Expand => {
             // Only instance rows expand; connection rows ignore the key. On a
             // fresh expand, lazily load the instance's connections so the

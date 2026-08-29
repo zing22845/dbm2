@@ -25,6 +25,11 @@ pub enum ObjectsMessage {
     /// (used to approximate the explorer viewport). No-op (dirty=false) at a
     /// scroll boundary.
     ScrollHorizontal { delta: i16, term_width: u16 },
+    /// Programmatically set the viewport start (scrollbar drag / wheel).
+    /// Clamped to `[0, rows.len - viewport]`. Sets `scroll_locked = true`
+    /// so the discover-style anchor does not fight the manual scroll until
+    /// the next cursor move.
+    SetVScroll { position: usize },
     /// Activate the current row: expand/collapse an expandable row, otherwise
     /// open an object (e.g. a table) — matching the original dbm's `Enter`.
     Select,

@@ -7,27 +7,134 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::common::view::hints::{draw_pane_footer, footer_height, objects_pane_footer_text};
-use crate::common::view::pane_scrollbar::{draw_horizontal_pane_scrollbar, pane_scroll_layout};
+use crate::common::view::pane_scrollbar::{
+    PaneScrollLayout, draw_horizontal_pane_scrollbar, draw_vertical_pane_scrollbar,
+    pane_scroll_layout,
+};
 use crate::common::view::theme::Theme;
 
 use super::state::ObjectsState;
+
+/// Result of [`compute_objects_viewport`]: shared by render, row_at, toggle_at,
+/// and v_scrollbar_hit so they agree on body geometry, viewport start, and
+/// scrollbar placement.
+pub struct ObjectsViewport {
+    pub body: Rect,
+    pub layout: PaneScrollLayout,
+    pub content: Rect,
+    pub viewport: usize,
+    pub start: usize,
+    pub total: usize,
+    pub max_scroll: usize,
+}
+
+/// Shared body-area computation used by render and row_at.
+fn compute_objects_body(area: Rect, _state: &ObjectsState) -> Option<Rect> {
+    let hint = objects_pane_footer_text();
+    let footer_h =
+        footer_height(&hint, area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
+    let block = Block::default().borders(Borders::ALL);
+    let inner = block.inner(area);
+    if inner.width == 0 || inner.height == 0 {
+        return None;
+    }
+    let body_h = inner.height.saturating_sub(footer_h);
+    if body_h == 0 {
+        return None;
+    }
+    Some(Rect::new(inner.x, inner.y, inner.width, body_h))
+}
+
+/// Compute the objects tree viewport. One source of truth for render, row_at,
+/// toggle_at, and v_scrollbar_hit. Applies discover-style cursor anchoring
+/// (skipped when `scroll_locked`).
+pub fn compute_objects_viewport(
+    area: Rect,
+    state: &ObjectsState,
+) -> Option<ObjectsViewport> {
+    let total = state.rows.len();
+    if total == 0 {
+        return None;
+    }
+    let body = compute_objects_body(area, state)?;
+    // The widest row drives h_scrollbar; use pane_scroll_layout to reserve
+    // 1 col for v_scrollbar when the tree overflows vertically.
+    let max_row_w = state.max_row_width();
+    let layout = pane_scroll_layout(body, max_row_w, total, body.height as usize);
+    let content = layout.content_area;
+
+    let viewport = content.height.max(1) as usize;
+    let max_scroll = total.saturating_sub(viewport);
+
+    // Discover-style anchor — skipped when scroll_locked (manual v_scrollbar drag).
+    let scroll_locked = state.scroll_locked;
+    let mut start = state.scroll.min(total.saturating_sub(1));
+    if !scroll_locked {
+        if state.cursor < start {
+            start = state.cursor;
+        } else if state.cursor >= start + viewport {
+            start = state.cursor + 1 - viewport;
+        }
+    }
+
+    Some(ObjectsViewport {
+        body,
+        layout,
+        content,
+        viewport,
+        start,
+        total,
+        max_scroll,
+    })
+}
+
+/// Result of [`v_scrollbar_hit`]: everything the drag handler needs.
+pub struct ObjectsVScrollInfo {
+    pub track_y: u16,
+    pub max_scroll: usize,
+    /// Track PIXEL height — drag formula needs this (NOT data-row count).
+    pub viewport_height: usize,
+}
+
+/// Hit-test the objects pane's vertical scrollbar.
+pub fn v_scrollbar_hit(
+    area: Rect,
+    state: &ObjectsState,
+    x: u16,
+    y: u16,
+) -> Option<ObjectsVScrollInfo> {
+    let ov = compute_objects_viewport(area, state)?;
+    let v_bar = ov.layout.v_scrollbar?;
+    if ov.max_scroll == 0 {
+        return None;
+    }
+    if !crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y) {
+        return None;
+    }
+    Some(ObjectsVScrollInfo {
+        track_y: v_bar.y,
+        max_scroll: ov.max_scroll,
+        viewport_height: usize::from(v_bar.height.max(1)),
+    })
+}
 
 /// Hit-test a click inside the objects tree area to a visible row (absolute,
 /// including scroll offset), mirroring `render`'s body geometry. Returns `None`
 /// when the click is on the border, title, footer, or beyond the row count.
 pub fn row_at(area: Rect, state: &ObjectsState, y: u16) -> Option<usize> {
-    let footer_h =
-        footer_height(&objects_pane_footer_text(), area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
-    let inner_h = area.height.saturating_sub(2); // borders
-    let body_h = inner_h.saturating_sub(footer_h);
-    let body_top = area.y.saturating_add(1); // top border
-    if y >= body_top && y < body_top.saturating_add(body_h) {
-        let row = (y - body_top) as usize + state.scroll;
-        if row < state.rows.len() {
-            return Some(row);
-        }
+    let ov = compute_objects_viewport(area, state)?;
+    let content = ov.content;
+    if y < content.y || y >= content.y + content.height {
+        return None;
     }
-    None
+    let row_in_content = (y - content.y) as usize;
+    let data_row = row_in_content.min(ov.viewport.saturating_sub(1));
+    let row_idx = ov.start + data_row;
+    if row_idx < ov.total {
+        Some(row_idx)
+    } else {
+        None
+    }
 }
 
 /// Like [`row_at`], but also require the click x to land on the row's
@@ -37,12 +144,14 @@ pub fn row_at(area: Rect, state: &ObjectsState, y: u16) -> Option<usize> {
 pub fn toggle_at(area: Rect, state: &ObjectsState, x: u16, y: u16) -> Option<usize> {
     let row = row_at(area, state, y)?;
     let depth = state.rows.get(row).map(|r| r.depth).unwrap_or(0) as u16;
+    let ov = compute_objects_viewport(area, state)?;
     // Rows render as "{indent}{marker} label" with indent = 2 cols per depth
-    // and NO leading space, so the marker sits at body_x + depth*2 (matching
+    // and NO leading space, so the marker sits at content.x + depth*2 (matching
     // `render`'s `format!("{indent}{marker} {label}")`). No +1 leading-space
     // offset here, unlike the instances pane (which does emit a leading space).
-    let body_x = area.x.saturating_add(1); // left border
-    let marker_col = body_x
+    let marker_col = ov
+        .content
+        .x
         .saturating_add(depth.saturating_mul(2))
         .saturating_sub(state.h_scroll);
     (x >= marker_col && x < marker_col.saturating_add(2)).then_some(row)
@@ -60,10 +169,6 @@ pub fn render(
 ) {
     let p = theme.palette();
 
-    // The block is drawn over `area`; its inner area is split into a body (the
-    // tree, with a horizontal scrollbar) and a footer hint area at the bottom,
-    // both *inside* the pane's border — matching the original dbm. The footer
-    // is sized to its wrapped height so a narrow terminal does not clip it.
     let hint = objects_pane_footer_text();
     let footer_h = footer_height(&hint, area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
     let block = Block::default()
@@ -72,36 +177,38 @@ pub fn render(
         .border_style(p.active_border(region_focused));
     frame.render_widget(&block, area);
     let inner = block.inner(area);
-    let (body, footer_area) = if inner.height > footer_h {
-        let h = inner.height.saturating_sub(footer_h);
-        (
-            Rect {
-                x: inner.x,
-                y: inner.y,
-                width: inner.width,
-                height: h,
-            },
-            Rect {
-                x: inner.x,
-                y: inner.y.saturating_add(h),
-                width: inner.width,
-                height: footer_h,
-            },
-        )
-    } else {
-        (inner, Rect::default())
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    // ---- SHARED VIEWPORT CALCULATION ----
+    let ov = match compute_objects_viewport(area, state) {
+        Some(v) => v,
+        None => {
+            // Empty tree: still draw the footer so the pane looks consistent.
+            if footer_h > 0 {
+                let footer_area = Rect::new(
+                    inner.x,
+                    inner.y.saturating_add(inner.height.saturating_sub(footer_h)),
+                    inner.width,
+                    footer_h,
+                );
+                draw_pane_footer(frame, theme, footer_area, &hint);
+            }
+            return;
+        }
     };
 
+    let content = ov.content;
+    let layout = &ov.layout;
+    let start = ov.start;
+    let viewport = ov.viewport;
+    let body = ov.body;
+
     let mut lines = Vec::new();
-    let inner_h = body.height as usize;
-    for (vis, idx) in (state.scroll..state.rows.len()).enumerate() {
-        if vis >= inner_h {
-            break;
-        }
+    for idx in start..(start + viewport).min(ov.total) {
         let row = &state.rows[idx];
         let focused = idx == state.cursor;
-        // The active schema row is highlighted (dedicated active color + bold);
-        // the cursor row keeps its selection highlight underneath.
         let style = if focused {
             Style::default()
                 .fg(if row.active { p.selection_focus_text } else { p.selection_text })
@@ -124,8 +231,6 @@ pub fn render(
     }
     if lines.is_empty() {
         let msg = if state.bound_connection.is_empty() {
-            // No active connection (active workspace is an instance or nothing):
-            // prompt to open a connection, matching the original dbm.
             "Open a connection to browse objects"
         } else {
             "(no objects — press Enter on a connection to load the catalog)"
@@ -133,24 +238,15 @@ pub fn render(
         lines.push(Line::from(Span::styled(msg, Style::default().fg(p.muted))));
     }
 
-    // The widest rendered row drives the horizontal scrollbar: it only appears
-    // when content is wider than the text viewport, and its thumb position
-    // reflects `h_scroll` so the user can tell at a glance whether the content
-    // is scrolled to its end (matching the original dbm).
+    // Horizontal scrollbar — uses h_scroll to pan content horizontally.
     let max_row_w = state.max_row_width();
-    let layout = pane_scroll_layout(
-        body,
-        max_row_w,
-        lines.len(),
-        body.height as usize,
-    );
     let viewport_w = layout.content_area.width as usize;
     let effective_h = state
         .h_scroll
         .min(max_row_w.saturating_sub(viewport_w as u16));
-    // Content (clipped + horizontally panned) on the body's content_area.
     let paragraph = Paragraph::new(lines).scroll((0, effective_h));
-    frame.render_widget(paragraph, layout.content_area);
+    frame.render_widget(paragraph, content);
+
     if let Some(bar) = layout.h_scrollbar {
         let max_scroll = max_row_w.saturating_sub(viewport_w as u16) as usize;
         draw_horizontal_pane_scrollbar(
@@ -164,8 +260,29 @@ pub fn render(
         );
     }
 
+    // Vertical scrollbar — reserved by pane_scroll_layout above.
+    if let Some(bar) = layout.v_scrollbar {
+        draw_vertical_pane_scrollbar(
+            frame,
+            bar,
+            start,
+            viewport,
+            ov.max_scroll,
+            p,
+            false,
+        );
+    }
+
     // Pane footer (inside the border).
-    draw_pane_footer(frame, theme, footer_area, &hint);
+    let footer_area = Rect::new(
+        inner.x,
+        body.y.saturating_add(body.height),
+        inner.width,
+        footer_h,
+    );
+    if footer_h > 0 {
+        draw_pane_footer(frame, theme, footer_area, &hint);
+    }
 }
 
 #[cfg(test)]

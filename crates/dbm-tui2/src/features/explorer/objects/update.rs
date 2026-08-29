@@ -19,9 +19,26 @@ pub fn update(
     let mut effects = Vec::new();
     let mut dirty = false;
     match msg {
-        ObjectsMessage::MoveUp => dirty |= state.move_up(),
-        ObjectsMessage::MoveDown => dirty |= state.move_down(),
-        ObjectsMessage::JumpTo { row } => dirty |= state.jump_to(row),
+        ObjectsMessage::MoveUp => {
+            state.scroll_locked = false;
+            dirty |= state.move_up();
+        }
+        ObjectsMessage::MoveDown => {
+            state.scroll_locked = false;
+            dirty |= state.move_down();
+        }
+        ObjectsMessage::JumpTo { row } => {
+            state.scroll_locked = false;
+            dirty |= state.jump_to(row);
+        }
+        ObjectsMessage::SetVScroll { position } => {
+            let total = state.rows.len();
+            let clamped = position.min(total.saturating_sub(1));
+            let changed = state.scroll != clamped;
+            state.scroll = clamped;
+            state.scroll_locked = true;
+            dirty |= changed;
+        }
         ObjectsMessage::Collapse => {
             dirty |= state.collapse();
         }

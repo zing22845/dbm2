@@ -154,6 +154,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     let mut results_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
     let mut discover_targets_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
     let mut discover_results_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    let mut explorer_objects_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    let mut explorer_instances_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
 
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
@@ -963,6 +965,95 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 }
                             }
 
+                            // Explorer objects v_scrollbar hit-test — runs BEFORE
+                            // the generic explorer_row_click_msgs jump so a
+                            // scrollbar click starts a drag instead of moving
+                            // the cursor to that row.
+                            if let Pane::Explorer(_) = state.focus
+                                && let Some(explorer) =
+                                    app_explorer_rect(size, body_top, body_h, &state)
+                                && let (_inst_area, objs_area) = explorer_child_areas(
+                                    explorer,
+                                    state.explorer.splitter.instances_height,
+                                )
+                                && objs_area.contains(point)
+                            {
+                                use crate::features::explorer::objects::{msg::*, view};
+                                use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+                                if let Some(si) = view::v_scrollbar_hit(
+                                    objs_area,
+                                    &state.explorer.objects,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    explorer_objects_v_scrollbar_drag =
+                                        Some((si.track_y, si.viewport_height, si.max_scroll));
+                                    let new_scroll = scrollbar_y_to_position(
+                                        mouse.row,
+                                        si.viewport_height,
+                                        si.max_scroll,
+                                    );
+                                    let msg = AppMsg::Explorer(ExplorerMsg::Message(
+                                        ExplorerMessage::Objects(ObjectsMsg::Message(
+                                            ObjectsMessage::SetVScroll {
+                                                position: new_scroll,
+                                            },
+                                        )),
+                                    ));
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
+                            // Explorer instances v_scrollbar hit-test — before
+                            // explorer_row_click_msgs so a scrollbar click
+                            // starts a drag instead of moving the cursor.
+                            if let Pane::Explorer(_) = state.focus
+                                && let Some(explorer) =
+                                    app_explorer_rect(size, body_top, body_h, &state)
+                                && let (inst_area, _objs_area) = explorer_child_areas(
+                                    explorer,
+                                    state.explorer.splitter.instances_height,
+                                )
+                                && inst_area.contains(point)
+                            {
+                                use crate::features::explorer::instances::{msg::*, view};
+                                use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+                                if let Some(si) = view::v_scrollbar_hit(
+                                    inst_area,
+                                    &state.explorer.instances,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    explorer_instances_v_scrollbar_drag =
+                                        Some((si.track_y, si.viewport_height, si.max_scroll));
+                                    let new_scroll = scrollbar_y_to_position(
+                                        mouse.row,
+                                        si.viewport_height,
+                                        si.max_scroll,
+                                    );
+                                    let msg = AppMsg::Explorer(ExplorerMsg::Message(
+                                        ExplorerMessage::Instances(InstancesMsg::Message(
+                                            InstancesMessage::SetVScroll {
+                                                position: new_scroll,
+                                            },
+                                        )),
+                                    ));
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
                             // Left-click on the header `Discover` button activates
                             // it, in addition to moving focus to the header.
                             let header_area = Rect::new(0, 0, size.width, 3);
@@ -1355,6 +1446,32 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                                 dirty |= result.dirty;
                             }
+
+                            // Explorer objects v_scrollbar drag.
+                            if let Some((track_y, viewport_height, max_scroll)) = explorer_objects_v_scrollbar_drag {
+                                let rel_y = point.y.saturating_sub(track_y);
+                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                use crate::features::explorer::objects::msg::{ObjectsMessage, ObjectsMsg};
+                                use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+                                let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
+                                    ObjectsMsg::Message(ObjectsMessage::SetVScroll { position: start }),
+                                )));
+                                let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                dirty |= result.dirty;
+                            }
+
+                            // Explorer instances v_scrollbar drag.
+                            if let Some((track_y, viewport_height, max_scroll)) = explorer_instances_v_scrollbar_drag {
+                                let rel_y = point.y.saturating_sub(track_y);
+                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
+                                use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+                                let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                                    InstancesMsg::Message(InstancesMessage::SetVScroll { position: start }),
+                                )));
+                                let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                dirty |= result.dirty;
+                            }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
                             history_h_scrollbar_drag = None;
@@ -1364,6 +1481,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             results_v_scrollbar_drag = None;
                             discover_targets_v_scrollbar_drag = None;
                             discover_results_v_scrollbar_drag = None;
+                            explorer_objects_v_scrollbar_drag = None;
+                            explorer_instances_v_scrollbar_drag = None;
                             if explorer_split_drag {
                                 explorer_split_drag = false;
                                 state.splitter_hover.explorer_splitter_drag = false;
@@ -1534,6 +1653,130 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                                 ResultsMsg::Message(ResultsMessage::MoveDown),
                                             ),
                                         ),
+                                    ),
+                                    _ => unreachable!(),
+                                };
+                                let result = process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    msg,
+                                    &mut state,
+                                );
+                                dirty |= result.dirty;
+                            }
+                        }
+                        // Scroll wheel: route to explorer objects pane when
+                        // focus is on Explorer Objects and mouse is inside it.
+                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                            if matches!(state.focus, Pane::Explorer(crate::app_shell::nav::ExplorerPane::Objects)) =>
+                        {
+                            let dir: i32 = match mouse.kind {
+                                MouseEventKind::ScrollUp => -1,
+                                _ => 1,
+                            };
+                            let now = std::time::Instant::now();
+                            if let Some((t, d)) = last_wheel
+                                && d == dir
+                                && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                            {
+                                idle_iterations = 0;
+                                continue;
+                            }
+                            last_wheel = Some((now, dir));
+
+                            let size = terminal.size()?;
+                            let footer_h =
+                                footer_view::footer_height(&state.footer, size.width);
+                            let body_top = 3u16;
+                            let body_h =
+                                size.height.saturating_sub(body_top).saturating_sub(footer_h);
+                            let point = ratatui::layout::Position::new(mouse.column, mouse.row);
+                            if let Some(explorer) =
+                                app_explorer_rect(size, body_top, body_h, &state)
+                                && let (_inst_area, objs_area) = explorer_child_areas(
+                                    explorer,
+                                    state.explorer.splitter.instances_height,
+                                )
+                                && objs_area.contains(point)
+                            {
+                                use crate::features::explorer::objects::msg::{
+                                    ObjectsMessage, ObjectsMsg,
+                                };
+                                use crate::features::explorer::msg::{
+                                    ExplorerMessage, ExplorerMsg,
+                                };
+                                let msg = match mouse.kind {
+                                    MouseEventKind::ScrollUp => AppMsg::Explorer(
+                                        ExplorerMsg::Message(ExplorerMessage::Objects(
+                                            ObjectsMsg::Message(ObjectsMessage::MoveUp),
+                                        )),
+                                    ),
+                                    MouseEventKind::ScrollDown => AppMsg::Explorer(
+                                        ExplorerMsg::Message(ExplorerMessage::Objects(
+                                            ObjectsMsg::Message(ObjectsMessage::MoveDown),
+                                        )),
+                                    ),
+                                    _ => unreachable!(),
+                                };
+                                let result = process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    msg,
+                                    &mut state,
+                                );
+                                dirty |= result.dirty;
+                            }
+                        }
+                        // Scroll wheel: route to explorer instances pane when
+                        // focus is on Explorer Instances and mouse is inside it.
+                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                            if matches!(state.focus, Pane::Explorer(crate::app_shell::nav::ExplorerPane::Instances)) =>
+                        {
+                            let dir: i32 = match mouse.kind {
+                                MouseEventKind::ScrollUp => -1,
+                                _ => 1,
+                            };
+                            let now = std::time::Instant::now();
+                            if let Some((t, d)) = last_wheel
+                                && d == dir
+                                && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                            {
+                                idle_iterations = 0;
+                                continue;
+                            }
+                            last_wheel = Some((now, dir));
+
+                            let size = terminal.size()?;
+                            let footer_h =
+                                footer_view::footer_height(&state.footer, size.width);
+                            let body_top = 3u16;
+                            let body_h =
+                                size.height.saturating_sub(body_top).saturating_sub(footer_h);
+                            let point = ratatui::layout::Position::new(mouse.column, mouse.row);
+                            if let Some(explorer) =
+                                app_explorer_rect(size, body_top, body_h, &state)
+                                && let (inst_area, _objs_area) = explorer_child_areas(
+                                    explorer,
+                                    state.explorer.splitter.instances_height,
+                                )
+                                && inst_area.contains(point)
+                            {
+                                use crate::features::explorer::instances::msg::{
+                                    InstancesMessage, InstancesMsg,
+                                };
+                                use crate::features::explorer::msg::{
+                                    ExplorerMessage, ExplorerMsg,
+                                };
+                                let msg = match mouse.kind {
+                                    MouseEventKind::ScrollUp => AppMsg::Explorer(
+                                        ExplorerMsg::Message(ExplorerMessage::Instances(
+                                            InstancesMsg::Message(InstancesMessage::MoveUp),
+                                        )),
+                                    ),
+                                    MouseEventKind::ScrollDown => AppMsg::Explorer(
+                                        ExplorerMsg::Message(ExplorerMessage::Instances(
+                                            InstancesMsg::Message(InstancesMessage::MoveDown),
+                                        )),
                                     ),
                                     _ => unreachable!(),
                                 };
