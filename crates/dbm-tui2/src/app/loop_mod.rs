@@ -624,8 +624,53 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
 
                             // A single click inside the explorer's instances or
                             // objects tree moves the selection (cursor) to the
-                            // clicked row.
+                            // clicked row — UNLESS the click lands on a v_scrollbar
+                            // or h_scrollbar track, which must NOT also move the
+                            // cursor to that row.
+                            let click_hits_explorer_scrollbar = {
+                                let mut hits = false;
+                                if let Some(explorer) =
+                                    app_explorer_rect(size, body_top, body_h, &state)
+                                {
+                                    let (inst_area, objs_area) = explorer_child_areas(
+                                        explorer,
+                                        state.explorer.splitter.instances_height,
+                                    );
+                                    use crate::features::explorer::instances as inst_mod;
+                                    use crate::features::explorer::objects as obj_mod;
+                                    if inst_area.contains(point) {
+                                        hits |= inst_mod::view::v_scrollbar_hit(
+                                            inst_area,
+                                            &state.explorer.instances,
+                                            mouse.column,
+                                            mouse.row,
+                                        ).is_some();
+                                        hits |= inst_mod::view::h_scrollbar_hit(
+                                            inst_area,
+                                            &state.explorer.instances,
+                                            mouse.column,
+                                            mouse.row,
+                                        ).is_some();
+                                    }
+                                    if objs_area.contains(point) {
+                                        hits |= obj_mod::view::v_scrollbar_hit(
+                                            objs_area,
+                                            &state.explorer.objects,
+                                            mouse.column,
+                                            mouse.row,
+                                        ).is_some();
+                                        hits |= obj_mod::view::h_scrollbar_hit(
+                                            objs_area,
+                                            &state.explorer.objects,
+                                            mouse.column,
+                                            mouse.row,
+                                        ).is_some();
+                                    }
+                                }
+                                hits
+                            };
                             if mouse.column < explorer_w
+                                && !click_hits_explorer_scrollbar
                                 && let Some(click_msgs) =
                                     explorer_row_click_msgs(size, body_top, body_h, mouse.column, mouse.row, &state)
                             {
@@ -646,6 +691,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // space (no node: do nothing, not act on the cursor).
                             if is_double_click
                                 && mouse.column < explorer_w
+                                && !click_hits_explorer_scrollbar
                                 && explorer_click_hits_row(
                                     explorer_w,
                                     body_top,
