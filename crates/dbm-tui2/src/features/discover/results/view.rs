@@ -81,7 +81,7 @@ pub fn compute_results_viewport(
 
     // Discover-style anchor — skipped when scroll_locked (manual scrollbar drag).
     let scroll_locked = state.scroll_locked;
-    let mut start = state.scroll.min(total.saturating_sub(1));
+    let mut start = state.scroll.min(max_scroll);
     if !scroll_locked {
         if state.cursor < start {
             start = state.cursor;

@@ -26,6 +26,10 @@ pub struct ObjectsViewport {
     pub start: usize,
     pub total: usize,
     pub max_scroll: usize,
+    /// Horizontal scroll max — `selected_row_width - content.width`. The
+    /// single source of truth for Paragraph::scroll clamp, h_scrollbar
+    /// thumb, and h_scrollbar_hit. All three read this field so they agree.
+    pub max_h_scroll: usize,
 }
 
 /// Shared body-area computation used by render and row_at.
@@ -68,7 +72,7 @@ pub fn compute_objects_viewport(
 
     // Discover-style anchor — skipped when scroll_locked (manual v_scrollbar drag).
     let scroll_locked = state.scroll_locked;
-    let mut start = state.scroll.min(total.saturating_sub(1));
+    let mut start = state.scroll.get().min(max_scroll);
     if !scroll_locked {
         if state.cursor < start {
             start = state.cursor;
@@ -76,6 +80,16 @@ pub fn compute_objects_viewport(
             start = state.cursor + 1 - viewport;
         }
     }
+
+    // Write anchor result back so the next frame starts from the correct
+    // position, not from a stale `state.scroll`.
+    state.scroll.set(start);
+
+    let max_h_scroll = sel_row_w.saturating_sub(content.width) as usize;
+
+    // Write the viewport-aware max back so update's ScrollHorizontal / SetHScroll
+    // can clamp to the real upper bound and stay in sync.
+    state.cached_h_max_scroll.set(max_h_scroll);
 
     Some(ObjectsViewport {
         body,
@@ -85,6 +99,7 @@ pub fn compute_objects_viewport(
         start,
         total,
         max_scroll,
+        max_h_scroll,
     })
 }
 
@@ -138,9 +153,7 @@ pub fn h_scrollbar_hit(
 ) -> Option<ObjectsHScrollInfo> {
     let ov = compute_objects_viewport(area, state)?;
     let h_bar = ov.layout.h_scrollbar?;
-    let sel_row_w = state.selected_row_width();
-    let viewport_w = ov.content.width as usize;
-    let max_scroll = sel_row_w.saturating_sub(viewport_w as u16) as usize;
+    let max_scroll = ov.max_h_scroll; // single source of truth
     if max_scroll == 0 {
         return None;
     }
@@ -274,17 +287,12 @@ pub fn render(
         lines.push(Line::from(Span::styled(msg, Style::default().fg(p.muted))));
     }
 
-    // Horizontal scrollbar — h_scroll pans content horizontally. The bar is
-    // shown only when the selected row overflows the viewport (matching
-    // history list), but Paragraph::scroll still uses full max_row_width so
-    // ALL rows can scroll horizontally once the bar is visible.
-    let sel_row_w = state.selected_row_width();
-    let max_row_w = state.max_row_width();
+    // Horizontal scroll — single source of truth: `ov.max_h_scroll`.
+    // Paragraph::scroll clamp, scrollbar thumb, and h_scrollbar_hit all use
+    // this value so they stay aligned.
     let viewport_w = layout.content_area.width as usize;
-    let max_h_scroll = sel_row_w.saturating_sub(viewport_w as u16) as usize;
-    let effective_h = state
-        .h_scroll
-        .min(max_row_w.saturating_sub(viewport_w as u16));
+    let max_h = ov.max_h_scroll;
+    let effective_h = state.h_scroll.min(max_h as u16);
     let paragraph = Paragraph::new(lines).scroll((0, effective_h));
     frame.render_widget(paragraph, content);
 
@@ -294,7 +302,7 @@ pub fn render(
             bar,
             state.h_scroll as usize,
             viewport_w,
-            max_h_scroll,
+            max_h,
             p,
             false,
         );

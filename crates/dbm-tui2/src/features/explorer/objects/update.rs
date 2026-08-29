@@ -34,30 +34,28 @@ pub fn update(
         ObjectsMessage::SetVScroll { position } => {
             let total = state.rows.len();
             let clamped = position.min(total.saturating_sub(1));
-            let changed = state.scroll != clamped;
-            state.scroll = clamped;
+            let changed = state.scroll.get() != clamped;
+            state.scroll.set(clamped);
             state.scroll_locked = true;
             dirty |= changed;
         }
         ObjectsMessage::SetHScroll { position } => {
-            let clamped = position.min(state.max_row_width() as usize);
+            // Clamp upper bound to the viewport-aware max cached by the renderer
+            // — same bound used by Paragraph::scroll + h_scrollbar thumb.
+            let max = state.cached_h_max_scroll.get();
+            let clamped = position.min(max);
             let changed = state.h_scroll as usize != clamped;
-            state.h_scroll = clamped as u16;
+            state.h_scroll = clamped.min(u16::MAX as usize) as u16;
             dirty |= changed;
         }
         ObjectsMessage::Collapse => {
             dirty |= state.collapse();
         }
-        ObjectsMessage::ScrollHorizontal { delta, term_width } => {
-            // The explorer takes ~20% of terminal width, minus the 2 border
-            // columns, matching the view's text viewport.  Clamp so `h_scroll`
-            // never grows past the longest content row beyond the viewport.
-            // When content fits fully inside the viewport, `max` is 0 and
-            // pressing Right is a no-op — matching the original dbm.
-            let viewport_w = (term_width as u32 * 20 / 100)
-                .saturating_sub(2)
-                .max(1) as u16;
-            let max = state.max_row_width().saturating_sub(viewport_w);
+        ObjectsMessage::ScrollHorizontal { delta, term_width: _ } => {
+            // Use the viewport-aware max cached by the renderer — this is the
+            // same bound used by Paragraph::scroll + h_scrollbar thumb, so an
+            // already-at-boundary press is a pure no-op.
+            let max = state.cached_h_max_scroll.get().min(u16::MAX as usize) as u16;
             dirty |= state.scroll_horizontal(delta, max);
         }
         ObjectsMessage::Select => {

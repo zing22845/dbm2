@@ -104,7 +104,7 @@ pub fn compute_targets_viewport(
 
     // Discover-style anchor — skipped when scroll_locked (manual scroll).
     let scroll_locked = state.scroll_locked;
-    let mut start = state.scroll_offset.min(total.saturating_sub(1));
+    let mut start = state.scroll_offset.min(max_scroll);
     if !scroll_locked {
         if state.row < start {
             start = state.row;

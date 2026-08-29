@@ -1,5 +1,6 @@
 //! Explorer objects (object tree) feature state.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
 /// A lazily-fetched catalog list at one level of the tree.
@@ -131,8 +132,9 @@ pub struct ObjectsState {
     pub rows: Vec<ObjectsRow>,
     /// Cursor row within the tree.
     pub cursor: usize,
-    /// Scroll offset.
-    pub scroll: usize,
+    /// Scroll offset — uses Cell so the discover-style anchor can write back
+    /// the viewport start each frame (same pattern as InstancesState).
+    pub scroll: Cell<usize>,
     /// Manual-scroll flag: when true, the discover-style cursor anchor is
     /// skipped so a scrollbar drag keeps its position even if the cursor
     /// would pull the viewport. Cleared on the next cursor move.
@@ -140,6 +142,9 @@ pub struct ObjectsState {
     /// Horizontal scroll offset of the tree (`Left`/`Right`), matching the
     /// original dbm's objects horizontal scroll.
     pub h_scroll: u16,
+    /// Cached viewport-aware h_scroll max — written by `compute_objects_viewport`
+    /// each frame. Same semantics as `InstancesState::cached_h_max_scroll`.
+    pub cached_h_max_scroll: Cell<usize>,
     /// The instance and connection the tree is bound to (empty = unbound).
     pub bound_instance: String,
     pub bound_connection: String,
@@ -541,7 +546,7 @@ impl ObjectsState {
         self.bound_instance.clear();
         self.bound_connection.clear();
         self.cursor = 0;
-        self.scroll = 0;
+        self.scroll.set(0);
         self.h_scroll = 0;
         self.expanded.clear();
         self.catalog = ObjectsCatalog::default();
@@ -558,7 +563,7 @@ impl ObjectsState {
         self.bound_instance = instance;
         self.bound_connection = connection;
         self.cursor = 0;
-        self.scroll = 0;
+        self.scroll.set(0);
         self.h_scroll = 0;
         self.expanded.clear();
         if matches_restore {
@@ -587,12 +592,12 @@ impl ObjectsState {
         self.rows = new_rows;
         if self.rows.is_empty() {
             self.cursor = 0;
-            self.scroll = 0;
+            self.scroll.set(0);
             return changed;
         }
         self.cursor = self.cursor.min(self.rows.len() - 1);
         let max_scroll = self.rows.len().saturating_sub(1);
-        self.scroll = self.scroll.min(max_scroll);
+        self.scroll.set(self.scroll.get().min(max_scroll));
         changed
     }
 }

@@ -538,12 +538,46 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 // instances (top) and objects (bottom) trees;
                                 // map the click row to the matching sub-pane
                                 // so mouse navigation agrees with Ctrl+j/k.
-                                Some(Pane::Explorer(explorer_pane_for_click(
-                                    mouse.row,
-                                    body_top,
-                                    body_h,
-                                    state.explorer.splitter.instances_height,
-                                )))
+                                // Exception: clicks on the explorer instances/
+                                // objects splitter keep the current sub-pane —
+                                // the splitter is a drag handle, not a clickable
+                                // region.
+                                let current_sub = match state.focus {
+                                    Pane::Explorer(sub) => Some(sub),
+                                    _ => None,
+                                };
+                                let hit_splitter = if let Some(explorer) =
+                                    app_explorer_rect(size, body_top, body_h, &state)
+                                    && explorer.height >= 3
+                                {
+                                    let inner = Rect::new(
+                                        explorer.x.saturating_add(1),
+                                        explorer.y.saturating_add(1),
+                                        explorer.width.saturating_sub(2),
+                                        explorer.height.saturating_sub(2),
+                                    );
+                                    let layout = crate::features::explorer::splitter::view::explorer_body_layout(
+                                        inner,
+                                        state.explorer.splitter.instances_height,
+                                    );
+                                    crate::features::explorer::splitter::view::splitter_at(
+                                        &layout, mouse.column, mouse.row,
+                                    )
+                                } else {
+                                    false
+                                };
+                                if hit_splitter
+                                    && let Some(sub) = current_sub
+                                {
+                                    Some(Pane::Explorer(sub))
+                                } else {
+                                    Some(Pane::Explorer(explorer_pane_for_click(
+                                        mouse.row,
+                                        body_top,
+                                        body_h,
+                                        state.explorer.splitter.instances_height,
+                                    )))
+                                }
                             } else if !state.instance_workspace_open() {
                                 Some(Pane::SQLWorkspace)
                             } else {

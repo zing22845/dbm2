@@ -1,5 +1,7 @@
 //! Explorer instances (connection tree) feature state.
 
+use std::cell::Cell;
+
 use dbm_store::{InstanceConnection, ManagedInstance};
 
 /// Which workspace is currently active in the tree, matching the original dbm's
@@ -52,8 +54,11 @@ pub struct InstancesState {
     pub nodes: Vec<InstanceNode>,
     /// Cursor row within the flat visible list.
     pub cursor: usize,
-    /// Scroll offset of the tree.
-    pub scroll: usize,
+    /// Scroll offset of the tree — written both by manual drag (SetVScroll)
+    /// and by the discover-style anchor each frame (so the next frame starts
+    /// from the correct position, not from a stale value). Uses Cell so the
+    /// renderer can write through `&InstancesState`.
+    pub scroll: Cell<usize>,
     /// Manual-scroll flag: when true, the discover-style cursor anchor is
     /// skipped so a scrollbar drag keeps its position even if the cursor
     /// would pull the viewport. Cleared on the next cursor move.
@@ -61,6 +66,14 @@ pub struct InstancesState {
     /// Horizontal scroll offset of the tree (`Left`/`Right`), matching the
     /// original dbm's tree horizontal scroll.
     pub h_scroll: u16,
+    /// Cached viewport-aware h_scroll max — written by `compute_instances_viewport`
+    /// each frame. The authoritative bound for both `ScrollHorizontal` (keyboard)
+    /// and `SetHScroll` (drag) handlers, so an already-at-boundary press is a
+    /// pure no-op (no dirty/no repaint). View computes it as
+    /// `selected_row_width - content_area.width` and stores it here; update
+    /// reads it back for clamping. Uses Cell so the renderer can write through
+    /// an `&InstancesState` borrow.
+    pub cached_h_max_scroll: Cell<usize>,
     /// The active workspace (instance or connection), matching the original
     /// dbm's `ConnectionTreeState::active_workspace`. `None` when no workspace
     /// has been opened yet. Drives the active-row highlight and the workspace render.
@@ -521,7 +534,7 @@ impl InstancesState {
             self.restore_active_connection = Some((iname, conn_name));
         }
         self.cursor = 0;
-        self.scroll = 0;
+        self.scroll.set(0);
     }
 
     /// Remove the instance node at `idx` (e.g. after unregistering it) and
@@ -548,7 +561,7 @@ impl InstancesState {
         self.nodes.remove(idx);
         let max = self.visible_count().saturating_sub(1);
         self.cursor = self.cursor.min(max);
-        self.scroll = self.scroll.min(max);
+        self.scroll.set(self.scroll.get().min(max));
         true
     }
 
