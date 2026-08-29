@@ -58,6 +58,10 @@ pub struct ListState {
     pub edit_blocked_reason: Option<String>,
     /// Auto-sized column widths computed from the current result.
     pub col_widths: Vec<u16>,
+    /// When true, the viewport anchor that keeps the cursor visible is
+    /// suppressed so scrollbar drags / manual scrolls are not overridden.
+    /// Cleared on any cursor-movement message.
+    pub scroll_locked: Cell<bool>,
 }
 
 impl ListState {

@@ -599,6 +599,9 @@ fn history_v_scrollbar_hit(
     );
 
     let visible = tab.history.list.visible_indices(&state.history_store, &instance, &connection);
+    if visible.is_empty() {
+        return None;
+    }
 
     // Cut gutter off the left — v_scrollbar sits on inner_content's right edge.
     let gutter_w = crate::common::components::line_numbers::gutter_width(visible.len());
@@ -614,26 +617,54 @@ fn history_v_scrollbar_hit(
         list_area
     };
 
-    let viewport_rows = inner_content.height.max(1) as usize;
-    let max_scroll = visible.len().saturating_sub(viewport_rows);
+    // Compute selected-entry horizontal width so we know whether the renderer
+    // also draws a horizontal scrollbar — that eats one row from the viewport.
+    let selected_width = tab
+        .history
+        .list
+        .selected_entry(&state.history_store, &instance, &connection)
+        .as_deref()
+        .map(|sql| {
+            crate::features::sql_workspace::sql_tab::history::store::history_line_display_width(sql) as usize
+        })
+        .unwrap_or(0);
+
+    let viewport_rows = inner_content.height as usize;
+    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        inner_content,
+        selected_width as u16,
+        visible.len(),
+        viewport_rows.max(1),
+    );
+    let content_w = layout.content_area.width as usize;
+    let needs_h = selected_width > content_w;
+    let effective_layout = if needs_h {
+        layout
+    } else {
+        crate::common::view::pane_scrollbar::pane_scroll_layout(
+            inner_content,
+            0,
+            visible.len(),
+            viewport_rows.max(1),
+        )
+    };
+
+    let v_bar = effective_layout.v_scrollbar?;
+    // max_scroll is in content rows (matches render's data-rows calculation).
+    // viewport_height is the TRACK'S PIXEL HEIGHT — drag formula uses it to
+    // linearly map pointer Y (pixels) to scroll position.
+    let content_rows = effective_layout.content_area.height.max(1) as usize;
+    let max_scroll = visible.len().saturating_sub(content_rows);
     if max_scroll == 0 {
         return None;
     }
-
-    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
-        inner_content,
-        0, // no horizontal content width needed for vertical hit-test
-        visible.len(),
-        viewport_rows,
-    );
-    let v_bar = layout.v_scrollbar?;
 
     if crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y) {
         Some(SqlClickAction::HistoryVScrollbar {
             track_y: v_bar.y,
             y,
             max_scroll,
-            viewport_height: viewport_rows,
+            viewport_height: usize::from(v_bar.height.max(1)),
         })
     } else {
         None
@@ -665,8 +696,17 @@ fn results_v_scrollbar_hit(
         table_area.height as usize,
     );
     let v_bar = layout.v_scrollbar?;
-    let viewport_height = layout.content_area.height.max(1) as usize;
-    let max_scroll = row_count.saturating_sub(viewport_height);
+    // max_scroll is in DATA ROWS (each row is 2 pixels + 3-pixel header),
+    // matching what render_table uses for scrollbar thumb sizing and anchor.
+    let content_h = usize::from(layout.content_area.height.max(1));
+    let visible_data_rows = if row_count > 0 {
+        content_h
+            .saturating_sub(usize::from(crate::common::view::format::RESULTS_HEADER_HEIGHT))
+            / usize::from(crate::common::view::format::RESULTS_ROW_HEIGHT)
+    } else {
+        0
+    };
+    let max_scroll = row_count.saturating_sub(visible_data_rows.max(1));
     if max_scroll == 0 {
         return None;
     }
@@ -676,7 +716,9 @@ fn results_v_scrollbar_hit(
             track_y: v_bar.y,
             y,
             max_scroll,
-            viewport_height,
+            // Track PIXEL height — drag formula needs this to linearly map
+            // pointer Y (pixels) to scroll position. NOT the data-row count.
+            viewport_height: usize::from(v_bar.height.max(1)),
         })
     } else {
         None

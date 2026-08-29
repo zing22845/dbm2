@@ -74,6 +74,7 @@ pub fn update(
             changed
         }
         ListMessage::MoveSelection { dr, dc } => {
+            state.scroll_locked.set(false);
             let changed = state.move_selection(dr, dc);
             if changed && dc != 0 {
                 state.auto_scroll_h();
@@ -203,6 +204,7 @@ pub fn update(
             let vr = state.viewport_rows.get().max(1);
             let max = row_count.saturating_sub(vr);
             let before = state.v_scroll.get();
+            state.scroll_locked.set(true);
             state.v_scroll.set(position.min(max));
             state.v_scroll.get() != before
         }
@@ -211,6 +213,7 @@ pub fn update(
             let table_w = crate::common::view::format::results_table_width(&state.col_widths) as usize;
             let vp = state.viewport_width.get() as usize;
             let max = table_w.saturating_sub(vp);
+            state.scroll_locked.set(true);
             state.h_scroll.set(position.min(max));
             state.h_scroll.get() != before
         }

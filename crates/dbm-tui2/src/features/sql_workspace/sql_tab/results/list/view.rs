@@ -20,7 +20,7 @@ use crate::common::view::format::{
 };
 use crate::common::view::hints::{draw_footer, footer_height};
 use crate::common::view::theme::Theme;
-use crate::common::view::pane_scrollbar::pane_scroll_layout;
+use crate::common::view::pane_scrollbar::{PaneScrollLayout, pane_scroll_layout};
 
 use super::state::ListState;
 use super::super::pagination::{RESULTS_PAGINATION_BAR_HEIGHT, pagination_toolbar_line};
@@ -228,8 +228,6 @@ fn render_table(
     let col_widths = &state.col_widths;
     let state_row = state.row;
     let state_col = state.col;
-    let state_h_scroll = state.h_scroll.get();
-    let state_v_scroll = state.v_scroll.get();
     let p = theme.palette();
 
     if result.columns.is_empty() {
@@ -253,58 +251,26 @@ fn render_table(
 
     // Compute actual table content width to detect horizontal overflow.
     let table_width = crate::common::view::format::results_table_width(col_widths);
-    let max_h_scroll = crate::common::view::format::results_max_h_scroll(table_width, area.width);
 
-    // Reserve scrollbar area: pass the table's content width so h_scrollbar is
-    // shown only when columns overflow the viewport.
-    let layout = pane_scroll_layout(area, table_width, row_count, area.height as usize);
+    // ---- SHARED VIEWPORT CALCULATION ----
+    // One source of truth: both render and cell_hit_at call this exact
+    // function so the anchored v_scroll / h_scroll / visible_data_rows
+    // always match between what we draw and what we hit-test.
+    let vs = match compute_viewport_scroll(area, state, row_count, col_widths, table_width as usize) {
+        Some(v) => v,
+        None => return,
+    };
+
+    let layout = &vs.layout;
     let table_area = layout.content_area;
 
     // Visible content width: when columns don't fill the viewport, avoid
     // rendering empty space beyond the last column (matching original dbm).
     let content_width = table_width.min(table_area.width);
 
-    if table_area.height < RESULTS_HEADER_HEIGHT {
-        return;
-    }
-
-    // Determine how many data rows are visible.
-    let visible_data_rows = if row_count > 0 {
-        usize::from(table_area.height.saturating_sub(RESULTS_HEADER_HEIGHT) / RESULTS_ROW_HEIGHT)
-    } else {
-        0
-    };
-
-    // Auto-adjust h_scroll to keep cursor anchored: only scroll when cursor
-    // exits the visible viewport (based on pixel positions, not column
-    // indices — handles wide columns that are the sole visible column).
-    let viewport_width = table_area.width as usize;
-    let mut h_scroll_val = state_h_scroll;
-    if viewport_width > 0 && !col_widths.is_empty() {
-        let view_right = h_scroll_val.saturating_add(viewport_width);
-        let cur_col_left = crate::common::view::format::col_x_start(state_col, col_widths);
-        let cur_col_right = crate::common::view::format::col_x_end(state_col, col_widths);
-        if cur_col_right <= h_scroll_val {
-            h_scroll_val = cur_col_left;
-        } else if cur_col_left >= view_right {
-            h_scroll_val = cur_col_right.saturating_sub(viewport_width);
-        }
-        let max_h = crate::common::view::format::results_max_h_scroll(table_width, table_area.width) as usize;
-        h_scroll_val = h_scroll_val.min(max_h);
-    }
-    let h_scroll = h_scroll_val as u16;
-
-    // Auto-adjust v_scroll to keep cursor anchored: only scroll when cursor
-    // exits the visible viewport (not always anchored to first row).
-    let vr = visible_data_rows.max(1);
-    let max_scroll = row_count.saturating_sub(vr);
-    let mut v_scroll = state_v_scroll.min(max_scroll);
-    if state_row >= v_scroll + vr {
-        v_scroll = state_row.saturating_sub(vr.saturating_sub(1));
-    } else if state_row < v_scroll {
-        v_scroll = state_row;
-    }
-    v_scroll = v_scroll.min(max_scroll);
+    let h_scroll = vs.h_scroll as u16;
+    let v_scroll = vs.v_scroll;
+    let visible_data_rows = vs.visible_data_rows;
 
     // Row separator style (subtle grid line).
     let grid_style = Style::default().fg(p.muted);
@@ -499,7 +465,7 @@ fn render_table(
             bar,
             v_scroll,
             visible_data_rows,
-            max_scroll,
+            vs.max_v_scroll,
             p,
             false,
         );
@@ -512,7 +478,7 @@ fn render_table(
             bar,
             h_scroll as usize,
             table_area.width as usize,
-            max_h_scroll as usize,
+            vs.max_h_scroll,
             p,
             false,
         );
@@ -521,10 +487,102 @@ fn render_table(
     // Sync computed scroll values and viewport info back to state so the next
     // frame starts from the correct position (fixes stale h_scroll issue).
     // Uses Cell for interior mutability — allows writing through &ListState.
-    state.h_scroll.set(h_scroll_val);
+    state.h_scroll.set(vs.h_scroll);
     state.v_scroll.set(v_scroll);
     state.viewport_width.set(table_area.width);
     state.viewport_rows.set(visible_data_rows);
+}
+
+/// Result of [`compute_viewport_scroll`]: the shared viewport calculation
+/// used by both [`render_table`] and [`cell_hit_at`]. Keeping both paths
+/// honest to the same formula eliminates cursor-anchor drift between the
+/// drawn rows and the click-resolved row.
+pub struct ViewportScroll {
+    /// Full pane_scroll_layout result — has content_area and both scrollbar rects.
+    pub layout: PaneScrollLayout,
+    /// Number of data rows visible inside `content_area`.
+    pub visible_data_rows: usize,
+    /// Anchored v_scroll (data-row index of first visible row).
+    pub v_scroll: usize,
+    /// Anchored h_scroll (pixel offset into the table width).
+    pub h_scroll: usize,
+    /// Maximum valid v_scroll value.
+    pub max_v_scroll: usize,
+    /// Maximum valid h_scroll value.
+    pub max_h_scroll: usize,
+}
+
+/// Compute the visible-area viewport and anchored scrolls for the given
+/// Results table `area` and `state`. Mirrors discover-style scrolling: when
+/// the cursor lies within the viewport we keep v_scroll where it is; when
+/// it leaves we push the viewport to track.
+///
+/// When `scroll_locked` is set (scrollbar drag / manual SetVScroll / SetHScroll)
+/// both anchors are skipped so the manually-set scroll is honoured.
+pub fn compute_viewport_scroll(
+    area: Rect,
+    state: &ListState,
+    row_count: usize,
+    col_widths: &[u16],
+    table_width: usize,
+) -> Option<ViewportScroll> {
+    if area.width == 0 || area.height == 0 || row_count == 0 {
+        return None;
+    }
+
+    let layout = pane_scroll_layout(area, table_width as u16, row_count, area.height as usize);
+    let content_area = layout.content_area;
+    if content_area.height < RESULTS_HEADER_HEIGHT {
+        return None;
+    }
+
+    let visible_data_rows = usize::from(
+        content_area
+            .height
+            .saturating_sub(RESULTS_HEADER_HEIGHT)
+            / RESULTS_ROW_HEIGHT,
+    );
+    let vr = visible_data_rows.max(1);
+    let max_v_scroll = row_count.saturating_sub(vr);
+    let max_h_scroll = crate::common::view::format::results_max_h_scroll(table_width as u16, content_area.width)
+        as usize;
+
+    let scroll_locked = state.scroll_locked.get();
+
+    // ---- h_scroll anchor (pixel-column based) ----
+    let viewport_w = content_area.width as usize;
+    let mut h_scroll = state.h_scroll.get().min(max_h_scroll);
+    if !scroll_locked && viewport_w > 0 && !col_widths.is_empty() {
+        let view_right = h_scroll.saturating_add(viewport_w);
+        let cur_col_left = crate::common::view::format::col_x_start(state.col, col_widths);
+        let cur_col_right = crate::common::view::format::col_x_end(state.col, col_widths);
+        if cur_col_right <= h_scroll {
+            h_scroll = cur_col_left;
+        } else if cur_col_left >= view_right {
+            h_scroll = cur_col_right.saturating_sub(viewport_w);
+        }
+        h_scroll = h_scroll.min(max_h_scroll);
+    }
+
+    // ---- v_scroll anchor (data-row based) ----
+    let mut v_scroll = state.v_scroll.get().min(max_v_scroll);
+    if !scroll_locked {
+        if state.row >= v_scroll + vr {
+            v_scroll = state.row.saturating_sub(vr.saturating_sub(1));
+        } else if state.row < v_scroll {
+            v_scroll = state.row;
+        }
+    }
+    v_scroll = v_scroll.min(max_v_scroll);
+
+    Some(ViewportScroll {
+        layout,
+        visible_data_rows,
+        v_scroll,
+        h_scroll,
+        max_v_scroll,
+        max_h_scroll,
+    })
 }
 
 /// Hit-test a click at `(x, y)` inside the list's **inner** area (already
@@ -560,71 +618,34 @@ pub fn cell_hit_at(
         detail_open,
     );
 
-    // Click must be inside table_area, excluding scrollbars.
-    if !contains(table_area, x, y) {
-        return None;
-    }
-
     let row_count = result.rows.len();
     let table_width = crate::common::view::format::results_table_width(col_widths);
-    let layout = pane_scroll_layout(table_area, table_width, row_count, table_area.height as usize);
-    if !contains(layout.content_area, x, y) {
+
+    // ---- SHARED VIEWPORT CALCULATION ----
+    // Use the exact same compute_viewport_scroll that render_table uses —
+    // no more duplicated anchor logic that silently drifts from render.
+    let vs = compute_viewport_scroll(table_area, state, row_count, col_widths, table_width as usize)?;
+
+    if !contains(vs.layout.content_area, x, y) {
         return None;
     }
-
-    let viewport_width = layout.content_area.width as usize;
-    let viewport_height = layout.content_area.height as usize;
-    if viewport_width == 0 || viewport_height <= usize::from(RESULTS_HEADER_HEIGHT) {
-        return None;
-    }
-
-    // Compute scrolls (mirroring render_table logic).
-    let max_h_scroll = crate::common::view::format::results_max_h_scroll(table_width, layout.content_area.width) as usize;
-    let state_h_scroll = state.h_scroll.get();
-    let mut h_scroll_val = state_h_scroll.min(max_h_scroll);
-    let state_row = state.row;
-
-    let num_cols = result.columns.len();
-    if h_scroll_val > 0 && !col_widths.is_empty() {
-        let view_right = h_scroll_val.saturating_add(viewport_width);
-        let cur_col_left = crate::common::view::format::col_x_start(state.col, col_widths);
-        let cur_col_right = crate::common::view::format::col_x_end(state.col, col_widths);
-        if cur_col_right <= h_scroll_val {
-            h_scroll_val = cur_col_left;
-        } else if cur_col_left >= view_right {
-            h_scroll_val = cur_col_right.saturating_sub(viewport_width);
-        }
-        h_scroll_val = h_scroll_val.min(max_h_scroll);
-    }
-
-    let visible_data_rows = viewport_height.saturating_sub(usize::from(RESULTS_HEADER_HEIGHT))
-        / usize::from(RESULTS_ROW_HEIGHT);
-    let vr = visible_data_rows.max(1);
-    let max_scroll = row_count.saturating_sub(vr);
-    let mut v_scroll = state.v_scroll.get().min(max_scroll);
-    if state_row >= v_scroll + vr {
-        v_scroll = state_row.saturating_sub(vr.saturating_sub(1));
-    } else if state_row < v_scroll {
-        v_scroll = state_row;
-    }
-    v_scroll = v_scroll.min(max_scroll);
 
     // Hit-test row: y relative to content_area, minus header.
-    let rel_y = y.saturating_sub(layout.content_area.y);
+    let rel_y = y.saturating_sub(vs.layout.content_area.y);
     if rel_y < RESULTS_HEADER_HEIGHT {
         return None;
     }
     let rel_data_y = rel_y.saturating_sub(RESULTS_HEADER_HEIGHT);
     let row_in_viewport = rel_data_y / RESULTS_ROW_HEIGHT;
-    let row_idx = v_scroll + usize::from(row_in_viewport);
+    let row_idx = vs.v_scroll + usize::from(row_in_viewport);
     if row_idx >= row_count {
         return None;
     }
 
     // Hit-test column: x relative to content_area, accounting for h_scroll.
-    let rel_x = x.saturating_sub(layout.content_area.x) as usize;
-    let col_sx = rel_x.saturating_add(h_scroll_val);
-    for col in 0..num_cols {
+    let rel_x = x.saturating_sub(vs.layout.content_area.x) as usize;
+    let col_sx = rel_x.saturating_add(vs.h_scroll);
+    for col in 0..result.columns.len() {
         let start = crate::common::view::format::col_x_start(col, col_widths);
         let end = crate::common::view::format::col_x_end(col, col_widths);
         if col_sx >= start && col_sx < end {

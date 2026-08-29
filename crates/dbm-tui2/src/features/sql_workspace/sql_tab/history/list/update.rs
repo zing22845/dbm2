@@ -24,11 +24,18 @@ pub fn update(
     connection: &str,
 ) -> (ListState, bool) {
     let dirty = match msg {
-        ListMessage::MoveCursor { delta } => move_cursor(&mut state, store, instance, connection, delta),
-        ListMessage::SetCursor { index } => set_cursor(&mut state, store, instance, connection, index),
+        ListMessage::MoveCursor { delta } => {
+            state.scroll_locked = false;
+            move_cursor(&mut state, store, instance, connection, delta)
+        }
+        ListMessage::SetCursor { index } => {
+            state.scroll_locked = false;
+            set_cursor(&mut state, store, instance, connection, index)
+        }
         ListMessage::BeginSearch => {
             state.search.reset();
             state.search.start();
+            state.scroll_locked = false;
             true
         }
         ListMessage::SearchKey(key) => {
@@ -36,8 +43,14 @@ pub fn update(
             true
         }
         ListMessage::ScrollHScroll { delta } => scroll_hscroll(&mut state, store, instance, connection, delta),
-        ListMessage::SetHScroll { position } => set_hscroll(&mut state, store, instance, connection, position),
-        ListMessage::SetVScroll { position } => set_vscroll(&mut state, store, instance, connection, position),
+        ListMessage::SetHScroll { position } => {
+            state.scroll_locked = true;
+            set_hscroll(&mut state, store, instance, connection, position)
+        }
+        ListMessage::SetVScroll { position } => {
+            state.scroll_locked = true;
+            set_vscroll(&mut state, store, instance, connection, position)
+        }
     };
     (state, dirty)
 }

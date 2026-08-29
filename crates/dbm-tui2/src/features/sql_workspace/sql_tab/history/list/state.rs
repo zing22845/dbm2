@@ -20,6 +20,10 @@ pub struct ListState {
     pub v_scroll: usize,
     /// Horizontal scroll offset of the list rows.
     pub h_scroll: usize,
+    /// When true, the discover-style cursor anchor is suppressed so manual
+    /// scrollbar drags / scrolls are not immediately overridden by cursor
+    /// re-anchoring. Cleared on any cursor-movement message.
+    pub scroll_locked: bool,
 }
 
 impl ListState {
