@@ -91,6 +91,60 @@ pub fn tblcmp_rect(
     Some(Rect::new(x, area.y, chip_w, 1))
 }
 
+/// Single source of truth for how the editor block area is split into
+/// picker overlay (if open), editor body, and footer hints. Both [`render`]
+/// and the hit-test path in [`crate::features::sql_workspace::sql_tab::view`]
+/// must call this function — independently re-deriving the layout causes
+/// scrollbar geometry to drift when footer height or picker state changes.
+///
+/// Returns `(editor_body, footer_area, picker_area)`. `picker_area` is `None`
+/// when the context picker is closed.
+pub fn compute_editor_body_area(
+    area: Rect,
+    mode: edtui::EditorMode,
+    context_picker_open: bool,
+    complete_table_names: bool,
+    sql_search_active: bool,
+    sql_search_has_filter: bool,
+) -> (Rect, Rect, Option<Rect>) {
+    let block = Block::default().borders(Borders::ALL);
+    let inner = block.inner(area);
+
+    let footer_mode = match mode {
+        edtui::EditorMode::Insert => "insert",
+        edtui::EditorMode::Visual => "visual",
+        _ => "normal",
+    };
+    let hint = sql_pane_footer_text(
+        sql_search_active,
+        sql_search_active,
+        footer_mode,
+        sql_search_has_filter,
+        complete_table_names,
+    );
+    let footer_h = footer_height(&hint, inner.width).min(inner.height.saturating_sub(1));
+
+    let mut constraints = Vec::new();
+    let mut picker_area = None;
+    if context_picker_open {
+        let picker_h = CONTEXT_PICKER_HEIGHT.min(inner.height);
+        constraints.push(Constraint::Length(picker_h));
+        picker_area = Some(Rect::new(inner.x, inner.y, inner.width, picker_h));
+    }
+    constraints.push(Constraint::Min(0));
+    constraints.push(Constraint::Length(footer_h));
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(inner);
+
+    let editor_body = if picker_area.is_some() { chunks[1] } else { chunks[0] };
+    let footer_area = if picker_area.is_some() { chunks[2] } else { chunks[1] };
+
+    (editor_body, footer_area, picker_area)
+}
+
 /// Compute the editor body's scrollbar geometry for hit-testing and drag
 /// dispatch. Returns `Some((v_scrollbar_rect, max_scroll))` when a vertical
 /// scrollbar is actually visible (content rows exceed the viewport).
@@ -169,12 +223,6 @@ pub fn render(
     // schema, clickable to switch), and — in INSERT mode — the table-name
     // completion (TblCmp) status.
     let mode = editor_mode_label(state.editor.mode);
-    // The footer hint builder matches on the lowercase mode name.
-    let footer_mode = match state.editor.mode {
-        edtui::EditorMode::Insert => "insert",
-        edtui::EditorMode::Visual => "visual",
-        _ => "normal",
-    };
     let mut base = format!(" [S] SQL [{mode}]");
     let db = database.filter(|d| !d.is_empty()).unwrap_or("…");
     let schema = schema.filter(|s| !s.is_empty()).unwrap_or("…");
@@ -199,40 +247,18 @@ pub fn render(
         .title(title)
         .borders(Borders::ALL)
         .border_style(p.active_border(focused));
-    let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // The footer hint is sized to its wrapped height so a narrow terminal does
-    // not clip it; the editor body gets the remaining space.
+    // Compute body/footer/picker geometry from the single source of truth.
     let search_active = state.sql_search.text_input_active();
-    let hint = sql_pane_footer_text(
-        search_active,
-        search_active,
-        footer_mode,
-        state.sql_search.has_filter(),
+    let (editor_body, footer_area, picker_area) = compute_editor_body_area(
+        area,
+        state.editor.mode,
+        state.context_picker.open,
         complete_table_names,
+        search_active,
+        state.sql_search.has_filter(),
     );
-    let footer_h = footer_height(&hint, inner.width).min(inner.height.saturating_sub(1));
-    // When the context picker is open it occupies a full-width panel at the top
-    // of the editor (below the block header), with the editor body + footer
-    // filling the rest — matching the original dbm's `sql_tab_layout`.
-    let mut constraints = Vec::new();
-    let mut picker_area = None;
-    if state.context_picker.open {
-        let picker_h = CONTEXT_PICKER_HEIGHT.min(inner.height);
-        constraints.push(Constraint::Length(picker_h));
-        picker_area = Some(Rect::new(inner.x, inner.y, inner.width, picker_h));
-    }
-    constraints.push(Constraint::Min(0)); // editor body
-    constraints.push(Constraint::Length(footer_h)); // editor footer hints
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(inner);
-
-    // The editor body is the first non-picker chunk.
-    let editor_body = if picker_area.is_some() { chunks[1] } else { chunks[0] };
-    let footer_area = if picker_area.is_some() { chunks[2] } else { chunks[1] };
 
     if let Some(picker_area) = picker_area {
         cp_view::render(frame, theme, picker_area, &state.context_picker);
@@ -308,6 +334,18 @@ pub fn render(
         cursor.as_ref().map(|c| c.position),
     );
     // Editor footer hints from the shared builder (wrapped to the pane width).
+    let footer_mode = match state.editor.mode {
+        edtui::EditorMode::Insert => "insert",
+        edtui::EditorMode::Visual => "visual",
+        _ => "normal",
+    };
+    let hint = sql_pane_footer_text(
+        search_active,
+        search_active,
+        footer_mode,
+        state.sql_search.has_filter(),
+        complete_table_names,
+    );
     draw_footer(frame, theme, footer_area, &hint);
 
     // Hand the hardware cursor up so the shell can place the terminal caret at

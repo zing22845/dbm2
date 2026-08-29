@@ -56,44 +56,15 @@ pub fn render(
     let state_h_scroll = state.h_scroll.get();
 
     // `area` is already the inner area of the outer Results Block.
-    let inner = area;
-
     let search_active = state.search.text_input_active();
+    let (table_body, action_bar_area, pagination_area, footer_area) =
+        compute_table_area(area, row_count, search_active, detail_open);
+
     let hint = crate::common::view::hints::results_pane_footer_text(
         search_active,
         detail_open,
         "",
     );
-    let footer_h = footer_height(&hint, inner.width).min(inner.height.saturating_sub(4));
-
-    let pagination_h = if row_count > 0 {
-        RESULTS_PAGINATION_BAR_HEIGHT
-    } else {
-        0
-    };
-
-    let chunks = if pagination_h > 0 {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(pagination_h),
-                Constraint::Length(footer_h),
-            ])
-            .split(inner)
-    } else {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(footer_h),
-            ])
-            .split(inner)
-    };
-
-    let content = chunks[0];
-    let pagination_area = if pagination_h > 0 { Some(chunks[1]) } else { None };
-    let footer_area = if pagination_h > 0 { chunks[2] } else { chunks[1] };
 
     // Content area: action bar + table.
     let has_result = state.result.is_some();
@@ -115,25 +86,17 @@ pub fn render(
             edit_reason,
         };
         (
-            action_bar_width(&model).saturating_sub(content.width),
+            action_bar_width(&model).saturating_sub(action_bar_area.width),
             model,
         )
     };
     let bar_scroll = state_h_scroll.min(bar_scroll_max as usize) as u16;
 
-    let list_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(RESULTS_ACTION_BAR_HEIGHT),
-            Constraint::Min(0),
-        ])
-        .split(content);
-
-    draw_action_bar(frame, list_chunks[0], &model, bar_scroll, p);
+    draw_action_bar(frame, action_bar_area, &model, bar_scroll, p);
     render_table(
         frame,
         theme,
-        list_chunks[1],
+        table_body,
         state,
         focused,
     );
@@ -155,6 +118,65 @@ pub fn render(
 
     // Results list footer (full width, inside the Block).
     draw_footer(frame, theme, footer_area, &hint);
+}
+
+/// Single source of truth for how the results list's already-inner area is
+/// split into action_bar + table_body + (pagination) + footer. Both [`render`]
+/// and the hit-test path in [`crate::features::sql_workspace::sql_tab::view`]
+/// must call this.
+///
+/// Returns `(table_body_area, action_bar_area, pagination_area, footer_area)`.
+/// `pagination_area` is `None` when there are no rows to paginate.
+pub fn compute_table_area(
+    list_inner: Rect,
+    row_count: usize,
+    search_active: bool,
+    detail_open: bool,
+) -> (Rect, Rect, Option<Rect>, Rect) {
+    let hint = crate::common::view::hints::results_pane_footer_text(
+        search_active,
+        detail_open,
+        "",
+    );
+    let footer_h = footer_height(&hint, list_inner.width).min(list_inner.height.saturating_sub(4));
+
+    let pagination_h = if row_count > 0 { RESULTS_PAGINATION_BAR_HEIGHT } else { 0 };
+
+    let chunks = if pagination_h > 0 {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(pagination_h),
+                Constraint::Length(footer_h),
+            ])
+            .split(list_inner)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(footer_h),
+            ])
+            .split(list_inner)
+    };
+
+    let content = chunks[0];
+    let pagination_area = if pagination_h > 0 { Some(chunks[1]) } else { None };
+    let footer_area = if pagination_h > 0 { chunks[2] } else { chunks[1] };
+
+    let list_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(RESULTS_ACTION_BAR_HEIGHT),
+            Constraint::Min(0),
+        ])
+        .split(content);
+
+    let action_bar_area = list_chunks[0];
+    let table_body_area = list_chunks[1];
+
+    (table_body_area, action_bar_area, pagination_area, footer_area)
 }
 
 fn render_error(frame: &mut Frame, theme: &Theme, area: Rect, message: &str) {
@@ -510,14 +532,14 @@ fn render_table(
 /// click lands on a data cell (not header, action bar, pagination, footer,
 /// or scrollbar), or `None` otherwise.
 ///
-/// Replicates the geometry used by [`render`] and [`render_table`] so the
-/// hit-test matches what the user sees exactly.
+/// Uses [`compute_table_area`] so hit-test geometry always matches the
+/// renderer's split logic exactly.
 pub fn cell_hit_at(
     inner: Rect,
     state: &ListState,
     x: u16,
     y: u16,
-    footer_height: u16,
+    detail_open: bool,
 ) -> Option<(usize, usize)> {
     if inner.width == 0 || inner.height == 0 {
         return None;
@@ -530,42 +552,13 @@ pub fn cell_hit_at(
 
     let col_widths = &state.col_widths;
 
-    // Split inner → content + pagination + footer (same as render()).
-    let pagination_h = if state.row_count() > 0 {
-        RESULTS_PAGINATION_BAR_HEIGHT
-    } else {
-        0
-    };
-
-    let chunks = if pagination_h > 0 {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(pagination_h),
-                Constraint::Length(footer_height),
-            ])
-            .split(inner)
-    } else {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(footer_height),
-            ])
-            .split(inner)
-    };
-    let content = chunks[0];
-
-    // Split content → action bar + table area.
-    let list_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(RESULTS_ACTION_BAR_HEIGHT),
-            Constraint::Min(0),
-        ])
-        .split(content);
-    let table_area = list_chunks[1];
+    // Use the single source of truth for geometry.
+    let (table_area, _action_bar_area, _pagination_area, _footer_area) = compute_table_area(
+        inner,
+        state.row_count(),
+        state.search.text_input_active(),
+        detail_open,
+    );
 
     // Click must be inside table_area, excluding scrollbars.
     if !contains(table_area, x, y) {
