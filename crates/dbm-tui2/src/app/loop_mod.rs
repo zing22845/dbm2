@@ -150,6 +150,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     let mut history_h_scrollbar_drag: Option<(u16, usize, usize)> = None;
     let mut history_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
     let mut editor_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    let mut results_h_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    let mut results_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
 
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
@@ -681,6 +683,26 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     {
                                         editor_v_scrollbar_drag = Some((track_y, viewport_height, max_scroll));
                                     }
+                                    // If the click was on the results list h_scrollbar, start dragging.
+                                    if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::ResultsHScrollbar {
+                                        track_x,
+                                        x: _,
+                                        max_scroll,
+                                        viewport_width,
+                                    } = action
+                                    {
+                                        results_h_scrollbar_drag = Some((track_x, viewport_width, max_scroll));
+                                    }
+                                    // If the click was on the results list v_scrollbar, start dragging.
+                                    if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::ResultsVScrollbar {
+                                        track_y,
+                                        y: _,
+                                        max_scroll,
+                                        viewport_height,
+                                    } = action
+                                    {
+                                        results_v_scrollbar_drag = Some((track_y, viewport_height, max_scroll));
+                                    }
                                     for msg in sql_click_msgs(&state.sql.sql_tab, action) {
                                         let result = process_message_round(
                                             &effect_runner,
@@ -1123,11 +1145,57 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     editor_v_scrollbar_drag = None;
                                 }
                             }
+
+                            // Results list h_scrollbar drag: convert mouse x
+                            // inside the track to a horizontal scroll position.
+                            if let Some((track_x, viewport_width, max_scroll)) = results_h_scrollbar_drag {
+                                let rel_x = point.x.saturating_sub(track_x);
+                                let position = scrollbar_x_to_position(rel_x, viewport_width, max_scroll);
+                                if let Some(active_tab) = state.sql.sql_tab.active_tab {
+                                    use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+                                    use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+                                    use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+                                    let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                                        SqlTabMessage::Results {
+                                            tab_id: active_tab,
+                                            msg: ResultsMsg::Message(ResultsMessage::SetHScroll { position }),
+                                        },
+                                    ))));
+                                    let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                    dirty |= result.dirty;
+                                } else {
+                                    results_h_scrollbar_drag = None;
+                                }
+                            }
+
+                            // Results list v_scrollbar drag: scrollbar position
+                            // IS the viewport start. Send SetVScroll directly.
+                            if let Some((track_y, viewport_height, max_scroll)) = results_v_scrollbar_drag {
+                                let rel_y = point.y.saturating_sub(track_y);
+                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                if let Some(active_tab) = state.sql.sql_tab.active_tab {
+                                    use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+                                    use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+                                    use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+                                    let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                                        SqlTabMessage::Results {
+                                            tab_id: active_tab,
+                                            msg: ResultsMsg::Message(ResultsMessage::SetVScroll { position: start }),
+                                        },
+                                    ))));
+                                    let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                    dirty |= result.dirty;
+                                } else {
+                                    results_v_scrollbar_drag = None;
+                                }
+                            }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
                             history_h_scrollbar_drag = None;
                             history_v_scrollbar_drag = None;
                             editor_v_scrollbar_drag = None;
+                            results_h_scrollbar_drag = None;
+                            results_v_scrollbar_drag = None;
                             if explorer_split_drag {
                                 explorer_split_drag = false;
                                 state.splitter_hover.explorer_splitter_drag = false;
@@ -1321,6 +1389,26 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                             SqlTabMessage::History {
                                                 tab_id: tab_idx,
                                                 msg: HistoryMsg::Message(HistoryMessage::MoveCursor { delta }),
+                                            },
+                                        ))));
+                                        let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                        dirty |= result.dirty;
+                                    } else if layout.results.contains(point) {
+                                        // Scroll wheel on the results pane: move
+                                        // the cell selection up/down. The view
+                                        // auto-adjusts v_scroll to keep cursor visible.
+                                        use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+                                        use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+                                        use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+                                        let delta: i32 = match mouse.kind {
+                                            MouseEventKind::ScrollUp => -1,
+                                            MouseEventKind::ScrollDown => 1,
+                                            _ => unreachable!(),
+                                        };
+                                        let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                                            SqlTabMessage::Results {
+                                                tab_id: tab_idx,
+                                                msg: ResultsMsg::Message(ResultsMessage::MoveSelection { dr: delta, dc: 0 }),
                                             },
                                         ))));
                                         let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
@@ -2489,6 +2577,46 @@ fn sql_click_msgs(
                     SqlTabMessage::Results {
                         tab_id,
                         msg: ResultsMsg::Message(ResultsMessage::ToggleDetail),
+                    },
+                )))),
+            ]
+        }
+        SqlClickAction::ResultsHScrollbar { track_x, x, max_scroll, viewport_width } => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            let rel_x = x.saturating_sub(track_x);
+            let position = scrollbar_x_to_position(rel_x, viewport_width, max_scroll);
+            vec![
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Focus(SqlFocus::Results),
+                )))),
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        tab_id,
+                        msg: ResultsMsg::Message(ResultsMessage::SetHScroll { position }),
+                    },
+                )))),
+            ]
+        }
+        SqlClickAction::ResultsVScrollbar { track_y, y, max_scroll, viewport_height } => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            let rel_y = y.saturating_sub(track_y);
+            let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+            vec![
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Focus(SqlFocus::Results),
+                )))),
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        tab_id,
+                        msg: ResultsMsg::Message(ResultsMessage::SetVScroll { position: start }),
                     },
                 )))),
             ]

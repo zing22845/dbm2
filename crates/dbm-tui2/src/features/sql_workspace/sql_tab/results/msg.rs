@@ -68,6 +68,10 @@ pub enum ResultsMessage {
     ToggleDetail,
     /// Synchronise the viewport dimensions.
     SyncViewport { rows: usize, width: u16 },
+    /// Set vertical scroll offset (from scrollbar drag).
+    SetVScroll { position: usize },
+    /// Set horizontal scroll offset (from scrollbar drag).
+    SetHScroll { position: usize },
 
     // ---- Routed variants (for internal sub-feature routing) ----
     /// Route to the list sub-feature.
@@ -145,6 +149,8 @@ impl ResultsMessage {
             ResultsMessage::SetPage { page } => ListMessage::SetPage { page },
             ResultsMessage::Commit => ListMessage::Commit,
             ResultsMessage::SyncViewport { rows, width } => ListMessage::SyncViewport { rows, width },
+            ResultsMessage::SetVScroll { position } => ListMessage::SetVScroll { position },
+            ResultsMessage::SetHScroll { position } => ListMessage::SetHScroll { position },
             ResultsMessage::SetDetailDraft { .. } | ResultsMessage::ToggleDetail => {
                 ListMessage::ResetSelection
             }

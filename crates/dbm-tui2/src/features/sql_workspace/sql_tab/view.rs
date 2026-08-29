@@ -47,6 +47,10 @@ pub enum SqlClickAction {
     ResultsCellClicked { row: usize, col: usize },
     /// Double-click inside the results pane: toggle the detail inspect mode.
     ResultsOpenDetail,
+    /// Click/drag on the results list horizontal scrollbar.
+    ResultsHScrollbar { track_x: u16, x: u16, max_scroll: usize, viewport_width: usize },
+    /// Click/drag on the results list vertical scrollbar.
+    ResultsVScrollbar { track_y: u16, y: u16, max_scroll: usize, viewport_height: usize },
     /// Click the editor header's `· TblCmp:ON/OFF` chip to toggle table-name
     /// completion (equivalent to Alt+Tab in insert mode).
     ToggleTableCompletion,
@@ -306,7 +310,19 @@ pub fn sql_workspace_click(
 
             if is_double_click && !tab.results.detail_open {
                 return Some(SqlClickAction::ResultsOpenDetail);
-            } else if let Some((row, col)) =
+            }
+
+            // Check scrollbar hit BEFORE cell hit so scrollbar clicks take
+            // precedence over cell clicks (scrollbar area is excluded from
+            // cell_hit_at but we still want explicit scrollbar actions).
+            if let Some(action) = results_v_scrollbar_hit(tab, list_inner, x, y, footer_h) {
+                return Some(action);
+            }
+            if let Some(action) = results_h_scrollbar_hit(tab, list_inner, x, y, footer_h) {
+                return Some(action);
+            }
+
+            if let Some((row, col)) =
                 crate::features::sql_workspace::sql_tab::results::list::view::cell_hit_at(
                     list_inner,
                     &tab.results.list,
@@ -630,6 +646,139 @@ fn history_v_scrollbar_hit(
             y,
             max_scroll,
             viewport_height: viewport_rows,
+        })
+    } else {
+        None
+    }
+}
+
+/// Compute the results list's table area (action bar + table body) inside
+/// `list_inner`, mirroring the geometry used by [`results::list::view::render`]
+/// and [`results::list::view::cell_hit_at`].
+fn results_table_area(
+    list_inner: Rect,
+    row_count: usize,
+    footer_h: u16,
+) -> Option<Rect> {
+    use ratatui::layout::{Constraint, Direction, Layout};
+    use crate::common::view::action_bar::RESULTS_ACTION_BAR_HEIGHT;
+    use crate::features::sql_workspace::sql_tab::results::pagination::RESULTS_PAGINATION_BAR_HEIGHT;
+
+    let pagination_h = if row_count > 0 { RESULTS_PAGINATION_BAR_HEIGHT } else { 0 };
+
+    let chunks = if pagination_h > 0 {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(pagination_h),
+                Constraint::Length(footer_h),
+            ])
+            .split(list_inner)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(footer_h),
+            ])
+            .split(list_inner)
+    };
+
+    let content = chunks[0];
+    let list_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(RESULTS_ACTION_BAR_HEIGHT),
+            Constraint::Min(0),
+        ])
+        .split(content);
+
+    Some(list_chunks[1])
+}
+
+/// Check if a click at `(x, y)` hits the results list vertical scrollbar.
+/// Returns the `ResultsVScrollbar` action with scrollbar geometry if so.
+fn results_v_scrollbar_hit(
+    tab: &crate::features::sql_workspace::sql_tab::state::SqlTab,
+    list_inner: Rect,
+    x: u16,
+    y: u16,
+    footer_h: u16,
+) -> Option<SqlClickAction> {
+    let list = &tab.results.list;
+    let result = list.result.as_ref()?;
+    let row_count = result.rows.len();
+    let table_width = crate::common::view::format::results_table_width(&list.col_widths);
+
+    let table_area = results_table_area(list_inner, row_count, footer_h)?;
+    if !contains(table_area, x, y) {
+        return None;
+    }
+
+    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        table_area,
+        table_width,
+        row_count,
+        table_area.height as usize,
+    );
+    let v_bar = layout.v_scrollbar?;
+    let viewport_height = layout.content_area.height.max(1) as usize;
+    let max_scroll = row_count.saturating_sub(viewport_height);
+    if max_scroll == 0 {
+        return None;
+    }
+
+    if crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y) {
+        Some(SqlClickAction::ResultsVScrollbar {
+            track_y: v_bar.y,
+            y,
+            max_scroll,
+            viewport_height,
+        })
+    } else {
+        None
+    }
+}
+
+/// Check if a click at `(x, y)` hits the results list horizontal scrollbar.
+/// Returns the `ResultsHScrollbar` action with scrollbar geometry if so.
+fn results_h_scrollbar_hit(
+    tab: &crate::features::sql_workspace::sql_tab::state::SqlTab,
+    list_inner: Rect,
+    x: u16,
+    y: u16,
+    footer_h: u16,
+) -> Option<SqlClickAction> {
+    let list = &tab.results.list;
+    let result = list.result.as_ref()?;
+    let row_count = result.rows.len();
+    let table_width = crate::common::view::format::results_table_width(&list.col_widths);
+
+    let table_area = results_table_area(list_inner, row_count, footer_h)?;
+    if !contains(table_area, x, y) {
+        return None;
+    }
+
+    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        table_area,
+        table_width,
+        row_count,
+        table_area.height as usize,
+    );
+    let h_bar = layout.h_scrollbar?;
+    let viewport_width = layout.content_area.width.max(1) as usize;
+    let max_scroll = (table_width as usize).saturating_sub(viewport_width);
+    if max_scroll == 0 {
+        return None;
+    }
+
+    if crate::common::view::pane_scrollbar::point_in_bar(h_bar, x, y) {
+        Some(SqlClickAction::ResultsHScrollbar {
+            track_x: h_bar.x,
+            x,
+            max_scroll,
+            viewport_width,
         })
     } else {
         None

@@ -56,6 +56,10 @@ pub enum ListMessage {
     Commit,
     /// Synchronise the viewport dimensions (called after render).
     SyncViewport { rows: usize, width: u16 },
+    /// Set vertical scroll offset (from scrollbar drag).
+    SetVScroll { position: usize },
+    /// Set horizontal scroll offset (from scrollbar drag).
+    SetHScroll { position: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

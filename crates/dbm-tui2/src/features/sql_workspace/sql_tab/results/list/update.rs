@@ -198,6 +198,22 @@ pub fn update(
             state.set_viewport(rows, width);
             false
         }
+        ListMessage::SetVScroll { position } => {
+            let row_count = state.row_count();
+            let vr = state.viewport_rows.get().max(1);
+            let max = row_count.saturating_sub(vr);
+            let before = state.v_scroll.get();
+            state.v_scroll.set(position.min(max));
+            state.v_scroll.get() != before
+        }
+        ListMessage::SetHScroll { position } => {
+            let before = state.h_scroll.get();
+            let table_w = crate::common::view::format::results_table_width(&state.col_widths) as usize;
+            let vp = state.viewport_width.get() as usize;
+            let max = table_w.saturating_sub(vp);
+            state.h_scroll.set(position.min(max));
+            state.h_scroll.get() != before
+        }
     };
     (state, effects, dirty)
 }
