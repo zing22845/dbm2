@@ -1790,6 +1790,8 @@ mod tests {
                 test_failed_at: None,
             }],
             cursor: 0,
+            scroll: 0,
+            scroll_locked: false,
             restore_cursor: None,
             form: None,
             status: None,

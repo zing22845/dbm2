@@ -6,6 +6,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+use crate::common::view::pane_scrollbar::{
+    PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout, point_in_bar,
+};
 use crate::common::view::theme::Theme;
 use dbm_store::ManagedInstance;
 
@@ -84,6 +87,98 @@ fn management_scope_labels(inst: &ManagedInstance, conn_count: usize) -> String 
     }
 }
 
+/// Result of [`compute_overview_viewport`]: shared by render and
+/// v_scrollbar_hit so they agree on geometry and scroll position.
+pub struct OverviewViewport {
+    pub layout: PaneScrollLayout,
+    pub content: Rect,
+    pub viewport: usize,
+    pub start: usize,
+    pub total: usize,
+    pub max_scroll: usize,
+}
+
+/// Shared viewport computation. Applies discover-style cursor anchoring
+/// (skipped when `scroll_locked`). Note: Overview uses Paragraph::wrap so a
+/// data row can span multiple pixel rows, but this viewport counts **data
+/// rows** (1 data row = 1 Line passed to Paragraph). The `max_scroll` is
+/// computed from content pixel height, which may undercount when many rows
+/// wrap — this is acceptable because v_scrollbar scrolls by data row, not by
+/// wrapped pixel row, and the Paragraph wraps naturally within the content area.
+pub fn compute_overview_viewport(
+    area: Rect,
+    state: &OverviewState,
+    conn_count: usize,
+) -> Option<OverviewViewport> {
+    let inst = state.instance.as_ref()?;
+    let rows = overview_rows(inst, conn_count);
+    let total = rows.len();
+    if total == 0 {
+        return None;
+    }
+
+    // pane_scroll_layout reserves 1 col for v_scrollbar when the data rows
+    // overflow the area height. content_width estimate: overview rows are
+    // "{label:20} {value}" ≈ 21 + typical value length (say 50). Connections
+    // does not h_scroll in practice.
+    let content_width = 80u16; // generous estimate
+    let layout = pane_scroll_layout(area, content_width, total, area.height.max(1) as usize);
+    let content = layout.content_area;
+
+    let viewport = content.height.max(1) as usize;
+    let max_scroll = total.saturating_sub(viewport);
+
+    // Discover-style anchor — skipped when scroll_locked (manual v_scrollbar drag).
+    let mut start = state.scroll.min(total.saturating_sub(1));
+    if !state.scroll_locked {
+        if state.cursor < start {
+            start = state.cursor;
+        } else if state.cursor >= start + viewport {
+            start = state.cursor + 1 - viewport;
+        }
+    }
+
+    Some(OverviewViewport {
+        layout,
+        content,
+        viewport,
+        start,
+        total,
+        max_scroll,
+    })
+}
+
+/// Result of [`v_scrollbar_hit`]: everything the drag handler needs.
+pub struct OverviewVScrollInfo {
+    pub track_y: u16,
+    pub max_scroll: usize,
+    /// Track PIXEL height — drag formula needs this (NOT data-row count).
+    pub viewport_height: usize,
+}
+
+/// Hit-test the overview pane's vertical scrollbar.
+pub fn v_scrollbar_hit(
+    area: Rect,
+    state: &OverviewState,
+    conn_count: usize,
+    x: u16,
+    y: u16,
+) -> Option<OverviewVScrollInfo> {
+    let ov = compute_overview_viewport(area, state, conn_count)?;
+    let v_bar = ov.layout.v_scrollbar?;
+    if ov.max_scroll == 0 {
+        return None;
+    }
+    if !point_in_bar(v_bar, x, y) {
+        return None;
+    }
+    Some(OverviewVScrollInfo {
+        track_y: v_bar.y,
+        max_scroll: ov.max_scroll,
+        viewport_height: usize::from(v_bar.height.max(1)),
+    })
+}
+
 /// Render the instance overview body: the instance's attribute rows laid out
 /// like the original dbm (`label:20 value`), with the cursor row highlighted.
 /// Long rows wrap onto the next line when the pane is too narrow, so no
@@ -111,30 +206,18 @@ pub fn render(
         return;
     };
 
-    let rows = overview_rows(inst, conn_count);
-    if rows.is_empty() {
-        return;
-    }
-
-    // Vertical scrolling keeps the cursor visible: the window is `viewport`
-    // rows tall, anchored so the cursor stays in range.
-    let viewport = area.height.max(1) as usize;
-    let row_count = rows.len();
-    let cursor = state.cursor.min(row_count.saturating_sub(1));
-    let scroll = if cursor < viewport {
-        0
-    } else {
-        cursor.saturating_add(1).saturating_sub(viewport)
+    let ov = match compute_overview_viewport(area, state, conn_count) {
+        Some(v) => v,
+        None => return,
     };
 
+    let rows = overview_rows(inst, conn_count);
+    let content = ov.content;
+    let start = ov.start;
+
     let mut lines = Vec::new();
-    for view_row in 0..viewport {
-        let row_idx = scroll + view_row;
-        if row_idx >= row_count {
-            break;
-        }
-        let (label, value) = &rows[row_idx];
-        let selected = row_idx == cursor;
+    for (idx, (label, value)) in rows.iter().enumerate().skip(start).take(ov.viewport) {
+        let selected = idx == state.cursor;
         let style = if selected {
             Style::default()
                 .fg(p.selection_text)
@@ -146,12 +229,26 @@ pub fn render(
         let text = format!("{label:20} {value}");
         lines.push(Line::from(Span::styled(text, style)));
     }
+
     // Wrap long rows so a narrow pane shows the full value instead of cropping
     // it; the wrapped continuation keeps the same style as the row.
     frame.render_widget(
         Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
-        area,
+        content,
     );
+
+    // ---- VERTICAL SCROLLBAR ----
+    if let Some(bar) = ov.layout.v_scrollbar {
+        draw_vertical_pane_scrollbar(
+            frame,
+            bar,
+            ov.start,
+            ov.viewport,
+            ov.max_scroll,
+            p,
+            false,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -193,10 +290,8 @@ mod tests {
                 "Management scope", "Lifecycle checked", "Query readiness",
             ]
         );
-        // Connections + query readiness depend on conn_count.
         assert_eq!(rows[13].1, "3 registered");
         assert_eq!(rows[16].1, "Ready");
-        // Management scope includes lifecycle + query/monitor/backup.
         assert!(rows[14].1.contains("lifecycle"));
         assert!(rows[14].1.contains("query"));
     }
@@ -206,7 +301,6 @@ mod tests {
         let rows = overview_rows(&inst(), 0);
         assert_eq!(rows[13].1, "0 registered");
         assert_eq!(rows[16].1, "Degraded");
-        // No connections -> management scope is only the lifecycle label.
         assert_eq!(rows[14].1, "lifecycle");
     }
 
@@ -224,10 +318,6 @@ mod tests {
 
     #[test]
     fn lifecycle_change_repaints_nonzero_cells() {
-        // A refresh updates lifecycle_checked_at, which the overview renders as
-        // the "Lifecycle checked" row. Verify that redrawing with a changed
-        // lifecycle actually changes cells — so this repaint is NOT counted as
-        // waste by the perf monitor (changed_cells > 0).
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
         use crate::common::view::theme;
@@ -267,14 +357,10 @@ mod tests {
 
     #[test]
     fn narrow_width_wraps_long_rows_instead_of_cropping() {
-        // A narrow pane must wrap long rows (e.g. the fingerprint / version
-        // full values) onto the next line rather than crop them, so the full
-        // value stays readable without horizontal scrolling.
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
         use crate::common::view::theme;
         let theme = theme::dracula();
-        // A very narrow body: only ~16 columns.
         let area = Rect::new(0, 0, 16, 30);
         let mut terminal = Terminal::new(TestBackend::new(16, 30)).unwrap();
 
@@ -289,8 +375,6 @@ mod tests {
             .unwrap();
         let buf = terminal.backend().buffer().clone();
 
-        // The version-full value (long, single token) must appear somewhere in
-        // the buffer — i.e. it wrapped instead of being cropped at column 16.
         let text: String = buf
             .content()
             .iter()
@@ -300,5 +384,41 @@ mod tests {
             text.contains("x86_64-pc-linux-gnu"),
             "long value should wrap into view, buffer contains: {text:?}"
         );
+    }
+
+    // ---- New v_scrollbar tests ----
+
+    #[test]
+    fn viewport_anchors_cursor_and_respects_scroll_locked() {
+        let mut s = OverviewState {
+            instance: Some(inst()),
+            cursor: 16, // last row out of 17
+            scroll: 0,
+            scroll_locked: false,
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 80, 6); // v_scrollbar reserves 1 col → 59 rows wide? No, scrollbar only on overflow
+                                          // area.height=6, rows=17 → overflow → v_scrollbar → content.height=5
+        let ov = compute_overview_viewport(area, &s, 0).expect("some viewport");
+        assert_eq!(ov.start, 12, "anchor: cursor=16, viewport=5 -> start=16-5+1");
+
+        // scroll_locked skips anchor.
+        s.scroll_locked = true;
+        s.scroll = 5;
+        s.cursor = 0;
+        let ov = compute_overview_viewport(area, &s, 0).expect("some viewport");
+        assert_eq!(ov.start, 5, "scroll_locked keeps manual scroll even if cursor is at top");
+    }
+
+    #[test]
+    fn v_scrollbar_hit_returns_none_when_no_scroll_needed() {
+        let s = OverviewState {
+            instance: Some(inst()),
+            cursor: 0,
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 80, 50); // plenty of height for all 17 rows
+        let hit = v_scrollbar_hit(area, &s, 0, 79, 5);
+        assert!(hit.is_none());
     }
 }

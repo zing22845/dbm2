@@ -13,6 +13,12 @@ pub struct OverviewState {
     pub instance_name: String,
     /// Cursor row within the overview list, highlighted like the original dbm.
     pub cursor: usize,
+    /// Vertical scroll offset in data rows (0 = top row visible).
+    pub scroll: usize,
+    /// When true, the discover-style cursor anchor is skipped — the viewport
+    /// stays exactly where the user last dragged/scrolled it, even if the
+    /// cursor moves outside it. Reset on any MoveCursor.
+    pub scroll_locked: bool,
     /// One-line status shown on the overview pane footer (e.g. "Refreshed").
     /// Owned by this pane so it does not leak into the connections footer.
     pub status: Option<String>,

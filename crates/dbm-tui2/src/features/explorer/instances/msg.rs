@@ -45,6 +45,9 @@ pub enum InstancesMessage {
     /// so the discover-style anchor does not fight the manual scroll until
     /// the next cursor move.
     SetVScroll { position: usize },
+    /// Programmatically set horizontal scroll offset (h_scrollbar drag).
+    /// Clamped to `[0, max_h_scroll]`.
+    SetHScroll { position: usize },
 }
 
 /// Feature message envelope (central-router compatible).

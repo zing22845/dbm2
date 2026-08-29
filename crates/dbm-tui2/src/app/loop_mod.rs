@@ -156,6 +156,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     let mut discover_results_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
     let mut explorer_objects_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
     let mut explorer_instances_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    let mut explorer_objects_h_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    let mut explorer_instances_h_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    let mut iw_connections_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    let mut iw_overview_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
 
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
@@ -1054,6 +1058,171 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 }
                             }
 
+                            // Explorer objects h_scrollbar hit-test.
+                            if let Pane::Explorer(_) = state.focus
+                                && let Some(explorer) =
+                                    app_explorer_rect(size, body_top, body_h, &state)
+                                && let (_inst_area, objs_area) = explorer_child_areas(
+                                    explorer,
+                                    state.explorer.splitter.instances_height,
+                                )
+                                && objs_area.contains(point)
+                            {
+                                use crate::features::explorer::objects::{msg::*, view};
+                                use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+                                if let Some(si) = view::h_scrollbar_hit(
+                                    objs_area,
+                                    &state.explorer.objects,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    explorer_objects_h_scrollbar_drag =
+                                        Some((si.track_x, si.viewport_width, si.max_scroll));
+                                    let new_scroll = scrollbar_x_to_position(
+                                        mouse.column,
+                                        si.viewport_width,
+                                        si.max_scroll,
+                                    );
+                                    let msg = AppMsg::Explorer(ExplorerMsg::Message(
+                                        ExplorerMessage::Objects(ObjectsMsg::Message(
+                                            ObjectsMessage::SetHScroll {
+                                                position: new_scroll,
+                                            },
+                                        )),
+                                    ));
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
+                            // Explorer instances h_scrollbar hit-test.
+                            if let Pane::Explorer(_) = state.focus
+                                && let Some(explorer) =
+                                    app_explorer_rect(size, body_top, body_h, &state)
+                                && let (inst_area, _objs_area) = explorer_child_areas(
+                                    explorer,
+                                    state.explorer.splitter.instances_height,
+                                )
+                                && inst_area.contains(point)
+                            {
+                                use crate::features::explorer::instances::{msg::*, view};
+                                use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+                                if let Some(si) = view::h_scrollbar_hit(
+                                    inst_area,
+                                    &state.explorer.instances,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    explorer_instances_h_scrollbar_drag =
+                                        Some((si.track_x, si.viewport_width, si.max_scroll));
+                                    let new_scroll = scrollbar_x_to_position(
+                                        mouse.column,
+                                        si.viewport_width,
+                                        si.max_scroll,
+                                    );
+                                    let msg = AppMsg::Explorer(ExplorerMsg::Message(
+                                        ExplorerMessage::Instances(InstancesMsg::Message(
+                                            InstancesMessage::SetHScroll {
+                                                position: new_scroll,
+                                            },
+                                        )),
+                                    ));
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
+                            // IW connections v_scrollbar hit-test.
+                            if let Some(body) =
+                                iw_body_area_for_hit(size, &state)
+                                && body.contains(point)
+                                && matches!(state.iw.pane, crate::app_shell::nav::IwPane::Connections)
+                            {
+                                use crate::features::instance_workspace::connections::{
+                                    msg::*, view,
+                                };
+                                use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+                                if let Some(si) = view::v_scrollbar_hit(
+                                    body,
+                                    &state.iw.connections,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    iw_connections_v_scrollbar_drag = Some((
+                                        si.track_y,
+                                        si.viewport_height,
+                                        si.max_scroll,
+                                    ));
+                                    let new_scroll = scrollbar_y_to_position(
+                                        mouse.row,
+                                        si.viewport_height,
+                                        si.max_scroll,
+                                    );
+                                    let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
+                                        ConnectionsMsg::Message(ConnectionsMessage::SetVScroll {
+                                            position: new_scroll,
+                                        }),
+                                    )));
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
+                            // IW overview v_scrollbar hit-test.
+                            if let Some(body) =
+                                iw_body_area_for_hit(size, &state)
+                                && body.contains(point)
+                                && matches!(state.iw.pane, crate::app_shell::nav::IwPane::Overview)
+                            {
+                                use crate::features::instance_workspace::overview::{
+                                    msg::*, view,
+                                };
+                                use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+                                // overview_rows conn_count parameter for viewport calc;
+                                // 0 is fine for geometry (only affects row content).
+                                if let Some(si) =
+                                    view::v_scrollbar_hit(body, &state.iw.overview, 0, mouse.column, mouse.row)
+                                {
+                                    iw_overview_v_scrollbar_drag = Some((
+                                        si.track_y,
+                                        si.viewport_height,
+                                        si.max_scroll,
+                                    ));
+                                    let new_scroll = scrollbar_y_to_position(
+                                        mouse.row,
+                                        si.viewport_height,
+                                        si.max_scroll,
+                                    );
+                                    let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Overview(
+                                        OverviewMsg::Message(OverviewMessage::SetVScroll {
+                                            position: new_scroll,
+                                        }),
+                                    )));
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
                             // Left-click on the header `Discover` button activates
                             // it, in addition to moving focus to the header.
                             let header_area = Rect::new(0, 0, size.width, 3);
@@ -1472,6 +1641,62 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                                 dirty |= result.dirty;
                             }
+
+                            // Explorer objects h_scrollbar drag.
+                            if let Some((track_x, viewport_width, max_scroll)) = explorer_objects_h_scrollbar_drag {
+                                let rel_x = point.x.saturating_sub(track_x);
+                                let position = scrollbar_x_to_position(rel_x, viewport_width, max_scroll);
+                                use crate::features::explorer::objects::msg::{ObjectsMessage, ObjectsMsg};
+                                use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+                                let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
+                                    ObjectsMsg::Message(ObjectsMessage::SetHScroll { position }),
+                                )));
+                                let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                dirty |= result.dirty;
+                            }
+
+                            // Explorer instances h_scrollbar drag.
+                            if let Some((track_x, viewport_width, max_scroll)) = explorer_instances_h_scrollbar_drag {
+                                let rel_x = point.x.saturating_sub(track_x);
+                                let position = scrollbar_x_to_position(rel_x, viewport_width, max_scroll);
+                                use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
+                                use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+                                let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                                    InstancesMsg::Message(InstancesMessage::SetHScroll { position }),
+                                )));
+                                let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                dirty |= result.dirty;
+                            }
+
+                            // IW connections v_scrollbar drag.
+                            if let Some((track_y, viewport_height, max_scroll)) = iw_connections_v_scrollbar_drag {
+                                let rel_y = point.y.saturating_sub(track_y);
+                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                use crate::features::instance_workspace::connections::msg::{
+                                    ConnectionsMessage, ConnectionsMsg,
+                                };
+                                use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+                                let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
+                                    ConnectionsMsg::Message(ConnectionsMessage::SetVScroll { position: start }),
+                                )));
+                                let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                dirty |= result.dirty;
+                            }
+
+                            // IW overview v_scrollbar drag.
+                            if let Some((track_y, viewport_height, max_scroll)) = iw_overview_v_scrollbar_drag {
+                                let rel_y = point.y.saturating_sub(track_y);
+                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                use crate::features::instance_workspace::overview::msg::{
+                                    OverviewMessage, OverviewMsg,
+                                };
+                                use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+                                let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Overview(
+                                    OverviewMsg::Message(OverviewMessage::SetVScroll { position: start }),
+                                )));
+                                let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                dirty |= result.dirty;
+                            }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
                             history_h_scrollbar_drag = None;
@@ -1483,6 +1708,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             discover_results_v_scrollbar_drag = None;
                             explorer_objects_v_scrollbar_drag = None;
                             explorer_instances_v_scrollbar_drag = None;
+                            explorer_objects_h_scrollbar_drag = None;
+                            explorer_instances_h_scrollbar_drag = None;
+                            iw_connections_v_scrollbar_drag = None;
+                            iw_overview_v_scrollbar_drag = None;
                             if explorer_split_drag {
                                 explorer_split_drag = false;
                                 state.splitter_hover.explorer_splitter_drag = false;
@@ -1780,6 +2009,92 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     ),
                                     _ => unreachable!(),
                                 };
+                                let result = process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    msg,
+                                    &mut state,
+                                );
+                                dirty |= result.dirty;
+                            }
+                        }
+                        // Scroll wheel: route to IW connections when focus is on
+                        // InstanceWorkspace Connections AND mouse is inside IW body.
+                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                            if matches!(state.focus, Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::Connections)) =>
+                        {
+                            let dir: i32 = match mouse.kind {
+                                MouseEventKind::ScrollUp => -1,
+                                _ => 1,
+                            };
+                            let now = std::time::Instant::now();
+                            if let Some((t, d)) = last_wheel
+                                && d == dir
+                                && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                            {
+                                idle_iterations = 0;
+                                continue;
+                            }
+                            last_wheel = Some((now, dir));
+
+                            let size = terminal.size()?;
+                            if let Some(body) = iw_body_area_for_hit(size, &state)
+                                && let point = ratatui::layout::Position::new(mouse.column, mouse.row)
+                                && body.contains(point)
+                            {
+                                use crate::features::instance_workspace::connections::msg::{
+                                    ConnectionsMessage, ConnectionsMsg,
+                                };
+                                use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+                                let msg = match mouse.kind {
+                                    MouseEventKind::ScrollUp => AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
+                                        ConnectionsMsg::Message(ConnectionsMessage::MoveUp),
+                                    ))),
+                                    MouseEventKind::ScrollDown => AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
+                                        ConnectionsMsg::Message(ConnectionsMessage::MoveDown),
+                                    ))),
+                                    _ => unreachable!(),
+                                };
+                                let result = process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    msg,
+                                    &mut state,
+                                );
+                                dirty |= result.dirty;
+                            }
+                        }
+                        // Scroll wheel: route to IW overview when focus is on
+                        // InstanceWorkspace Overview AND mouse is inside IW body.
+                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                            if matches!(state.focus, Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::Overview)) =>
+                        {
+                            let dir: i32 = match mouse.kind {
+                                MouseEventKind::ScrollUp => -1,
+                                _ => 1,
+                            };
+                            let now = std::time::Instant::now();
+                            if let Some((t, d)) = last_wheel
+                                && d == dir
+                                && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                            {
+                                idle_iterations = 0;
+                                continue;
+                            }
+                            last_wheel = Some((now, dir));
+
+                            let size = terminal.size()?;
+                            if let Some(body) = iw_body_area_for_hit(size, &state)
+                                && let point = ratatui::layout::Position::new(mouse.column, mouse.row)
+                                && body.contains(point)
+                            {
+                                use crate::features::instance_workspace::overview::msg::{
+                                    OverviewMessage, OverviewMsg,
+                                };
+                                use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+                                let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Overview(
+                                    OverviewMsg::Message(OverviewMessage::MoveCursor(dir)),
+                                )));
                                 let result = process_message_round(
                                     &effect_runner,
                                     &mut action_rx,
@@ -2138,6 +2453,64 @@ fn sql_tab_area_for_hit(
         inner.width,
         inner.height.saturating_sub(footer_h),
     ))
+}
+
+/// Compute the Instance Workspace's **body** rect (active sub-pane content,
+/// inside the tab bar and parent footer), or `None` when IW is not shown.
+/// Mirrors `instance_workspace/view.rs`'s area splitting logic.
+fn iw_body_area_for_hit(
+    size: ratatui::layout::Size,
+    state: &AppState,
+) -> Option<ratatui::layout::Rect> {
+    if !state.explorer.instances.active_is_instance()
+        || state.modal.is_some()
+        || matches!(state.focus, Pane::Discover(_))
+    {
+        return None;
+    }
+    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let body_top = 3u16;
+    let body_h = size.height.saturating_sub(body_top).saturating_sub(footer_h);
+    if body_h < 5 {
+        return None;
+    }
+    let workspace = workspace_rect_for_hit(size, body_top, body_h, state)?;
+    // IW outer Block (1 col/row border).
+    let inner = ratatui::layout::Rect::new(
+        workspace.x.saturating_add(1),
+        workspace.y.saturating_add(1),
+        workspace.width.saturating_sub(2),
+        workspace.height.saturating_sub(2),
+    );
+    if inner.width == 0 || inner.height < 3 {
+        return None;
+    }
+    // Footer height matches instance_workspace/view.rs's wrapped-line-count
+    // calculation for IW's pane footer + overview status (overview status only
+    // when the active tab is Overview).
+    let mut footer_text =
+        crate::common::view::hints::instance_workspace_footer_text(state.iw.pane);
+    if matches!(state.iw.pane, crate::app_shell::nav::IwPane::Overview)
+        && let Some(status) = state.iw.overview.status.as_deref()
+        && !status.is_empty()
+    {
+        footer_text.push('\n');
+        footer_text.push_str(status);
+    }
+    use crate::common::utils::text_width::wrapped_line_count;
+    let footer_h = wrapped_line_count(&footer_text, inner.width)
+        .max(1)
+        .min(inner.height.saturating_sub(2).max(1));
+    // Split: tab bar (1) + body + footer.
+    let chunks = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(footer_h),
+        ])
+        .split(inner);
+    Some(chunks[1])
 }
 
 /// Compute the context picker overlay rect (in the active tab's editor) for

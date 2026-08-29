@@ -61,10 +61,10 @@ pub fn compute_instances_viewport(
         return None;
     }
     let body = compute_instances_body(area, state)?;
-    // Horizontal scroll needs max_row_width; use pane_scroll_layout which
-    // can reserve 1 col for v_scrollbar when the tree overflows vertically.
-    let max_row_w = state.max_row_width();
-    let layout = pane_scroll_layout(body, max_row_w, total, body.height as usize);
+    // Horizontal scrollbar shown only when the CURRENTLY SELECTED row overflows
+    // (matching history list), not the widest row in the tree.
+    let sel_row_w = state.selected_row_width();
+    let layout = pane_scroll_layout(body, sel_row_w, total, body.height as usize);
     let content = layout.content_area;
 
     let viewport = content.height.max(1) as usize;
@@ -119,6 +119,42 @@ pub fn v_scrollbar_hit(
         track_y: v_bar.y,
         max_scroll: iv.max_scroll,
         viewport_height: usize::from(v_bar.height.max(1)),
+    })
+}
+
+/// Result of [`h_scrollbar_hit`]: everything the drag handler needs for the
+/// horizontal scrollbar.
+pub struct InstancesHScrollInfo {
+    pub track_x: u16,
+    pub max_scroll: usize,
+    /// Track PIXEL width — drag formula needs this.
+    pub viewport_width: usize,
+}
+
+/// Hit-test the instances pane's horizontal scrollbar. Returns the drag
+/// geometry if the click lands on the bar and the selected row actually
+/// overflows the viewport.
+pub fn h_scrollbar_hit(
+    area: Rect,
+    state: &InstancesState,
+    x: u16,
+    y: u16,
+) -> Option<InstancesHScrollInfo> {
+    let iv = compute_instances_viewport(area, state)?;
+    let h_bar = iv.layout.h_scrollbar?;
+    let sel_row_w = state.selected_row_width();
+    let viewport_w = iv.content.width as usize;
+    let max_scroll = sel_row_w.saturating_sub(viewport_w as u16) as usize;
+    if max_scroll == 0 {
+        return None;
+    }
+    if !crate::common::view::pane_scrollbar::point_in_bar(h_bar, x, y) {
+        return None;
+    }
+    Some(InstancesHScrollInfo {
+        track_x: h_bar.x,
+        max_scroll,
+        viewport_width: usize::from(h_bar.width.max(1)),
     })
 }
 
@@ -294,9 +330,14 @@ pub fn render(
         )));
     }
 
-    // Horizontal scrollbar — uses h_scroll to pan content horizontally.
+    // Horizontal scrollbar — h_scroll pans content horizontally. The bar is
+    // shown only when the selected row overflows the viewport (matching
+    // history list), but Paragraph::scroll still uses full max_row_width so
+    // ALL rows can scroll horizontally once the bar is visible.
+    let sel_row_w = state.selected_row_width();
     let max_row_w = state.max_row_width();
     let viewport_w = layout.content_area.width as usize;
+    let max_h_scroll = sel_row_w.saturating_sub(viewport_w as u16) as usize;
     let effective_h = state
         .h_scroll
         .min(max_row_w.saturating_sub(viewport_w as u16));
@@ -304,13 +345,12 @@ pub fn render(
     frame.render_widget(paragraph, content);
 
     if let Some(bar) = layout.h_scrollbar {
-        let max_scroll = max_row_w.saturating_sub(viewport_w as u16) as usize;
         draw_horizontal_pane_scrollbar(
             frame,
             bar,
             state.h_scroll as usize,
             viewport_w,
-            max_scroll,
+            max_h_scroll,
             p,
             false,
         );

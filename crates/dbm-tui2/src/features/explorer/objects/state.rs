@@ -495,6 +495,21 @@ impl ObjectsState {
             .unwrap_or(0)
     }
 
+    /// Display width of the currently selected row. The h_scrollbar is shown
+    /// only when this row overflows the viewport — matching history list.
+    pub fn selected_row_width(&self) -> u16 {
+        self.rows
+            .get(self.cursor)
+            .map(|r| {
+                let indent = r.depth.saturating_mul(2);
+                let marker_w = 1usize;
+                let label_w = unicode_width::UnicodeWidthStr::width(r.label.as_str());
+                let total: usize = indent + marker_w + 1 + label_w;
+                total.try_into().unwrap_or(u16::MAX)
+            })
+            .unwrap_or(0)
+    }
+
     /// Scroll the tree horizontally by `delta` columns, clamped to `[0, max]`.
     /// Returns whether the offset moved, so a no-op at a boundary skips a
     /// redundant repaint (matching the original dbm).

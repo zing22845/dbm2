@@ -39,6 +39,12 @@ pub fn update(
             state.scroll_locked = true;
             dirty |= changed;
         }
+        ObjectsMessage::SetHScroll { position } => {
+            let clamped = position.min(state.max_row_width() as usize);
+            let changed = state.h_scroll as usize != clamped;
+            state.h_scroll = clamped as u16;
+            dirty |= changed;
+        }
         ObjectsMessage::Collapse => {
             dirty |= state.collapse();
         }

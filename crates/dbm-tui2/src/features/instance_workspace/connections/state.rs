@@ -91,6 +91,12 @@ pub struct ConnectionsState {
     pub connections: Vec<InstanceConnection>,
     /// Cursor row within the connection list.
     pub cursor: usize,
+    /// Vertical scroll offset in data rows (0 = top row visible).
+    pub scroll: usize,
+    /// When true, the discover-style cursor anchor is skipped — the viewport
+    /// stays exactly where the user last dragged/scrolled it, even if the
+    /// cursor moves outside it. Reset on any MoveUp/Down.
+    pub scroll_locked: bool,
     /// A cursor to apply once the connections load. Used by session restore,
     /// which must remember the saved row because the list is still empty at
     /// that point (connections load lazily). Consumed by `Loaded`.

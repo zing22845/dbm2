@@ -277,6 +277,35 @@ impl InstancesState {
             .unwrap_or(0)
     }
 
+    /// Display width of the currently selected row. The h_scrollbar is shown
+    /// only when this row overflows the viewport — matching history list.
+    pub fn selected_row_width(&self) -> u16 {
+        let Some((instance_idx, conn_idx)) = self.cursor_selection() else {
+            return 0;
+        };
+        let Some(node) = self.nodes.get(instance_idx) else {
+            return 0;
+        };
+        if let Some(ci) = conn_idx {
+            // Connection row: "    └ name/db".
+            node.connections.get(ci).map_or(0, |c| {
+                let w: usize = 6
+                    + unicode_width::UnicodeWidthStr::width(c.name.as_str())
+                    + unicode_width::UnicodeWidthStr::width(c.database.as_str());
+                w.try_into().unwrap_or(u16::MAX)
+            })
+        } else {
+            // Instance row: " ▸/▾ name".
+            node.instance.as_ref().map_or(0, |inst| {
+                let marker = if node.expanded { "▾" } else { "▸" };
+                let w: usize = 3
+                    + unicode_width::UnicodeWidthStr::width(marker)
+                    + unicode_width::UnicodeWidthStr::width(inst.name.as_str());
+                w.try_into().unwrap_or(u16::MAX)
+            })
+        }
+    }
+
     /// Scroll the tree horizontally by `delta` columns, clamped to `[0, max]`.
     /// Returns whether the scroll offset actually moved, so callers can skip a
     /// redundant repaint when already at a boundary (matching the original dbm,

@@ -61,6 +61,9 @@ pub enum ConnectionsMessage {
     FormChar(char),
     /// Backspace in the active form field.
     FormBackspace,
+    /// Set the vertical scroll position (0 = top row visible). Issued by the
+    /// v_scrollbar drag handler; sets `scroll_locked = true`.
+    SetVScroll { position: usize },
 }
 
 /// Feature message envelope (central-router compatible).

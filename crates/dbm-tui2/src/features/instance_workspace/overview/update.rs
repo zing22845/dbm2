@@ -53,6 +53,20 @@ pub fn update(
             state.cursor = ((state.cursor as i64) + (delta as i64))
                 .clamp(0, (len - 1) as i64) as usize;
             let dirty = state.cursor != prev;
+            if dirty {
+                state.scroll_locked = false;
+            }
+            (state, Vec::new(), Vec::new(), dirty)
+        }
+        OverviewMessage::SetVScroll { position } => {
+            let len = state
+                .instance
+                .as_ref()
+                .map_or(0, |i| super::view::overview_rows(i, 0).len());
+            let prev = state.scroll;
+            state.scroll = position.min(len.saturating_sub(1));
+            state.scroll_locked = true;
+            let dirty = state.scroll != prev;
             (state, Vec::new(), Vec::new(), dirty)
         }
     }

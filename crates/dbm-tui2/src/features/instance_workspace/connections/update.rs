@@ -70,8 +70,20 @@ pub fn update(
             // refresh that reloads identical data does not redraw.
             list_changed || cursor_changed
         }
-        ConnectionsMessage::MoveUp => state.move_up(),
-        ConnectionsMessage::MoveDown => state.move_down(),
+        ConnectionsMessage::MoveUp => {
+            let dirty = state.move_up();
+            if dirty {
+                state.scroll_locked = false;
+            }
+            dirty
+        }
+        ConnectionsMessage::MoveDown => {
+            let dirty = state.move_down();
+            if dirty {
+                state.scroll_locked = false;
+            }
+            dirty
+        }
         ConnectionsMessage::BeginAdd => {
             let changed = state.begin_add();
             if changed {
@@ -298,6 +310,13 @@ pub fn update(
         ConnectionsMessage::FormChar(c) if !c.is_control() => state.form_insert_char(c),
         ConnectionsMessage::FormChar(_) => false,
         ConnectionsMessage::FormBackspace => state.form_backspace(),
+        ConnectionsMessage::SetVScroll { position } => {
+            let max = state.connections.len().saturating_sub(1);
+            let prev = state.scroll;
+            state.scroll = position.min(max);
+            state.scroll_locked = true;
+            state.scroll != prev
+        }
     };
     (state, intents, effects, dirty)
 }
