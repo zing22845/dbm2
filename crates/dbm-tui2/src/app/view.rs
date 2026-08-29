@@ -29,6 +29,7 @@ pub fn render(
     Option<crate::common::editor::EditorHardwareCursor>,
     Option<crate::features::discover::targets::view::TargetsLayoutInfo>,
     Option<usize>,
+    Option<usize>,
 ) {
     // The footer height is dynamic: one line of hints plus the (wrapped) status
     // line when present.
@@ -86,6 +87,7 @@ pub fn render(
     // takes precedence over the editor caret underneath.
     let mut discover_caret = None;
     let targets_layout_ref = std::cell::RefCell::new(None);
+    let results_layout_ref = std::cell::RefCell::new(None);
     if let Pane::Discover(sub) = state.focus {
         let discover_caret_ref = std::cell::RefCell::new(None);
         crate::common::view::modal::render_modal_popup(
@@ -96,23 +98,25 @@ pub fn render(
             75,
             &state.discover,
             |f, t, a, s| {
-                let c = discover_view::render(f, t, a, s, sub, state.splitter_hover.discover_splitter, state.splitter_hover.discover_splitter_drag, &targets_layout_ref);
+                let c = discover_view::render(f, t, a, s, sub, state.splitter_hover.discover_splitter, state.splitter_hover.discover_splitter_drag, &targets_layout_ref, &results_layout_ref);
                 *discover_caret_ref.borrow_mut() = c;
             },
         );
         discover_caret = discover_caret_ref.into_inner();
     }
 
+    let results_scroll_out = results_layout_ref.into_inner();
+
     // Render any active modal (data popup) as a centered overlay.
     if let Some(modal) = &state.modal {
         // Generic titled popup for the picker/confirm/commit-preview modals.
         render_popup_modal(frame, &state.theme, workspace, modal);
         // A modal overlays the workspace, so the editor caret is hidden.
-        return (None, targets_layout_ref.into_inner(), history_v_scroll);
+        return (None, targets_layout_ref.into_inner(), history_v_scroll, results_scroll_out);
     }
     // The discover overlay's inline-edit caret wins over the editor caret
     // underneath when discover is focused.
-    (discover_caret.or(editor_cursor), targets_layout_ref.into_inner(), history_v_scroll)
+    (discover_caret.or(editor_cursor), targets_layout_ref.into_inner(), history_v_scroll, results_scroll_out)
 }
 
 /// Render the footer row: the global footer hints on the left (flexible width)

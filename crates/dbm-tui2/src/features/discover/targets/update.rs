@@ -23,11 +23,23 @@ pub fn update(
     // the same text is treated as a fresh action instead of being swallowed.
     let is_paste = matches!(&msg, TargetsMessage::Paste(_));
     let dirty = match msg {
+        // Manual scroll (scrollbar drag): lock the viewport so cursor anchor
+        // does not override the dragged position until the next cursor move.
+        TargetsMessage::SetVScroll { position } => {
+            let total = state.targets.len();
+            let max = total.saturating_sub(state.target_viewport.max(1));
+            let new = position.min(max);
+            let changed = state.scroll_offset != new;
+            state.scroll_offset = new;
+            state.scroll_locked = true;
+            changed
+        }
         TargetsMessage::MoveUp => {
             let before = state.row;
             state.row = state.row.saturating_sub(1);
             let changed = state.row != before;
             if changed {
+                state.scroll_locked = false;
                 state.ensure_row_visible(state.row);
             }
             changed
@@ -37,6 +49,7 @@ pub fn update(
             state.row = (state.row + 1).min(state.targets.len().saturating_sub(1));
             let changed = state.row != before;
             if changed {
+                state.scroll_locked = false;
                 state.ensure_row_visible(state.row);
             }
             changed
@@ -200,6 +213,7 @@ pub fn update(
             let row = row.min(state.targets.len().saturating_sub(1));
             let changed = state.row != row;
             state.row = row;
+            state.scroll_locked = false;
             if changed {
                 state.ensure_row_visible(state.row);
             }
@@ -213,6 +227,7 @@ pub fn update(
             let changed = state.row != row || state.col != col;
             state.row = row;
             state.col = col;
+            state.scroll_locked = false;
             if state.row != row {
                 state.ensure_row_visible(state.row);
             }
@@ -226,6 +241,7 @@ pub fn update(
             let mut changed = state.row != row || state.col != col;
             state.row = row;
             state.col = col;
+            state.scroll_locked = false;
             if changed {
                 state.ensure_row_visible(state.row);
             }

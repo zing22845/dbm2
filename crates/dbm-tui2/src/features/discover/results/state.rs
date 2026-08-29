@@ -7,8 +7,12 @@ pub struct ResultsState {
     pub items: Vec<dbm_discovery::DiscoveredInstance>,
     /// Cursor row within the (filtered) results.
     pub cursor: usize,
-    /// Scroll offset of the results list.
+    /// Scroll offset of the results list (first visible filtered row).
     pub scroll: usize,
+    /// Manual-scroll flag: when true, the discover-style cursor anchor is
+    /// skipped so that a scrollbar drag keeps its position even if the
+    /// cursor would pull the viewport. Cleared on the next MoveUp/Down.
+    pub scroll_locked: bool,
     /// Whether only unregistered instances are shown.
     pub unregistered_only: bool,
     /// Indices of the currently selected results.
@@ -21,6 +25,7 @@ impl Default for ResultsState {
             items: Vec::new(),
             cursor: 0,
             scroll: 0,
+            scroll_locked: false,
             // Default to hiding already-registered instances: discover is meant
             // to surface *new* hosts, and registered instances cannot be
             // registered again (they would hit ALREADY_REGISTERED). The user can

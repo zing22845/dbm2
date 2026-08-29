@@ -5,7 +5,9 @@ use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
-use crate::common::view::pane_scrollbar::{draw_vertical_pane_scrollbar, pane_scroll_layout};
+use crate::common::view::pane_scrollbar::{
+    PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
+};
 use crate::common::view::theme::Theme;
 
 use super::state::{TargetCol, TargetsState};
@@ -16,6 +18,145 @@ use super::state::{TargetCol, TargetsState};
 pub struct TargetsLayoutInfo {
     pub scroll_offset: usize,
     pub viewport: usize,
+}
+
+/// Shared footer-area computation used by render, hit_test, and the scrollbar
+/// hit-test helper. Keeps the footer height, body area, and everything that
+/// depends on them in one place so all three paths agree on which rows are
+/// visible (same pattern as the history/results "effective_layout" helpers).
+pub fn compute_targets_body_and_footer(
+    area: Rect,
+    state: &TargetsState,
+) -> Option<(Rect, u16)> {
+    use crate::common::utils::text_width::wrapped_line_count;
+    use crate::common::view::hints::discover_targets_footer_text;
+
+    let block = Block::default().borders(Borders::ALL);
+    let inner = block.inner(area);
+    if inner.width == 0 || inner.height == 0 {
+        return None;
+    }
+
+    let footer_text = discover_targets_footer_text(
+        state.editing,
+        state.has_loopback(),
+        state.status.as_deref(),
+    );
+    let footer_h = if footer_text.is_empty() {
+        0
+    } else {
+        wrapped_line_count(&footer_text, inner.width)
+            .max(1)
+            .min(inner.height.saturating_sub(1).max(1))
+    };
+
+    let body = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(footer_h),
+    );
+    if body.width == 0 || body.height == 0 {
+        return None;
+    }
+    Some((body, footer_h))
+}
+
+/// Result of [`compute_targets_viewport`]: the pure viewport calculation
+/// shared by `render`, `hit_test`, and `v_scrollbar_hit`. Keeping all three
+/// honest to the same formula eliminates anchor drift between the drawn rows,
+/// the click-resolved row, and the scrollbar thumb position — exactly the
+/// lesson history/results taught us.
+pub struct TargetsViewport {
+    pub body: Rect,
+    pub layout: PaneScrollLayout,
+    pub content: Rect,
+    /// Data rows visible in the content area (content.height - 1 for the
+    /// Table header row).
+    pub viewport: usize,
+    /// Cursor-anchored v_scroll (first visible data row index).
+    pub start: usize,
+    pub total: usize,
+    pub max_scroll: usize,
+}
+
+/// Compute the targets list viewport given the outer `area` and `state`.
+/// Encodes footer computation, `pane_scroll_layout`, and discover-style
+/// cursor anchoring — all in one place. When `scroll_locked` is set
+/// (scrollbar drag / manual SetVScroll) the anchor is skipped so the
+/// manual scroll position is honoured until the next cursor move.
+pub fn compute_targets_viewport(
+    area: Rect,
+    state: &TargetsState,
+) -> Option<TargetsViewport> {
+    let total = state.targets.len();
+    if total == 0 {
+        return None;
+    }
+    let (body, _footer_h) = compute_targets_body_and_footer(area, state)?;
+    let viewport_rows = body.height as usize;
+    let layout = pane_scroll_layout(body, body.width, total, viewport_rows);
+    let content = layout.content_area;
+
+    // Table reserves one row for its header → visible data rows are one less.
+    let viewport = content.height.saturating_sub(1).max(1) as usize;
+    let max_scroll = total.saturating_sub(viewport.max(1));
+
+    // Discover-style anchor — skipped when scroll_locked (manual scroll).
+    let scroll_locked = state.scroll_locked;
+    let mut start = state.scroll_offset.min(total.saturating_sub(1));
+    if !scroll_locked {
+        if state.row < start {
+            start = state.row;
+        } else if state.row >= start + viewport {
+            start = state.row + 1 - viewport;
+        }
+    }
+
+    Some(TargetsViewport {
+        body,
+        layout,
+        content,
+        viewport,
+        start,
+        total,
+        max_scroll,
+    })
+}
+
+/// Result of [`v_scrollbar_hit`]: carries everything the drag handler needs
+/// to compute the new scroll position on each pointer-move event.
+pub struct TargetsVScrollInfo {
+    pub track_y: u16,
+    pub max_scroll: usize,
+    /// Track PIXEL height — the drag formula uses this to linearly map
+    /// pointer Y (pixels) to scroll position. NOT the data-row count
+    /// (which would be off-by-viewport).
+    pub viewport_height: usize,
+}
+
+/// Hit-test the targets pane's vertical scrollbar. Returns scrollbar drag
+/// info when `(x, y)` lands on the v_scrollbar, or `None` otherwise.
+pub fn v_scrollbar_hit(
+    area: Rect,
+    state: &TargetsState,
+    x: u16,
+    y: u16,
+) -> Option<TargetsVScrollInfo> {
+    let tv = compute_targets_viewport(area, state)?;
+    let v_bar = tv.layout.v_scrollbar?;
+    let max_scroll = tv.max_scroll;
+    if max_scroll == 0 {
+        return None;
+    }
+    if !crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y) {
+        return None;
+    }
+    Some(TargetsVScrollInfo {
+        track_y: v_bar.y,
+        max_scroll,
+        viewport_height: usize::from(v_bar.height.max(1)),
+    })
 }
 
 /// The target list's table column layout. Used both by the `Table` render and
@@ -43,7 +184,6 @@ pub fn render(
     focus: crate::app_shell::nav::DiscoverPane,
     layout_out: &std::cell::RefCell<Option<TargetsLayoutInfo>>,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
-    use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::{discover_targets_footer_text, draw_pane_footer};
     let p = theme.palette();
     let focused = focus == crate::app_shell::nav::DiscoverPane::Targets;
@@ -60,57 +200,27 @@ pub fn render(
         return None;
     }
 
-    // The footer may span the hints line plus a loopback note and/or the last
-    // paste/undo/redo status line. Size it to the actual wrapped line count at
-    // the pane's width (a long loopback note wraps under a narrow pane), but
-    // never let it crowd out the whole body.
-    let footer_h = if footer_text.is_empty() {
-        0
-    } else {
-        wrapped_line_count(&footer_text, inner.width)
-            .max(1)
-            .min(inner.height.saturating_sub(1).max(1))
-    };
+    // ---- SHARED VIEWPORT CALCULATION ----
+    // One source of truth for render, hit_test, and scrollbar hit-test.
+    let tv = compute_targets_viewport(area, state)?;
+    let body = tv.body;
+    let content = tv.content;
+    let layout = &tv.layout;
+    let viewport = tv.viewport;
+    let start = tv.start;
 
-    // Body is the inner area minus the footer strip. Rendered as a table with
-    // `#` line-number, `Host` and `Ports` columns (matching the original dbm),
-    // so host and ports are independently editable and visible.
-    let body = Rect::new(
-        inner.x,
-        inner.y,
-        inner.width,
-        inner.height.saturating_sub(footer_h),
-    );
+    // Write back layout info so the render loop can update scroll_offset and
+    // target_viewport for the next frame (discover-style layout_out pattern).
+    *layout_out.borrow_mut() = Some(TargetsLayoutInfo {
+        scroll_offset: start,
+        viewport,
+    });
+
     let mut caret: Option<crate::common::editor::EditorHardwareCursor> = None;
     if body.width > 0 && body.height > 0 {
         let selected = focused && state.row < state.targets.len();
         let header = ratatui::widgets::Row::new(["#", "Host", "Ports"])
             .style(Style::default().add_modifier(Modifier::BOLD));
-        // Reserve a vertical scrollbar column when the list overflows its
-        // viewport. The scroll offset is stored in state and only adjusted
-        // when the cursor would move outside the visible window — matching
-        // the original dbm's `ensure_targets_visible` behavior.
-        let viewport_rows = body.height as usize;
-        let layout = pane_scroll_layout(body, body.width, state.targets.len(), viewport_rows);
-        let content = layout.content_area;
-        // A Table reserves one row for its header, so the visible content rows
-        // are one less than the area height. Use that as the scroll viewport.
-        let viewport = content.height.saturating_sub(1).max(1) as usize;
-        let total = state.targets.len();
-        // Start from the stored scroll_offset, clamped to valid range.
-        let mut start = state.scroll_offset.min(total.saturating_sub(1));
-        // Only adjust scroll when the cursor would move outside the viewport.
-        if state.row < start {
-            start = state.row;
-        } else if state.row >= start + viewport {
-            start = state.row + 1 - viewport;
-        }
-        // Write back the computed layout info so the render loop can update
-        // the state's scroll_offset and target_viewport for next frame.
-        *layout_out.borrow_mut() = Some(TargetsLayoutInfo {
-            scroll_offset: start,
-            viewport,
-        });
         let rows = state
             .targets
             .iter()
@@ -185,6 +295,7 @@ pub fn render(
         }
     }
 
+    let footer_h = inner.height.saturating_sub(body.height);
     if footer_h > 0 {
         let footer_area = Rect::new(inner.x, inner.y + body.height, inner.width, footer_h);
         draw_pane_footer(frame, theme, footer_area, &footer_text);
@@ -241,56 +352,18 @@ pub fn hit_test(
     click_x: u16,
     click_y: u16,
 ) -> Option<(usize, Option<TargetCol>)> {
-    use crate::common::utils::text_width::wrapped_line_count;
+    let tv = compute_targets_viewport(area, state)?;
+    let content = tv.content;
+    let viewport = tv.viewport;
+    let start = tv.start;
 
-    let block = Block::default().borders(Borders::ALL);
-    let inner = block.inner(area);
-    if inner.width == 0 || inner.height == 0 {
-        return None;
-    }
-
-    let footer_text = crate::common::view::hints::discover_targets_footer_text(
-        state.editing,
-        state.has_loopback(),
-        state.status.as_deref(),
-    );
-    let footer_h = if footer_text.is_empty() {
-        0
-    } else {
-        wrapped_line_count(&footer_text, inner.width)
-            .max(1)
-            .min(inner.height.saturating_sub(1).max(1))
-    };
-
-    let body = Rect::new(
-        inner.x,
-        inner.y,
-        inner.width,
-        inner.height.saturating_sub(footer_h),
-    );
-    if body.width == 0 || body.height == 0 {
-        return None;
-    }
-
-    let viewport_rows = body.height as usize;
-    let layout = pane_scroll_layout(body, body.width, state.targets.len(), viewport_rows);
-    let content = layout.content_area;
-
+    // Click must be inside the content area (not scrollbar, not outside block).
     if click_x < content.x
         || click_x >= content.x + content.width
         || click_y < content.y
         || click_y >= content.y + content.height
     {
         return None;
-    }
-
-    let viewport = content.height.saturating_sub(1).max(1) as usize;
-    let total = state.targets.len();
-    let mut start = state.scroll_offset.min(total.saturating_sub(1));
-    if state.row < start {
-        start = state.row;
-    } else if state.row >= start + viewport {
-        start = state.row + 1 - viewport;
     }
 
     let row_in_content = (click_y - content.y) as usize;

@@ -11,6 +11,14 @@ pub enum ResultsMessage {
     ToggleSelect,
     /// Toggle the unregistered-only filter.
     ToggleUnregisteredFilter,
+    /// Programmatically set the viewport start (scrollbar drag / wheel).
+    /// Clamped to `[0, row_count - viewport]`. Sets `scroll_locked = true`
+    /// so the discover-style anchor does not fight the manual scroll until
+    /// the next cursor move.
+    SetVScroll { position: usize },
+    /// Set cursor to a specific filtered row index (mouse click, etc.).
+    /// Clamped to visible range; clears `scroll_locked` (user is navigating).
+    SetCursor { row: usize },
 }
 
 /// Feature message envelope (central-router compatible).

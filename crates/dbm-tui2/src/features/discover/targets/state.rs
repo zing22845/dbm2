@@ -58,6 +58,10 @@ pub struct TargetsState {
     /// Last computed viewport height (data rows, excluding the header).
     /// Updated from the render loop so update handlers can clamp scroll.
     pub target_viewport: usize,
+    /// When true, cursor-anchored viewport scrolling is skipped so a manual
+    /// scroll (scrollbar drag / SetVScroll) is honoured until the next cursor
+    /// move. Same pattern as history/results ListStates.
+    pub scroll_locked: bool,
 }
 
 

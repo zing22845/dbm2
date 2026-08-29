@@ -28,6 +28,7 @@ pub fn render(
     splitter_hover: bool,
     splitter_drag: bool,
     targets_layout_out: &std::cell::RefCell<Option<targets_view::TargetsLayoutInfo>>,
+    results_layout_out: &std::cell::RefCell<Option<usize>>,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::{discover_engine_footer_text, discover_footer_text, draw_pane_footer};
@@ -84,7 +85,7 @@ pub fn render(
 
     let caret = targets_view::render(frame, theme, body.targets, &state.targets, focus, targets_layout_out);
     splitter_view::render(frame, &body, splitter_hover, splitter_drag);
-    results_view::render(frame, theme, body.results, &state.results, focus);
+    results_view::render(frame, theme, body.results, &state.results, focus, results_layout_out);
 
     // Discover dialog footer: rendered directly (no separator dashes), so the
     // style matches every other footer.

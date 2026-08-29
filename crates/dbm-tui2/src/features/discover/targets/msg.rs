@@ -46,6 +46,10 @@ pub enum TargetsMessage {
     SelectCell { row: usize, col: TargetCol },
     /// Begin edit on a specific cell (double-click on a cell).
     BeginEditCell { row: usize, col: TargetCol },
+    /// Manually set the vertical scroll offset (scrollbar drag / page-scroll).
+    /// Sets `scroll_locked` so the anchored cursor viewport does not override
+    /// this manual position until the next cursor move.
+    SetVScroll { position: usize },
 }
 
 /// Feature message envelope (central-router compatible).

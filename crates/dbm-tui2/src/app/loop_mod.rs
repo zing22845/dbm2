@@ -152,6 +152,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     let mut editor_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
     let mut results_h_scrollbar_drag: Option<(u16, usize, usize)> = None;
     let mut results_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    let mut discover_targets_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    let mut discover_results_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
 
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
@@ -227,12 +229,14 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             let editor_cursor = std::cell::RefCell::new(None);
             let targets_layout = std::cell::RefCell::new(None);
             let history_v_scroll_out = std::cell::RefCell::new(None);
+            let results_scroll_out = std::cell::RefCell::new(None);
             tracing::debug!("render: begin terminal.draw");
             terminal.draw(|frame| {
-                let (c, t, h) = render(frame, &state);
+                let (c, t, h, r) = render(frame, &state);
                 *editor_cursor.borrow_mut() = c;
                 *targets_layout.borrow_mut() = t;
                 *history_v_scroll_out.borrow_mut() = h;
+                *results_scroll_out.borrow_mut() = r;
             })?;
             tracing::debug!("render: terminal.draw done");
             crate::common::editor::apply_hardware_cursor(editor_cursor.into_inner())?;
@@ -242,6 +246,13 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                 let targets = &mut state.discover.targets;
                 targets.scroll_offset = info.scroll_offset;
                 targets.target_viewport = info.viewport;
+            }
+            // Feed back the discover results viewport start so the next frame's
+            // anchor sees the reconciled scroll value (required because the
+            // viewport height depends on terminal size, which only the renderer
+            // knows).
+            if let Some(scroll) = results_scroll_out.into_inner() {
+                state.discover.results.scroll = scroll;
             }
             // Feed back the reconciled history v_scroll (viewport start) to
             // the state — required because the viewport height depends on
@@ -776,7 +787,41 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     msg::{TargetsMessage, TargetsMsg},
                                     view,
                                 };
-                                if let Some((row, col)) =
+                                // 1. Scrollbar hit-test first — scrollbar sits
+                                //    outside content area so hit_test misses it.
+                                //    If we hit the v_scrollbar, start a drag.
+                                if let Some(si) = view::v_scrollbar_hit(
+                                    layout.targets,
+                                    &state.discover.targets,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    discover_targets_v_scrollbar_drag =
+                                        Some((si.track_y, si.viewport_height, si.max_scroll));
+                                    let new_scroll = scrollbar_y_to_position(
+                                        mouse.row,
+                                        si.viewport_height,
+                                        si.max_scroll,
+                                    );
+                                    let msg = crate::app::AppMsg::Discover(
+                                        crate::features::discover::msg::DiscoverMsg::Message(
+                                            crate::features::discover::msg::DiscoverMessage::Targets(
+                                                TargetsMsg::Message(TargetsMessage::SetVScroll {
+                                                    position: new_scroll,
+                                                }),
+                                            ),
+                                        ),
+                                    );
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                                // 2. Content-area click: select row / cell.
+                                else if let Some((row, col)) =
                                     view::hit_test(layout.targets, &state.discover.targets, mouse.column, mouse.row)
                                 {
                                     let msg = if is_double_click {
@@ -821,6 +866,100 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         &mut state,
                                     );
                                     dirty |= result.dirty;
+                                }
+                            }
+
+                            // Discover results pane click handler — v_scrollbar
+                            // hit-test first, then content row click (select +
+                            // toggle). Much simpler than targets (no cells).
+                            if let Pane::Discover(sub) = state.focus
+                                && !state.discover.close_confirm
+                                && !discover_split_drag
+                                && matches!(sub, crate::app_shell::nav::DiscoverPane::Results)
+                                && let Some(workspace) =
+                                    workspace_rect_for_hit(size, body_top, body_h, &state)
+                                && let discover_popup =
+                                    crate::common::view::modal::popup_rect(workspace, 75, 75)
+                                && let body = crate::features::discover::view::discover_body_area(
+                                    discover_popup,
+                                    &state.discover,
+                                )
+                                && !body.is_empty()
+                                && let layout = crate::features::discover::splitter::view::discover_body_layout(
+                                    body,
+                                    state.discover.splitter.targets_height,
+                                )
+                                && layout.results.contains(point)
+                            {
+                                use crate::features::discover::results::{
+                                    msg::{ResultsMessage, ResultsMsg},
+                                    view,
+                                };
+                                use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
+                                // 1. Scrollbar hit-test first.
+                                if let Some(si) = view::v_scrollbar_hit(
+                                    layout.results,
+                                    &state.discover.results,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    discover_results_v_scrollbar_drag =
+                                        Some((si.track_y, si.viewport_height, si.max_scroll));
+                                    let new_scroll = scrollbar_y_to_position(
+                                        mouse.row,
+                                        si.viewport_height,
+                                        si.max_scroll,
+                                    );
+                                    let msg = AppMsg::Discover(DiscoverMsg::Message(
+                                        DiscoverMessage::Results(ResultsMsg::Message(
+                                            ResultsMessage::SetVScroll {
+                                                position: new_scroll,
+                                            },
+                                        )),
+                                    ));
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                                // 2. Content-area click: select row. A single
+                                //    click moves cursor + toggles selection (the
+                                //    discover results pane's primary interaction).
+                                else if let Some(row) = view::hit_test(
+                                    layout.results,
+                                    &state.discover.results,
+                                    mouse.column,
+                                    mouse.row,
+                                ) {
+                                    // Move cursor to clicked row first (also
+                                    // clears scroll_locked), then toggle selection.
+                                    let focus_msg = AppMsg::Discover(DiscoverMsg::Message(
+                                        DiscoverMessage::Results(ResultsMsg::Message(
+                                            ResultsMessage::SetCursor { row },
+                                        )),
+                                    ));
+                                    let r1 = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        focus_msg,
+                                        &mut state,
+                                    );
+                                    dirty |= r1.dirty;
+                                    let toggle_msg = AppMsg::Discover(DiscoverMsg::Message(
+                                        DiscoverMessage::Results(ResultsMsg::Message(
+                                            ResultsMessage::ToggleSelect,
+                                        )),
+                                    ));
+                                    let r2 = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        toggle_msg,
+                                        &mut state,
+                                    );
+                                    dirty |= r2.dirty;
                                 }
                             }
 
@@ -1189,6 +1328,33 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     results_v_scrollbar_drag = None;
                                 }
                             }
+
+                            // Discover targets v_scrollbar drag: same linear
+                            // mapping as history/results.
+                            if let Some((track_y, viewport_height, max_scroll)) = discover_targets_v_scrollbar_drag {
+                                let rel_y = point.y.saturating_sub(track_y);
+                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
+                                use crate::features::discover::targets::msg::{TargetsMessage, TargetsMsg};
+                                let msg = AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Targets(
+                                    TargetsMsg::Message(TargetsMessage::SetVScroll { position: start }),
+                                )));
+                                let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                dirty |= result.dirty;
+                            }
+
+                            // Discover results v_scrollbar drag: same pattern.
+                            if let Some((track_y, viewport_height, max_scroll)) = discover_results_v_scrollbar_drag {
+                                let rel_y = point.y.saturating_sub(track_y);
+                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
+                                use crate::features::discover::results::msg::{ResultsMessage, ResultsMsg};
+                                let msg = AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Results(
+                                    ResultsMsg::Message(ResultsMessage::SetVScroll { position: start }),
+                                )));
+                                let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                dirty |= result.dirty;
+                            }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
                             history_h_scrollbar_drag = None;
@@ -1196,6 +1362,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             editor_v_scrollbar_drag = None;
                             results_h_scrollbar_drag = None;
                             results_v_scrollbar_drag = None;
+                            discover_targets_v_scrollbar_drag = None;
+                            discover_results_v_scrollbar_drag = None;
                             if explorer_split_drag {
                                 explorer_split_drag = false;
                                 state.splitter_hover.explorer_splitter_drag = false;
@@ -1293,6 +1461,77 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         crate::features::discover::msg::DiscoverMsg::Message(
                                             crate::features::discover::msg::DiscoverMessage::Targets(
                                                 TargetsMsg::Message(TargetsMessage::MoveDown),
+                                            ),
+                                        ),
+                                    ),
+                                    _ => unreachable!(),
+                                };
+                                let result = process_message_round(
+                                    &effect_runner,
+                                    &mut action_rx,
+                                    msg,
+                                    &mut state,
+                                );
+                                dirty |= result.dirty;
+                            }
+                        }
+                        // Scroll wheel: route to the discover results pane
+                        // when focus is on Results and mouse is inside it.
+                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                            if matches!(state.focus, Pane::Discover(crate::app_shell::nav::DiscoverPane::Results))
+                                && !state.discover.close_confirm =>
+                        {
+                            let dir: i32 = match mouse.kind {
+                                MouseEventKind::ScrollUp => -1,
+                                _ => 1,
+                            };
+                            let now = std::time::Instant::now();
+                            if let Some((t, d)) = last_wheel
+                                && d == dir
+                                && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                            {
+                                idle_iterations = 0;
+                                continue;
+                            }
+                            last_wheel = Some((now, dir));
+
+                            let size = terminal.size()?;
+                            let footer_h =
+                                footer_view::footer_height(&state.footer, size.width);
+                            let body_top = 3u16;
+                            let body_h =
+                                size.height.saturating_sub(body_top).saturating_sub(footer_h);
+                            let point = ratatui::layout::Position::new(mouse.column, mouse.row);
+                            if let Some(workspace) =
+                                workspace_rect_for_hit(size, body_top, body_h, &state)
+                                && let discover_popup =
+                                    crate::common::view::modal::popup_rect(workspace, 75, 75)
+                                && let body = crate::features::discover::view::discover_body_area(
+                                    discover_popup,
+                                    &state.discover,
+                                )
+                                && !body.is_empty()
+                                && let layout = crate::features::discover::splitter::view::discover_body_layout(
+                                    body,
+                                    state.discover.splitter.targets_height,
+                                )
+                                && layout.results.contains(point)
+                            {
+                                use crate::features::discover::results::msg::{
+                                    ResultsMessage, ResultsMsg,
+                                };
+                                let msg = match mouse.kind {
+                                    MouseEventKind::ScrollUp => AppMsg::Discover(
+                                        crate::features::discover::msg::DiscoverMsg::Message(
+                                            crate::features::discover::msg::DiscoverMessage::Results(
+                                                ResultsMsg::Message(ResultsMessage::MoveUp),
+                                            ),
+                                        ),
+                                    ),
+                                    MouseEventKind::ScrollDown => AppMsg::Discover(
+                                        crate::features::discover::msg::DiscoverMsg::Message(
+                                            crate::features::discover::msg::DiscoverMessage::Results(
+                                                ResultsMsg::Message(ResultsMessage::MoveDown),
                                             ),
                                         ),
                                     ),
