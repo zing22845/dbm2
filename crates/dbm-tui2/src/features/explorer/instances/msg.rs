@@ -34,6 +34,15 @@ pub enum InstancesMessage {
     /// original dbm's `n` key, which forces a new tab regardless of any
     /// already-open tabs for that connection).
     NewConnectionTab,
+    /// Request to add a new connection on the current instance — the shell
+    /// intercepts this and opens the instance-workspace connections pane with
+    /// the add-connection form pre-filled for the parent instance. Works from
+    /// both instance rows (add under that instance) and connection rows (add
+    /// under the connection's parent instance).
+    AddConnection,
+    /// Request to edit the connection under the cursor. Only meaningful on a
+    /// connection row; on an instance row it is a no-op (the shell drops it).
+    EditConnection,
     /// Reload a specific instance's connections from the store (used after a
     /// connection is added/edited/deleted inside the instance workspace, so the
     /// tree reflects the change immediately).

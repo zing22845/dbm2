@@ -25,6 +25,17 @@ pub enum InstancesIntent {
         instance_idx: usize,
         connection_idx: usize,
     },
+    /// The user pressed `a` to add a connection on a specific instance.
+    /// Dispatched by the shell to open the IW connections pane and auto-trigger
+    /// `BeginAdd` for that instance.
+    RequestAddConnection { instance_idx: usize },
+    /// The user pressed `i` on a connection row to edit it. Dispatched by the
+    /// shell to open the IW connections pane and auto-trigger `BeginEdit` for
+    /// that connection.
+    RequestEditConnection {
+        instance_idx: usize,
+        connection_idx: usize,
+    },
 }
 
 impl Intent for InstancesIntent {
@@ -37,7 +48,9 @@ impl Intent for InstancesIntent {
         match self {
             InstancesIntent::OpenInstanceWorkspace { .. }
             | InstancesIntent::OpenConnectionWorkspace { .. }
-            | InstancesIntent::NewConnectionWorkspace { .. } => None,
+            | InstancesIntent::NewConnectionWorkspace { .. }
+            | InstancesIntent::RequestAddConnection { .. }
+            | InstancesIntent::RequestEditConnection { .. } => None,
         }
     }
 }

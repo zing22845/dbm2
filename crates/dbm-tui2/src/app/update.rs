@@ -560,6 +560,122 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         }
                     }
                 }
+                if let ExplorerIntent::Instances(
+                    crate::features::explorer::instances::intent::InstancesIntent::RequestAddConnection {
+                        instance_idx,
+                    },
+                ) = intent
+                {
+                    let instance_name = state
+                        .explorer
+                        .instances
+                        .nodes
+                        .get(*instance_idx)
+                        .and_then(|n| n.instance.as_ref())
+                        .map(|i| i.name.clone())
+                        .unwrap_or_default();
+                    if !instance_name.is_empty() {
+                        state.explorer.instances.set_active_instance(*instance_idx);
+                        // Lazy-load connections if not loaded yet (needed so
+                        // the IW connections pane has something to display).
+                        if state.explorer.instances.nodes.get(*instance_idx).is_some_and(|n| !n.loaded) {
+                            result.effects.push(box_effect(ExplorerEffect::Instances(
+                                InstancesEffect::LoadConnections {
+                                    instance_idx: *instance_idx,
+                                    instance_name: instance_name.clone(),
+                                },
+                            )));
+                        }
+                        // Open the IW for this instance.
+                        let iw = std::mem::take(&mut state.iw);
+                        let (iw2, i, e, _d) = iw_update(
+                            crate::features::instance_workspace::msg::IwMessage::OpenInstance {
+                                instance_name: instance_name.clone(),
+                            },
+                            iw,
+                        );
+                        state.iw = iw2;
+                        result.intents.extend(i.into_iter().map(box_intent));
+                        result.effects.extend(e.into_iter().map(box_effect));
+                        // Switch focus to IW connections pane.
+                        result.pending.push_back(focus_changed(Pane::InstanceWorkspace(
+                            crate::app_shell::nav::IwPane::Connections,
+                        )));
+                        // Auto-trigger BeginAdd — IW connections cursor is at 0,
+                        // so BeginAdd opens a blank form (that's the correct
+                        // behavior regardless of which row the user pressed `a`
+                        // on in the explorer tree).
+                        result.pending.push_back(AppMsg::Iw(
+                            crate::features::instance_workspace::msg::IwMsg::Message(
+                                crate::features::instance_workspace::msg::IwMessage::Connections(
+                                    crate::features::instance_workspace::connections::msg::ConnectionsMsg::Message(
+                                        crate::features::instance_workspace::connections::msg::ConnectionsMessage::BeginAdd,
+                                    ),
+                                ),
+                            ),
+                        ));
+                    }
+                }
+                if let ExplorerIntent::Instances(
+                    crate::features::explorer::instances::intent::InstancesIntent::RequestEditConnection {
+                        instance_idx,
+                        connection_idx: _explorer_conn_idx,
+                    },
+                ) = intent
+                {
+                    let instance_name = state
+                        .explorer
+                        .instances
+                        .nodes
+                        .get(*instance_idx)
+                        .and_then(|n| n.instance.as_ref())
+                        .map(|i| i.name.clone())
+                        .unwrap_or_default();
+                    if !instance_name.is_empty() {
+                        state.explorer.instances.set_active_instance(*instance_idx);
+                        // Ensure the parent instance is expanded so the
+                        // connection row stays visible in the tree.
+                        let expanded = state.explorer.instances.expand();
+                        let _ = expanded; // no-op if already expanded
+                        // Lazy-load connections.
+                        if state.explorer.instances.nodes.get(*instance_idx).is_some_and(|n| !n.loaded) {
+                            result.effects.push(box_effect(ExplorerEffect::Instances(
+                                InstancesEffect::LoadConnections {
+                                    instance_idx: *instance_idx,
+                                    instance_name: instance_name.clone(),
+                                },
+                            )));
+                        }
+                        // Open IW, switch to connections pane.
+                        let iw = std::mem::take(&mut state.iw);
+                        let (iw2, i, e, _d) = iw_update(
+                            crate::features::instance_workspace::msg::IwMessage::OpenInstance {
+                                instance_name: instance_name.clone(),
+                            },
+                            iw,
+                        );
+                        state.iw = iw2;
+                        result.intents.extend(i.into_iter().map(box_intent));
+                        result.effects.extend(e.into_iter().map(box_effect));
+                        result.pending.push_back(focus_changed(Pane::InstanceWorkspace(
+                            crate::app_shell::nav::IwPane::Connections,
+                        )));
+                        // Auto-trigger BeginEdit.
+                        // TODO: align IW connections cursor to the specific
+                        // connection the user selected in the explorer so
+                        // BeginEdit opens the right form (currently edits the
+                        // connection at cursor 0).
+                        result.pending.push_back(AppMsg::Iw(
+                            crate::features::instance_workspace::msg::IwMsg::Message(
+                                crate::features::instance_workspace::msg::IwMessage::Connections(
+                                    crate::features::instance_workspace::connections::msg::ConnectionsMsg::Message(
+                                        crate::features::instance_workspace::connections::msg::ConnectionsMessage::BeginEdit,
+                                    ),
+                                ),
+                            ),
+                        ));
+                    }
+                }
                 // Cross-feature: opening an object (e.g. a table) from the object
                 // tree. Mirroring the original dbm's double-click behavior:
                 //   - a table/view/matview runs a `SELECT * FROM "schema"."table"`

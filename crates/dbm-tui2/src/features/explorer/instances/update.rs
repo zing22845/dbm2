@@ -245,6 +245,26 @@ pub fn update(
             }
             false
         }
+        InstancesMessage::AddConnection => {
+            // `a` works on both row kinds: on an instance row the new
+            // connection belongs to that instance, on a connection row it
+            // belongs to the connection's parent.
+            if let Some((instance_idx, _)) = state.cursor_selection() {
+                intents.push(InstancesIntent::RequestAddConnection { instance_idx });
+            }
+            false
+        }
+        InstancesMessage::EditConnection => {
+            // `i` is meaningful only on a connection row; instance rows are
+            // dropped silently (no intent, no dirty).
+            if let Some((instance_idx, Some(conn_idx))) = state.cursor_selection() {
+                intents.push(InstancesIntent::RequestEditConnection {
+                    instance_idx,
+                    connection_idx: conn_idx,
+                });
+            }
+            false
+        }
     };
     (state, intents, effects, dirty)
 }

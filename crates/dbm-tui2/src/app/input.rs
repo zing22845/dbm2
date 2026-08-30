@@ -649,6 +649,8 @@ fn instances_key(key: KeyEvent, term_width: u16) -> Option<AppMsg> {
         KeyCode::Char('n') => InstancesMessage::NewConnectionTab,
         KeyCode::Char('l') => InstancesMessage::Expand,
         KeyCode::Char('h') => InstancesMessage::Collapse,
+        KeyCode::Char('a') => InstancesMessage::AddConnection,
+        KeyCode::Char('i') => InstancesMessage::EditConnection,
         KeyCode::Right => InstancesMessage::ScrollHorizontal { delta: 1, term_width },
         KeyCode::Left => InstancesMessage::ScrollHorizontal { delta: -1, term_width },
         _ => return None,
