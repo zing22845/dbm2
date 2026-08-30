@@ -23,7 +23,11 @@ dbm-driver-pg = { workspace = true }
 dbm-store = { workspace = true }
 edtui = { workspace = true }
 futures = "0.3"
-ratatui = { workspace = true }
+# `unstable-rendered-line-info` exposes `Paragraph::line_count`, used by
+# `common::utils::text_width::wrapped_line_count` to size pane footers exactly as
+# the renderer wraps them. Still unstable in 0.30.2 (the latest); see the
+# rationale and fallback noted on `wrapped_line_count`.
+ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
 ratatui-themes = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

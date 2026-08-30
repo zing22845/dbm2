@@ -413,6 +413,51 @@ mod tests {
         assert_eq!(footer_height("", 50), 1);
     }
 
+    /// Ground truth: render `text` and count the rows that received content.
+    fn rendered_rows(text: &str, cols: u16) -> usize {
+        use ratatui::buffer::Buffer;
+        use ratatui::layout::Rect;
+        use ratatui::widgets::{Paragraph, Widget, Wrap};
+
+        let area = Rect::new(0, 0, cols, 16);
+        let mut buf = Buffer::empty(area);
+        Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .render(area, &mut buf);
+        let mut rows = 0usize;
+        for y in 0..area.height {
+            if (0..area.width).any(|x| buf[(x, y)].symbol() != " ") {
+                rows = y as usize + 1;
+            }
+        }
+        rows
+    }
+
+    #[test]
+    fn explorer_footer_height_never_clips_the_hint() {
+        // Regression: the explorer panes reserve `footer_height` rows for their
+        // hint strip. Estimating rows as `width / cols` under-counted because the
+        // renderer wraps at *word* boundaries, so on a narrow explorer the last
+        // hint was clipped away (e.g. "Collapse: h" vanishing right after
+        // "Expand: l"). Both explorer panes share this helper, so both are
+        // covered here.
+        let texts = [
+            instances_pane_footer_text(true),
+            instances_pane_footer_text(false),
+            objects_pane_footer_text(),
+        ];
+        for text in texts {
+            for cols in [80u16, 60, 45, 40, 35, 30, 25, 20, 15, 12] {
+                let reserved = footer_height(&text, cols) as usize;
+                let rows = rendered_rows(&text, cols);
+                assert!(
+                    reserved >= rows,
+                    "footer_height {reserved} clips {rows} rendered rows at {cols} cols: {text:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn pane_search_active_footer_lists_chords() {
         let footer = pane_search_active_footer(&[]);

@@ -121,26 +121,43 @@ pub fn truncate_plain_from(s: &str, skip: usize, max_width: usize) -> String {
     out.into_iter().collect()
 }
 
-/// Estimated number of wrapped lines for `text` constrained to `cols` cells.
+/// Number of wrapped lines `text` occupies when constrained to `cols` cells.
 ///
-/// Display-width aware, so CJK footers reserve the right height. For pure
-/// ASCII this matches the previous `line.len().div_ceil(width)` estimate.
+/// Measured with the renderer's own wrapper (`Paragraph` + `Wrap { trim: false }`)
+/// rather than estimated from the display width. The renderer wraps at *word*
+/// boundaries, which needs **more** rows than a `width / cols` split whenever a
+/// word does not fit in the space left on a line — e.g. a 61-cell footer at 30
+/// columns renders as 3 rows, not `ceil(61/30) == 2`.
+///
+/// Getting this right matters because panes reserve `footer_height` rows for
+/// their hint: under-counting clips the tail of the footer (silently losing a
+/// key hint such as "Collapse: h"), while over-counting merely wastes a row.
+///
+/// # Why the `unstable-rendered-line-info` feature
+///
+/// `Paragraph::line_count` sits behind ratatui's `unstable-rendered-line-info`
+/// feature (enabled in `dbm-tui2/Cargo.toml`). It is still unstable in 0.30.2 —
+/// the latest release — and its stabilization is tracked by ratatui#293
+/// ("RFC: Text Wrapping Design"), which is closed but still labelled
+/// "Design Needed" with no milestone, so upgrading ratatui will not make it
+/// stable any time soon.
+///
+/// The alternative — rendering into a scratch `Buffer` and counting the rows that
+/// received content — needs no unstable feature and was measured to agree with
+/// `line_count` at every width tested. It is the fallback if a future ratatui
+/// renames or removes this method. Because the only failure mode is a compile
+/// error (never a silent behaviour change), and the call is confined to this one
+/// function, depending on the unstable API is the better trade: it is exact and
+/// allocates nothing.
 pub fn wrapped_line_count(text: &str, cols: u16) -> u16 {
     if text.is_empty() {
         return 1;
     }
-    let w = cols.max(1) as usize;
-    text.lines()
-        .map(|line| {
-            let line_w = width(line);
-            if line_w == 0 {
-                1
-            } else {
-                line_w.div_ceil(w)
-            }
-        })
-        .sum::<usize>()
-        .max(1) as u16
+    use ratatui::widgets::{Paragraph, Wrap};
+    let rows = Paragraph::new(text)
+        .wrap(Wrap { trim: false })
+        .line_count(cols.max(1));
+    rows.max(1) as u16
 }
 
 #[cfg(test)]
@@ -173,5 +190,57 @@ mod tests {
     #[test]
     fn empty_text_is_one_line() {
         assert_eq!(wrapped_line_count("", 4), 1);
+    }
+
+    /// Render `text` with ratatui and count the rows that actually received
+    /// content — the ground truth `wrapped_line_count` must match, or a pane's
+    /// footer gets clipped.
+    fn rendered_rows(text: &str, cols: u16) -> usize {
+        use ratatui::buffer::Buffer;
+        use ratatui::layout::Rect;
+        use ratatui::widgets::{Paragraph, Widget, Wrap};
+
+        let area = Rect::new(0, 0, cols, 16);
+        let mut buf = Buffer::empty(area);
+        Paragraph::new(text)
+            .wrap(Wrap { trim: false })
+            .render(area, &mut buf);
+        let mut rows = 0usize;
+        for y in 0..area.height {
+            let occupied = (0..area.width).any(|x| buf[(x, y)].symbol() != " ");
+            if occupied {
+                rows = y as usize + 1;
+            }
+        }
+        rows
+    }
+
+    #[test]
+    fn wrapped_count_matches_rendered_rows_for_a_real_footer() {
+        // Regression: a pane reserves `footer_height` rows for its hint. A
+        // `width / cols` estimate under-counts because the renderer wraps at
+        // word boundaries, clipping the tail of the footer (losing "Collapse: h").
+        let text = "Open: ENTER / Dbl-click  Add conn: a  Expand: l  Collapse: h";
+        for cols in [60u16, 45, 40, 35, 30, 25, 20, 15, 12] {
+            assert_eq!(
+                wrapped_line_count(text, cols) as usize,
+                rendered_rows(text, cols),
+                "wrapped_line_count must match the rendered rows at {cols} columns"
+            );
+        }
+    }
+
+    #[test]
+    fn wrapped_count_matches_rendered_rows_for_cjk() {
+        // CJK footers must reserve the right height too (display width, not
+        // char count).
+        let text = "科学研究管理数据";
+        for cols in [20u16, 12, 9, 7, 5, 3, 2] {
+            assert_eq!(
+                wrapped_line_count(text, cols) as usize,
+                rendered_rows(text, cols),
+                "CJK wrapped_line_count must match the rendered rows at {cols} columns"
+            );
+        }
     }
 }

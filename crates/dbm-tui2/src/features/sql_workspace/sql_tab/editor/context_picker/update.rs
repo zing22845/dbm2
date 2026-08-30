@@ -54,8 +54,7 @@ pub fn update(
             true
         }
         ContextPickerMessage::MoveCursor { delta } => {
-            move_cursor(&mut state, delta, &mut effects);
-            true
+            move_cursor(&mut state, delta, &mut effects)
         }
         ContextPickerMessage::SetCursor { column, cursor } => {
             state.switch_column(column);
@@ -120,7 +119,21 @@ pub fn update(
 }
 
 /// Move the cursor in the active column and re-sync the preview/cursors.
-fn move_cursor(state: &mut ContextPickerState, delta: i32, effects: &mut Vec<ContextPickerEffect>) {
+///
+/// Returns whether the rendered state actually changed. At a list boundary the
+/// cursor clamps back to where it already was, so pressing j/k there changes
+/// nothing on screen and must not dirty the view — otherwise every keypress at
+/// the edge repaints an identical frame and inflates the redundancy metric.
+fn move_cursor(
+    state: &mut ContextPickerState,
+    delta: i32,
+    effects: &mut Vec<ContextPickerEffect>,
+) -> bool {
+    let before = (
+        state.db_cursor,
+        state.schema_cursor,
+        state.preview_database.clone(),
+    );
     match state.column {
         PickerColumn::Database => {
             if let CachedList::Ready(items) = &state.databases {
@@ -146,6 +159,12 @@ fn move_cursor(state: &mut ContextPickerState, delta: i32, effects: &mut Vec<Con
         }
     }
     sync_picker_cursors(state, effects);
+    let after = (
+        state.db_cursor,
+        state.schema_cursor,
+        state.preview_database.clone(),
+    );
+    before != after
 }
 
 /// Reconcile the preview database with the database cursor, clamp both cursors
@@ -329,6 +348,49 @@ mod tests {
         s = s2;
         assert!(matches!(s.schemas, CachedList::Ready(_)));
         assert_eq!(s.schema_cursor, 1);
+    }
+
+    #[test]
+    fn move_cursor_at_list_boundary_does_not_dirty() {
+        // Pressing j/k at the first/last row clamps the cursor back to where it
+        // already is, so nothing on screen changes. The move must therefore not
+        // dirty the view — otherwise every keypress at the edge repaints an
+        // identical frame and inflates the redundancy metric.
+        let (mut s, _i, _e, _d) = update(
+            ContextPickerMessage::Open {
+                column: PickerColumn::Database,
+                instance: "inst".into(),
+                connection: "conn".into(),
+                database: "app".into(),
+                schema: "public".into(),
+            },
+            ContextPickerState::default(),
+        );
+        s.databases = CachedList::Ready(vec!["app".into(), "postgres".into()]);
+        s.db_cursor = 0; // app, the first row
+        s.schemas = CachedList::Ready(vec!["public".into()]);
+        s.schema_cursor = 0;
+
+        // At the top: k cannot move up, so the frame is unchanged.
+        let (s, _i, _e, d) = update(ContextPickerMessage::MoveCursor { delta: -1 }, s);
+        assert_eq!(s.db_cursor, 0, "the cursor must stay on the first row");
+        assert!(
+            !d,
+            "k at the first row changes nothing and must not dirty the view"
+        );
+
+        // Moving down to the last row is a real change.
+        let (s, _i, _e, d) = update(ContextPickerMessage::MoveCursor { delta: 1 }, s);
+        assert_eq!(s.db_cursor, 1, "the cursor moves to the last row");
+        assert!(d, "a real cursor move must dirty the view");
+
+        // At the bottom: j cannot move down, so the frame is unchanged.
+        let (s, _i, _e, d) = update(ContextPickerMessage::MoveCursor { delta: 1 }, s);
+        assert_eq!(s.db_cursor, 1, "the cursor must stay on the last row");
+        assert!(
+            !d,
+            "j at the last row changes nothing and must not dirty the view"
+        );
     }
 
     #[test]
