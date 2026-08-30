@@ -94,11 +94,7 @@ pub fn update(
             changed
         }
         ConnectionsMessage::BeginEdit => {
-            let changed = if let Some(idx) = Some(state.cursor) {
-                state.begin_edit(idx)
-            } else {
-                false
-            };
+            let changed = state.begin_edit(state.cursor);
             if changed {
                 state.status = None;
                 state.status_kind = ConnectionStatusKind::Idle;

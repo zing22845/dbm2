@@ -183,7 +183,7 @@ mod tests {
             IwMessage::Connections(ConnectionsMsg::Message(ConnectionsMessage::BeginAdd)),
             state,
         );
-        let mut state = s;
+        let state = s;
         assert!(
             state.connections.form.is_some(),
             "BeginAdd must open the add form"

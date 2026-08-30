@@ -122,28 +122,30 @@ pub fn render(
     instance: Option<&dbm_store::ManagedInstance>,
     _region_focused: bool,
 ) {
-    // Always render the connection list first so it stays visible behind the
-    // add/edit popup (the popup only covers its own rect).
+    // The connection list and the add/edit form are two orthogonal concerns:
+    // the list is drawn first, the form (when open) is drawn last on top. The
+    // form must render even when the list is empty, so the empty-state branch
+    // must not return early — it falls through to the form draw below.
     if state.connections.is_empty() {
         frame.render_widget(
             ratatui::widgets::Paragraph::new("No connections yet — press a to add"),
             area,
         );
-        return;
+    } else {
+        let cv = match compute_connections_viewport(area, state) {
+            Some(v) => v,
+            None => {
+                // Area too small for the table; nothing usable to draw.
+                return;
+            }
+        };
+        render_connections_list(frame, theme, &cv, state, instance);
     }
 
-    let cv = match compute_connections_viewport(area, state) {
-        Some(v) => v,
-        None => {
-            // Area too small — header row alone is fine; Table below would
-            // produce no rows so skip entirely.
-            return;
-        }
-    };
-
-    render_connections_list(frame, theme, &cv, state, instance);
-
-    // The add/edit form is drawn last as a centered popup on top of the list.
+    // The add/edit form is drawn last as a centered popup on top of whatever is
+    // behind it (the list or the empty state). Drawn unconditionally when open,
+    // independent of whether the list has rows — so you can add the first
+    // connection to an instance that has none.
     if let Some(form) = &state.form {
         render_form(frame, theme, area, state, form);
     }
