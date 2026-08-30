@@ -2,6 +2,10 @@
 //!
 //! Theme-aware via the semantic `Palette`: the track uses the muted/border slot
 //! and the thumb uses the accent slot, brightening when actively dragged.
+//!
+//! Also provides the shared `discover_anchor` viewport calculation and generic
+//! scrollbar hit-test helpers that every feature reuses — keeping anchor math,
+//! thumb geometry, and drag behavior consistent across the whole app.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -44,19 +48,78 @@ pub fn results_scrollbar_style(palette: &Palette, dragging: bool) -> ScrollbarSt
     }
 }
 
-/// Map a pointer position along a scrollbar track to a scroll offset in `0..=max_scroll`.
+/// Map a pointer pixel along a scrollbar track to a scroll offset in
+/// `0..=max_scroll`. Uses `track_len - 1` as the denominator so the last
+/// pixel of the track maps exactly to `max_scroll` — matching how ratatui's
+/// ScrollbarState reports position. Works for both vertical and horizontal
+/// scrollbars (caller passes pointer y or x, and track height or width).
 pub fn scroll_offset_from_track(
     pointer: u16,
     track_start: u16,
-    track_len: u16,
-    max_scroll: u32,
-) -> u32 {
-    if track_len == 0 || max_scroll == 0 {
+    track_len: usize,
+    max_scroll: usize,
+) -> usize {
+    if track_len <= 1 || max_scroll == 0 {
         return 0;
     }
-    let track_len = u32::from(track_len.max(1));
-    let rel = u32::from(pointer.saturating_sub(track_start).min(track_len as u16));
-    (rel * max_scroll) / track_len
+    let denom = track_len.saturating_sub(1);
+    let rel = pointer.saturating_sub(track_start).min(track_len.saturating_sub(1) as u16) as usize;
+    let pos = (rel * max_scroll) / denom;
+    pos.min(max_scroll)
+}
+
+/// Generic hit-test result for any scrollbar (vertical or horizontal).
+/// `track_start` is the coordinate along the scroll axis (y for vertical,
+/// x for horizontal). `track_len` is the track length in PIXELS — the drag
+/// formula needs this, NOT data-row count.
+#[derive(Debug, Clone, Copy)]
+pub struct ScrollbarHitInfo {
+    pub track_start: u16,
+    pub track_len: usize,
+    pub max_scroll: usize,
+}
+
+/// Generic vertical scrollbar hit-test — reuses the pane's own
+/// `PaneScrollLayout` to stay in sync with what the renderer drew.
+pub fn v_scrollbar_hit(
+    layout: &PaneScrollLayout,
+    max_scroll: usize,
+    x: u16,
+    y: u16,
+) -> Option<ScrollbarHitInfo> {
+    let v_bar = layout.v_scrollbar?;
+    if max_scroll == 0 {
+        return None;
+    }
+    if !point_in_bar(v_bar, x, y) {
+        return None;
+    }
+    Some(ScrollbarHitInfo {
+        track_start: v_bar.y,
+        track_len: v_bar.height.max(1) as usize,
+        max_scroll,
+    })
+}
+
+/// Generic horizontal scrollbar hit-test.
+pub fn h_scrollbar_hit(
+    layout: &PaneScrollLayout,
+    max_scroll: usize,
+    x: u16,
+    y: u16,
+) -> Option<ScrollbarHitInfo> {
+    let h_bar = layout.h_scrollbar?;
+    if max_scroll == 0 {
+        return None;
+    }
+    if !point_in_bar(h_bar, x, y) {
+        return None;
+    }
+    Some(ScrollbarHitInfo {
+        track_start: h_bar.x,
+        track_len: h_bar.width.max(1) as usize,
+        max_scroll,
+    })
 }
 
 pub fn point_in_bar(bar: Rect, x: u16, y: u16) -> bool {
@@ -66,6 +129,34 @@ pub fn point_in_bar(bar: Rect, x: u16, y: u16) -> bool {
         && x < bar.x.saturating_add(bar.width)
         && y >= bar.y
         && y < bar.y.saturating_add(bar.height)
+}
+
+/// Discover-style cursor anchor: the viewport's start row is only pushed
+/// when the cursor would fall OUTSIDE the current window. Cursor moving
+/// inside the window does NOT move the viewport. When `scroll_locked` is
+/// true (manual v_scrollbar drag), the anchor is completely skipped so the
+/// drag position is preserved.
+///
+/// All 7 scrollable panes (instances, objects, discover targets/results,
+/// iw connections/overview, sql history) MUST use this function so their
+/// anchor math stays identical.
+pub fn discover_anchor(
+    scroll: usize,
+    max_scroll: usize,
+    cursor: usize,
+    viewport: usize,
+    scroll_locked: bool,
+) -> usize {
+    let viewport = viewport.max(1);
+    let mut start = scroll.min(max_scroll);
+    if !scroll_locked {
+        if cursor < start {
+            start = cursor;
+        } else if cursor >= start + viewport {
+            start = cursor + 1 - viewport;
+        }
+    }
+    start
 }
 
 pub struct PaneScrollLayout {
@@ -172,9 +263,12 @@ mod tests {
 
     #[test]
     fn scroll_offset_from_track_maps_ends() {
+        // With track_len=10, denom=9. First pixel → 0, last pixel → max_scroll.
         assert_eq!(scroll_offset_from_track(10, 10, 10, 100), 0);
-        assert_eq!(scroll_offset_from_track(19, 10, 10, 100), 90);
+        assert_eq!(scroll_offset_from_track(19, 10, 10, 100), 100);
         assert_eq!(scroll_offset_from_track(10, 10, 10, 0), 0);
+        // Single-pixel track or zero max → 0.
+        assert_eq!(scroll_offset_from_track(5, 5, 1, 100), 0);
     }
 
     #[test]

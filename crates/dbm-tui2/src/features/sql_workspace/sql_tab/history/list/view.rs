@@ -90,16 +90,15 @@ pub fn compute_history_viewport(
     let content = effective_layout.content_area;
     let viewport = content.height.max(1) as usize;
 
-    // --- Discover-style cursor anchor (skipped when scroll_locked) ----
-    let max_start = total.saturating_sub(viewport);
-    let mut start = state.v_scroll.min(max_start);
-    if !state.scroll_locked {
-        if cursor < start {
-            start = cursor;
-        } else if cursor >= start + viewport {
-            start = cursor + 1 - viewport;
-        }
-    }
+    // Discover-style cursor anchor via shared helper.
+    let max_scroll = total.saturating_sub(viewport);
+    let start = crate::common::view::pane_scrollbar::discover_anchor(
+        state.v_scroll,
+        max_scroll,
+        cursor,
+        viewport,
+        state.scroll_locked,
+    );
     let end = (start + viewport).min(total);
 
     Some(HistoryViewport {

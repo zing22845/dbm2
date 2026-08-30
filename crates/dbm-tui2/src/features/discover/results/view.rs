@@ -79,16 +79,14 @@ pub fn compute_results_viewport(
     let viewport = content.height.max(1) as usize;
     let max_scroll = total.saturating_sub(viewport);
 
-    // Discover-style anchor — skipped when scroll_locked (manual scrollbar drag).
-    let scroll_locked = state.scroll_locked;
-    let mut start = state.scroll.min(max_scroll);
-    if !scroll_locked {
-        if state.cursor < start {
-            start = state.cursor;
-        } else if state.cursor >= start + viewport {
-            start = state.cursor + 1 - viewport;
-        }
-    }
+    // Discover-style anchor via shared helper.
+    let start = crate::common::view::pane_scrollbar::discover_anchor(
+        state.scroll,
+        max_scroll,
+        state.cursor,
+        viewport,
+        state.scroll_locked,
+    );
 
     Some(DiscoverResultsViewport {
         body,
@@ -101,34 +99,17 @@ pub fn compute_results_viewport(
     })
 }
 
-/// Result of [`v_scrollbar_hit`]: carries everything the drag handler needs.
-pub struct DiscoverResultsVScrollInfo {
-    pub track_y: u16,
-    pub max_scroll: usize,
-    /// Track PIXEL height — drag formula needs this (NOT the data-row count).
-    pub viewport_height: usize,
-}
+use crate::common::view::pane_scrollbar::ScrollbarHitInfo;
 
-/// Hit-test the discover results pane's vertical scrollbar.
+/// Hit-test the discover results pane's vertical scrollbar — delegates to shared helper.
 pub fn v_scrollbar_hit(
     area: Rect,
     state: &ResultsState,
     x: u16,
     y: u16,
-) -> Option<DiscoverResultsVScrollInfo> {
+) -> Option<ScrollbarHitInfo> {
     let rv = compute_results_viewport(area, state)?;
-    let v_bar = rv.layout.v_scrollbar?;
-    if rv.max_scroll == 0 {
-        return None;
-    }
-    if !crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y) {
-        return None;
-    }
-    Some(DiscoverResultsVScrollInfo {
-        track_y: v_bar.y,
-        max_scroll: rv.max_scroll,
-        viewport_height: usize::from(v_bar.height.max(1)),
-    })
+    crate::common::view::pane_scrollbar::v_scrollbar_hit(&rv.layout, rv.max_scroll, x, y)
 }
 
 /// Hit-test the discover results list content area. Returns the row index in

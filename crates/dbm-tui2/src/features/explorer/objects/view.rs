@@ -64,28 +64,35 @@ pub fn compute_objects_viewport(
     // Horizontal scrollbar shown only when the CURRENTLY SELECTED row overflows
     // (matching history list), not the widest row in the tree.
     let sel_row_w = state.selected_row_width();
-    let layout = pane_scroll_layout(body, sel_row_w, total, body.height as usize);
+    // First pass: reserve bars assuming the selected row might overflow.
+    let first_pass = pane_scroll_layout(body, sel_row_w, total, body.height as usize);
+    // Second pass (effective_layout): if the first pass's content_area is
+    // already wide enough for the selected row, there's no need for an
+    // h_scrollbar — drop it so we don't steal a row of viewport height.
+    let content_w = first_pass.content_area.width;
+    let (layout, max_h_scroll) = if sel_row_w > content_w {
+        let max_h = sel_row_w.saturating_sub(content_w) as usize;
+        (first_pass, max_h)
+    } else {
+        (
+            pane_scroll_layout(body, 0, total, body.height as usize),
+            0usize,
+        )
+    };
     let content = layout.content_area;
 
     let viewport = content.height.max(1) as usize;
     let max_scroll = total.saturating_sub(viewport);
 
-    // Discover-style anchor — skipped when scroll_locked (manual v_scrollbar drag).
-    let scroll_locked = state.scroll_locked;
-    let mut start = state.scroll.get().min(max_scroll);
-    if !scroll_locked {
-        if state.cursor < start {
-            start = state.cursor;
-        } else if state.cursor >= start + viewport {
-            start = state.cursor + 1 - viewport;
-        }
-    }
-
-    // Write anchor result back so the next frame starts from the correct
-    // position, not from a stale `state.scroll`.
+    // Discover-style anchor via shared helper.
+    let start = crate::common::view::pane_scrollbar::discover_anchor(
+        state.scroll.get(),
+        max_scroll,
+        state.cursor,
+        viewport,
+        state.scroll_locked,
+    );
     state.scroll.set(start);
-
-    let max_h_scroll = sel_row_w.saturating_sub(content.width) as usize;
 
     // Write the viewport-aware max back so update's ScrollHorizontal / SetHScroll
     // can clamp to the real upper bound and stay in sync.
@@ -103,68 +110,28 @@ pub fn compute_objects_viewport(
     })
 }
 
-/// Result of [`v_scrollbar_hit`]: everything the drag handler needs.
-pub struct ObjectsVScrollInfo {
-    pub track_y: u16,
-    pub max_scroll: usize,
-    /// Track PIXEL height — drag formula needs this (NOT data-row count).
-    pub viewport_height: usize,
-}
+use crate::common::view::pane_scrollbar::ScrollbarHitInfo;
 
-/// Hit-test the objects pane's vertical scrollbar.
+/// Hit-test the objects pane's vertical scrollbar — delegates to shared helper.
 pub fn v_scrollbar_hit(
     area: Rect,
     state: &ObjectsState,
     x: u16,
     y: u16,
-) -> Option<ObjectsVScrollInfo> {
+) -> Option<ScrollbarHitInfo> {
     let ov = compute_objects_viewport(area, state)?;
-    let v_bar = ov.layout.v_scrollbar?;
-    if ov.max_scroll == 0 {
-        return None;
-    }
-    if !crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y) {
-        return None;
-    }
-    Some(ObjectsVScrollInfo {
-        track_y: v_bar.y,
-        max_scroll: ov.max_scroll,
-        viewport_height: usize::from(v_bar.height.max(1)),
-    })
+    crate::common::view::pane_scrollbar::v_scrollbar_hit(&ov.layout, ov.max_scroll, x, y)
 }
 
-/// Result of [`h_scrollbar_hit`]: everything the drag handler needs for the
-/// horizontal scrollbar.
-pub struct ObjectsHScrollInfo {
-    pub track_x: u16,
-    pub max_scroll: usize,
-    /// Track PIXEL width — drag formula needs this.
-    pub viewport_width: usize,
-}
-
-/// Hit-test the objects pane's horizontal scrollbar. Returns the drag
-/// geometry if the click lands on the bar and the selected row actually
-/// overflows the viewport.
+/// Hit-test the objects pane's horizontal scrollbar — delegates to shared helper.
 pub fn h_scrollbar_hit(
     area: Rect,
     state: &ObjectsState,
     x: u16,
     y: u16,
-) -> Option<ObjectsHScrollInfo> {
+) -> Option<ScrollbarHitInfo> {
     let ov = compute_objects_viewport(area, state)?;
-    let h_bar = ov.layout.h_scrollbar?;
-    let max_scroll = ov.max_h_scroll; // single source of truth
-    if max_scroll == 0 {
-        return None;
-    }
-    if !crate::common::view::pane_scrollbar::point_in_bar(h_bar, x, y) {
-        return None;
-    }
-    Some(ObjectsHScrollInfo {
-        track_x: h_bar.x,
-        max_scroll,
-        viewport_width: usize::from(h_bar.width.max(1)),
-    })
+    crate::common::view::pane_scrollbar::h_scrollbar_hit(&ov.layout, ov.max_h_scroll, x, y)
 }
 
 /// Hit-test a click inside the objects tree area to a visible row (absolute,
@@ -198,11 +165,14 @@ pub fn toggle_at(area: Rect, state: &ObjectsState, x: u16, y: u16) -> Option<usi
     // and NO leading space, so the marker sits at content.x + depth*2 (matching
     // `render`'s `format!("{indent}{marker} {label}")`). No +1 leading-space
     // offset here, unlike the instances pane (which does emit a leading space).
+    // Horizontal scroll only moves the selected row, so subtract it only when
+    // the clicked row IS the cursor row.
+    let row_h_scroll = if row == state.cursor { state.h_scroll } else { 0 };
     let marker_col = ov
         .content
         .x
         .saturating_add(depth.saturating_mul(2))
-        .saturating_sub(state.h_scroll);
+        .saturating_sub(row_h_scroll);
     (x >= marker_col && x < marker_col.saturating_add(2)).then_some(row)
 }
 
@@ -253,6 +223,9 @@ pub fn render(
     let start = ov.start;
     let viewport = ov.viewport;
     let body = ov.body;
+    let viewport_w = layout.content_area.width as usize;
+    let max_h = ov.max_h_scroll;
+    let effective_h = state.h_scroll.min(max_h as u16);
 
     let mut lines = Vec::new();
     for idx in start..(start + viewport).min(ov.total) {
@@ -274,9 +247,15 @@ pub fn render(
             "·"
         };
         let indent = "  ".repeat(row.depth);
-        lines.push(Line::from(vec![
-            Span::styled(format!("{indent}{marker} {}", row.label), style),
-        ]));
+        let full_text = format!("{indent}{marker} {}", row.label);
+        // Per-row horizontal scroll: only the selected row scrolls.
+        let row_h_scroll: usize = if focused { effective_h as usize } else { 0 };
+        let display_text = crate::common::utils::text_width::truncate_plain_from(
+            &full_text,
+            row_h_scroll,
+            viewport_w,
+        );
+        lines.push(Line::from(vec![Span::styled(display_text, style)]));
     }
     if lines.is_empty() {
         let msg = if state.bound_connection.is_empty() {
@@ -287,14 +266,7 @@ pub fn render(
         lines.push(Line::from(Span::styled(msg, Style::default().fg(p.muted))));
     }
 
-    // Horizontal scroll — single source of truth: `ov.max_h_scroll`.
-    // Paragraph::scroll clamp, scrollbar thumb, and h_scrollbar_hit all use
-    // this value so they stay aligned.
-    let viewport_w = layout.content_area.width as usize;
-    let max_h = ov.max_h_scroll;
-    let effective_h = state.h_scroll.min(max_h as u16);
-    let paragraph = Paragraph::new(lines).scroll((0, effective_h));
-    frame.render_widget(paragraph, content);
+    frame.render_widget(Paragraph::new(lines), content);
 
     if let Some(bar) = layout.h_scrollbar {
         draw_horizontal_pane_scrollbar(

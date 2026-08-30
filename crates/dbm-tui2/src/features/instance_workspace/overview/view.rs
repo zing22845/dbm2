@@ -7,7 +7,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::common::view::pane_scrollbar::{
-    PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout, point_in_bar,
+    PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
 use dbm_store::ManagedInstance;
@@ -128,15 +128,14 @@ pub fn compute_overview_viewport(
     let viewport = content.height.max(1) as usize;
     let max_scroll = total.saturating_sub(viewport);
 
-    // Discover-style anchor — skipped when scroll_locked (manual v_scrollbar drag).
-    let mut start = state.scroll.min(max_scroll);
-    if !state.scroll_locked {
-        if state.cursor < start {
-            start = state.cursor;
-        } else if state.cursor >= start + viewport {
-            start = state.cursor + 1 - viewport;
-        }
-    }
+    // Discover-style anchor via shared helper.
+    let start = crate::common::view::pane_scrollbar::discover_anchor(
+        state.scroll,
+        max_scroll,
+        state.cursor,
+        viewport,
+        state.scroll_locked,
+    );
 
     Some(OverviewViewport {
         layout,
@@ -148,35 +147,19 @@ pub fn compute_overview_viewport(
     })
 }
 
-/// Result of [`v_scrollbar_hit`]: everything the drag handler needs.
-pub struct OverviewVScrollInfo {
-    pub track_y: u16,
-    pub max_scroll: usize,
-    /// Track PIXEL height — drag formula needs this (NOT data-row count).
-    pub viewport_height: usize,
-}
+use crate::common::view::pane_scrollbar::ScrollbarHitInfo;
 
-/// Hit-test the overview pane's vertical scrollbar.
+/// Hit-test the overview pane's vertical scrollbar — delegates to shared helper.
+/// Takes `conn_count` because `compute_overview_viewport` needs it to build rows.
 pub fn v_scrollbar_hit(
     area: Rect,
     state: &OverviewState,
     conn_count: usize,
     x: u16,
     y: u16,
-) -> Option<OverviewVScrollInfo> {
+) -> Option<ScrollbarHitInfo> {
     let ov = compute_overview_viewport(area, state, conn_count)?;
-    let v_bar = ov.layout.v_scrollbar?;
-    if ov.max_scroll == 0 {
-        return None;
-    }
-    if !point_in_bar(v_bar, x, y) {
-        return None;
-    }
-    Some(OverviewVScrollInfo {
-        track_y: v_bar.y,
-        max_scroll: ov.max_scroll,
-        viewport_height: usize::from(v_bar.height.max(1)),
-    })
+    crate::common::view::pane_scrollbar::v_scrollbar_hit(&ov.layout, ov.max_scroll, x, y)
 }
 
 /// Render the instance overview body: the instance's attribute rows laid out

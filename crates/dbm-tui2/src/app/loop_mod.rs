@@ -883,10 +883,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.row,
                                 ) {
                                     discover_targets_v_scrollbar_drag =
-                                        Some((si.track_y, si.viewport_height, si.max_scroll));
-                                    let new_scroll = scrollbar_y_to_position(
+                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
-                                        si.viewport_height,
+                                        si.track_start,
+                                        si.track_len,
                                         si.max_scroll,
                                     );
                                     let msg = crate::app::AppMsg::Discover(
@@ -990,10 +991,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.row,
                                 ) {
                                     discover_results_v_scrollbar_drag =
-                                        Some((si.track_y, si.viewport_height, si.max_scroll));
-                                    let new_scroll = scrollbar_y_to_position(
+                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
-                                        si.viewport_height,
+                                        si.track_start,
+                                        si.track_len,
                                         si.max_scroll,
                                     );
                                     let msg = AppMsg::Discover(DiscoverMsg::Message(
@@ -1071,10 +1073,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.row,
                                 ) {
                                     explorer_objects_v_scrollbar_drag =
-                                        Some((si.track_y, si.viewport_height, si.max_scroll));
-                                    let new_scroll = scrollbar_y_to_position(
+                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
-                                        si.viewport_height,
+                                        si.track_start,
+                                        si.track_len,
                                         si.max_scroll,
                                     );
                                     let msg = AppMsg::Explorer(ExplorerMsg::Message(
@@ -1115,10 +1118,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.row,
                                 ) {
                                     explorer_instances_v_scrollbar_drag =
-                                        Some((si.track_y, si.viewport_height, si.max_scroll));
-                                    let new_scroll = scrollbar_y_to_position(
+                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
-                                        si.viewport_height,
+                                        si.track_start,
+                                        si.track_len,
                                         si.max_scroll,
                                     );
                                     let msg = AppMsg::Explorer(ExplorerMsg::Message(
@@ -1157,10 +1161,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.row,
                                 ) {
                                     explorer_objects_h_scrollbar_drag =
-                                        Some((si.track_x, si.viewport_width, si.max_scroll));
-                                    let new_scroll = scrollbar_x_to_position(
+                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.column,
-                                        si.viewport_width,
+                                        si.track_start,
+                                        si.track_len,
                                         si.max_scroll,
                                     );
                                     let msg = AppMsg::Explorer(ExplorerMsg::Message(
@@ -1199,10 +1204,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.row,
                                 ) {
                                     explorer_instances_h_scrollbar_drag =
-                                        Some((si.track_x, si.viewport_width, si.max_scroll));
-                                    let new_scroll = scrollbar_x_to_position(
+                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.column,
-                                        si.viewport_width,
+                                        si.track_start,
+                                        si.track_len,
                                         si.max_scroll,
                                     );
                                     let msg = AppMsg::Explorer(ExplorerMsg::Message(
@@ -1239,13 +1245,14 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.row,
                                 ) {
                                     iw_connections_v_scrollbar_drag = Some((
-                                        si.track_y,
-                                        si.viewport_height,
+                                        si.track_start,
+                                        si.track_len,
                                         si.max_scroll,
                                     ));
-                                    let new_scroll = scrollbar_y_to_position(
+                                    let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
-                                        si.viewport_height,
+                                        si.track_start,
+                                        si.track_len,
                                         si.max_scroll,
                                     );
                                     let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
@@ -1279,13 +1286,14 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     view::v_scrollbar_hit(body, &state.iw.overview, 0, mouse.column, mouse.row)
                                 {
                                     iw_overview_v_scrollbar_drag = Some((
-                                        si.track_y,
-                                        si.viewport_height,
+                                        si.track_start,
+                                        si.track_len,
                                         si.max_scroll,
                                     ));
-                                    let new_scroll = scrollbar_y_to_position(
+                                    let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
-                                        si.viewport_height,
+                                        si.track_start,
+                                        si.track_len,
                                         si.max_scroll,
                                     );
                                     let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Overview(
@@ -1562,8 +1570,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // absolute mouse x to a position inside the track
                             // using the track geometry captured at Down time.
                             if let Some((track_x, viewport_width, max_scroll)) = history_h_scrollbar_drag {
-                                let rel_x = point.x.saturating_sub(track_x);
-                                let position = scrollbar_x_to_position(rel_x, viewport_width, max_scroll);
+                                let _rel_x = point.x.saturating_sub(track_x);
+                                let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.x, track_x, viewport_width, max_scroll);
                                 if let Some(active_tab) = state.sql.sql_tab.active_tab {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
@@ -1584,8 +1592,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // History list v_scrollbar drag: scrollbar position
                             // IS the viewport start. Send SetVScroll directly.
                             if let Some((track_y, viewport_height, max_scroll)) = history_v_scrollbar_drag {
-                                let rel_y = point.y.saturating_sub(track_y);
-                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                let _rel_y = point.y.saturating_sub(track_y);
+                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
                                 if let Some(active_tab) = state.sql.sql_tab.active_tab {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
@@ -1606,8 +1614,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // Editor body v_scrollbar drag: same linear mapping as
                             // history — scrollbar thumb position IS the viewport start.
                             if let Some((track_y, viewport_height, max_scroll)) = editor_v_scrollbar_drag {
-                                let rel_y = point.y.saturating_sub(track_y);
-                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                let _rel_y = point.y.saturating_sub(track_y);
+                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
                                 if let Some(active_tab) = state.sql.sql_tab.active_tab {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
@@ -1628,8 +1636,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // Results list h_scrollbar drag: convert mouse x
                             // inside the track to a horizontal scroll position.
                             if let Some((track_x, viewport_width, max_scroll)) = results_h_scrollbar_drag {
-                                let rel_x = point.x.saturating_sub(track_x);
-                                let position = scrollbar_x_to_position(rel_x, viewport_width, max_scroll);
+                                let _rel_x = point.x.saturating_sub(track_x);
+                                let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.x, track_x, viewport_width, max_scroll);
                                 if let Some(active_tab) = state.sql.sql_tab.active_tab {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
@@ -1650,8 +1658,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // Results list v_scrollbar drag: scrollbar position
                             // IS the viewport start. Send SetVScroll directly.
                             if let Some((track_y, viewport_height, max_scroll)) = results_v_scrollbar_drag {
-                                let rel_y = point.y.saturating_sub(track_y);
-                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                let _rel_y = point.y.saturating_sub(track_y);
+                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
                                 if let Some(active_tab) = state.sql.sql_tab.active_tab {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
@@ -1672,8 +1680,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // Discover targets v_scrollbar drag: same linear
                             // mapping as history/results.
                             if let Some((track_y, viewport_height, max_scroll)) = discover_targets_v_scrollbar_drag {
-                                let rel_y = point.y.saturating_sub(track_y);
-                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                let _rel_y = point.y.saturating_sub(track_y);
+                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
                                 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
                                 use crate::features::discover::targets::msg::{TargetsMessage, TargetsMsg};
                                 let msg = AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Targets(
@@ -1685,8 +1693,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
 
                             // Discover results v_scrollbar drag: same pattern.
                             if let Some((track_y, viewport_height, max_scroll)) = discover_results_v_scrollbar_drag {
-                                let rel_y = point.y.saturating_sub(track_y);
-                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                let _rel_y = point.y.saturating_sub(track_y);
+                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
                                 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
                                 use crate::features::discover::results::msg::{ResultsMessage, ResultsMsg};
                                 let msg = AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Results(
@@ -1698,8 +1706,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
 
                             // Explorer objects v_scrollbar drag.
                             if let Some((track_y, viewport_height, max_scroll)) = explorer_objects_v_scrollbar_drag {
-                                let rel_y = point.y.saturating_sub(track_y);
-                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                let _rel_y = point.y.saturating_sub(track_y);
+                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
                                 use crate::features::explorer::objects::msg::{ObjectsMessage, ObjectsMsg};
                                 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
                                 let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
@@ -1711,8 +1719,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
 
                             // Explorer instances v_scrollbar drag.
                             if let Some((track_y, viewport_height, max_scroll)) = explorer_instances_v_scrollbar_drag {
-                                let rel_y = point.y.saturating_sub(track_y);
-                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                let _rel_y = point.y.saturating_sub(track_y);
+                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
                                 use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
                                 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
                                 let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
@@ -1724,8 +1732,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
 
                             // Explorer objects h_scrollbar drag.
                             if let Some((track_x, viewport_width, max_scroll)) = explorer_objects_h_scrollbar_drag {
-                                let rel_x = point.x.saturating_sub(track_x);
-                                let position = scrollbar_x_to_position(rel_x, viewport_width, max_scroll);
+                                let _rel_x = point.x.saturating_sub(track_x);
+                                let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.x, track_x, viewport_width, max_scroll);
                                 use crate::features::explorer::objects::msg::{ObjectsMessage, ObjectsMsg};
                                 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
                                 let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
@@ -1737,8 +1745,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
 
                             // Explorer instances h_scrollbar drag.
                             if let Some((track_x, viewport_width, max_scroll)) = explorer_instances_h_scrollbar_drag {
-                                let rel_x = point.x.saturating_sub(track_x);
-                                let position = scrollbar_x_to_position(rel_x, viewport_width, max_scroll);
+                                let _rel_x = point.x.saturating_sub(track_x);
+                                let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.x, track_x, viewport_width, max_scroll);
                                 use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
                                 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
                                 let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
@@ -1750,8 +1758,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
 
                             // IW connections v_scrollbar drag.
                             if let Some((track_y, viewport_height, max_scroll)) = iw_connections_v_scrollbar_drag {
-                                let rel_y = point.y.saturating_sub(track_y);
-                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                let _rel_y = point.y.saturating_sub(track_y);
+                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
                                 use crate::features::instance_workspace::connections::msg::{
                                     ConnectionsMessage, ConnectionsMsg,
                                 };
@@ -1765,8 +1773,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
 
                             // IW overview v_scrollbar drag.
                             if let Some((track_y, viewport_height, max_scroll)) = iw_overview_v_scrollbar_drag {
-                                let rel_y = point.y.saturating_sub(track_y);
-                                let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+                                let _rel_y = point.y.saturating_sub(track_y);
+                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
                                 use crate::features::instance_workspace::overview::msg::{
                                     OverviewMessage, OverviewMsg,
                                 };
@@ -3446,8 +3454,8 @@ fn sql_click_msgs(
             };
             use crate::features::sql_workspace::sql_tab::history::msg::{HistoryMessage, HistoryMsg};
             use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-            let rel_x = x.saturating_sub(track_x);
-            let position = scrollbar_x_to_position(rel_x, viewport_width, max_scroll);
+            let _rel_x = x.saturating_sub(track_x);
+            let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(x, track_x, viewport_width, max_scroll);
             vec![
                 AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                     SqlTabMessage::Focus(SqlFocus::History),
@@ -3466,8 +3474,8 @@ fn sql_click_msgs(
             };
             use crate::features::sql_workspace::sql_tab::history::msg::{HistoryMessage, HistoryMsg};
             use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-            let rel_y = y.saturating_sub(track_y);
-            let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+            let _rel_y = y.saturating_sub(track_y);
+            let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(y, track_y, viewport_height, max_scroll);
             vec![
                 AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                     SqlTabMessage::Focus(SqlFocus::History),
@@ -3522,8 +3530,8 @@ fn sql_click_msgs(
             };
             use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
             use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-            let rel_x = x.saturating_sub(track_x);
-            let position = scrollbar_x_to_position(rel_x, viewport_width, max_scroll);
+            let _rel_x = x.saturating_sub(track_x);
+            let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(x, track_x, viewport_width, max_scroll);
             vec![
                 AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                     SqlTabMessage::Focus(SqlFocus::Results),
@@ -3542,8 +3550,8 @@ fn sql_click_msgs(
             };
             use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
             use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-            let rel_y = y.saturating_sub(track_y);
-            let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+            let _rel_y = y.saturating_sub(track_y);
+            let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(y, track_y, viewport_height, max_scroll);
             vec![
                 AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                     SqlTabMessage::Focus(SqlFocus::Results),
@@ -3567,8 +3575,8 @@ fn sql_click_msgs(
                 return Vec::new();
             };
             use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
-            let rel_y = y.saturating_sub(track_y);
-            let start = scrollbar_y_to_position(rel_y, viewport_height, max_scroll);
+            let _rel_y = y.saturating_sub(track_y);
+            let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(y, track_y, viewport_height, max_scroll);
             vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                 SqlTabMessage::Editor {
                     tab_id,
@@ -3577,36 +3585,6 @@ fn sql_click_msgs(
             ))))]
         }
     }
-}
-
-/// Map a click x-coordinate inside a horizontal scrollbar track to the
-/// corresponding scroll position.
-///
-/// The scrollbar track has `viewport_width` cells. A click at the
-/// rightmost cell (rel_x = viewport_width - 1) must map to `max_scroll`
-/// so that dragging all the way to the end really reaches the last line.
-fn scrollbar_x_to_position(x: u16, viewport_width: usize, max_scroll: usize) -> usize {
-    if max_scroll == 0 || viewport_width <= 1 {
-        return 0;
-    }
-    let rel_x = (x as usize).min(viewport_width - 1);
-    let denom = viewport_width.saturating_sub(1).max(1);
-    // Linear map: rel_x=0 → pos=0, rel_x=viewport_width-1 → pos=max_scroll.
-    let pos = (rel_x * max_scroll) / denom;
-    pos.min(max_scroll)
-}
-
-/// Map a click y-coordinate inside a vertical scrollbar track to the
-/// corresponding scroll position (same math as `scrollbar_x_to_position`
-/// but on the y axis).
-fn scrollbar_y_to_position(y: u16, viewport_height: usize, max_scroll: usize) -> usize {
-    if max_scroll == 0 || viewport_height <= 1 {
-        return 0;
-    }
-    let rel_y = (y as usize).min(viewport_height - 1);
-    let denom = viewport_height.saturating_sub(1).max(1);
-    let pos = (rel_y * max_scroll) / denom;
-    pos.min(max_scroll)
 }
 
 /// Convert a SQL workspace action into the corresponding workspace message,

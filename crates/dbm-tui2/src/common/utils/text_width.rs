@@ -81,6 +81,46 @@ pub fn truncate_from(s: &str, skip: usize, max_width: usize) -> String {
     out.into_iter().collect()
 }
 
+/// Plain (no-ellipsis) version of [`truncate_from`]: skips leading display
+/// cells and cuts at `max_width` without appending `…`. Used by panes whose
+/// horizontal scrollbar already signals overflow (e.g. explorer object/tree
+/// panes) — they don't need the extra visual marker on each row.
+pub fn truncate_plain_from(s: &str, skip: usize, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if skip >= width(s) {
+        return String::new();
+    }
+
+    let chars: Vec<char> = s.chars().collect();
+    let widths: Vec<usize> = chars.iter().map(|c| char_width(*c)).collect();
+
+    let mut start_idx = 0usize;
+    let mut acc = 0usize;
+    while start_idx < chars.len() && acc < skip {
+        acc += widths[start_idx];
+        if acc > skip {
+            break;
+        }
+        start_idx += 1;
+    }
+
+    let mut out: Vec<char> = Vec::new();
+    let mut used = 0usize;
+    let mut idx = start_idx;
+    while idx < chars.len() {
+        let cw = widths[idx];
+        if used + cw > max_width {
+            break;
+        }
+        out.push(chars[idx]);
+        used += cw;
+        idx += 1;
+    }
+    out.into_iter().collect()
+}
+
 /// Estimated number of wrapped lines for `text` constrained to `cols` cells.
 ///
 /// Display-width aware, so CJK footers reserve the right height. For pure

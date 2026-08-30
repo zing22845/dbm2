@@ -7,7 +7,7 @@ use ratatui::widgets::{Cell, Row, Table};
 use ratatui::Frame;
 
 use crate::common::view::pane_scrollbar::{
-    PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout, point_in_bar,
+    PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
 
@@ -75,15 +75,14 @@ pub fn compute_connections_viewport(
     let viewport = content.height.max(1) as usize;
     let max_scroll = total.saturating_sub(viewport);
 
-    // Discover-style anchor — skipped when scroll_locked (manual v_scrollbar drag).
-    let mut start = state.scroll.min(max_scroll);
-    if !state.scroll_locked {
-        if state.cursor < start {
-            start = state.cursor;
-        } else if state.cursor >= start + viewport {
-            start = state.cursor + 1 - viewport;
-        }
-    }
+    // Discover-style anchor via shared helper.
+    let start = crate::common::view::pane_scrollbar::discover_anchor(
+        state.scroll,
+        max_scroll,
+        state.cursor,
+        viewport,
+        state.scroll_locked,
+    );
 
     Some(ConnectionsViewport {
         header,
@@ -97,36 +96,17 @@ pub fn compute_connections_viewport(
     })
 }
 
-/// Result of [`v_scrollbar_hit`]: everything the drag handler needs.
-pub struct ConnectionsVScrollInfo {
-    /// Track top y-coordinate (data_body top — skips the fixed header row).
-    pub track_y: u16,
-    pub max_scroll: usize,
-    /// Track PIXEL height — drag formula needs this (NOT data-row count).
-    pub viewport_height: usize,
-}
+use crate::common::view::pane_scrollbar::ScrollbarHitInfo;
 
-/// Hit-test the connections pane's vertical scrollbar.
+/// Hit-test the connections pane's vertical scrollbar — delegates to shared helper.
 pub fn v_scrollbar_hit(
     area: Rect,
     state: &ConnectionsState,
     x: u16,
     y: u16,
-) -> Option<ConnectionsVScrollInfo> {
+) -> Option<ScrollbarHitInfo> {
     let cv = compute_connections_viewport(area, state)?;
-    let v_bar = cv.layout.v_scrollbar?;
-    if cv.max_scroll == 0 {
-        return None;
-    }
-    if !point_in_bar(v_bar, x, y) {
-        return None;
-    }
-    Some(ConnectionsVScrollInfo {
-        // Track starts at data_body top, skipping the fixed header row.
-        track_y: cv.data_body.y,
-        max_scroll: cv.max_scroll,
-        viewport_height: usize::from(cv.data_body.height.max(1)),
-    })
+    crate::common::view::pane_scrollbar::v_scrollbar_hit(&cv.layout, cv.max_scroll, x, y)
 }
 
 /// Render the connections panel: the connection list plus (when open) the

@@ -102,16 +102,14 @@ pub fn compute_targets_viewport(
     let viewport = content.height.saturating_sub(1).max(1) as usize;
     let max_scroll = total.saturating_sub(viewport.max(1));
 
-    // Discover-style anchor — skipped when scroll_locked (manual scroll).
-    let scroll_locked = state.scroll_locked;
-    let mut start = state.scroll_offset.min(max_scroll);
-    if !scroll_locked {
-        if state.row < start {
-            start = state.row;
-        } else if state.row >= start + viewport {
-            start = state.row + 1 - viewport;
-        }
-    }
+    // Discover-style anchor via shared helper.
+    let start = crate::common::view::pane_scrollbar::discover_anchor(
+        state.scroll_offset,
+        max_scroll,
+        state.row,
+        viewport,
+        state.scroll_locked,
+    );
 
     Some(TargetsViewport {
         body,
@@ -124,39 +122,17 @@ pub fn compute_targets_viewport(
     })
 }
 
-/// Result of [`v_scrollbar_hit`]: carries everything the drag handler needs
-/// to compute the new scroll position on each pointer-move event.
-pub struct TargetsVScrollInfo {
-    pub track_y: u16,
-    pub max_scroll: usize,
-    /// Track PIXEL height — the drag formula uses this to linearly map
-    /// pointer Y (pixels) to scroll position. NOT the data-row count
-    /// (which would be off-by-viewport).
-    pub viewport_height: usize,
-}
+use crate::common::view::pane_scrollbar::ScrollbarHitInfo;
 
-/// Hit-test the targets pane's vertical scrollbar. Returns scrollbar drag
-/// info when `(x, y)` lands on the v_scrollbar, or `None` otherwise.
+/// Hit-test the targets pane's vertical scrollbar — delegates to shared helper.
 pub fn v_scrollbar_hit(
     area: Rect,
     state: &TargetsState,
     x: u16,
     y: u16,
-) -> Option<TargetsVScrollInfo> {
+) -> Option<ScrollbarHitInfo> {
     let tv = compute_targets_viewport(area, state)?;
-    let v_bar = tv.layout.v_scrollbar?;
-    let max_scroll = tv.max_scroll;
-    if max_scroll == 0 {
-        return None;
-    }
-    if !crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y) {
-        return None;
-    }
-    Some(TargetsVScrollInfo {
-        track_y: v_bar.y,
-        max_scroll,
-        viewport_height: usize::from(v_bar.height.max(1)),
-    })
+    crate::common::view::pane_scrollbar::v_scrollbar_hit(&tv.layout, tv.max_scroll, x, y)
 }
 
 /// The target list's table column layout. Used both by the `Table` render and
