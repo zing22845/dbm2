@@ -51,8 +51,13 @@ pub fn update(
                 std::mem::take(&mut state.connections),
             );
             state.connections = cn;
+            // Switching instances invalidates any open add/edit form: the form is
+            // not instance-scoped, so leaving it open would let it re-render under
+            // the new instance's name (a cross-instance leftover that looks like the
+            // form belongs to the instance you just switched to). Close it.
+            let form_was_open = state.connections.form.take().is_some();
             effects.extend(ce.into_iter().map(IwEffect::Connections));
-            changed || od || cd
+            changed || od || cd || form_was_open
         }
         IwMessage::Refresh { instance_name } => {
             // Refresh re-probes lifecycle and reloads both the overview data and
@@ -165,6 +170,39 @@ mod tests {
         assert!(effects
             .iter()
             .any(|e| matches!(e, IwEffect::Connections(_))));
+    }
+
+    #[test]
+    fn opening_another_instance_closes_open_form() {
+        use crate::features::instance_workspace::connections::msg::{ConnectionsMessage, ConnectionsMsg};
+
+        // A form is open for the current instance ...
+        let mut state = IwState::default();
+        state.instance_name = "inst-a".to_string();
+        let (s, _i, _e, _d) = update(
+            IwMessage::Connections(ConnectionsMsg::Message(ConnectionsMessage::BeginAdd)),
+            state,
+        );
+        let mut state = s;
+        assert!(
+            state.connections.form.is_some(),
+            "BeginAdd must open the add form"
+        );
+
+        // ... switching to a different instance must close it, otherwise the
+        // not-instance-scoped form would re-render under the new instance's name
+        // (a cross-instance leftover that looks like it belongs to inst-b).
+        let (s, _i, _e, dirty) = update(
+            IwMessage::OpenInstance {
+                instance_name: "inst-b".into(),
+            },
+            state,
+        );
+        assert!(
+            s.connections.form.is_none(),
+            "switching instances must close any open add/edit form"
+        );
+        assert!(dirty, "closing the form repaints");
     }
 
     #[test]
