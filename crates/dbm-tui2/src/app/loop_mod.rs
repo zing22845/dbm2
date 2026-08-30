@@ -130,6 +130,13 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // `update` via split-resize messages).
     let mut split_drag: Option<(usize, crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter)> = None;
 
+    // The hardware caret position placed on the previous frame. The editor's
+    // caret is written straight to the terminal (crossterm `MoveTo`) rather
+    // than into the ratatui buffer, so moving it changes no cells and the
+    // change count stays 0. Tracking it lets the redundancy metric tell a
+    // caret-only move apart from a genuinely redundant repaint.
+    let mut last_cursor_pos: Option<ratatui::layout::Position> = None;
+
     // Whether the app-level Explorer / workspace splitter is being dragged.
     // This is separate from `split_drag` because the app splitter is draggable
     // from any focus pane (it separates two peer top-level panes), not just
@@ -245,7 +252,9 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                 *results_scroll_out.borrow_mut() = r;
             })?;
             tracing::debug!("render: terminal.draw done");
-            crate::common::editor::apply_hardware_cursor(editor_cursor.into_inner())?;
+            let cursor = editor_cursor.into_inner();
+            let cursor_pos = cursor.as_ref().map(|c| c.position);
+            crate::common::editor::apply_hardware_cursor(cursor)?;
             // Feed back the computed targets layout (scroll offset, viewport)
             // to the state so update handlers can clamp scroll correctly.
             if let Some(info) = targets_layout.into_inner() {
@@ -271,17 +280,28 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             }
             let changed_cells = terminal.backend_mut().last_changed_cells();
             if real_redraw {
+                // The editor caret is a *hardware* cursor: it is positioned with
+                // a direct crossterm `MoveTo` outside the ratatui buffer, so a
+                // caret-only change (e.g. moving the cursor in the SQL editor)
+                // legitimately repaints zero cells. Count that as real work
+                // rather than redundancy, or every caret move would be scored
+                // as a wasted repaint.
+                let caret_moved = cursor_pos != last_cursor_pos;
+                // A caret-only move is real work even though no cell changed, so
+                // score it as one changed cell instead of a wasted repaint.
+                let effective_changed = changed_cells.max(usize::from(caret_moved));
+                last_cursor_pos = cursor_pos;
                 // Debug assertion (non-fatal): a real redraw (one asked for by
                 // an event/action, i.e. dirty) that changed zero cells means the
                 // repaint was over-broad — a message marked `dirty` without
                 // actually changing rendered state. Timed/forced repaints never
                 // reach this branch, so this only surfaces the event-driven
                 // dirty case.
-                if changed_cells == 0 {
+                if changed_cells == 0 && !caret_moved {
                     tracing::debug!("dirty redraw changed 0 cells (over-broad dirty?)");
                 }
                 state.perf.record_frame();
-                state.perf.record_redundancy(changed_cells);
+                state.perf.record_redundancy(effective_changed);
             } else {
                 // Forced counter-refresh repaint: bump the frame timestamp so
                 // later real redraws still count, but don't record this frame.
