@@ -186,50 +186,47 @@ fn render_connections_list(
         .map(|i| {
             let conn = &state.connections[i];
             let selected = i == state.cursor;
-            let color = match (
-                conn.test_succeeded_at.as_deref(),
-                conn.test_failed_at.as_deref(),
-            ) {
-                (Some(s), Some(f)) => {
-                    if s > f {
-                        ratatui::style::Color::Green
-                    } else {
-                        ratatui::style::Color::Red
-                    }
-                }
-                (Some(_), None) => ratatui::style::Color::Green,
-                (None, Some(_)) => ratatui::style::Color::Red,
-                (None, None) => p.fg,
-            };
+            // Row fg follows selection state only; test status is expressed
+            // via the ✓/✗ symbol on the Test OK / Test Fail cells (see below)
+            // so the two semantics never share the same color channel.
             let style = if selected {
-                let fg = if color == p.fg { p.selection_text } else { color };
                 Style::default()
-                    .fg(fg)
+                    .fg(p.selection_text)
                     .bg(p.selection_bg)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(color)
+                Style::default().fg(p.fg)
             };
             let name_body = conn.name.clone();
             let password = if conn.has_password { "set" } else { "empty" };
             let target = instance
                 .map_or_else(|| "?".to_string(), |inst| conn.display_target(inst));
-            let ok_at = conn
-                .test_succeeded_at
-                .clone()
-                .unwrap_or_else(|| "—".into());
-            let fail_at = conn
-                .test_failed_at
-                .clone()
-                .unwrap_or_else(|| "—".into());
+            // Test status cells: colored symbol + plain timestamp. The symbol
+            // is one char wide on the selection background (minimal clash), and
+            // the timestamp text inherits the row's fg (p.fg or selection_text)
+            // so contrast is always theme-guaranteed.
+            let ok_cell = match conn.test_succeeded_at.as_deref() {
+                Some(ts) => Cell::from(Line::from(vec![
+                    Span::styled("✓ ", Style::default().fg(p.success)),
+                    Span::raw(ts.to_string()),
+                ])),
+                None => Cell::from("—"),
+            };
+            let fail_cell = match conn.test_failed_at.as_deref() {
+                Some(ts) => Cell::from(Line::from(vec![
+                    Span::styled("✗ ", Style::default().fg(p.error)),
+                    Span::raw(ts.to_string()),
+                ])),
+                None => Cell::from("—"),
+            };
             Row::new(vec![
                 Cell::from(name_body),
                 Cell::from(target),
                 Cell::from(conn.ssl_mode.clone()),
                 Cell::from(password),
                 Cell::from(conn.updated_at.clone()),
-                Cell::from(ok_at),
-                Cell::from(fail_at),
+                ok_cell,
+                fail_cell,
             ])
             .style(style)
         })
