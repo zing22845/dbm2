@@ -260,21 +260,33 @@ pub fn render(
             let active = state.is_active_instance(inst_idx);
             let style = if focused {
                 Style::default()
-                    .fg(if active { p.selection_focus_text } else { p.selection_text })
+                    .fg(p.selection_text)
                     .bg(p.selection_bg)
                     .add_modifier(Modifier::BOLD)
-            } else if active {
-                Style::default().fg(p.active_fg).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(p.fg)
             };
             let marker = if node.expanded { "▾" } else { "▸" };
             let full_text = format!(" {marker} {instance_name}");
             let row_h_scroll: usize = if focused { effective_h as usize } else { 0 };
-            let display_text = crate::common::utils::text_width::truncate_plain_from(
-                &full_text, row_h_scroll, viewport_w,
+            // Active rows reserve 1 cell for the trailing ● marker (tight
+            // against the right border); inactive rows use the full width.
+            let dot = "●";
+            let text_max = if active { viewport_w.saturating_sub(1) } else { viewport_w };
+            let display_text = crate::common::utils::text_width::truncate_from(
+                &full_text, row_h_scroll, text_max,
             );
-            lines.push(Line::from(vec![Span::styled(display_text, style)]));
+            if active && viewport_w >= 2 {
+                let text_w = crate::common::utils::text_width::width(&display_text);
+                let padding = text_max.saturating_sub(text_w);
+                lines.push(Line::from(vec![
+                    Span::styled(display_text, style),
+                    Span::raw(" ".repeat(padding)),
+                    Span::styled(dot, Style::default().fg(p.success)),
+                ]));
+            } else {
+                lines.push(Line::from(vec![Span::styled(display_text, style)]));
+            }
             rows_emitted += 1;
         }
         flat_row += 1;
@@ -288,20 +300,30 @@ pub fn render(
                     let conn_active = state.is_active_connection(inst_idx, ci);
                     let cstyle = if conn_focused {
                         Style::default()
-                            .fg(if conn_active { p.selection_focus_text } else { p.selection_text })
+                            .fg(p.selection_text)
                             .bg(p.selection_bg)
                             .add_modifier(Modifier::BOLD)
-                    } else if conn_active {
-                        Style::default().fg(p.active_fg).add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(p.fg)
                     };
                     let full_text = format!("    └ {}/{}", conn.name, conn.database);
                     let row_h_scroll: usize = if conn_focused { effective_h as usize } else { 0 };
-                    let display_text = crate::common::utils::text_width::truncate_plain_from(
-                        &full_text, row_h_scroll, viewport_w,
+                    let dot = "●";
+                    let text_max = if conn_active { viewport_w.saturating_sub(1) } else { viewport_w };
+                    let display_text = crate::common::utils::text_width::truncate_from(
+                        &full_text, row_h_scroll, text_max,
                     );
-                    lines.push(Line::from(vec![Span::styled(display_text, cstyle)]));
+                    if conn_active && viewport_w >= 2 {
+                        let text_w = crate::common::utils::text_width::width(&display_text);
+                        let padding = text_max.saturating_sub(text_w);
+                        lines.push(Line::from(vec![
+                            Span::styled(display_text, cstyle),
+                            Span::raw(" ".repeat(padding)),
+                            Span::styled(dot, Style::default().fg(p.success)),
+                        ]));
+                    } else {
+                        lines.push(Line::from(vec![Span::styled(display_text, cstyle)]));
+                    }
                     rows_emitted += 1;
                 }
                 flat_row += 1;

@@ -233,11 +233,9 @@ pub fn render(
         let focused = idx == state.cursor;
         let style = if focused {
             Style::default()
-                .fg(if row.active { p.selection_focus_text } else { p.selection_text })
+                .fg(p.selection_text)
                 .bg(p.selection_bg)
                 .add_modifier(Modifier::BOLD)
-        } else if row.active {
-            Style::default().fg(p.active_fg).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(p.fg)
         };
@@ -250,12 +248,26 @@ pub fn render(
         let full_text = format!("{indent}{marker} {}", row.label);
         // Per-row horizontal scroll: only the selected row scrolls.
         let row_h_scroll: usize = if focused { effective_h as usize } else { 0 };
-        let display_text = crate::common::utils::text_width::truncate_plain_from(
+        // Active rows reserve 1 cell for the trailing ● marker (tight against
+        // the right border); inactive rows use the full width.
+        let dot = "●";
+        let text_max = if row.active { viewport_w.saturating_sub(1) } else { viewport_w };
+        let display_text = crate::common::utils::text_width::truncate_from(
             &full_text,
             row_h_scroll,
-            viewport_w,
+            text_max,
         );
-        lines.push(Line::from(vec![Span::styled(display_text, style)]));
+        if row.active && viewport_w >= 2 {
+            let text_w = crate::common::utils::text_width::width(&display_text);
+            let padding = text_max.saturating_sub(text_w);
+            lines.push(Line::from(vec![
+                Span::styled(display_text, style),
+                Span::raw(" ".repeat(padding)),
+                Span::styled(dot, Style::default().fg(p.success)),
+            ]));
+        } else {
+            lines.push(Line::from(vec![Span::styled(display_text, style)]));
+        }
     }
     if lines.is_empty() {
         let msg = if state.bound_connection.is_empty() {
