@@ -232,12 +232,20 @@ pub fn update(
                 Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
             // Test the form's current values against the database (no save).
             let Some(form) = state.form.as_ref() else {
+                tracing::debug!("TestForm: no form open");
                 return (state, intents, effects, false);
             };
             if form.name.trim().is_empty() {
+                tracing::debug!("TestForm: form name empty");
                 return (state, intents, effects, false);
             }
             let instance_name = state.instance_name.clone();
+            tracing::debug!(
+                instance_name = %instance_name,
+                edit_original = ?form.edit_original_name,
+                password_blank = form.password.is_empty(),
+                "TestForm: dispatching"
+            );
             // When editing an existing connection and the password field is
             // blank (password not re-entered), fall back to testing the saved
             // connection by name — the store has its stored password. This
@@ -246,12 +254,21 @@ pub fn update(
             if form.password.is_empty()
                 && let Some(original_name) = form.edit_original_name.as_ref()
             {
+                tracing::debug!(
+                    instance_name = %instance_name,
+                    connection_name = %original_name,
+                    "TestForm: fallback to TestConnection (saved password)"
+                );
                 effects.push(ConnectionsEffect::TestConnection {
                     instance_name,
                     connection_name: original_name.clone(),
                 });
                 return (state, intents, effects, false);
             }
+            tracing::debug!(
+                instance_name = %instance_name,
+                "TestForm: TestFormConnection with form values"
+            );
             let connection = NewInstanceConnection {
                 name: form.name.trim().to_string(),
                 username: form.username.clone(),

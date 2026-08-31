@@ -33,6 +33,12 @@ pub fn update(
         }
         IwMessage::OpenInstance { instance_name } => {
             let changed = state.instance_name != instance_name;
+            tracing::debug!(
+                old = %state.instance_name,
+                new = %instance_name,
+                changed,
+                "iw: OpenInstance"
+            );
             state.instance_name = instance_name.clone();
             // Load the overview and connections for the freshly opened instance
             // by dispatching child Load messages.

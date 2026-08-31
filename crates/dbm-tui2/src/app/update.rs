@@ -631,6 +631,12 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         .and_then(|n| n.instance.as_ref())
                         .map(|i| i.name.clone())
                         .unwrap_or_default();
+                    tracing::debug!(
+                        instance_idx = *instance_idx,
+                        instance_name = %instance_name,
+                        explorer_conn_idx = *_explorer_conn_idx,
+                        "shell: RequestEditConnection"
+                    );
                     if !instance_name.is_empty() {
                         state.explorer.instances.set_active_instance(*instance_idx);
                         // Ensure the parent instance is expanded so the
