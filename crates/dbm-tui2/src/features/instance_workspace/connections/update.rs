@@ -84,6 +84,19 @@ pub fn update(
             }
             dirty
         }
+        ConnectionsMessage::JumpTo { row } => {
+            if state.connections.is_empty() {
+                false
+            } else {
+                let clamped = row.min(state.connections.len() - 1);
+                let changed = state.cursor != clamped;
+                state.cursor = clamped;
+                // A click targets a visible row, so unlock the anchor so the
+                // viewport stops fighting the manual jump on the next frame.
+                state.scroll_locked = false;
+                changed
+            }
+        }
         ConnectionsMessage::BeginAdd => {
             let changed = state.begin_add();
             if changed {
@@ -321,6 +334,75 @@ pub fn update(
 mod tests {
     use super::*;
     use crate::features::instance_workspace::connections::state::ConnectionForm;
+
+    fn mk_conn(name: &str) -> dbm_store::InstanceConnection {
+        dbm_store::InstanceConnection {
+            id: name.into(),
+            instance_id: "inst".into(),
+            name: name.into(),
+            username: "postgres".into(),
+            database: "postgres".into(),
+            has_password: false,
+            ssl_mode: "prefer".into(),
+            env_label: None,
+            created_at: "now".into(),
+            updated_at: "now".into(),
+            test_succeeded_at: None,
+            test_failed_at: None,
+        }
+    }
+
+    #[test]
+    fn jump_to_moves_cursor_and_unlocks_scroll() {
+        let mut s = ConnectionsState::default();
+        s.connections = vec![
+            mk_conn("a"),
+            mk_conn("b"),
+            mk_conn("c"),
+        ];
+        s.cursor = 0;
+        s.scroll_locked = true; // a prior manual drag locked the anchor
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::JumpTo { row: 2 },
+            std::mem::take(&mut s),
+        );
+        assert_eq!(s.cursor, 2);
+        assert!(!s.scroll_locked, "click unlocks the discover anchor");
+        assert!(dirty);
+    }
+
+    #[test]
+    fn jump_to_clamps_out_of_range_row_and_is_noop_when_unchanged() {
+        let mut s = ConnectionsState::default();
+        s.connections = vec![mk_conn("a"), mk_conn("b")];
+        s.cursor = 0;
+        // Out-of-range row clamps into the list (99 -> last row 1).
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::JumpTo { row: 99 },
+            std::mem::take(&mut s),
+        );
+        assert_eq!(s.cursor, 1);
+        assert!(dirty);
+        // Same-row jump is a no-op.
+        let s = ConnectionsState { cursor: 1, ..s };
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::JumpTo { row: 1 },
+            s,
+        );
+        assert_eq!(s.cursor, 1);
+        assert!(!dirty);
+    }
+
+    #[test]
+    fn jump_to_empty_list_is_noop() {
+        let mut s = ConnectionsState::default();
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::JumpTo { row: 3 },
+            std::mem::take(&mut s),
+        );
+        assert_eq!(s.cursor, 0);
+        assert!(!dirty);
+    }
 
     #[test]
     fn load_binds_instance_name_for_later_reload() {

@@ -15,6 +15,9 @@ pub enum ConnectionsMessage {
     MoveUp,
     /// Move the connection cursor down.
     MoveDown,
+    /// Move the cursor to a specific visible row (single click). Unlocks the
+    /// discover-style anchor so the viewport follows the new cursor.
+    JumpTo { row: usize },
     /// Open the add-connection form.
     BeginAdd,
     /// Open the edit form for the connection at the cursor.

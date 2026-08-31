@@ -1290,6 +1290,55 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 }
                             }
 
+                            // IW connections list click: a single click moves the
+                            // cursor to the clicked row; a double click opens the
+                            // edit form for it. Excludes clicks on the v_scrollbar
+                            // track (which start a drag instead) and clicks while
+                            // the add/edit form is open (the popup owns the input).
+                            if let Some(body) = iw_body_area_for_hit(size, &state)
+                                && body.contains(point)
+                                && matches!(state.iw.pane, crate::app_shell::nav::IwPane::Connections)
+                                && state.iw.connections.form.is_none()
+                            {
+                                use crate::features::instance_workspace::connections::{
+                                    msg::*, view,
+                                };
+                                use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+                                let on_scrollbar = view::v_scrollbar_hit(
+                                    body,
+                                    &state.iw.connections,
+                                    mouse.column,
+                                    mouse.row,
+                                )
+                                .is_some();
+                                if !on_scrollbar
+                                    && let Some(row) = view::row_at(
+                                        body,
+                                        &state.iw.connections,
+                                        mouse.row,
+                                    )
+                                {
+                                    let msg = if is_double_click {
+                                        // Double click edits the connection, like
+                                        // pressing `i` on the row (BeginEdit).
+                                        ConnectionsMessage::BeginEdit
+                                    } else {
+                                        // Single click selects the row (JumpTo).
+                                        ConnectionsMessage::JumpTo { row }
+                                    };
+                                    let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
+                                        ConnectionsMsg::Message(msg),
+                                    )));
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
                             // IW overview v_scrollbar hit-test.
                             if let Some(body) =
                                 iw_body_area_for_hit(size, &state)

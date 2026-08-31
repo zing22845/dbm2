@@ -1,6 +1,6 @@
 //! Instance connections feature rendering.
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Row, Table};
@@ -13,21 +13,18 @@ use crate::common::view::theme::Theme;
 
 use super::state::{ConnectionsState, FormField};
 
-/// Number of header rows in the connections Table widget.
-const HEADER_H: u16 = 1;
-
 /// Result of [`compute_connections_viewport`]: shared by render and
 /// v_scrollbar_hit so they agree on geometry and scroll position.
 pub struct ConnectionsViewport {
-    /// Header row rect (fixed, does not scroll).
-    pub header: Rect,
-    /// Original data_body rect (before pane_scroll_layout reserves v_bar).
+    /// The pane body area (before `pane_scroll_layout` reserves the bars).
     pub data_body: Rect,
-    /// Layout returned by pane_scroll_layout on data_body.
+    /// Layout returned by `pane_scroll_layout` on `data_body`.
     pub layout: PaneScrollLayout,
-    /// The actual Table render area (inside data_body, reserved v_bar).
+    /// The actual Table render area (inside `data_body`, reserving the bars).
+    /// The Table draws its own header on `content.y`, so data rows begin at
+    /// `content.y + 1`.
     pub content: Rect,
-    /// Number of data rows visible in content.
+    /// Number of data rows visible in `content` (Table header excluded).
     pub viewport: usize,
     /// Scroll offset: index of the first visible data row.
     pub start: usize,
@@ -39,6 +36,11 @@ pub struct ConnectionsViewport {
 
 /// Shared viewport computation. Applies discover-style cursor anchoring
 /// (skipped when `scroll_locked`).
+///
+/// The `Table` widget draws its own header row, so we do NOT split a separate
+/// header chunk here (that was the old dead-row bug). Instead the whole `area`
+/// is the scrollable body, and `viewport` subtracts the Table's header row —
+/// matching the `discover/targets` single-source-of-truth pattern.
 pub fn compute_connections_viewport(
     area: Rect,
     state: &ConnectionsState,
@@ -47,20 +49,7 @@ pub fn compute_connections_viewport(
     if total == 0 {
         return None;
     }
-
-    // Split off the fixed header row; the rest is the scrollable data body.
-    if area.height <= HEADER_H {
-        return None;
-    }
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(HEADER_H),
-            Constraint::Min(0),
-        ])
-        .split(area);
-    let header = chunks[0];
-    let data_body = chunks[1];
+    let data_body = area;
     if data_body.height == 0 {
         return None;
     }
@@ -72,7 +61,9 @@ pub fn compute_connections_viewport(
     let layout = pane_scroll_layout(data_body, 0, total, data_body.height as usize);
     let content = layout.content_area;
 
-    let viewport = content.height.max(1) as usize;
+    // The Table reserves one row for its header → visible data rows are one
+    // less than the content height (same convention as discover/targets).
+    let viewport = content.height.saturating_sub(1).max(1) as usize;
     let max_scroll = total.saturating_sub(viewport);
 
     // Discover-style anchor via shared helper.
@@ -85,7 +76,6 @@ pub fn compute_connections_viewport(
     );
 
     Some(ConnectionsViewport {
-        header,
         data_body,
         layout,
         content,
@@ -107,6 +97,24 @@ pub fn v_scrollbar_hit(
 ) -> Option<ScrollbarHitInfo> {
     let cv = compute_connections_viewport(area, state)?;
     crate::common::view::pane_scrollbar::v_scrollbar_hit(&cv.layout, cv.max_scroll, x, y)
+}
+
+/// Map a click Y coordinate (in the connections pane's `area`) to a data row
+/// index. The `Table` is rendered into `content` and draws its own header on
+/// `content.y`, so the first *data* row sits at `content.y + 1`:
+/// `row = start + (y - content.y - 1)`. Returns `None` for clicks on the
+/// header, the scrollbar gutter, or beyond the last data row.
+pub fn row_at(area: Rect, state: &ConnectionsState, y: u16) -> Option<usize> {
+    let cv = compute_connections_viewport(area, state)?;
+    // The Table header occupies content.y; data rows begin one row below it.
+    let data_top = cv.content.y.saturating_add(1);
+    let data_bottom = cv.content.y.saturating_add(cv.content.height);
+    if y < data_top || y >= data_bottom {
+        return None;
+    }
+    let rel = usize::from(y.saturating_sub(data_top));
+    let idx = cv.start.saturating_add(rel);
+    (idx < cv.total).then_some(idx)
 }
 
 /// Render the connections panel: the connection list plus (when open) the
@@ -238,9 +246,11 @@ fn render_connections_list(
         Constraint::Length(19),
     ];
 
-    // Render header on its own row and Table body in the content area.
+    // Render the Table (header + sliced data rows) into the content area, so
+    // it never overlaps the reserved v_scrollbar column. The Table draws its
+    // own header on content.y; the viewport rows fill the rest.
     let table = Table::new(rows, constraints).header(header_row);
-    frame.render_widget(table, cv.data_body);
+    frame.render_widget(table, cv.content);
 
     // ---- VERTICAL SCROLLBAR ----
     if let Some(bar) = cv.layout.v_scrollbar {
@@ -403,6 +413,35 @@ mod tests {
             test_succeeded_at: None,
             test_failed_at: None,
         }
+    }
+
+    #[test]
+    fn row_at_accounts_for_table_header_offset() {
+        // area height 6 => content is (0,0,79,6) after reserving the v_bar
+        // column. The Table draws its own header on content.y (=0), so the
+        // first *data* row is at y=1. A click at y=1 must map to row 0, not
+        // row 1 (the off-by-one this guards against).
+        let mut s = ConnectionsState::default();
+        s.connections = (0..20).map(|i| mk_conn(&format!("c{i}"))).collect();
+        s.scroll_locked = true; // pin start so we test pure geometry
+        s.scroll = 0;
+        let area = Rect::new(0, 0, 80, 6);
+        assert_eq!(row_at(area, &s, 0), None, "table header row is not data");
+        assert_eq!(row_at(area, &s, 1), Some(0), "first data row");
+        assert_eq!(row_at(area, &s, 2), Some(1));
+        assert_eq!(row_at(area, &s, 3), Some(2));
+    }
+
+    #[test]
+    fn row_at_adds_scroll_offset() {
+        let mut s = ConnectionsState::default();
+        s.connections = (0..20).map(|i| mk_conn(&format!("c{i}"))).collect();
+        s.scroll_locked = true;
+        s.scroll = 10; // viewport starts at data row 10
+        let area = Rect::new(0, 0, 80, 6);
+        // First visible data row (y=1) now maps to index 10.
+        assert_eq!(row_at(area, &s, 1), Some(10));
+        assert_eq!(row_at(area, &s, 2), Some(11));
     }
 
     #[test]
