@@ -237,6 +237,21 @@ pub fn update(
             if form.name.trim().is_empty() {
                 return (state, intents, effects, false);
             }
+            let instance_name = state.instance_name.clone();
+            // When editing an existing connection and the password field is
+            // blank (password not re-entered), fall back to testing the saved
+            // connection by name — the store has its stored password. This
+            // avoids a spurious failure where TestFormConnection receives
+            // password: None and can't authenticate.
+            if form.password.is_empty()
+                && let Some(original_name) = form.edit_original_name.as_ref()
+            {
+                effects.push(ConnectionsEffect::TestConnection {
+                    instance_name,
+                    connection_name: original_name.clone(),
+                });
+                return (state, intents, effects, false);
+            }
             let connection = NewInstanceConnection {
                 name: form.name.trim().to_string(),
                 username: form.username.clone(),
@@ -249,16 +264,10 @@ pub fn update(
                 ssl_mode: None,
                 env_label: None,
             };
-            let instance_name = state.instance_name.clone();
             effects.push(ConnectionsEffect::TestFormConnection {
                 instance_name,
                 connection,
             });
-            // Starting the async test does not change any rendered state: the
-            // result only lands when `TestResult`/`TestComplete` arrives. Marking
-            // this dirty would trigger a redundant repaint (a held `t` wastes a
-            // redraw every second with nothing visibly changed), so keep it false
-            // and let the completion message repaint with the actual result.
             false
         }
         ConnectionsMessage::TestSelected => {
