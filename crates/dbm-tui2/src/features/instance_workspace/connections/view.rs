@@ -55,8 +55,8 @@ pub fn compute_connections_viewport(
     }
 
     // Horizontal content width estimate: connections columns are Name(16) +
-    // Target(min 12) + SSL(8) + Password(10) + Updated(19) + Test OK(19) +
-    // Test Fail(19) = 103 fixed (Target min can grow). Connections does not
+    // Target(min 12) + SSL(8) + Password(10) + Updated(19) + Test OK(21) +
+    // Test Fail(21) = 107 fixed (Target min can grow). Connections does not
     // wrap or h_scroll in practice, so use 0 to skip h_scrollbar reservation.
     let layout = pane_scroll_layout(data_body, 0, total, data_body.height as usize);
     let content = layout.content_area;
@@ -239,8 +239,8 @@ fn render_connections_list(
         Constraint::Length(8),
         Constraint::Length(10),
         Constraint::Length(19),
-        Constraint::Length(19),
-        Constraint::Length(19),
+        Constraint::Length(21),
+        Constraint::Length(21),
     ];
 
     // Render the Table (header + sliced data rows) into the content area, so
