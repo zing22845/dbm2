@@ -1012,9 +1012,41 @@ fn results_key(key: KeyEvent, tab_id: usize, results: &crate::features::sql_work
 fn history_key(
     key: KeyEvent,
     tab_id: usize,
-    _history: &crate::features::sql_workspace::sql_tab::history::state::HistoryState,
+    history: &crate::features::sql_workspace::sql_tab::history::state::HistoryState,
 ) -> Option<AppMsg> {
+    let search = &history.list.search;
+    // While search text input is active, forward all keys to the search
+    // handler (Esc cancels, letters build the query, etc.).
+    if search.text_input_active() {
+        return Some(sql_history(tab_id, HistoryMessage::SearchKey(key)));
+    }
+    // ESC: if a search filter is set (but input not active), clear it first;
+    // otherwise return focus to the SQL editor.
+    if key.code == KeyCode::Esc {
+        if search.has_filter() {
+            return Some(sql_history(tab_id, HistoryMessage::SearchKey(key)));
+        }
+        return Some(focus_subpane(SqlFocus::Editor));
+    }
     let msg = match key.code {
+        // j/k: up/down (global, not shown in footer)
+        KeyCode::Char('j') if key.modifiers.is_empty() => HistoryMessage::MoveCursor { delta: 1 },
+        KeyCode::Char('k') if key.modifiers.is_empty() => HistoryMessage::MoveCursor { delta: -1 },
+        // h/l: horizontal scroll (global, not shown in footer)
+        KeyCode::Char('h') if key.modifiers.is_empty() => HistoryMessage::ScrollHScroll { delta: -1 },
+        KeyCode::Char('l') if key.modifiers.is_empty() => HistoryMessage::ScrollHScroll { delta: 1 },
+        // Ctrl+p / Ctrl+n: up / down
+        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            HistoryMessage::MoveCursor { delta: -1 }
+        }
+        KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            HistoryMessage::MoveCursor { delta: 1 }
+        }
+        // g / G: jump to top / bottom
+        KeyCode::Char('g') if key.modifiers.is_empty() => HistoryMessage::SetCursor { index: 0 },
+        KeyCode::Char('G') if key.modifiers.is_empty() => {
+            HistoryMessage::SetCursor { index: usize::MAX }
+        }
         KeyCode::Up => HistoryMessage::MoveCursor { delta: -1 },
         KeyCode::Down => HistoryMessage::MoveCursor { delta: 1 },
         KeyCode::Left => HistoryMessage::ScrollHScroll { delta: -1 },
@@ -1023,12 +1055,17 @@ fn history_key(
         KeyCode::Char('/') if key.modifiers.is_empty() => HistoryMessage::BeginSearch,
         _ => return None,
     };
-    Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+    Some(sql_history(tab_id, msg))
+}
+
+/// Build a `SqlTabMessage::History` app message targeting the given tab.
+fn sql_history(tab_id: usize, msg: HistoryMessage) -> AppMsg {
+    AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
         SqlTabMessage::History {
             tab_id,
             msg: HistoryMsg::Message(msg),
         },
-    )))))
+    ))))
 }
 
 /// Tab-bar navigation keys: switch / open / close tabs.
