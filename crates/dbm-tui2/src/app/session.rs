@@ -419,6 +419,12 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
             // `iw.instance` (the ManagedInstance), not just the name, so mirror
             // the node's instance data onto it.
             state.iw.instance_name = instance_name.clone();
+            // The connections sub-state tracks its own `instance_name` copy
+            // (used by TestForm / Save etc.). OpenInstance normally sets it
+            // via ConnectionsMessage::Load, but session restore bypasses that
+            // path — sync it here so form actions don't dispatch with an empty
+            // instance name.
+            state.iw.connections.instance_name = instance_name.clone();
             if let Some(node) = state.explorer.instances.nodes.get(idx)
                 && let Some(inst) = &node.instance
             {
