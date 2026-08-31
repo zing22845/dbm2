@@ -1,6 +1,6 @@
 //! Instance connections feature rendering.
 
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Row, Table};
@@ -54,10 +54,10 @@ pub fn compute_connections_viewport(
         return None;
     }
 
-    // Horizontal content width estimate: connections columns are Name(16) +
-    // Target(min 12) + SSL(8) + Password(10) + Updated(19) + Test OK(21) +
-    // Test Fail(21) = 107 fixed (Target min can grow). Connections does not
-    // wrap or h_scroll in practice, so use 0 to skip h_scrollbar reservation.
+    // Horizontal content width estimate: column widths are auto-measured with
+    // a per-column cap of 30 + 1 ellipsis reserve (see
+    // `measure_connections_col_widths`). Connections does not wrap or h_scroll
+    // in practice, so use 0 to skip h_scrollbar reservation.
     let layout = pane_scroll_layout(data_body, 0, total, data_body.height as usize);
     let content = layout.content_area;
 
@@ -159,6 +159,39 @@ pub fn render(
     }
 }
 
+/// Measure each column's display width across header + all connections,
+/// with a per-column cap and ellipsis reserve so long values get truncated
+/// with `…` (matching the results list approach).
+fn measure_connections_col_widths(
+    state: &ConnectionsState,
+    instance: Option<&dbm_store::ManagedInstance>,
+) -> [u16; 7] {
+    const CAP: u16 = 30;
+    const ELLIPSIS_RESERVE: u16 = 1;
+    const MIN_W: u16 = 4;
+    let w = crate::common::utils::text_width::width;
+
+    let headers = ["Name", "Target", "SSL", "Password", "Updated", "Test OK", "Test Fail"];
+    let mut widths = [0u16; 7];
+    for (i, h) in headers.iter().enumerate() {
+        widths[i] = widths[i].max(w(h) as u16);
+    }
+    for conn in &state.connections {
+        widths[0] = widths[0].max(w(&conn.name) as u16);
+        let target = instance.map_or_else(|| "?".to_string(), |inst| conn.display_target(inst));
+        widths[1] = widths[1].max(w(&target) as u16);
+        widths[2] = widths[2].max(w(&conn.ssl_mode) as u16);
+        widths[3] = widths[3].max(if conn.has_password { 3 } else { 5 });
+        widths[4] = widths[4].max(w(&conn.updated_at) as u16);
+        widths[5] = widths[5].max(conn.test_succeeded_at.as_deref().map_or(1, |ts| 2 + w(ts) as u16));
+        widths[6] = widths[6].max(conn.test_failed_at.as_deref().map_or(1, |ts| 2 + w(ts) as u16));
+    }
+    for cw in widths.iter_mut() {
+        *cw = (*cw).min(CAP).saturating_add(ELLIPSIS_RESERVE).max(MIN_W);
+    }
+    widths
+}
+
 fn render_connections_list(
     frame: &mut Frame,
     theme: &Theme,
@@ -181,6 +214,8 @@ fn render_connections_list(
     .style(Style::default().add_modifier(Modifier::BOLD));
 
     // ---- DATA ROWS (sliced to the visible viewport) ----
+    let col_widths = measure_connections_col_widths(state, instance);
+    let trunc = crate::common::utils::text_width::truncate_from;
     let end = (cv.start + cv.viewport).min(cv.total);
     let rows: Vec<Row> = (cv.start..end)
         .map(|i| {
@@ -197,34 +232,45 @@ fn render_connections_list(
             } else {
                 Style::default().fg(p.fg)
             };
-            let name_body = conn.name.clone();
+            let name_body = trunc(&conn.name, 0, col_widths[0] as usize);
             let password = if conn.has_password { "set" } else { "empty" };
             let target = instance
                 .map_or_else(|| "?".to_string(), |inst| conn.display_target(inst));
+            let target = trunc(&target, 0, col_widths[1] as usize);
+            let ssl = trunc(&conn.ssl_mode, 0, col_widths[2] as usize);
+            let updated = trunc(&conn.updated_at, 0, col_widths[4] as usize);
             // Test status cells: colored symbol + plain timestamp. The symbol
             // is one char wide on the selection background (minimal clash), and
             // the timestamp text inherits the row's fg (p.fg or selection_text)
             // so contrast is always theme-guaranteed.
             let ok_cell = match conn.test_succeeded_at.as_deref() {
-                Some(ts) => Cell::from(Line::from(vec![
-                    Span::styled("✓ ", Style::default().fg(p.success)),
-                    Span::raw(ts.to_string()),
-                ])),
+                Some(ts) => {
+                    let avail = col_widths[5].saturating_sub(2) as usize;
+                    let ts = trunc(ts, 0, avail);
+                    Cell::from(Line::from(vec![
+                        Span::styled("✓ ", Style::default().fg(p.success)),
+                        Span::raw(ts),
+                    ]))
+                }
                 None => Cell::from("—"),
             };
             let fail_cell = match conn.test_failed_at.as_deref() {
-                Some(ts) => Cell::from(Line::from(vec![
-                    Span::styled("✗ ", Style::default().fg(p.error)),
-                    Span::raw(ts.to_string()),
-                ])),
+                Some(ts) => {
+                    let avail = col_widths[6].saturating_sub(2) as usize;
+                    let ts = trunc(ts, 0, avail);
+                    Cell::from(Line::from(vec![
+                        Span::styled("✗ ", Style::default().fg(p.error)),
+                        Span::raw(ts),
+                    ]))
+                }
                 None => Cell::from("—"),
             };
             Row::new(vec![
                 Cell::from(name_body),
                 Cell::from(target),
-                Cell::from(conn.ssl_mode.clone()),
+                Cell::from(ssl),
                 Cell::from(password),
-                Cell::from(conn.updated_at.clone()),
+                Cell::from(updated),
                 ok_cell,
                 fail_cell,
             ])
@@ -232,15 +278,14 @@ fn render_connections_list(
         })
         .collect();
 
-    use ratatui::layout::Constraint;
     let constraints = [
-        Constraint::Length(16),
-        Constraint::Min(12),
-        Constraint::Length(8),
-        Constraint::Length(10),
-        Constraint::Length(19),
-        Constraint::Length(21),
-        Constraint::Length(21),
+        Constraint::Length(col_widths[0]),
+        Constraint::Length(col_widths[1]),
+        Constraint::Length(col_widths[2]),
+        Constraint::Length(col_widths[3]),
+        Constraint::Length(col_widths[4]),
+        Constraint::Length(col_widths[5]),
+        Constraint::Length(col_widths[6]),
     ];
 
     // Render the Table (header + sliced data rows) into the content area, so
