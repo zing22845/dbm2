@@ -247,8 +247,14 @@ pub fn update(
             if let Some(idx) = state.index_of(tab_id) {
                 let tab = &state.tabs[idx];
                 let (instance, connection) = session_key(&tab.session);
-                let detail_visible = tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History
-                    && !state.history_store.entries(&instance, &connection).is_empty();
+                let detail_visible = super::history::detail_visible(
+                    tab.focus
+                        == crate::features::sql_workspace::sql_tab::state::SqlFocus::History,
+                    &tab.history.list,
+                    &state.history_store,
+                    &instance,
+                    &connection,
+                );
                 let list_w = if detail_visible {
                     // `width` is the whole zone (A to the right edge), which
                     // holds list + detail + splitter + the History border. The
@@ -315,10 +321,14 @@ pub fn update(
                     MAX_HISTORY_WIDTH, MIN_HISTORY_WIDTH,
                 };
                 let (instance, connection) = session_key(&state.tabs[idx].session);
-                let detail_visible =
+                let detail_visible = super::history::detail_visible(
                     state.tabs[idx].focus
-                        == crate::features::sql_workspace::sql_tab::state::SqlFocus::History
-                    && !state.history_store.entries(&instance, &connection).is_empty();
+                        == crate::features::sql_workspace::sql_tab::state::SqlFocus::History,
+                    &state.tabs[idx].history.list,
+                    &state.history_store,
+                    &instance,
+                    &connection,
+                );
                 if detail_visible {
                     let tab = &state.tabs[idx];
                     let hi = tab

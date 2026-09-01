@@ -2321,7 +2321,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     // leftward into the editor. For wheel routing we
                                     // compute the full zone rect (detail + list +
                                     // splitter) so wheel works anywhere inside it.
-                                    let detail_visible = tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History;
+                                    use crate::features::sql_workspace::sql_tab::session::session_view_key;
+                                    let (instance, connection) = session_view_key(&tab.session);
+                                    let detail_visible = crate::features::sql_workspace::sql_tab::history::detail_visible(
+                                        tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History,
+                                        &tab.history.list,
+                                        &state.sql.sql_tab.history_store,
+                                        &instance,
+                                        &connection,
+                                    );
                                     let zone_rect = if detail_visible {
                                         use crate::features::sql_workspace::sql_tab::history::splitter::view::{history_zone_x, history_zone_width};
                                         let zone_x = history_zone_x(tab_area, &layout, tab.history.splitter.detail_pane_width);

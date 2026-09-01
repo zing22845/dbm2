@@ -171,8 +171,13 @@ pub fn sql_workspace_click(
     // detail preview — must keep focus on History, not fall through to the
     // editor. Mirror the same zone computation used by the renderer.
     let (instance, connection) = session_view_key(&tab.session);
-    let detail_visible = tab.focus == SqlFocus::History
-        && !state.history_store.entries(&instance, &connection).is_empty();
+    let detail_visible = super::history::detail_visible(
+        tab.focus == SqlFocus::History,
+        &tab.history.list,
+        &state.history_store,
+        &instance,
+        &connection,
+    );
     // The History feature owns the list AND the detail; when the detail is
     // visible the history zone widens leftward (eating into the editor). Both
     // the shrunk editor and the widened history zone must be hit-tested so a
@@ -850,8 +855,13 @@ pub fn render(
     // caret/shell focus). So focusing History with `H` pops the detail to the
     // left of the list immediately. The splitter can widen the detail, but it
     // is never absent while History is focused.
-    let history_detail_visible = tab.focus == SqlFocus::History
-        && !state.history_store.entries(&instance, &connection).is_empty();
+    let history_detail_visible = super::history::detail_visible(
+        tab.focus == SqlFocus::History,
+        &tab.history.list,
+        &state.history_store,
+        &instance,
+        &connection,
+    );
 
     // When the detail is visible it extends the history zone to the left,
     // eating into the editor's width (mirrors original `history_zone_width`).

@@ -95,8 +95,13 @@ pub fn sql_tab_splitter_at(
         return None;
     }
     let (instance, connection) = session_view_key(&tab.session);
-    let detail_visible = tab.focus == SqlFocus::History
-        && !state.history_store.entries(&instance, &connection).is_empty();
+    let detail_visible = super::super::history::detail_visible(
+        tab.focus == SqlFocus::History,
+        &tab.history.list,
+        &state.history_store,
+        &instance,
+        &connection,
+    );
     let mut splitter = if detail_visible {
         splitter_at_with_detail(
             &layout,
@@ -168,8 +173,13 @@ pub fn sql_tab_splitter_resize_msg(
             // history pane's right edge. Measuring to the wrong edge would let
             // the stored width and the rendered zone disagree.
             let (instance, connection) = super::super::session::session_view_key(&tab.session);
-            let detail_visible = tab.focus == super::super::state::SqlFocus::History
-                && !state.history_store.entries(&instance, &connection).is_empty();
+            let detail_visible = super::super::history::detail_visible(
+                tab.focus == super::super::state::SqlFocus::History,
+                &tab.history.list,
+                &state.history_store,
+                &instance,
+                &connection,
+            );
             let right_edge = if detail_visible {
                 body.right()
             } else {
