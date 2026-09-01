@@ -295,7 +295,11 @@ impl SqlTabState {
             splitter: super::splitter::state::SqlTabSplitterState::default(),
             complete_table_names: false,
             editor: EditorState::default(),
-            results: ResultsState::default(),
+            // `new()` (not `default()`): a fresh tab must get valid pagination
+            // (`row_limit = DEFAULT_RESULTS_ROW_LIMIT`, page = 1). `default()`
+            // yields `row_limit = 0`, which a run forwards as `LIMIT 0` and
+            // returns no rows. Keep consistent with session restore (`new()`).
+            results: ResultsState::new(),
             history: HistoryState::default(),
         });
         self.active_tab = Some(self.tabs.len() - 1);
@@ -447,7 +451,11 @@ impl SqlTabState {
             splitter: super::splitter::state::SqlTabSplitterState::default(),
             complete_table_names: false,
             editor: EditorState::default(),
-            results: ResultsState::default(),
+            // `new()` (not `default()`): a fresh tab must get valid pagination
+            // (`row_limit = DEFAULT_RESULTS_ROW_LIMIT`, page = 1). `default()`
+            // yields `row_limit = 0`, which a run forwards as `LIMIT 0` and
+            // returns no rows. Keep consistent with session restore (`new()`).
+            results: ResultsState::new(),
             history: HistoryState::default(),
         });
         self.active_tab = Some(self.tabs.len() - 1);
@@ -538,6 +546,26 @@ mod tests {
         assert_eq!(session.database.as_deref(), Some("mydb"));
         assert_eq!(session.schema.as_deref(), Some("public"));
         assert_eq!(session.sequence, 1); // first tab for this connection
+    }
+
+    #[test]
+    fn fresh_tabs_have_valid_default_pagination() {
+        // A freshly opened tab must start with the default row limit (not the
+        // raw `default()` value of 0). A 0 limit would be forwarded to a run as
+        // `SELECT ... LIMIT 0` and return no data.
+        let mut state = SqlTabState::default();
+        state.open_connection_tab("local".into(), "c1".into(), "id1".into(), None, None, None);
+        state.open_tab();
+        assert_eq!(state.active_tab, Some(state.tabs.len() - 1));
+        for tab in &state.tabs {
+            assert_eq!(
+                tab.results.list.row_limit,
+                super::super::results::pagination::DEFAULT_RESULTS_ROW_LIMIT,
+                "every tab must start with the default row limit"
+            );
+            assert_eq!(tab.results.list.page, 1, "every tab must start on page 1");
+        }
+        assert_eq!(state.tabs.len(), 2);
     }
 
     #[test]
