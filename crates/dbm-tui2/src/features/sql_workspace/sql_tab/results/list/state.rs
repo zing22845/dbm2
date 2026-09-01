@@ -86,6 +86,26 @@ impl ListState {
         }
     }
 
+    /// The SQL the results pane actually executed, shown in the pane footer.
+    /// Mirrors the original dbm's `paginated_executed_sql` status: a paginated
+    /// run displays the SELECT rewritten with `LIMIT`/`OFFSET` (the statement
+    /// that was really run), any other run displays the last SQL text. Empty
+    /// when there is no result to describe.
+    pub fn executed_sql_display(&self) -> String {
+        let sql = self.last_sql.trim();
+        if self.result.is_none() || sql.is_empty() {
+            return String::new();
+        }
+        if self.paginated {
+            let limit = self.row_limit as u64;
+            let offset = (self.page.saturating_sub(1) as u64) * limit;
+            dbm_driver_pg::paginated_select_sql(sql, limit, offset)
+                .unwrap_or_else(|| sql.to_string())
+        } else {
+            sql.to_string()
+        }
+    }
+
     /// The value at the selected cell, if any.
     pub fn selected_cell(&self) -> Option<String> {
         let result = self.result.as_ref()?;
@@ -464,6 +484,39 @@ mod tests {
         };
         assert_eq!(s.selected_cell().as_deref(), Some("bob"));
         assert_eq!(s.selected_column_name(), Some("name"));
+    }
+
+    #[test]
+    fn executed_sql_display_empty_without_result() {
+        let s = ListState::default();
+        assert_eq!(s.executed_sql_display(), "");
+    }
+
+    #[test]
+    fn executed_sql_display_non_paginated_returns_trimmed_last_sql() {
+        let s = ListState {
+            result: Some(sample()),
+            last_sql: "  SELECT id FROM t  ".into(),
+            paginated: false,
+            ..ListState::default()
+        };
+        assert_eq!(s.executed_sql_display(), "SELECT id FROM t");
+    }
+
+    #[test]
+    fn executed_sql_display_paginated_wraps_with_limit_offset() {
+        let s = ListState {
+            result: Some(sample()),
+            paginated: true,
+            page: 2,
+            row_limit: 100,
+            last_sql: "SELECT id FROM t".into(),
+            ..ListState::default()
+        };
+        assert_eq!(
+            s.executed_sql_display(),
+            "SELECT * FROM (SELECT id FROM t) AS dbm_page LIMIT 100 OFFSET 100"
+        );
     }
 
     #[test]

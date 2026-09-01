@@ -57,13 +57,14 @@ pub fn render(
 
     // `area` is already the inner area of the outer Results Block.
     let search_active = state.search.text_input_active();
+    let sql_status = state.executed_sql_display();
     let (table_body, action_bar_area, pagination_area, footer_area) =
-        compute_table_area(area, row_count, search_active, detail_open);
+        compute_table_area(area, row_count, search_active, detail_open, &sql_status);
 
     let hint = crate::common::view::hints::results_pane_footer_text(
         search_active,
         detail_open,
-        "",
+        &sql_status,
     );
 
     // Content area: action bar + table.
@@ -132,11 +133,12 @@ pub fn compute_table_area(
     row_count: usize,
     search_active: bool,
     detail_open: bool,
+    sql_status: &str,
 ) -> (Rect, Rect, Option<Rect>, Rect) {
     let hint = crate::common::view::hints::results_pane_footer_text(
         search_active,
         detail_open,
-        "",
+        sql_status,
     );
     let footer_h = footer_height(&hint, list_inner.width).min(list_inner.height.saturating_sub(4));
 
@@ -785,6 +787,7 @@ pub fn cell_hit_at(
         state.row_count(),
         state.search.text_input_active(),
         detail_open,
+        &state.executed_sql_display(),
     );
 
     let row_count = result.rows.len();

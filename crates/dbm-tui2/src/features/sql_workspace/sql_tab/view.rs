@@ -299,6 +299,7 @@ pub fn sql_workspace_click(
                     tab.results.list.row_count(),
                     tab.results.list.search.text_input_active(),
                     tab.results.detail_open,
+                    &tab.results.list.executed_sql_display(),
                 );
 
             if is_double_click && !tab.results.detail_open {
