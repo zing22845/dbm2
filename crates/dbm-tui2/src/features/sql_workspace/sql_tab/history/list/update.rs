@@ -40,8 +40,7 @@ pub fn update(
             true
         }
         ListMessage::SearchKey(key) => {
-            handle_search_key(&mut state, store, instance, connection, key);
-            true
+            handle_search_key(&mut state, store, instance, connection, key)
         }
         ListMessage::ScrollHScroll { delta } => scroll_hscroll(&mut state, store, instance, connection, delta),
         ListMessage::SetHScroll { position } => {
@@ -106,7 +105,7 @@ fn handle_search_key(
     instance: &str,
     connection: &str,
     key: crossterm::event::KeyEvent,
-) {
+) -> bool {
     let caps_lock = false;
     let action = match key.code {
         crossterm::event::KeyCode::Esc => {
@@ -122,13 +121,18 @@ fn handle_search_key(
 
     if let PaneSearchInput::Navigate { forward } = action {
         move_cursor(state, store, instance, connection, if forward { 1 } else { -1 });
-        return;
-    }
-
-    if matches!(action, PaneSearchInput::QueryChanged | PaneSearchInput::OptionsChanged) {
+    } else if matches!(
+        action,
+        PaneSearchInput::QueryChanged | PaneSearchInput::OptionsChanged
+    ) {
         state.cursor = 0;
         state.v_scroll = 0;
     }
+
+    // A key the search input ignored (e.g. holding a direction key while
+    // typing) changes nothing, so do not mark the state dirty — matching the
+    // original dbm's `Unchanged` behaviour for ignored search keys.
+    action != PaneSearchInput::Ignored
 }
 
 fn scroll_hscroll(

@@ -128,10 +128,7 @@ pub fn update(
             state.refresh_search_matches();
             true
         }
-        ListMessage::SearchKey(key) => {
-            handle_search_key(&mut state, key);
-            true
-        }
+        ListMessage::SearchKey(key) => handle_search_key(&mut state, key),
         ListMessage::SearchNavigate { forward } => {
             state.advance_search_match(if forward { 1 } else { -1 });
             true
@@ -280,7 +277,7 @@ fn rerun_query(state: &ListState, effects: &mut Vec<ResultsEffect>) {
     });
 }
 
-fn handle_search_key(state: &mut ListState, key: crossterm::event::KeyEvent) {
+fn handle_search_key(state: &mut ListState, key: crossterm::event::KeyEvent) -> bool {
     let caps_lock = false;
     let action = match key.code {
         crossterm::event::KeyCode::Esc => {
@@ -309,6 +306,12 @@ fn handle_search_key(state: &mut ListState, key: crossterm::event::KeyEvent) {
         }
         _ => {}
     }
+
+    // A key the search input ignored (e.g. holding a direction key while
+    // typing) changes nothing, so do not mark the state dirty. This mirrors
+    // the original dbm, which returns `Unchanged` for ignored search keys and
+    // avoids re-rendering the whole grid on every key-press repeat.
+    action != PaneSearchInput::Ignored
 }
 
 #[cfg(test)]
@@ -370,6 +373,30 @@ mod tests {
         );
         assert!(state.result.is_some());
         assert!(!state.selected, "a fresh result must be deselected");
+    }
+
+    #[test]
+    fn ignored_search_keys_do_not_mark_dirty() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut state = ListState::default();
+        state.search.start();
+
+        // Holding a direction key while the search input is live is ignored by
+        // the search component, so it must not force a full grid re-render.
+        let (s, _e, dirty) = update(
+            ListMessage::SearchKey(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+            state,
+        );
+        state = s;
+        assert!(!dirty, "an ignored search key must not mark the state dirty");
+
+        let (s, _e, dirty) = update(
+            ListMessage::SearchKey(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+            state,
+        );
+        state = s;
+        assert!(dirty, "a query character must mark the state dirty");
+        assert_eq!(state.search.query, "a");
     }
 
     #[test]
