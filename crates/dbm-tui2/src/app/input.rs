@@ -211,19 +211,29 @@ fn pane_jump_from_key(key: KeyEvent, state: &super::state::AppState) -> Option<A
     if !upper.is_ascii_uppercase() {
         return None;
     }
-    // Suppress all letter jumps while typing in the SQL editor (insert mode),
-    // mirroring the original dbm's `workspace_text_input_active`.
+    // Suppress letter jumps while the workspace is "typing" — mirroring the
+    // original dbm's `workspace_text_input_active`: the SQL editor (insert
+    // mode), any sub-pane's active `/` search, or the context picker's search.
+    // A search counts even when its input ended (Enter) but the filter is
+    // still applied and visible on the pane's bottom border, so `S`/`H`/`R`
+    // never jump away while a filter is shown.
     if let Pane::SQLWorkspace = state.focus
         && let Some(tab) = state
             .sql
             .sql_tab
             .active_tab
             .and_then(|i| state.sql.sql_tab.tabs.get(i))
-            && tab.focus == SqlFocus::Editor
-                && matches!(tab.editor.editor.mode, edtui::EditorMode::Insert)
-            {
-                return None;
-            }
+    {
+        let editor_insert = tab.focus == SqlFocus::Editor
+            && matches!(tab.editor.editor.mode, edtui::EditorMode::Insert);
+        let any_search_active = tab.editor.sql_search.search.is_visible()
+            || tab.results.list.search.is_visible()
+            || tab.history.list.search.is_visible()
+            || (tab.focus == SqlFocus::Editor && tab.editor.context_picker.open);
+        if editor_insert || any_search_active {
+            return None;
+        }
+    }
     match upper {
         // Workspace sub-panes.
         'S' => Some(focus_subpane(SqlFocus::Editor)),
@@ -763,6 +773,41 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         return Some(msg);
     }
 
+    // An active `/` search in the focused sub-pane consumes the pane's keys
+    // (matching the original dbm): characters, Enter, Esc, Ctrl+/ and Ctrl+p/n
+    // route to the search handler, and unmodified chrome keys such as the
+    // splitter nudges (`[`/`]`, `+`/`-`) are suppressed. Tab management above
+    // (Ctrl+W, Alt+1-9) is a modifier chord and still applies.
+    //
+    // The case toggle (`Ctrl+/`) additionally routes while the focused pane's
+    // search is *visible* with an applied filter (input ended via Enter): the
+    // filter stays shown on the bottom border, so toggling case must keep
+    // working there too. Other keys are only consumed while actively typing.
+    let case_toggle = crate::common::components::search::is_case_toggle_key(&key);
+    match tab.focus {
+        SqlFocus::History
+            if tab.history.list.search.text_input_active()
+                || (case_toggle && tab.history.list.search.is_visible()) =>
+        {
+            return Some(sql_history(tab_id, HistoryMessage::SearchKey(key)));
+        }
+        SqlFocus::Results
+            if tab.results.list.search.text_input_active()
+                || (case_toggle && tab.results.list.search.is_visible()) =>
+        {
+            return Some(sql_results(SqlResultsMessage::SearchKey(key), tab_id));
+        }
+        SqlFocus::Editor
+            if tab.editor.sql_search.text_input_active()
+                || (case_toggle && tab.editor.sql_search.search.is_visible()) =>
+        {
+            // The editor owns its in-buffer search (sql_search): forward the key
+            // so the editor update routes it to the search input.
+            return editor_key(key, tab_id);
+        }
+        _ => {}
+    }
+
     // Vertical-splitter nudges work from any sub-pane: `[` / `]` resize the
     // splitter boundary of the focused pane. When the History pane is focused
     // they resize the internal detail/list splitter (the detail owns the left
@@ -1015,13 +1060,9 @@ fn history_key(
     history: &crate::features::sql_workspace::sql_tab::history::state::HistoryState,
 ) -> Option<AppMsg> {
     let search = &history.list.search;
-    // While search text input is active, forward all keys to the search
-    // handler (Esc cancels, letters build the query, etc.).
-    if search.text_input_active() {
-        return Some(sql_history(tab_id, HistoryMessage::SearchKey(key)));
-    }
     // ESC: if a search filter is set (but input not active), clear it first;
-    // otherwise return focus to the SQL editor.
+    // otherwise return focus to the SQL editor. (An active `/` search input is
+    // handled earlier in `sql_key`, which routes every key to the search.)
     if key.code == KeyCode::Esc {
         if search.has_filter() {
             return Some(sql_history(tab_id, HistoryMessage::SearchKey(key)));
@@ -1044,7 +1085,11 @@ fn history_key(
         }
         // g / G: jump to top / bottom
         KeyCode::Char('g') if key.modifiers.is_empty() => HistoryMessage::SetCursor { index: 0 },
-        KeyCode::Char('G') if key.modifiers.is_empty() => {
+        // SHIFT is always set when typing uppercase 'G'; allow it, block
+        // CONTROL/ALT so Ctrl+G / Alt+G don't trigger the jump.
+        KeyCode::Char('G') if !key.modifiers.contains(KeyModifiers::CONTROL)
+            && !key.modifiers.contains(KeyModifiers::ALT) =>
+        {
             HistoryMessage::SetCursor { index: usize::MAX }
         }
         KeyCode::Up => HistoryMessage::MoveCursor { delta: -1 },
@@ -1982,6 +2027,177 @@ mod tests {
         // Plain 'j' is not a pane-move chord (no Ctrl), so it should not switch
         // the pane; the header key handler does not consume it either.
         assert!(key_to_msg(key(KeyCode::Char('j'), KeyModifiers::NONE), &state).is_none());
+    }
+
+    #[test]
+    fn uppercase_jumps_suppressed_when_history_search_active() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+            None,
+        );
+        let tab = &mut state.sql.sql_tab.tabs[0];
+        tab.focus = SqlFocus::History;
+        tab.history.list.search.start();
+        tab.history.list.search.query.push('a');
+        // S while history search active must not produce a Focus(pane) jump.
+        let msg = key_to_msg(key(KeyCode::Char('S'), KeyModifiers::SHIFT), &state);
+        assert!(
+            !matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::Focus(_))
+                ))))
+            ),
+            "S while history search active must not jump; got {msg:?}"
+        );
+        // Ctrl+/ while history search active must route to the search handler.
+        let msg = key_to_msg(
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL),
+            &state,
+        );
+        assert!(
+            matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::History { .. })
+                ))))
+            ),
+            "Ctrl+/ while history search active must route to History SearchKey; got {msg:?}"
+        );
+    }
+
+    #[test]
+    fn jumps_and_case_toggle_apply_with_applied_history_filter() {
+        // A filter stays visible after Enter ends the input (`active == false`):
+        // `S`/`H`/`R` must still be suppressed and `Ctrl+/` must still toggle
+        // case, so the search does not stop working once the query is applied.
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+            None,
+        );
+        let tab = &mut state.sql.sql_tab.tabs[0];
+        tab.focus = SqlFocus::History;
+        // Applied filter: query set, input ended.
+        tab.history.list.search.query.push('a');
+        assert!(tab.history.list.search.has_filter());
+        assert!(!tab.history.list.search.text_input_active());
+        let msg = key_to_msg(key(KeyCode::Char('S'), KeyModifiers::SHIFT), &state);
+        assert!(
+            !matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::Focus(_))
+                ))))
+            ),
+            "S with an applied history filter must not jump; got {msg:?}"
+        );
+        let msg = key_to_msg(
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL),
+            &state,
+        );
+        assert!(
+            matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::History { .. })
+                ))))
+            ),
+            "Ctrl+/ with an applied history filter must route to History SearchKey; got {msg:?}"
+        );
+    }
+
+    #[test]
+    fn uppercase_jumps_suppressed_when_results_search_active() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+            None,
+        );
+        let tab = &mut state.sql.sql_tab.tabs[0];
+        tab.focus = SqlFocus::Results;
+        tab.results.list.search.start();
+        tab.results.list.search.query.push('a');
+        let msg = key_to_msg(key(KeyCode::Char('H'), KeyModifiers::SHIFT), &state);
+        assert!(
+            !matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::Focus(_))
+                ))))
+            ),
+            "H while results search active must not jump; got {msg:?}"
+        );
+        let msg = key_to_msg(
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL),
+            &state,
+        );
+        assert!(
+            matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::Results { .. })
+                ))))
+            ),
+            "Ctrl+/ while results search active must route to Results SearchKey; got {msg:?}"
+        );
+    }
+
+    #[test]
+    fn uppercase_jumps_suppressed_when_editor_search_active() {
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+            None,
+        );
+        let tab = &mut state.sql.sql_tab.tabs[0];
+        tab.focus = SqlFocus::Editor;
+        tab.editor.sql_search.search.start();
+        tab.editor.sql_search.search.query.push('a');
+        let msg = key_to_msg(key(KeyCode::Char('R'), KeyModifiers::SHIFT), &state);
+        assert!(
+            !matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::Focus(_))
+                ))))
+            ),
+            "R while editor search active must not jump; got {msg:?}"
+        );
+        let msg = key_to_msg(
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL),
+            &state,
+        );
+        assert!(
+            matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::Editor { .. })
+                ))))
+            ),
+            "Ctrl+/ while editor search active must route to Editor; got {msg:?}"
+        );
     }
 
     #[test]

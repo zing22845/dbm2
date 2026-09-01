@@ -151,6 +151,15 @@ pub fn handle_sql_pane_search_key(
         return search.handle_search_input(editor, key);
     }
 
+    // The case toggle (`Ctrl+/`) keeps working while a filter is applied
+    // (input ended via Enter): the query is still shown, so re-run the match
+    // with the new case setting instead of letting the key reach the buffer.
+    if search.search.is_visible()
+        && crate::common::components::search::is_case_toggle_key(&key)
+    {
+        return search.handle_search_input(editor, key);
+    }
+
     match key.code {
         KeyCode::Char('/')
             if key.modifiers.is_empty() && editor.mode == edtui::EditorMode::Normal =>

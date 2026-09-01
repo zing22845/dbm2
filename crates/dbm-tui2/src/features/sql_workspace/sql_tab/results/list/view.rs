@@ -18,7 +18,7 @@ use crate::common::view::format::{
     RESULTS_HEADER_HEIGHT, RESULTS_ROW_CONTENT_HEIGHT, RESULTS_ROW_HEIGHT,
     column_type_label, results_col_text_view,
 };
-use crate::common::view::hints::{draw_footer, footer_height};
+use crate::common::view::hints::{draw_pane_footer, footer_height};
 use crate::common::view::theme::Theme;
 use crate::common::view::pane_scrollbar::{PaneScrollLayout, pane_scroll_layout};
 
@@ -117,7 +117,7 @@ pub fn render(
     }
 
     // Results list footer (full width, inside the Block).
-    draw_footer(frame, theme, footer_area, &hint);
+    draw_pane_footer(frame, theme, footer_area, &hint);
 }
 
 /// Single source of truth for how the results list's already-inner area is

@@ -8,9 +8,9 @@ use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
-use crate::common::components::search::pane_search_title_line;
+use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
 use crate::common::editor;
-use crate::common::view::hints::{draw_footer, footer_height, sql_pane_footer_text};
+use crate::common::view::hints::{draw_pane_footer, footer_height, sql_pane_footer_text};
 use crate::common::view::pane_scrollbar::{
     draw_vertical_pane_scrollbar, pane_scroll_layout,
 };
@@ -231,22 +231,32 @@ pub fn render(
         let flag = if complete_table_names { "ON" } else { "OFF" };
         base.push_str(&format!(" · TblCmp:{flag}"));
     }
-    let title = pane_search_title_line(
+    let title = pane_search_label_line(
         &base,
-        &state.sql_search.search,
-        false,
+        focused,
         true,
         Style::default().fg(if focused { p.border_active } else { p.muted }),
-        0,
-        0,
-        None,
-        Some(Style::default().fg(if focused { p.accent } else { p.muted })),
         Some(Style::default().fg(if focused { p.accent } else { p.muted })),
     );
-    let block = Block::default()
+
+    // The pane search `/query [n/m]` renders on the bottom border
+    // (`title_bottom`), matching the original dbm's search placement.
+    let search_title = pane_search_bottom_title_line(
+        &state.sql_search.search,
+        focused,
+        0,
+        0,
+        Some(area.width.saturating_sub(2)),
+        Style::default().fg(p.muted),
+    );
+
+    let mut block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(p.active_border(focused));
+    if let Some(line) = search_title {
+        block = block.title_bottom(line);
+    }
     frame.render_widget(block, area);
 
     // Compute body/footer/picker geometry from the single source of truth.
@@ -346,7 +356,7 @@ pub fn render(
         state.sql_search.has_filter(),
         complete_table_names,
     );
-    draw_footer(frame, theme, footer_area, &hint);
+    draw_pane_footer(frame, theme, footer_area, &hint);
 
     // Hand the hardware cursor up so the shell can place the terminal caret at
     // the editor cursor (it also drives the completion popup anchor above).

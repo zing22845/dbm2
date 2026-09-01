@@ -13,8 +13,8 @@ use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
-use crate::common::components::search::pane_search_title_line;
-use crate::common::view::hints::{draw_footer, footer_height, history_list_footer_text};
+use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
+use crate::common::view::hints::{draw_pane_footer, footer_height, history_list_footer_text};
 use crate::common::view::theme::Theme;
 
 use super::detail::view::draw_history_detail;
@@ -60,23 +60,32 @@ pub fn render(
         area.width
     };
 
-    let title = pane_search_title_line(
+    let title = pane_search_label_line(
         " [H] History",
-        &state.list.search,
-        true,
+        focused,
         false,
         Style::default().fg(p.muted),
-        cursor,
-        visible.len(),
-        Some(area.width.saturating_sub(6)),
         None,
-        Some(Style::default().fg(if focused { p.accent } else { p.muted })),
     );
 
-    let block = Block::default()
+    // The pane search `/query [n/m]` renders on the bottom border
+    // (`title_bottom`), matching the original dbm's search placement.
+    let search_title = pane_search_bottom_title_line(
+        &state.list.search,
+        focused,
+        cursor,
+        visible.len(),
+        Some(area.width.saturating_sub(2)),
+        Style::default().fg(p.muted),
+    );
+
+    let mut block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(p.active_border(focused));
+    if let Some(line) = search_title {
+        block = block.title_bottom(line);
+    }
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -141,7 +150,7 @@ pub fn render(
     );
 
     // The list footer hints (inside the shared border).
-    draw_footer(frame, theme, list_footer_area, &list_footer);
+    draw_pane_footer(frame, theme, list_footer_area, &list_footer);
 
     v_scroll_out
 }

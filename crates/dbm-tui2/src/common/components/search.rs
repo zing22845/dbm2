@@ -258,14 +258,20 @@ impl PaneSearch {
     }
 }
 
-/// Toggle ignore-case. Terminals disagree on Ctrl+/ (often `Ctrl+_` or US `\x1f`).
-fn is_case_toggle_key(key: &KeyEvent) -> bool {
+/// Toggle ignore-case. Terminals disagree on Ctrl+/: crossterm 0.29's Unix
+/// parser maps the raw US `Ctrl+/` byte (0x1F, also `Ctrl+_`) to `Char('7')` +
+/// CONTROL, while terminals using the enhanced (kitty) keyboard protocol
+/// report `Char('/')`/`Char('_')` + CONTROL. Accept all forms.
+pub fn is_case_toggle_key(key: &KeyEvent) -> bool {
     if !key.modifiers.contains(KeyModifiers::CONTROL) {
         return false;
     }
     matches!(
         key.code,
-        KeyCode::Char('/') | KeyCode::Char('_') | KeyCode::Char('\x1f')
+        KeyCode::Char('/')
+            | KeyCode::Char('_')
+            | KeyCode::Char('\x1f')
+            | KeyCode::Char('7')
     )
 }
 
@@ -377,6 +383,58 @@ pub fn filter_nav_counter(search: &PaneSearch, cursor: usize, filtered_count: us
     }
 }
 
+/// Label-only title line (no search query or counter). Used when the search
+/// query/counter is rendered on the bottom border (`Block::title_bottom`)
+/// instead of the top border.
+pub fn pane_search_label_line(
+    label: &str,
+    pane_focused: bool,
+    highlight_label_when_focused: bool,
+    theme_muted: Style,
+    focused_label_style: Option<Style>,
+) -> Line<'static> {
+    let label_style = if highlight_label_when_focused && pane_focused {
+        focused_label_style.unwrap_or_else(active_search_style)
+    } else if highlight_label_when_focused {
+        theme_muted
+    } else {
+        Style::default()
+    };
+    Line::from(Span::styled(label.to_string(), label_style))
+}
+
+/// Bottom-title line for a pane search: `/query [n/m]`. Rendered on the pane's
+/// bottom border (via `Block::title_bottom`), taking over part of the bottom
+/// border while the search is visible. Returns `None` when search is not
+/// visible (no active input and no filter), so the caller draws a plain border.
+pub fn pane_search_bottom_title_line(
+    search: &PaneSearch,
+    pane_focused: bool,
+    cursor: usize,
+    filtered_count: usize,
+    width: Option<u16>,
+    theme_muted: Style,
+) -> Option<Line<'static>> {
+    if !search.is_visible() {
+        return None;
+    }
+    // Reuse the title-line builder with an empty label so only the search
+    // query and counter appear on the bottom border. The leading "  /"
+    // separator from `append_search_query_spans` acts as left indentation.
+    Some(pane_search_title_line(
+        "",
+        search,
+        pane_focused,
+        false,
+        theme_muted,
+        cursor,
+        filtered_count,
+        width,
+        None,
+        None,
+    ))
+}
+
 /// Title line for a pane/column label plus optional in-title search and filter counter.
 #[allow(clippy::too_many_arguments)]
 pub fn pane_search_title_line(
@@ -477,6 +535,25 @@ mod tests {
         search.start();
         let key = KeyEvent {
             code: KeyCode::Char('/'),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        assert_eq!(
+            search.handle_key(&key, false),
+            PaneSearchInput::OptionsChanged
+        );
+        assert!(search.options.ignore_case);
+    }
+
+    #[test]
+    fn crossterm_ctrl_slash_char_7_toggles_ignore_case() {
+        // crossterm 0.29's Unix parser maps the raw US Ctrl+/ byte (0x1F) to
+        // `Char('7')` + CONTROL; the toggle must accept that form too.
+        let mut search = PaneSearch::default();
+        search.start();
+        let key = KeyEvent {
+            code: KeyCode::Char('7'),
             modifiers: KeyModifiers::CONTROL,
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,

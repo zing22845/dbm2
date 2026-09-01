@@ -9,7 +9,7 @@ use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
-use crate::common::components::search::pane_search_title_line;
+use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
 use crate::common::view::theme::Theme;
 
 use super::detail::view as detail_view;
@@ -33,23 +33,32 @@ pub fn render(
     }
     let p = theme.palette();
 
-    let row_count = state.list.row_count();
-    let title = pane_search_title_line(
+    let title = pane_search_label_line(
         " [R] Results",
-        &state.list.search,
-        true,
+        focused,
         false,
         Style::default().fg(p.muted),
-        state.list.row,
-        row_count,
         None,
-        None,
-        Some(Style::default().fg(if focused { p.accent } else { p.muted })),
     );
-    let block = Block::default()
+
+    // The pane search `/query [n/m]` renders on the bottom border
+    // (`title_bottom`), matching the original dbm's search placement.
+    let search_title = pane_search_bottom_title_line(
+        &state.list.search,
+        focused,
+        state.list.row,
+        state.list.row_count(),
+        Some(area.width.saturating_sub(2)),
+        Style::default().fg(p.muted),
+    );
+
+    let mut block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(p.active_border(focused));
+    if let Some(line) = search_title {
+        block = block.title_bottom(line);
+    }
     let inner = block.inner(area);
     frame.render_widget(block, area);
 

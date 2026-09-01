@@ -790,6 +790,13 @@ fn clamp_list_for_history_detail(tab: &mut super::state::SqlTab, store: &history
         return false;
     }
     let lo = tab.splitter.history_min.max(MIN_HISTORY_WIDTH);
+    // When the detail pane leaves no room between the list minimum and the
+    // history maximum the constraint is unsatisfiable; leave the stored width
+    // alone (the rendered geometry already clamps) instead of panicking in
+    // `clamp` when `lo > hi`.
+    if lo > hi {
+        return false;
+    }
     tab.splitter.history_pane_width = tab.splitter.history_pane_width.clamp(lo, hi);
     true
 }
