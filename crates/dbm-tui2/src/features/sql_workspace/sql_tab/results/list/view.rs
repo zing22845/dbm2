@@ -201,6 +201,84 @@ fn render_empty(frame: &mut Frame, theme: &Theme, area: Rect) {
     );
 }
 
+/// Compute the per-cell text skip (display cells) that keeps the current
+/// match's `query` visible inside the match cell. Derived at render time — it
+/// only has meaning for the cell holding the current match, so callers must
+/// apply it only to that cell and never store it as global state.
+///
+/// `table_skip` is the column's existing horizontal skip (`tv.table_text_skip`);
+/// the returned value cancels it so the match lands at `start - 1` in the cell
+/// view, mirroring the original dbm.
+fn match_cell_text_skip(
+    value: &str,
+    m: super::search::ResultsSearchMatch,
+    query: &str,
+    text_w: u16,
+    table_skip: u16,
+) -> u16 {
+    let visible = text_w.saturating_sub(1);
+    if visible == 0 || query.is_empty() {
+        return 0;
+    }
+    let match_start_w = crate::common::view::format::display_width_char_prefix(value, m.start);
+    let query_w = crate::common::view::format::cell_display_width(query);
+    let max_skip = crate::common::view::format::max_cell_text_skip(value, visible);
+    let ts = table_skip as usize;
+
+    let mut cell_skip = match_start_w.saturating_sub(ts).saturating_sub(1);
+    if match_start_w + query_w > cell_skip + ts + visible as usize {
+        cell_skip = match_start_w
+            .saturating_add(query_w)
+            .saturating_sub(ts)
+            .saturating_sub(visible as usize);
+    }
+    (cell_skip as u16).min(max_skip)
+}
+
+/// Style for the frame around the current-match cell (accent that stands out
+/// against the muted grid, matching the current-match highlight colour).
+fn current_match_border_style() -> Style {
+    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+}
+
+/// Recolour the grid border around the current-match cell into an accent
+/// frame: the top `─` (with corners) and the left/right `│`. The bottom edge
+/// coincides with the row separator, which is tinted separately via the
+/// returned `(left, right)` span. Skips cells that touch the pane edge where
+/// there is no interior border to recolor.
+fn draw_match_cell_frame(
+    frame: &mut Frame,
+    style: Style,
+    table_area: Rect,
+    content_x: u16,
+    content_y: u16,
+    border_x: u16,
+) -> Option<(u16, u16)> {
+    let left = content_x.saturating_sub(1);
+    let right = border_x;
+    let top = content_y.saturating_sub(1);
+    let bottom = content_y.saturating_add(RESULTS_ROW_CONTENT_HEIGHT);
+    if right <= left
+        || left < table_area.x
+        || right >= table_area.right()
+        || bottom > table_area.bottom()
+    {
+        return None;
+    }
+    // Top edge + corners; bottom edge is the row separator (tinted by caller).
+    frame.buffer_mut().set_string(left, top, "┌", style);
+    for x in (left + 1)..right {
+        frame.buffer_mut().set_string(x, top, "─", style);
+    }
+    frame.buffer_mut().set_string(right, top, "┐", style);
+    // Left/right edges spanning the content row down to the separator line.
+    for y in (top + 1)..=bottom {
+        frame.buffer_mut().set_string(left, y, "│", style);
+        frame.buffer_mut().set_string(right, y, "│", style);
+    }
+    Some((left, right))
+}
+
 /// Render the result table body directly into `area` (no own Block/borders).
 /// The outer Block with title is created by the caller (`render`).
 ///
@@ -228,6 +306,7 @@ fn render_table(
     let col_widths = &state.col_widths;
     let state_row = state.row;
     let state_col = state.col;
+    let state_selected = state.selected;
     let p = theme.palette();
 
     // Search highlight inputs: derived once so the cell loop stays flat.
@@ -238,7 +317,6 @@ fn render_table(
     };
     let search_matches = &state.search_matches;
     let current_match = state.search_matches.get(state.search_match_index).copied();
-    let search_cell_text_skip = state.search_cell_text_skip;
 
     if result.columns.is_empty() {
         let affected = result.rows_affected;
@@ -308,7 +386,7 @@ fn render_table(
             .saturating_sub(h_scroll);
 
         // Column name (bold).
-        let name_style = if col == state_col {
+        let name_style = if col == state_col && state_selected {
             Style::default()
                 .fg(p.selection_text)
                 .bg(p.selection_bg)
@@ -328,7 +406,7 @@ fn render_table(
 
         // Type label: dark grey on selection bg for hierarchy, green otherwise.
         let type_label = column_type_label(meta);
-        let type_style = if col == state_col {
+        let type_style = if col == state_col && state_selected {
             Style::default().fg(p.selection_text).bg(p.selection_bg).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
@@ -389,13 +467,18 @@ fn render_table(
         );
 
         // Row background (highlight if selected).
-        let row_selected = row_idx == state_row;
+        let row_selected = row_idx == state_row && state_selected;
         if row_selected {
             frame.render_widget(
                 ratatui::widgets::Block::default().style(Style::default().bg(p.selection_bg)),
                 row_content_area,
             );
         }
+
+        // Horizontal span (`(left, right)`) of the current-match cell on this
+        // row, if any; the row separator below tints this segment as the cell's
+        // bottom border so all four edges are drawn consistently.
+        let mut match_bottom_span: Option<(u16, u16)> = None;
 
         // Draw each cell.
         for col in 0..num_cols {
@@ -413,7 +496,7 @@ fn render_table(
                 .map(String::as_str)
                 .unwrap_or("");
 
-            let is_active = state_col == col;
+            let is_active = state_col == col && state_selected;
             let cell_selected = row_selected && is_active;
             let base_style = if cell_selected {
                 Style::default()
@@ -426,10 +509,17 @@ fn render_table(
                 Style::default().fg(p.fg)
             };
 
-            // Shift the window for the active match cell so the highlighted
-            // query stays inside the visible cell (mirrors the original dbm).
-            let text_skip = if cell_selected {
-                tv.table_text_skip.saturating_add(search_cell_text_skip)
+            // Shift the window for the cell holding the current match so the highlighted
+            // query stays in view — including when the focus has moved to another
+            // cell, so the viewport stays aligned with the offset/length read-out
+            // (which still describes the current match). It is derived at render
+            // time and never cached (stale skips on other cells are impossible).
+            let is_match_cell = current_match.is_some_and(|m| m.row == row_idx && m.col == col);
+            let text_skip = if is_match_cell {
+                let m = current_match.unwrap();
+                let q = search_query.unwrap_or("");
+                tv.table_text_skip
+                    .saturating_add(match_cell_text_skip(value, m, q, tv.text_w, tv.table_text_skip))
             } else {
                 tv.table_text_skip
             };
@@ -490,14 +580,36 @@ fn render_table(
                         .set_string(border_x, y, "│", grid_style);
                 }
             }
+
+            // Recolor the surrounding grid border into an accent frame for the
+            // current-match cell so it stands out (drawn after the plain border).
+            // The bottom edge is tinted later by the row separator.
+            if is_match_cell {
+                match_bottom_span = draw_match_cell_frame(
+                    frame,
+                    current_match_border_style(),
+                    table_area,
+                    col_x,
+                    y_base,
+                    border_x,
+                );
+            }
         }
 
-        // Row separator line.
+        // Row separator line (tinted as the current-match cell's bottom border).
         let row_sep_y = y_base + RESULTS_ROW_CONTENT_HEIGHT;
         if row_sep_y < table_area.bottom() {
+            let accent = current_match_border_style();
             let sep_right = table_area.x.saturating_add(content_width);
             for x in table_area.x..sep_right.min(table_area.right()) {
-                frame.buffer_mut().set_string(x, row_sep_y, "─", grid_style);
+                let (glyph, style) = match match_bottom_span {
+                    Some((l, r)) if x >= l && x <= r => {
+                        let c = if x == l { "└" } else if x == r { "┘" } else { "─" };
+                        (c, accent)
+                    }
+                    _ => ("─", grid_style),
+                };
+                frame.buffer_mut().set_string(x, row_sep_y, glyph, style);
             }
         }
     }

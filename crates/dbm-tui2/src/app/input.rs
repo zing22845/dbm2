@@ -1001,9 +1001,20 @@ fn results_key(key: KeyEvent, tab_id: usize, results: &crate::features::sql_work
             SqlResultsMessage::EnterEdit,
             tab_id,
         )),
-        // Exit edit mode / clear selection.
-        KeyCode::Esc if key.modifiers.is_empty() && results.list.edit.editing => {
-            Some(sql_results(SqlResultsMessage::ExitEdit, tab_id))
+        // ESC priority, mirroring the original dbm (Vim-like): clear the search
+        // filter first, then exit edit mode, then close the detail, then
+        // deselect the current cell. An active `/` search input is handled
+        // earlier in `sql_key`, which routes every key (incl. Esc) to the search.
+        KeyCode::Esc if key.modifiers.is_empty() => {
+            if results.list.search.has_filter() {
+                Some(sql_results(SqlResultsMessage::SearchKey(key), tab_id))
+            } else if results.list.edit.editing {
+                Some(sql_results(SqlResultsMessage::ExitEdit, tab_id))
+            } else if results.detail_open {
+                Some(sql_results(SqlResultsMessage::ToggleDetail, tab_id))
+            } else {
+                Some(sql_results(SqlResultsMessage::ResetSelection, tab_id))
+            }
         }
         // Commit edits: open a preview modal with the built statements, then
         // `y`/`Enter` confirms and dispatches `Commit`.

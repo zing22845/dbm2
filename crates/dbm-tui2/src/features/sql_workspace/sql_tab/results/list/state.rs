@@ -23,6 +23,9 @@ pub struct ListState {
     /// Selected cell (row, col) into `result`.
     pub row: usize,
     pub col: usize,
+    /// Whether a cell is actively selected. When `false` (deselected via Esc)
+    /// no cell cursor is shown and a newly started search matches all columns.
+    pub selected: bool,
     /// The `/` search state.
     pub search: PaneSearch,
     /// The column scoping the search, when limited to one column (`None` = all).
@@ -31,8 +34,6 @@ pub struct ListState {
     pub search_matches: Vec<ResultsSearchMatch>,
     /// Index into `search_matches` of the active match.
     pub search_match_index: usize,
-    /// Per-cell text skip used to scroll the active match into the cell view.
-    pub search_cell_text_skip: u16,
     /// Current 1-based page.
     pub page: usize,
     /// Rows per page.
@@ -77,6 +78,8 @@ impl ListState {
     /// Build a fresh state with default pagination.
     pub fn new() -> Self {
         ListState {
+            // A cell is selected by default (the cursor is on the first cell).
+            selected: true,
             page: 1,
             row_limit: DEFAULT_RESULTS_ROW_LIMIT,
             ..ListState::default()
@@ -135,6 +138,9 @@ impl ListState {
         if row_count == 0 {
             return false;
         }
+        // Any navigation re-establishes the selection (leaving the deselect
+        // state a cell is selected again).
+        self.selected = true;
         let prev_row = self.row;
         let prev_col = self.col;
         if dr != 0 {
@@ -207,71 +213,15 @@ impl ListState {
         self.apply_current_match();
     }
 
-    /// Select the cell of `search_matches[search_match_index]` and compute the
-    /// per-cell text skip so the match stays visible.
+    /// Select the cell of `search_matches[search_match_index]`.
     fn apply_current_match(&mut self) {
         let Some(m) = self.search_matches.get(self.search_match_index).copied() else {
             return;
         };
+        // Navigating to a match selects its cell.
+        self.selected = true;
         self.row = m.row;
         self.col = m.col;
-        self.compute_match_cell_skip(m);
-    }
-
-    /// Compute `search_cell_text_skip` so `query` (starting at char `m.start`)
-    /// is scrolled into the visible window of the match's cell.
-    fn compute_match_cell_skip(&mut self, m: ResultsSearchMatch) {
-        let Some(value) = self
-            .result
-            .as_ref()
-            .and_then(|r| r.rows.get(m.row))
-            .and_then(|r| r.get(m.col))
-            .map(String::as_str)
-        else {
-            self.search_cell_text_skip = 0;
-            return;
-        };
-        let vp = self.viewport_width.get();
-        if vp == 0 {
-            self.search_cell_text_skip = 0;
-            return;
-        }
-        let col_w = self
-            .col_widths
-            .get(m.col)
-            .copied()
-            .unwrap_or(crate::common::view::format::DEFAULT_RESULTS_COL_WIDTH);
-        let visible = col_w.saturating_sub(1);
-        if visible == 0 {
-            self.search_cell_text_skip = 0;
-            return;
-        }
-
-        let query = self.search.query.trim();
-        if query.is_empty() {
-            self.search_cell_text_skip = 0;
-            return;
-        }
-        let match_start_w =
-            crate::common::view::format::display_width_char_prefix(value, m.start);
-        let query_w = crate::common::view::format::cell_display_width(query);
-        let max_skip = crate::common::view::format::max_cell_text_skip(value, visible);
-        let table_skip = self
-            .col_widths
-            .iter()
-            .take(m.col)
-            .map(|&w| w as usize)
-            .sum::<usize>()
-            .saturating_sub(self.h_scroll.get());
-
-        let mut cell_skip = match_start_w.saturating_sub(table_skip).saturating_sub(1);
-        if match_start_w + query_w > cell_skip + table_skip + visible as usize {
-            cell_skip = match_start_w
-                .saturating_add(query_w)
-                .saturating_sub(table_skip)
-                .saturating_sub(visible as usize);
-        }
-        self.search_cell_text_skip = (cell_skip as u16).min(max_skip);
     }
 
     /// The active match cell `(start, char_offset_into_value)` read-out, when

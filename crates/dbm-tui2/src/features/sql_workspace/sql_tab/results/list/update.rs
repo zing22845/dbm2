@@ -26,7 +26,6 @@ pub fn update(
             state.search_matches.clear();
             state.search_match_index = 0;
             state.search_scope_column = None;
-            state.search_cell_text_skip = 0;
             state.edit_target = None;
             state.edit_blocked_reason = None;
             let result_columns: Vec<String> = state
@@ -65,7 +64,6 @@ pub fn update(
             state.search_matches.clear();
             state.search_match_index = 0;
             state.search_scope_column = None;
-            state.search_cell_text_skip = 0;
             state.edit_target = None;
             state.edit_blocked_reason = None;
             changed
@@ -82,7 +80,6 @@ pub fn update(
             state.search_matches.clear();
             state.search_match_index = 0;
             state.search_scope_column = None;
-            state.search_cell_text_skip = 0;
             state.edit_target = None;
             state.edit_blocked_reason = None;
             changed
@@ -102,6 +99,7 @@ pub fn update(
             let row = row.min(max_row);
             let col = col.min(max_col);
             let changed = state.row != row || state.col != col;
+            state.selected = true;
             state.row = row;
             state.col = col;
             if changed {
@@ -114,10 +112,10 @@ pub fn update(
             state.search.start();
             state.search_match_index = 0;
             state.search_matches.clear();
-            state.search_cell_text_skip = 0;
-            // Scope the search to the currently selected column (matching the
-            // original dbm); `None` when there is no cell / result yet.
-            state.search_scope_column = if state.col < state.column_count() {
+            // Scope the search to the selected column; `None` (all columns, a
+            // full-text match) when the grid has been deselected or has no
+            // result yet — mirroring the original dbm's `start_search`.
+            state.search_scope_column = if state.selected && state.col < state.column_count() {
                 Some(state.col)
             } else {
                 None
@@ -134,8 +132,15 @@ pub fn update(
             true
         }
         ListMessage::ResetSelection => {
-            let changed = state.row != 0 || state.col != 0 || state.h_scroll.get() != 0
-                || state.search.active;
+            // True deselect (matching the original dbm's `select_cell(None)`):
+            // no cell cursor is shown, and a search started from here matches
+            // all columns.
+            let changed = state.row != 0
+                || state.col != 0
+                || state.h_scroll.get() != 0
+                || state.search.active
+                || state.selected;
+            state.selected = false;
             state.row = 0;
             state.col = 0;
             state.h_scroll.set(0);
@@ -278,7 +283,6 @@ fn handle_search_key(state: &mut ListState, key: crossterm::event::KeyEvent) {
             state.search_match_index = 0;
             state.search_matches.clear();
             state.search_scope_column = None;
-            state.search_cell_text_skip = 0;
             PaneSearchInput::Cancelled
         }
         crossterm::event::KeyCode::Enter => {
@@ -346,6 +350,27 @@ mod tests {
             Some("relation \"nope\" does not exist")
         );
         assert!(dirty);
+    }
+
+    #[test]
+    fn deselect_makes_search_full_text_scope() {
+        let base = ListState {
+            result: Some(sample_result()),
+            selected: true,
+            row: 0,
+            col: 0,
+            ..ListState::default()
+        };
+        // With a selected cell, search scopes to the selected column.
+        let (mut state, _e, _d) = update(ListMessage::BeginSearch, base.clone());
+        assert_eq!(state.search_scope_column, Some(0));
+        state.search.reset();
+
+        // Esc deselection: no cell cursor; a fresh search matches all columns.
+        let (mut state, _e, _d) = update(ListMessage::ResetSelection, state);
+        assert!(!state.selected);
+        let (state, _e, _d) = update(ListMessage::BeginSearch, state);
+        assert!(state.search_scope_column.is_none());
     }
 
     #[test]
