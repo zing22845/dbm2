@@ -278,6 +278,7 @@ fn apply_snapshot(state: &mut AppState, snapshot: &TuiSessionSnapshot) -> Vec<Bo
                 s
             },
             complete_table_names: t.complete_table_names,
+            clear_editor_after_run: false,
             editor: {
                 // Keep the editor's TblCmp flag in sync with the tab's flag on
                 // restore, otherwise the completion engine would still offer

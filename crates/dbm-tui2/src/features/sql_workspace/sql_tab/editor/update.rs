@@ -48,6 +48,15 @@ pub fn update(
             let sql = crate::common::editor::editor_text(&state.editor);
             intents.push(EditorIntent::RunQuery { sql });
         }
+        EditorMessage::ClearAfterRun => {
+            // Mirror the original dbm's `after_sql_run`: empty the buffer and
+            // return to Insert so the next statement can be typed immediately.
+            state.editor.set_scroll_locked(false);
+            crate::common::editor::set_sql_text(&mut state.editor, "");
+            state.editor.mode = edtui::EditorMode::Insert;
+            state.sql_completion.close();
+            dirty = true;
+        }
         EditorMessage::ForceCompletion => {
             refresh_completion(&mut state, true);
             dirty = true;
@@ -423,6 +432,28 @@ mod tests {
             state,
         );
         assert!(!dirty, "catalog load with popup closed must not repaint");
+    }
+
+    #[test]
+    fn clear_after_run_empties_buffer_and_returns_to_insert() {
+        // After a successful editor-run query the buffer is emptied and the
+        // editor returns to Insert (mirroring the original dbm's
+        // `after_sql_run`), so the next statement can be typed immediately.
+        let mut state = EditorState::with_sql("select 1");
+        state.editor.mode = edtui::EditorMode::Insert;
+        state.editor.set_scroll_locked(true);
+        let (s, _i, _e, dirty) = update(EditorMessage::ClearAfterRun, state);
+        assert_eq!(
+            crate::common::editor::editor_text(&s.editor),
+            "",
+            "editor buffer must be cleared after a successful editor-run query"
+        );
+        assert_eq!(
+            s.editor.mode,
+            edtui::EditorMode::Insert,
+            "editor must return to Insert after clearing"
+        );
+        assert!(dirty, "clearing the editor must trigger a repaint");
     }
 
     #[test]

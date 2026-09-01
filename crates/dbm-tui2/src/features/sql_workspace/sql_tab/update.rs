@@ -430,6 +430,10 @@ pub fn update(
         }
         SqlTabMessage::RunQueryFromEditor { tab_id, sql } => {
             if let Some(idx) = state.index_of(tab_id) {
+                // This run came from the editor: once it succeeds its buffer is
+                // emptied (mirroring the original dbm's `after_sql_run`). The
+                // flag is reset when the query's result/error lands.
+                state.tabs[idx].clear_editor_after_run = true;
                 let session = &state.tabs[idx].session;
                 let instance = session.instance.clone().unwrap_or_default();
                 let connection = session
@@ -680,11 +684,28 @@ pub fn update(
                             },
                         });
                     }
+                    // An editor-initiated run that just succeeded is emptied and
+                    // the transient flag dropped (mirroring the original dbm's
+                    // `after_sql_run`).
+                    if state.tabs[idx].clear_editor_after_run {
+                        state.tabs[idx].clear_editor_after_run = false;
+                        let editor_state = std::mem::take(&mut state.tabs[idx].editor);
+                        let (es, _ei, _ee, ed) = editor::update::update(
+                            editor::msg::EditorMessage::ClearAfterRun,
+                            editor_state,
+                        );
+                        state.tabs[idx].editor = es;
+                        dirty |= ed;
+                    }
+                } else if matches!(&inner, results::msg::ResultsMessage::QueryError { .. }) {
+                    // On failure the buffer is preserved for editing; just drop
+                    // the flag so a later pagination re-run cannot wipe it.
+                    state.tabs[idx].clear_editor_after_run = false;
                 }
                 let results_state = std::mem::take(&mut state.tabs[idx].results);
                 let (s, i, e, d) = results::update::update(inner, results_state);
                 state.tabs[idx].results = s;
-                dirty = d;
+                dirty |= d;
                 intents.extend(
                     i.into_iter()
                         .map(|intent| SqlTabIntent::Results { tab_id, intent }),
@@ -1185,6 +1206,102 @@ mod tests {
                     if *t == tab_id && instance == "inst" && connection == "c1" && sql == "SELECT 1"
             )),
             "SetResult must emit a RecordSuccess history intent, got: {intents:?}"
+        );
+    }
+
+    #[test]
+    fn run_query_from_editor_clears_editor_on_success() {
+        use super::super::results::msg::{ResultsMessage, ResultsMsg};
+        use super::super::results::state::QueryResultData;
+
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        crate::common::editor::set_sql_text(&mut s.tabs[0].editor.editor, "select 1");
+        s.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+
+        // An editor-initiated run arms the transient clear flag.
+        let (s, _i, _e, _d) = update(
+            SqlTabMessage::RunQueryFromEditor {
+                tab_id,
+                sql: "select 1".into(),
+            },
+            s,
+        );
+        assert!(
+            s.tabs[0].clear_editor_after_run,
+            "run from editor must arm the clear flag"
+        );
+
+        // On success the editor is emptied and the flag dropped.
+        let (s, _i2, _e2, _d2) = update(
+            SqlTabMessage::Results {
+                tab_id,
+                msg: ResultsMsg::Message(ResultsMessage::SetResult {
+                    result: QueryResultData {
+                        columns: vec![],
+                        rows: vec![vec!["1".into()]],
+                        rows_affected: None,
+                        total_rows: None,
+                    },
+                    paginated: true,
+                }),
+            },
+            s,
+        );
+        assert!(
+            !s.tabs[0].clear_editor_after_run,
+            "clear flag must reset after a successful run"
+        );
+        assert_eq!(
+            crate::common::editor::editor_text(&s.tabs[0].editor.editor),
+            "",
+            "editor must be cleared after a successful editor-run query"
+        );
+        assert_eq!(
+            s.tabs[0].editor.editor.mode,
+            edtui::EditorMode::Insert,
+            "editor must return to Insert after a successful run"
+        );
+    }
+
+    #[test]
+    fn run_query_from_editor_preserves_buffer_on_failure() {
+        use super::super::results::msg::{ResultsMessage, ResultsMsg};
+
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        crate::common::editor::set_sql_text(&mut s.tabs[0].editor.editor, "select 1");
+        s.tabs[0].editor.editor.mode = edtui::EditorMode::Insert;
+
+        let (s, _i, _e, _d) = update(
+            SqlTabMessage::RunQueryFromEditor {
+                tab_id,
+                sql: "select 1".into(),
+            },
+            s,
+        );
+        assert!(s.tabs[0].clear_editor_after_run);
+
+        // On failure the buffer is preserved for editing and the flag dropped.
+        let (s, _i2, _e2, _d2) = update(
+            SqlTabMessage::Results {
+                tab_id,
+                msg: ResultsMsg::Message(ResultsMessage::QueryError {
+                    message: "boom".into(),
+                }),
+            },
+            s,
+        );
+        assert!(
+            !s.tabs[0].clear_editor_after_run,
+            "clear flag must reset when the run fails"
+        );
+        assert_eq!(
+            crate::common::editor::editor_text(&s.tabs[0].editor.editor),
+            "select 1",
+            "a failed editor-run query must keep its text for editing"
         );
     }
 

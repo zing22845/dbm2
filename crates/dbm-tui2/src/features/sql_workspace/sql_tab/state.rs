@@ -48,6 +48,13 @@ pub struct SqlTab {
     /// the editor header while in INSERT mode (matching the original dbm's
     /// `complete_table_names`). Toggled with Alt+Tab in INSERT mode.
     pub complete_table_names: bool,
+    /// Transient flag raised by `RunQueryFromEditor`: the most recent query run
+    /// was initiated from this tab's editor, so on success the editor must be
+    /// emptied (mirroring the original dbm's `after_sql_run`). Cleared again on
+    /// the query's `SetResult`/`QueryError`. It is never rendered or persisted;
+    /// it exists so a later pagination re-run's `SetResult` does not wipe a
+    /// freshly typed statement.
+    pub clear_editor_after_run: bool,
     /// Editor child feature state.
     pub editor: EditorState,
     /// Results child feature state.
@@ -294,6 +301,7 @@ impl SqlTabState {
             upper_pane: SqlFocus::Editor,
             splitter: super::splitter::state::SqlTabSplitterState::default(),
             complete_table_names: false,
+            clear_editor_after_run: false,
             editor: EditorState::default(),
             // `new()` (not `default()`): a fresh tab must get valid pagination
             // (`row_limit = DEFAULT_RESULTS_ROW_LIMIT`, page = 1). `default()`
@@ -450,6 +458,7 @@ impl SqlTabState {
             upper_pane: SqlFocus::Editor,
             splitter: super::splitter::state::SqlTabSplitterState::default(),
             complete_table_names: false,
+            clear_editor_after_run: false,
             editor: EditorState::default(),
             // `new()` (not `default()`): a fresh tab must get valid pagination
             // (`row_limit = DEFAULT_RESULTS_ROW_LIMIT`, page = 1). `default()`

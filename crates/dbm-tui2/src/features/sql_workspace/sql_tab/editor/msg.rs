@@ -21,6 +21,11 @@ pub enum EditorMessage {
     SetSql { sql: String },
     /// Run the current editor SQL (emits a RunQuery intent resolved by sql_tab).
     Run,
+    /// Clear the whole buffer and return to Insert mode after a successful
+    /// editor-run query, mirroring the original dbm's `after_sql_run` (which
+    /// clears the editor and restores Insert so the next statement can be typed
+    /// immediately). Routed by the parent `sql_tab` when the run succeeds.
+    ClearAfterRun,
     /// Force the SQL-completion popup open at the current buffer/cursor,
     /// bypassing the auto-open gate (Shift+Tab; mirrors the original dbm's
     /// `completion_trigger_key`).
