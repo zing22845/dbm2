@@ -23,6 +23,10 @@ pub fn update(
             state.col = 0;
             state.h_scroll.set(0);
             state.search.reset();
+            state.search_matches.clear();
+            state.search_match_index = 0;
+            state.search_scope_column = None;
+            state.search_cell_text_skip = 0;
             state.edit_target = None;
             state.edit_blocked_reason = None;
             let result_columns: Vec<String> = state
@@ -57,6 +61,11 @@ pub fn update(
             state.query_error = None;
             state.row = 0;
             state.col = 0;
+            state.search.reset();
+            state.search_matches.clear();
+            state.search_match_index = 0;
+            state.search_scope_column = None;
+            state.search_cell_text_skip = 0;
             state.edit_target = None;
             state.edit_blocked_reason = None;
             changed
@@ -69,6 +78,11 @@ pub fn update(
             state.query_error = Some(message);
             state.row = 0;
             state.col = 0;
+            state.search.reset();
+            state.search_matches.clear();
+            state.search_match_index = 0;
+            state.search_scope_column = None;
+            state.search_cell_text_skip = 0;
             state.edit_target = None;
             state.edit_blocked_reason = None;
             changed
@@ -98,10 +112,25 @@ pub fn update(
         ListMessage::BeginSearch => {
             state.search.reset();
             state.search.start();
+            state.search_match_index = 0;
+            state.search_matches.clear();
+            state.search_cell_text_skip = 0;
+            // Scope the search to the currently selected column (matching the
+            // original dbm); `None` when there is no cell / result yet.
+            state.search_scope_column = if state.col < state.column_count() {
+                Some(state.col)
+            } else {
+                None
+            };
+            state.refresh_search_matches();
             true
         }
         ListMessage::SearchKey(key) => {
             handle_search_key(&mut state, key);
+            true
+        }
+        ListMessage::SearchNavigate { forward } => {
+            state.advance_search_match(if forward { 1 } else { -1 });
             true
         }
         ListMessage::ResetSelection => {
@@ -246,6 +275,10 @@ fn handle_search_key(state: &mut ListState, key: crossterm::event::KeyEvent) {
     let action = match key.code {
         crossterm::event::KeyCode::Esc => {
             state.search.reset();
+            state.search_match_index = 0;
+            state.search_matches.clear();
+            state.search_scope_column = None;
+            state.search_cell_text_skip = 0;
             PaneSearchInput::Cancelled
         }
         crossterm::event::KeyCode::Enter => {
@@ -255,12 +288,17 @@ fn handle_search_key(state: &mut ListState, key: crossterm::event::KeyEvent) {
         _ => state.search.handle_key(&key, caps_lock),
     };
 
-    if let PaneSearchInput::Navigate { forward } = action {
-        let _ = state.move_selection(if forward { 1 } else { -1 }, 0);
-        return;
-    }
-    if matches!(action, PaneSearchInput::QueryChanged | PaneSearchInput::OptionsChanged) {
-        state.row = 0;
+    match action {
+        // Ctrl+p / Ctrl+n move between matches, wrapping.
+        PaneSearchInput::Navigate { forward } => {
+            state.advance_search_match(if forward { 1 } else { -1 });
+        }
+        // Query or case-option change: re-run the match over the grid and
+        // select the first match.
+        PaneSearchInput::QueryChanged | PaneSearchInput::OptionsChanged => {
+            state.refresh_search_matches();
+        }
+        _ => {}
     }
 }
 

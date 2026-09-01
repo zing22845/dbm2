@@ -407,6 +407,9 @@ pub fn pane_search_label_line(
 /// bottom border (via `Block::title_bottom`), taking over part of the bottom
 /// border while the search is visible. Returns `None` when search is not
 /// visible (no active input and no filter), so the caller draws a plain border.
+///
+/// `extra` (when non-empty) is appended as a plain suffix after the counter,
+/// used by the results list to show `scope` / `count` / `offset` read-outs.
 pub fn pane_search_bottom_title_line(
     search: &PaneSearch,
     pane_focused: bool,
@@ -414,6 +417,7 @@ pub fn pane_search_bottom_title_line(
     filtered_count: usize,
     width: Option<u16>,
     theme_muted: Style,
+    extra: Option<&str>,
 ) -> Option<Line<'static>> {
     if !search.is_visible() {
         return None;
@@ -421,7 +425,7 @@ pub fn pane_search_bottom_title_line(
     // Reuse the title-line builder with an empty label so only the search
     // query and counter appear on the bottom border. The leading "  /"
     // separator from `append_search_query_spans` acts as left indentation.
-    Some(pane_search_title_line(
+    let mut line = pane_search_title_line(
         "",
         search,
         pane_focused,
@@ -432,7 +436,11 @@ pub fn pane_search_bottom_title_line(
         width,
         None,
         None,
-    ))
+    );
+    if let Some(extra) = extra.filter(|e| !e.is_empty()) {
+        line.spans.push(Span::raw(extra.to_string()));
+    }
+    Some(line)
 }
 
 /// Title line for a pane/column label plus optional in-title search and filter counter.

@@ -1046,6 +1046,27 @@ fn results_key(key: KeyEvent, tab_id: usize, results: &crate::features::sql_work
         KeyCode::Char('/') if key.modifiers.is_empty() => {
             Some(sql_results(SqlResultsMessage::BeginSearch, tab_id))
         }
+        // `n` / `N` move to the next/previous match when a query filter is
+        // applied (input already ended), matching the original dbm.
+        KeyCode::Char(c)
+            if c.eq_ignore_ascii_case(&'n')
+                && results.list.search.has_filter()
+                && !key.modifiers.contains(KeyModifiers::CONTROL)
+                && crate::common::utils::shortcuts::pane_jump_modifiers_ok(key.modifiers) =>
+        {
+            use crate::common::utils::shortcuts::{
+                caps_lock_active, effective_ascii_letter,
+            };
+            let forward = effective_ascii_letter(
+                c,
+                key.modifiers.contains(KeyModifiers::SHIFT),
+                caps_lock_active(&key, false),
+            ) == 'n';
+            Some(sql_results(
+                SqlResultsMessage::SearchNavigate { forward },
+                tab_id,
+            ))
+        }
         // Row-limit picker modal.
         KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::ALT) => {
             Some(AppMsg::OpenModal(super::state::ModalKind::ResultsRowLimitPicker {

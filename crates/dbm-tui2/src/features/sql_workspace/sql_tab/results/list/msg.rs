@@ -23,6 +23,9 @@ pub enum ListMessage {
     BeginSearch,
     /// Forward a key while search input is active.
     SearchKey(KeyEvent),
+    /// Move to the next/previous match while an applied filter is shown
+    /// (`n` / `N` outside of input mode), wrapping.
+    SearchNavigate { forward: bool },
     /// Reset the result selection / scroll (after a new result).
     ResetSelection,
     /// Enter / toggle edit mode.

@@ -7,6 +7,7 @@ use std::cell::Cell;
 use crate::common::components::search::PaneSearch;
 use crate::common::view::format::init_results_layout;
 
+use super::search::ResultsSearchMatch;
 use super::super::edit::ResultsEditState;
 use super::super::edit_sql::EditTarget;
 use super::super::pagination::{DEFAULT_RESULTS_ROW_LIMIT, can_go_next};
@@ -24,6 +25,14 @@ pub struct ListState {
     pub col: usize,
     /// The `/` search state.
     pub search: PaneSearch,
+    /// The column scoping the search, when limited to one column (`None` = all).
+    pub search_scope_column: Option<usize>,
+    /// All current-match occurrences (cached from the last search refresh).
+    pub search_matches: Vec<ResultsSearchMatch>,
+    /// Index into `search_matches` of the active match.
+    pub search_match_index: usize,
+    /// Per-cell text skip used to scroll the active match into the cell view.
+    pub search_cell_text_skip: u16,
     /// Current 1-based page.
     pub page: usize,
     /// Rows per page.
@@ -93,6 +102,11 @@ impl ListState {
         self.result.as_ref().map(|r| r.rows.len()).unwrap_or(0)
     }
 
+    /// Total columns in the current result.
+    pub fn column_count(&self) -> usize {
+        self.result.as_ref().map(|r| r.columns.len()).unwrap_or(0)
+    }
+
     /// Whether the selection can move further to the next SQL page.
     pub fn can_go_next_page(&self) -> bool {
         if !self.paginated {
@@ -151,6 +165,145 @@ impl ListState {
             };
         }
         self.row != prev_row || self.col != prev_col
+    }
+
+    /// Recompute `search_matches` from the current query, scope and options,
+    /// clamping the match index and selecting the active match. Used whenever
+    /// the query, scope or ignore-case option changes.
+    pub fn refresh_search_matches(&mut self) {
+        self.search_matches = match self.result {
+            Some(ref result) => super::search::find_matches(
+                result,
+                &self.search.query,
+                self.search_scope_column,
+                self.search.options,
+            ),
+            None => Vec::new(),
+        };
+        // Reading `result` above borrows; selection update happens separately.
+        let count = self.search_matches.len();
+        if count == 0 {
+            self.search_match_index = 0;
+            return;
+        }
+        if self.search_match_index >= count {
+            self.search_match_index = 0;
+        }
+        self.apply_current_match();
+    }
+
+    /// Move the active match by `dr` (`+1` next, `-1` prev, wrapping) and
+    /// select its cell. No-op when there are no matches.
+    pub fn advance_search_match(&mut self, dr: i32) {
+        let count = self.search_matches.len();
+        if count == 0 {
+            return;
+        }
+        self.search_match_index = if dr >= 0 {
+            (self.search_match_index + 1) % count
+        } else {
+            (self.search_match_index + count - 1) % count
+        };
+        self.apply_current_match();
+    }
+
+    /// Select the cell of `search_matches[search_match_index]` and compute the
+    /// per-cell text skip so the match stays visible.
+    fn apply_current_match(&mut self) {
+        let Some(m) = self.search_matches.get(self.search_match_index).copied() else {
+            return;
+        };
+        self.row = m.row;
+        self.col = m.col;
+        self.compute_match_cell_skip(m);
+    }
+
+    /// Compute `search_cell_text_skip` so `query` (starting at char `m.start`)
+    /// is scrolled into the visible window of the match's cell.
+    fn compute_match_cell_skip(&mut self, m: ResultsSearchMatch) {
+        let Some(value) = self
+            .result
+            .as_ref()
+            .and_then(|r| r.rows.get(m.row))
+            .and_then(|r| r.get(m.col))
+            .map(String::as_str)
+        else {
+            self.search_cell_text_skip = 0;
+            return;
+        };
+        let vp = self.viewport_width.get();
+        if vp == 0 {
+            self.search_cell_text_skip = 0;
+            return;
+        }
+        let col_w = self
+            .col_widths
+            .get(m.col)
+            .copied()
+            .unwrap_or(crate::common::view::format::DEFAULT_RESULTS_COL_WIDTH);
+        let visible = col_w.saturating_sub(1);
+        if visible == 0 {
+            self.search_cell_text_skip = 0;
+            return;
+        }
+
+        let query = self.search.query.trim();
+        if query.is_empty() {
+            self.search_cell_text_skip = 0;
+            return;
+        }
+        let match_start_w =
+            crate::common::view::format::display_width_char_prefix(value, m.start);
+        let query_w = crate::common::view::format::cell_display_width(query);
+        let max_skip = crate::common::view::format::max_cell_text_skip(value, visible);
+        let table_skip = self
+            .col_widths
+            .iter()
+            .take(m.col)
+            .map(|&w| w as usize)
+            .sum::<usize>()
+            .saturating_sub(self.h_scroll.get());
+
+        let mut cell_skip = match_start_w.saturating_sub(table_skip).saturating_sub(1);
+        if match_start_w + query_w > cell_skip + table_skip + visible as usize {
+            cell_skip = match_start_w
+                .saturating_add(query_w)
+                .saturating_sub(table_skip)
+                .saturating_sub(visible as usize);
+        }
+        self.search_cell_text_skip = (cell_skip as u16).min(max_skip);
+    }
+
+    /// The active match cell `(start, char_offset_into_value)` read-out, when
+    /// there is a match (`count: idx/total` label uses this alongside `matches`).
+    pub fn current_match_offset(&self) -> Option<(usize, usize)> {
+        let m = self.search_matches.get(self.search_match_index)?;
+        let value = self
+            .result
+            .as_ref()
+            .and_then(|r| r.rows.get(m.row))
+            .and_then(|r| r.get(m.col))?;
+        Some((m.start, value.chars().count()))
+    }
+
+    /// The scope label for the current search (`col:{name}` or `all columns`).
+    pub fn search_scope_label(&self) -> String {
+        let name = self
+            .search_scope_column
+            .and_then(|c| self.result.as_ref().and_then(|r| r.columns.get(c)))
+            .map(|meta| meta.name.as_str());
+        super::search::search_scope_label(self.search_scope_column, name)
+    }
+
+    /// The read-out suffix for the search title: scope / count / offset.
+    pub fn search_title_extra(&self) -> String {
+        super::search::search_title_extra(
+            &self.search,
+            self.search_match_index,
+            self.search_matches.len(),
+            &self.search_scope_label(),
+            self.current_match_offset(),
+        )
     }
 
     /// Auto-adjust h_scroll to keep cursor column visible and anchored.

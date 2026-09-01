@@ -248,6 +248,7 @@ pub fn render(
         0,
         Some(area.width.saturating_sub(2)),
         Style::default().fg(p.muted),
+        None,
     );
 
     let mut block = Block::default()

@@ -230,6 +230,16 @@ fn render_table(
     let state_col = state.col;
     let p = theme.palette();
 
+    // Search highlight inputs: derived once so the cell loop stays flat.
+    let search_query = if state.search.query.trim().is_empty() {
+        None
+    } else {
+        Some(state.search.query.as_str())
+    };
+    let search_matches = &state.search_matches;
+    let current_match = state.search_matches.get(state.search_match_index).copied();
+    let search_cell_text_skip = state.search_cell_text_skip;
+
     if result.columns.is_empty() {
         let affected = result.rows_affected;
         let text = match affected {
@@ -404,7 +414,8 @@ fn render_table(
                 .unwrap_or("");
 
             let is_active = state_col == col;
-            let base_style = if row_selected && is_active {
+            let cell_selected = row_selected && is_active;
+            let base_style = if cell_selected {
                 Style::default()
                     .fg(p.selection_focus_text)
                     .bg(p.selection_cell_bg)
@@ -415,11 +426,13 @@ fn render_table(
                 Style::default().fg(p.fg)
             };
 
-            let text = crate::common::view::format::truncate_cell_display_from(
-                value,
-                tv.table_text_skip,
-                tv.text_w,
-            );
+            // Shift the window for the active match cell so the highlighted
+            // query stays inside the visible cell (mirrors the original dbm).
+            let text_skip = if cell_selected {
+                tv.table_text_skip.saturating_add(search_cell_text_skip)
+            } else {
+                tv.table_text_skip
+            };
             let col_x = table_area
                 .x
                 .saturating_add(
@@ -427,8 +440,39 @@ fn render_table(
                         + tv.table_text_skip,
                 )
                 .saturating_sub(h_scroll);
+
+            let highlight_line = search_query.and_then(|q| {
+                let starts = super::search::match_starts_in_cell(search_matches, row_idx, col);
+                if starts.is_empty() {
+                    None
+                } else {
+                    Some((q, starts))
+                }
+            });
+            let line = if let Some((q, starts)) = highlight_line {
+                super::search::cell_highlight_line(
+                    value,
+                    text_skip,
+                    tv.text_w,
+                    q,
+                    &starts,
+                    current_match
+                        .filter(|m| m.row == row_idx && m.col == col)
+                        .map(|m| m.start),
+                    base_style,
+                )
+            } else {
+                Line::from(Span::styled(
+                    crate::common::view::format::truncate_cell_display_from(
+                        value,
+                        text_skip,
+                        tv.text_w,
+                    ),
+                    base_style,
+                ))
+            };
             frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(text, base_style))),
+                Paragraph::new(line),
                 Rect::new(col_x, y_base, tv.text_w, RESULTS_ROW_CONTENT_HEIGHT),
             );
 

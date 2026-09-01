@@ -77,6 +77,7 @@ pub fn render(
         visible.len(),
         Some(area.width.saturating_sub(2)),
         Style::default().fg(p.muted),
+        None,
     );
 
     let mut block = Block::default()

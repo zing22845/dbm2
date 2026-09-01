@@ -31,6 +31,9 @@ pub enum ResultsMessage {
     BeginSearch,
     /// Forward a key while search input is active.
     SearchKey(KeyEvent),
+    /// Move to the next/previous match while an applied filter is shown
+    /// (`n` / `N` outside of input mode), wrapping.
+    SearchNavigate { forward: bool },
     /// Reset the result selection / scroll.
     ResetSelection,
     /// Run a SQL query.
@@ -119,6 +122,7 @@ impl ResultsMessage {
             ResultsMessage::SetSelection { row, col } => ListMessage::SetSelection { row, col },
             ResultsMessage::BeginSearch => ListMessage::BeginSearch,
             ResultsMessage::SearchKey(key) => ListMessage::SearchKey(key),
+            ResultsMessage::SearchNavigate { forward } => ListMessage::SearchNavigate { forward },
             ResultsMessage::ResetSelection => ListMessage::ResetSelection,
             ResultsMessage::RunQuery {
                 instance,

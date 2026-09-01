@@ -42,7 +42,9 @@ pub fn render(
     );
 
     // The pane search `/query [n/m]` renders on the bottom border
-    // (`title_bottom`), matching the original dbm's search placement.
+    // (`title_bottom`), matching the original dbm's search placement. When the
+    // search is visible, append the scope / count / offset read-out.
+    let search_extra = state.list.search_title_extra();
     let search_title = pane_search_bottom_title_line(
         &state.list.search,
         focused,
@@ -50,6 +52,7 @@ pub fn render(
         state.list.row_count(),
         Some(area.width.saturating_sub(2)),
         Style::default().fg(p.muted),
+        state.list.search.is_visible().then_some(search_extra.as_str()),
     );
 
     let mut block = Block::default()
