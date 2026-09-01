@@ -21,6 +21,9 @@ pub fn update(
             state.paginated = paginated;
             state.row = 0;
             state.col = 0;
+            // A fresh result is deselected (matching the original dbm, which
+            // clears the cell selection after every query run).
+            state.selected = false;
             state.h_scroll.set(0);
             state.search.reset();
             state.search_matches.clear();
@@ -355,6 +358,21 @@ mod tests {
     }
 
     #[test]
+    fn set_result_deselects_cell() {
+        // The original dbm clears the cell selection after every query run, so
+        // a fresh result must be deselected even when the state was selected.
+        let (state, _e, _dirty) = update(
+            ListMessage::SetResult {
+                result: sample_result(),
+                paginated: false,
+            },
+            ListState::new(), // `new()` starts selected; SetResult must reset it
+        );
+        assert!(state.result.is_some());
+        assert!(!state.selected, "a fresh result must be deselected");
+    }
+
+    #[test]
     fn deselect_makes_search_full_text_scope() {
         let base = ListState {
             result: Some(sample_result()),
@@ -369,7 +387,7 @@ mod tests {
         state.search.reset();
 
         // Esc deselection: no cell cursor; a fresh search matches all columns.
-        let (mut state, _e, _d) = update(ListMessage::ResetSelection, state);
+        let (state, _e, _d) = update(ListMessage::ResetSelection, state);
         assert!(!state.selected);
         let (state, _e, _d) = update(ListMessage::BeginSearch, state);
         assert!(state.search_scope_column.is_none());
