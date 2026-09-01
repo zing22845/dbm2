@@ -108,7 +108,9 @@ pub fn update(
             changed
         }
         ListMessage::BeginSearch => {
-            state.search.reset();
+            // Re-enter search editing on the existing filter: unlike the
+            // initial open, a repeated `/` must preserve the previous keyword
+            // (matching the original dbm) so it can be edited/refined.
             state.search.start();
             state.search_match_index = 0;
             state.search_matches.clear();

@@ -33,7 +33,8 @@ pub fn update(
             set_cursor(&mut state, store, instance, connection, index)
         }
         ListMessage::BeginSearch => {
-            state.search.reset();
+            // Re-enter search editing on the existing filter, preserving the
+            // previous keyword like the original dbm (only `start`, no clear).
             state.search.start();
             state.scroll_locked = false;
             true
