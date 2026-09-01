@@ -402,11 +402,15 @@ pub fn update(
         }
         SqlTabMessage::EnterHistoryRecall { tab_id } => {
             // Mirrors the original dbm's `enter_history_recall_from_sql`:
-            // pin the most recent entry so its detail shows, and move focus
-            // to the History pane so the recall list is interactive.
+            // pin the most recent entry so its detail shows, move focus to the
+            // History pane and start the `/` search input so the user can type
+            // a query immediately (the recall list is interactive as an input).
             if let Some(idx) = state.index_of(tab_id) {
                 let (instance, connection) = session_key(&state.tabs[idx].session);
-                state.tabs[idx].history.pin_most_recent(&state.history_store, &instance, &connection);
+                state.tabs[idx]
+                    .history
+                    .pin_most_recent(&state.history_store, &instance, &connection);
+                state.tabs[idx].history.list.search.start();
                 state.tabs[idx].focus = SqlFocus::History;
                 dirty = true;
                 dirty |= clamp_list_for_history_detail(&mut state.tabs[idx], &state.history_store);
@@ -1203,9 +1207,10 @@ mod tests {
     }
 
     #[test]
-    fn enter_history_recall_pins_and_focuses_history() {
+    fn enter_history_recall_pins_focuses_and_starts_search() {
         // Mirrors the original dbm's `ctrl+r` from the SQL editor: entering
-        // recall pins the newest entry and moves focus to the History pane.
+        // recall pins the newest entry, moves focus to the History pane, and
+        // starts the `/` search input so the next keystroke types a query.
         let mut s = SqlTabState::default();
         s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
         let tab_id = s.tabs[0].session.id;
@@ -1224,6 +1229,10 @@ mod tests {
             s.tabs[0].history.detail.pinned_sql.as_deref(),
             Some("SELECT 1"),
             "EnterHistoryRecall must pin the newest entry's detail"
+        );
+        assert!(
+            s.tabs[0].history.list.search.text_input_active(),
+            "EnterHistoryRecall must start the history search input (mirroring ctrl+r recall)"
         );
     }
 
