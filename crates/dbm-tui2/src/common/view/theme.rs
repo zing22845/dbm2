@@ -10,7 +10,7 @@
 //! `common/view` convention), which keeps feature views self-contained pure
 //! functions: pass a different theme to verify different colors.
 
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui_themes::ThemeName;
 
 /// The semantic color slots available to every view.
@@ -84,6 +84,40 @@ impl Palette {
     /// so focus highlighting is defined in one place.
     pub fn active_border(&self, active: bool) -> Style {
         Style::default().fg(if active { self.border_active } else { self.border })
+    }
+
+    /// Style of a (non-current) search match's text — the uniform accent used
+    /// for all hits. Matches the original dbm's `other_match_style`: yellow
+    /// foreground with no background. Current vs. other matches are
+    /// distinguished differently per pane: the results list frames the current
+    /// cell (via `match_cell_border_style`), while the editor fills the current
+    /// match's background via [`Self::current_match_style`].
+    pub fn match_style(&self) -> Style {
+        Style::default().fg(self.accent)
+    }
+
+    /// Style of the *current* search match — matches the original dbm's
+    /// `current_match_style`: black bold text on a yellow background. Used by
+    /// the editor, which has no cell frame to point at the current match.
+    pub fn current_match_style(&self) -> Style {
+        Style::default()
+            .fg(Color::Black)
+            .bg(self.accent)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    /// Style of an active search input's text/prompt.
+    pub fn search_active_style(&self) -> Style {
+        Style::default().fg(self.accent)
+    }
+
+    /// Style of the frame drawn around the current-match cell: bold accent so
+    /// it stands out from the muted grid. This is the sole "current" indicator
+    /// in the results list — the matched text itself uses [`Self::match_style`].
+    pub fn match_cell_border_style(&self) -> Style {
+        Style::default()
+            .fg(self.accent)
+            .add_modifier(Modifier::BOLD)
     }
 
     pub fn from_ratatui(p: &ratatui_themes::ThemePalette) -> Self {
@@ -163,6 +197,13 @@ impl Theme {
         light.selection_text = Color::Rgb(0x34, 0x37, 0x40);
         dark.selection_focus_text = Color::Rgb(0x1c, 0x48, 0x8c);
         light.selection_focus_text = Color::Rgb(0x1c, 0x48, 0x8c);
+        // Unify the emphasis accent to the original dbm's match yellow across
+        // every ratatui-derived theme (solarized, catppuccin, ...), and reset
+        // the primary foreground to the terminal default (editor-aligned).
+        dark.accent = ACCENT_YELLOW;
+        light.accent = ACCENT_YELLOW;
+        dark.fg = FG_RESET;
+        light.fg = FG_RESET;
         Theme {
             name,
             is_dark: true,
@@ -172,17 +213,27 @@ impl Theme {
     }
 }
 
+/// Original dbm's search-match yellow (ANSI `Color::Yellow`, not a pure RGB
+/// yellow), chosen as the global accent for emphasis slots (search match text,
+/// active match, match cell border, active search input).
+const ACCENT_YELLOW: Color = Color::Yellow;
+
+/// Primary foreground reset to the terminal default, matching the sql editor's
+/// base text (edtui `Style::default()`). Keeps history / results / explorer
+/// primary text aligned with the editor.
+const FG_RESET: Color = Color::Reset;
+
 /// A dark theme modeled after the Dracula color scheme.
 pub fn dracula() -> Theme {
     Theme {
         name: "dracula",
         is_dark: true,
         dark: Palette {
-            fg: Color::Rgb(0xf8, 0xf8, 0xf2),       // foreground
+            fg: FG_RESET,                            // editor-aligned default
             fg_dim: Color::Rgb(0x62, 0x64, 0x74),    // comment
             bg: Color::Rgb(0x28, 0x2a, 0x36),        // background
             surface: Color::Rgb(0x21, 0x23, 0x2e),   // current line
-            accent: Color::Rgb(0xbd, 0x93, 0xf9),    // purple
+            accent: ACCENT_YELLOW,
             border: Color::Rgb(0x44, 0x47, 0x5a),
             border_active: Color::Rgb(0xbd, 0x93, 0xf9),
             // Bright green — readable on the blue-grey selection background.
@@ -199,11 +250,11 @@ pub fn dracula() -> Theme {
             muted: Color::Rgb(0x62, 0x64, 0x74),
         },
         light: Palette {
-            fg: Color::Rgb(0x28, 0x2a, 0x36),
+            fg: FG_RESET,                            // editor-aligned default
             fg_dim: Color::Rgb(0x62, 0x74, 0x8f),
             bg: Color::Rgb(0xfa, 0xf7, 0xf2),
             surface: Color::Rgb(0xf1, 0xe8, 0xe2),
-            accent: Color::Rgb(0xbd, 0x93, 0xf9),
+            accent: ACCENT_YELLOW,
             border: Color::Rgb(0xcf, 0xc9, 0xc2),
             border_active: Color::Rgb(0xbd, 0x93, 0xf9),
             // Deep green — readable on the light blue-grey selection background.
@@ -228,11 +279,11 @@ pub fn nord() -> Theme {
         name: "nord",
         is_dark: true,
         dark: Palette {
-            fg: Color::Rgb(0xd8, 0xde, 0xe9),       // nord4
+            fg: FG_RESET,                            // editor-aligned default
             fg_dim: Color::Rgb(0x4c, 0x56, 0x6a),    // nord3
             bg: Color::Rgb(0x2e, 0x34, 0x40),        // nord0
             surface: Color::Rgb(0x3b, 0x42, 0x52),   // nord1
-            accent: Color::Rgb(0x88, 0xc0, 0xd0),    // nord8 (frost cyan)
+            accent: ACCENT_YELLOW,
             border: Color::Rgb(0x4c, 0x56, 0x6a),
             border_active: Color::Rgb(0x88, 0xc0, 0xd0),
             // Aurora green (nord14) — readable on the nord1 selection bg.
@@ -249,11 +300,11 @@ pub fn nord() -> Theme {
             muted: Color::Rgb(0x4c, 0x56, 0x6a),
         },
         light: Palette {
-            fg: Color::Rgb(0x2e, 0x34, 0x40),
+            fg: FG_RESET,                            // editor-aligned default
             fg_dim: Color::Rgb(0x4c, 0x56, 0x6a),
             bg: Color::Rgb(0xec, 0xef, 0xf4),        // nord6
             surface: Color::Rgb(0xe5, 0xe9, 0xf0),
-            accent: Color::Rgb(0x88, 0xc0, 0xd0),
+            accent: ACCENT_YELLOW,
             border: Color::Rgb(0xd8, 0xde, 0xe9),
             border_active: Color::Rgb(0x88, 0xc0, 0xd0),
             // Darker aurora green (nord10) — readable on the light selection bg.

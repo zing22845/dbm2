@@ -6,7 +6,7 @@
 //! counting, wrapping, and search-to-scroll mapping.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
@@ -135,12 +135,9 @@ pub fn first_match_display_line(
 fn highlight_style(current: bool, theme: &Theme) -> Style {
     let p = theme.palette();
     if current {
-        Style::default()
-            .fg(p.surface)
-            .bg(p.warning)
-            .add_modifier(Modifier::BOLD)
+        p.current_match_style()
     } else {
-        Style::default().fg(p.warning)
+        p.match_style()
     }
 }
 

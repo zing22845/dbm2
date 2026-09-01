@@ -6,7 +6,7 @@
 //! and render a title suffix through [`pane_search_title_line`].
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::common::utils::shortcuts::{
@@ -283,18 +283,15 @@ fn is_clear_line_key(key: &KeyEvent) -> bool {
     matches!(key.code, KeyCode::Char('u') | KeyCode::Char('\x15'))
 }
 
-/// Style of the active search input in a pane title.
-pub fn active_search_style() -> Style {
-    Style::default().fg(Color::Yellow)
-}
-
 pub fn inactive_search_style(theme_muted: Style) -> Style {
     theme_muted
 }
 
-pub fn search_query_style(search: &PaneSearch, theme_muted: Style) -> Style {
+/// Style of the active search input: the caller supplies the theme-derived
+/// accent style (this component is theme-agnostic).
+pub fn search_query_style(search: &PaneSearch, active_style: Style, theme_muted: Style) -> Style {
     if search.active {
-        active_search_style()
+        active_style
     } else {
         inactive_search_style(theme_muted)
     }
@@ -386,15 +383,17 @@ pub fn filter_nav_counter(search: &PaneSearch, cursor: usize, filtered_count: us
 /// Label-only title line (no search query or counter). Used when the search
 /// query/counter is rendered on the bottom border (`Block::title_bottom`)
 /// instead of the top border.
+#[allow(clippy::too_many_arguments)]
 pub fn pane_search_label_line(
     label: &str,
     pane_focused: bool,
     highlight_label_when_focused: bool,
     theme_muted: Style,
     focused_label_style: Option<Style>,
+    accent_style: Style,
 ) -> Line<'static> {
     let label_style = if highlight_label_when_focused && pane_focused {
-        focused_label_style.unwrap_or_else(active_search_style)
+        focused_label_style.unwrap_or(accent_style)
     } else if highlight_label_when_focused {
         theme_muted
     } else {
@@ -410,6 +409,7 @@ pub fn pane_search_label_line(
 ///
 /// `extra` (when non-empty) is appended as a plain suffix after the counter,
 /// used by the results list to show `scope` / `count` / `offset` read-outs.
+#[allow(clippy::too_many_arguments)]
 pub fn pane_search_bottom_title_line(
     search: &PaneSearch,
     pane_focused: bool,
@@ -418,6 +418,8 @@ pub fn pane_search_bottom_title_line(
     width: Option<u16>,
     theme_muted: Style,
     extra: Option<&str>,
+    applied_match_style: Option<Style>,
+    accent_style: Style,
 ) -> Option<Line<'static>> {
     if !search.is_visible() {
         return None;
@@ -435,7 +437,8 @@ pub fn pane_search_bottom_title_line(
         filtered_count,
         width,
         None,
-        None,
+        applied_match_style,
+        accent_style,
     );
     if let Some(extra) = extra.filter(|e| !e.is_empty()) {
         line.spans.push(Span::raw(extra.to_string()));
@@ -456,9 +459,10 @@ pub fn pane_search_title_line(
     title_width: Option<u16>,
     focused_label_style: Option<Style>,
     applied_match_style: Option<Style>,
+    accent_style: Style,
 ) -> Line<'static> {
     let label_style = if highlight_label_when_focused && pane_focused {
-        focused_label_style.unwrap_or_else(active_search_style)
+        focused_label_style.unwrap_or(accent_style)
     } else if highlight_label_when_focused {
         theme_muted
     } else {
@@ -474,7 +478,7 @@ pub fn pane_search_title_line(
     append_search_query_spans(
         &mut spans,
         search,
-        active_search_style(),
+        accent_style,
         applied,
         inactive_search_style(theme_muted),
         title_width,
@@ -488,6 +492,7 @@ pub fn pane_search_title_line(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Color;
     use crossterm::event::{KeyEventKind, KeyEventState};
 
     #[test]
@@ -506,6 +511,7 @@ mod tests {
             Some(40),
             None,
             None,
+            Style::default().fg(Color::Blue),
         );
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains(" databases "), "{text}");

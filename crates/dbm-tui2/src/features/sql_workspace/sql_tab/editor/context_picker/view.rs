@@ -108,6 +108,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
         db_active,
         Style::default().fg(p.muted),
         Style::default().fg(p.border_active),
+        Style::default().fg(p.accent),
     );
     let schema_title = picker_column_title_line(
         &format!(" schemas ({}) ", state.preview_database),
@@ -117,6 +118,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
         schema_active,
         Style::default().fg(p.muted),
         Style::default().fg(p.border_active),
+        Style::default().fg(p.accent),
     );
 
     let selected_style = Style::default()
@@ -144,6 +146,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
 }
 
 /// The title line for one picker column: label + `/` search + filter counter.
+#[allow(clippy::too_many_arguments)]
 fn picker_column_title_line(
     label: &str,
     search: &PaneSearch,
@@ -152,6 +155,7 @@ fn picker_column_title_line(
     column_focused: bool,
     theme_muted: Style,
     active_label_style: Style,
+    accent_style: Style,
 ) -> Line<'static> {
     pane_search_title_line(
         label,
@@ -164,6 +168,7 @@ fn picker_column_title_line(
         None,
         Some(active_label_style),
         None,
+        accent_style,
     )
 }
 

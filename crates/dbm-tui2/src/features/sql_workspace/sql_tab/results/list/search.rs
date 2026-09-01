@@ -8,7 +8,7 @@
 //!
 //! Mirrors the original dbm's `results/search.rs`.
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::common::components::search::{PaneSearch, TextSearchOptions, find_match_starts};
@@ -77,19 +77,14 @@ pub fn match_starts_in_cell(
         .collect()
 }
 
-/// Style of the current (active) match cell.
-pub fn current_match_style() -> Style {
-    Style::default()
-        .fg(Color::Black)
-        .bg(Color::Yellow)
-        .add_modifier(Modifier::BOLD)
-}
-
 /// Render one cell as a line that highlights every query match, colouring the
 /// current match (when on this cell) distinctly. `skip` is the table-level
-/// text skip for the column and `width` the visible cell width; `skip` is
-/// combined with any per-cell `cell_text_skip` by the caller for the active
-/// cell. Falls back to plain truncation when there is nothing to highlight.
+/// text skip for the column and `width` the visible cell width. `base_style`
+/// styles the non-matching text, `other_match_style` the non-current matches,
+/// and `current_match_style` the current match — the caller supplies the
+/// theme-derived styles so this pure helper stays theme-agnostic. Falls back
+/// to plain truncation when there is nothing to highlight.
+#[allow(clippy::too_many_arguments)]
 pub fn cell_highlight_line(
     text: &str,
     skip: u16,
@@ -98,6 +93,8 @@ pub fn cell_highlight_line(
     match_starts: &[usize],
     current_start: Option<usize>,
     base_style: Style,
+    other_match_style: Style,
+    current_match_style: Style,
 ) -> Line<'static> {
     let query = query.trim();
     if width == 0 || query.is_empty() || match_starts.is_empty() {
@@ -129,9 +126,9 @@ pub fn cell_highlight_line(
         }
         let end = (start + query_len).min(vis_end);
         let style = if current_start == Some(start) {
-            current_match_style()
+            current_match_style
         } else {
-            base_style.fg(Color::Yellow)
+            other_match_style
         };
         push_char_range(text, start, end, style, &mut spans);
         pos = end;
@@ -255,6 +252,7 @@ pub fn search_title_extra(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Color;
     use crate::common::view::format::{results_col_text_view, results_table_width};
     use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
 
@@ -331,6 +329,8 @@ mod tests {
         let widths = vec![12u16, 12];
         let tv = results_col_text_view(1, &widths, results_table_width(&widths), 0).unwrap();
         // "alpha beta": 'a' at char offsets 0 and 4; current match is offset 0.
+        let current = Style::default().fg(Color::Blue).bg(Color::Yellow);
+        let other = Style::default().fg(Color::Yellow);
         let line = cell_highlight_line(
             "alpha beta",
             0,
@@ -339,6 +339,8 @@ mod tests {
             &[0, 4],
             Some(0),
             Style::default(),
+            other,
+            current,
         );
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert_eq!(text, "alpha beta", "highlight must not change the visible text");
@@ -349,16 +351,53 @@ mod tests {
         assert_eq!(line.spans[1].content.as_ref(), "lph");
         assert_eq!(line.spans[2].content.as_ref(), "a");
         assert_eq!(line.spans[3].content.as_ref(), " beta");
-        // First span uses the current-match style (black on yellow).
+        // First span uses the current-match style passed in (accent fill).
         assert_eq!(line.spans[0].style.bg, Some(Color::Yellow));
-        // The other match is yellow foreground on the base style.
+        // The other match uses the passed-in other-match accent foreground.
         assert_eq!(line.spans[2].style.fg, Some(Color::Yellow));
     }
 
     #[test]
-    fn current_match_style_is_distinct() {
-        let s = current_match_style();
-        assert_eq!(s.bg, Some(Color::Yellow));
+    fn cell_highlight_uses_passed_match_styles() {
+        // "banana": "an" matches at char offsets 1 and 3.
+        let current = Style::default().bg(Color::Magenta);
+        let other = Style::default().fg(Color::Red);
+        // No active match: every match takes the "other" accent style.
+        let line = cell_highlight_line(
+            "banana",
+            0,
+            20,
+            "an",
+            &[1, 3],
+            None,
+            Style::default(),
+            other,
+            current,
+        );
+        assert_eq!(line.spans.len(), 4);
+        assert_eq!(line.spans[0].content.as_ref(), "b");
+        assert_eq!(line.spans[1].content.as_ref(), "an");
+        assert_eq!(line.spans[1].style.fg, Some(Color::Red));
+        assert_eq!(line.spans[2].content.as_ref(), "an");
+        assert_eq!(line.spans[2].style.fg, Some(Color::Red));
+        assert_eq!(line.spans[3].content.as_ref(), "a");
+        // Current style (magenta bg) is unused without an active match on this cell.
+        assert_eq!(line.spans[0].style.bg, None);
+
+        // When the second match is active, it carries the current style.
+        let line = cell_highlight_line(
+            "banana",
+            0,
+            20,
+            "an",
+            &[1, 3],
+            Some(3),
+            Style::default(),
+            other,
+            current,
+        );
+        assert_eq!(line.spans[2].content.as_ref(), "an");
+        assert_eq!(line.spans[2].style.bg, Some(Color::Magenta));
     }
 
     #[test]

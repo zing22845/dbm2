@@ -237,6 +237,7 @@ pub fn render(
         true,
         Style::default().fg(if focused { p.border_active } else { p.muted }),
         Some(Style::default().fg(if focused { p.accent } else { p.muted })),
+        p.search_active_style(),
     );
 
     // The pane search `/query [n/m]` renders on the bottom border
@@ -249,6 +250,8 @@ pub fn render(
         Some(area.width.saturating_sub(2)),
         Style::default().fg(p.muted),
         None,
+        Some(p.match_style()),
+        p.search_active_style(),
     );
 
     let mut block = Block::default()
@@ -316,6 +319,12 @@ pub fn render(
 
     // Render the editor into the content area (minus scrollbar space).
     let mut editor = state.editor.clone();
+    // Re-apply theme-derived match highlight styles at render time (only the
+    // view knows the active palette), overriding the neutral placeholders set
+    // in the update path so the highlights follow the theme.
+    if !state.sql_search.matches.is_empty() {
+        editor.set_highlights(state.sql_search.palette_highlights(p));
+    }
     let content_area = scroll_layout.content_area;
     let cursor = editor::render_editor(&mut editor, content_area, frame.buffer_mut());
 

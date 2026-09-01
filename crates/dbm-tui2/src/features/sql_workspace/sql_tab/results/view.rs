@@ -39,6 +39,7 @@ pub fn render(
         false,
         Style::default().fg(p.muted),
         None,
+        p.search_active_style(),
     );
 
     // The pane search `/query [n/m]` renders on the bottom border
@@ -53,6 +54,8 @@ pub fn render(
         Some(area.width.saturating_sub(2)),
         Style::default().fg(p.muted),
         state.list.search.is_visible().then_some(search_extra.as_str()),
+        Some(p.match_style()),
+        p.search_active_style(),
     );
 
     let mut block = Block::default()

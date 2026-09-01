@@ -235,10 +235,10 @@ fn match_cell_text_skip(
     (cell_skip as u16).min(max_skip)
 }
 
-/// Style for the frame around the current-match cell (accent that stands out
-/// against the muted grid, matching the current-match highlight colour).
-fn current_match_border_style() -> Style {
-    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+/// The frame around the current-match cell is drawn with the palette's match
+/// border emphasis (accent) so it stands out from the muted grid.
+fn current_match_border_style(p: &crate::common::view::theme::Palette) -> Style {
+    p.match_cell_border_style()
 }
 
 /// Recolour the grid border around the current-match cell into an accent
@@ -539,6 +539,17 @@ fn render_table(
                     Some((q, starts))
                 }
             });
+            // Matched text uses a uniform accent style so it reads against the
+            // pane background. On a selected row/column the accent fg would
+            // clash with the selection background, so we keep the selection
+            // foreground and mark the hit with bold instead. The *current* match
+            // cell is distinguished solely by its frame (`match_cell_border_style`),
+            // so both highlight args below use the same text style.
+            let match_text_style = if row_selected || is_active {
+                base_style.add_modifier(Modifier::BOLD)
+            } else {
+                p.match_style()
+            };
             let line = if let Some((q, starts)) = highlight_line {
                 super::search::cell_highlight_line(
                     value,
@@ -550,6 +561,8 @@ fn render_table(
                         .filter(|m| m.row == row_idx && m.col == col)
                         .map(|m| m.start),
                     base_style,
+                    match_text_style,
+                    match_text_style,
                 )
             } else {
                 Line::from(Span::styled(
@@ -587,7 +600,7 @@ fn render_table(
             if is_match_cell {
                 match_bottom_span = draw_match_cell_frame(
                     frame,
-                    current_match_border_style(),
+                    current_match_border_style(p),
                     table_area,
                     col_x,
                     y_base,
@@ -599,7 +612,7 @@ fn render_table(
         // Row separator line (tinted as the current-match cell's bottom border).
         let row_sep_y = y_base + RESULTS_ROW_CONTENT_HEIGHT;
         if row_sep_y < table_area.bottom() {
-            let accent = current_match_border_style();
+            let accent = current_match_border_style(p);
             let sep_right = table_area.x.saturating_add(content_width);
             for x in table_area.x..sep_right.min(table_area.right()) {
                 let (glyph, style) = match match_bottom_span {

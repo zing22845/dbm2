@@ -7,7 +7,6 @@
 //! lines, calls `find_matches`, and applies the results.
 
 use crate::common::components::search::{find_match_starts, TextSearchOptions};
-use ratatui::style::{Color, Modifier, Style};
 
 /// A single search match: which line and the inclusive char-column span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,19 +37,6 @@ pub fn find_matches(lines: &[String], query: &str, opts: TextSearchOptions) -> V
         }
     }
     matches
-}
-
-/// Style of the match under the cursor (current match).
-pub fn current_match_style() -> Style {
-    Style::default()
-        .fg(Color::Black)
-        .bg(Color::Yellow)
-        .add_modifier(Modifier::BOLD)
-}
-
-/// Style of the other (non-current) matches.
-pub fn other_match_style() -> Style {
-    Style::default().fg(Color::Yellow)
 }
 
 #[cfg(test)]
@@ -97,12 +83,5 @@ mod tests {
         assert_eq!(hits[0].col_start, 7);
         assert_eq!(hits[1].row, 2);
         assert_eq!(hits[1].col_start, 6);
-    }
-
-    #[test]
-    fn match_styles_are_distinct() {
-        assert_ne!(current_match_style(), other_match_style());
-        assert_eq!(other_match_style().bg, None);
-        assert!(current_match_style().add_modifier.contains(Modifier::BOLD));
     }
 }

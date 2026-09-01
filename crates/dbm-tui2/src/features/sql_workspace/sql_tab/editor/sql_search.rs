@@ -9,9 +9,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Style;
 
 use crate::common::components::search::{PaneSearch, PaneSearchInput};
-use crate::common::utils::sql_search::{
-    SqlSearchMatch, current_match_style, find_matches, other_match_style,
-};
+use crate::common::utils::sql_search::{SqlSearchMatch, find_matches};
+use crate::common::view::theme::Palette;
 
 /// Search state for one editor: the `/` input plus its live match results.
 #[derive(Debug, Clone, Default)]
@@ -112,8 +111,10 @@ impl EditorSqlSearch {
             editor.clear_highlights();
             return;
         }
-        let current = current_match_style();
-        let other = other_match_style();
+        // Placeholder: the view re-applies theme-derived styles at render time
+        // via `palette_highlights`, because only the view knows the active theme.
+        let current = Style::default();
+        let other = Style::default();
         let highlights = self
             .matches
             .iter()
@@ -128,6 +129,29 @@ impl EditorSqlSearch {
             })
             .collect();
         editor.set_highlights(highlights);
+    }
+
+    /// Build the accent-theme highlight styles for the current match set. The
+    /// view applies these at render time — the only layer that knows the active
+    /// `Palette` — replacing the neutral placeholders set in the update path.
+    pub fn palette_highlights(&self, palette: &Palette) -> Vec<edtui::Highlight> {
+        if self.matches.is_empty() {
+            return Vec::new();
+        }
+        let current = palette.current_match_style();
+        let other = palette.match_style();
+        self.matches
+            .iter()
+            .enumerate()
+            .map(|(idx, m)| {
+                let style: Style = if idx == self.match_index { current } else { other };
+                edtui::Highlight::new(
+                    edtui::Index2::new(m.row, m.col_start),
+                    edtui::Index2::new(m.row, m.col_end.saturating_sub(1)),
+                    style,
+                )
+            })
+            .collect()
     }
 }
 
