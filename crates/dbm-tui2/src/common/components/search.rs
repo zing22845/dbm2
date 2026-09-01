@@ -219,8 +219,14 @@ impl PaneSearch {
                 PaneSearchInput::Applied
             }
             KeyCode::Backspace => {
-                self.query.pop();
-                PaneSearchInput::QueryChanged
+                if self.query.is_empty() {
+                    // Nothing left to delete (e.g. holding backspace after the
+                    // query is already empty): ignore so we don't re-render.
+                    PaneSearchInput::Ignored
+                } else {
+                    self.query.pop();
+                    PaneSearchInput::QueryChanged
+                }
             }
             _ if is_clear_line_key(key) => {
                 if self.query.is_empty() {
@@ -609,6 +615,29 @@ mod tests {
         assert_eq!(search.escape(), PaneSearchEscape::ClearedFilter);
         assert!(!search.has_filter());
         assert_eq!(search.escape(), PaneSearchEscape::Ignored);
+    }
+
+    #[test]
+    fn backspace_on_empty_query_is_ignored() {
+        let mut search = PaneSearch::default();
+        search.start();
+        // Delete the only char, then hold backspace again: the second press is
+        // ignored so the caller won't re-render on every key repeat.
+        let bs = KeyEvent {
+            code: KeyCode::Backspace,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        search.query = "a".into();
+        assert_eq!(
+            search.handle_key(&bs, false),
+            PaneSearchInput::QueryChanged
+        );
+        assert!(search.query.is_empty());
+        assert_eq!(search.handle_key(&bs, false), PaneSearchInput::Ignored);
+        assert!(search.query.is_empty());
+        assert!(search.active);
     }
 
     #[test]
