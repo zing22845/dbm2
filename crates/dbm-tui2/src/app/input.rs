@@ -751,6 +751,23 @@ fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     if tab.focus == SqlFocus::Editor
         && editor.context_picker.open
     {
+        // While the picker's `/` search input is live every key feeds the
+        // search handler (mirroring the pane searches): characters build the
+        // query, Esc/Enter end it, Ctrl+p/n navigate and Ctrl+/ toggles case.
+        // The case toggle also keeps working on an applied (visible) filter.
+        let case_toggle = crate::common::components::search::is_case_toggle_key(&key);
+        if editor.context_picker.search_input_active()
+            || (case_toggle
+                && (editor.context_picker.db_search.is_visible()
+                    || editor.context_picker.schema_search.is_visible()))
+        {
+            return Some(sql_editor(
+                EditorMessage::ContextPicker(ContextPickerMsg::Message(
+                    ContextPickerMessage::SearchKey(key),
+                )),
+                tab_id,
+            ));
+        }
         return sql_context_picker_key(key, tab_id);
     }
 
@@ -1467,6 +1484,61 @@ mod tests {
                 SqlTabMessage::Editor { .. },
             )))) => {}
             other => panic!("expected an editor message (context picker open), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn context_picker_search_active_routes_keys_to_search_handler() {
+        let mut state = state_with_tabs(1);
+        let tab = &mut state.sql_tab.tabs[0];
+        tab.focus = SqlFocus::Editor;
+        tab.editor.context_picker.open = true;
+        // Begin the active-column `/` search (input live).
+        tab.editor.context_picker.db_search.start();
+        tab.editor.context_picker.db_search.query.push('a');
+
+        // A character while the picker search is live must feed the search
+        // handler instead of being dropped by the hardcoded picker bindings.
+        let msg = sql_key(key(KeyCode::Char('b'), KeyModifiers::NONE), &state)
+            .expect("character must route to the picker search while its input is active");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    msg: EditorMsg::Message(EditorMessage::ContextPicker(
+                        ContextPickerMsg::Message(ContextPickerMessage::SearchKey(_)),
+                    )),
+                    ..
+                },
+            )))) => {}
+            other => panic!("expected ContextPicker SearchKey, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn context_picker_applied_filter_case_toggle_routes_to_search() {
+        let mut state = state_with_tabs(1);
+        let tab = &mut state.sql_tab.tabs[0];
+        tab.focus = SqlFocus::Editor;
+        tab.editor.context_picker.open = true;
+        // Applied filter: query set, input ended via Enter.
+        tab.editor.context_picker.db_search.query.push('a');
+        assert!(tab.editor.context_picker.db_search.is_visible());
+        assert!(!tab.editor.context_picker.search_input_active());
+
+        // Ctrl+/ on an applied (visible) filter must still toggle case via the
+        // search handler rather than falling through to the picker bindings.
+        let msg = sql_key(key(KeyCode::Char('/'), KeyModifiers::CONTROL), &state)
+            .expect("Ctrl+/ must route to the picker search while a filter is visible");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    msg: EditorMsg::Message(EditorMessage::ContextPicker(
+                        ContextPickerMsg::Message(ContextPickerMessage::SearchKey(_)),
+                    )),
+                    ..
+                },
+            )))) => {}
+            other => panic!("expected ContextPicker SearchKey, got {other:?}"),
         }
     }
 
