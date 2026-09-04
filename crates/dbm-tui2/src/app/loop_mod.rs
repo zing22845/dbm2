@@ -1339,6 +1339,40 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 }
                             }
 
+                            // IW connections form click: when the add/edit form
+                            // popup is open, a single click on a field line
+                            // selects that field and a double click enters insert
+                            // mode on it (matching the original dbm's form field
+                            // click handling). Clicks outside a field line are
+                            // ignored.
+                            if let Some(body) = iw_body_area_for_hit(size, &state)
+                                && body.contains(point)
+                                && matches!(state.iw.pane, crate::app_shell::nav::IwPane::Connections)
+                                && state.iw.connections.form.is_some()
+                            {
+                                use crate::features::instance_workspace::connections::{
+                                    msg::*, view,
+                                };
+                                use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+                                if let Some(field) =
+                                    view::form_field_at(body, mouse.column, mouse.row)
+                                {
+                                    let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
+                                        ConnectionsMsg::Message(ConnectionsMessage::FormClick {
+                                            field,
+                                            is_double: is_double_click,
+                                        }),
+                                    )));
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
                             // IW overview v_scrollbar hit-test.
                             if let Some(body) =
                                 iw_body_area_for_hit(size, &state)

@@ -238,20 +238,6 @@ pub fn update(
                 return (state, intents, effects, false);
             }
             let instance_name = state.instance_name.clone();
-            // When editing an existing connection and the password field is
-            // blank (password not re-entered), fall back to testing the saved
-            // connection by name — the store has its stored password. This
-            // avoids a spurious failure where TestFormConnection receives
-            // password: None and can't authenticate.
-            if form.password.is_empty()
-                && let Some(original_name) = form.edit_original_name.as_ref()
-            {
-                effects.push(ConnectionsEffect::TestConnection {
-                    instance_name,
-                    connection_name: original_name.clone(),
-                });
-                return (state, intents, effects, false);
-            }
             let connection = NewInstanceConnection {
                 name: form.name.trim().to_string(),
                 username: form.username.clone(),
@@ -264,10 +250,24 @@ pub fn update(
                 ssl_mode: None,
                 env_label: None,
             };
-            effects.push(ConnectionsEffect::TestFormConnection {
-                instance_name,
-                connection,
-            });
+            // When editing an existing connection and the password field is
+            // blank (not re-entered), the test must still use the form's current
+            // name/username/database and only borrow the stored password — so a
+            // modified field value is actually exercised, not the old saved one.
+            if connection.password.is_none()
+                && let Some(original_name) = form.edit_original_name.as_ref()
+            {
+                effects.push(ConnectionsEffect::TestEditedFormConnection {
+                    instance_name,
+                    original_name: original_name.clone(),
+                    connection,
+                });
+            } else {
+                effects.push(ConnectionsEffect::TestFormConnection {
+                    instance_name,
+                    connection,
+                });
+            }
             false
         }
         ConnectionsMessage::TestSelected => {
@@ -320,6 +320,27 @@ pub fn update(
                 false
             }
         }
+        ConnectionsMessage::FormClick { field, is_double } => {
+            // Match the original dbm's form field click handling: clicking a
+            // field while another is being edited commits that in-progress edit
+            // and moves the cursor to the clicked field; a double click then
+            // enters insert mode on it. A single click just selects the field.
+            if state.form.is_none() {
+                return (state, intents, effects, false);
+            }
+            let was_insert = state.form.as_ref().unwrap().mode == FormMode::Insert;
+            let on_other = state.form.as_ref().unwrap().field != field;
+            if was_insert && on_other {
+                state.commit_field_insert();
+            }
+            state.form.as_mut().unwrap().field = field;
+            if is_double {
+                state.begin_field_insert();
+            } else if state.form.as_ref().unwrap().mode == FormMode::Insert {
+                state.commit_field_insert();
+            }
+            true
+        }
         ConnectionsMessage::BeginFieldInsert => state.begin_field_insert(),
         ConnectionsMessage::CommitFieldInsert => state.commit_field_insert(),
         ConnectionsMessage::CancelFieldInsert => state.cancel_field_insert(),
@@ -342,7 +363,9 @@ pub fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::features::instance_workspace::connections::state::ConnectionForm;
+    use crate::features::instance_workspace::connections::state::{
+        ConnectionForm, FormField,
+    };
 
     fn mk_conn(name: &str) -> dbm_store::InstanceConnection {
         dbm_store::InstanceConnection {
@@ -637,6 +660,125 @@ mod tests {
     }
 
     #[test]
+    fn form_click_single_selects_field() {
+        // A single click on a field row moves the field cursor to it and stays
+        // in normal mode.
+        let mut s = ConnectionsState {
+            form: Some(ConnectionForm {
+                name: "a".into(),
+                field: FormField::Name,
+                mode: FormMode::Normal,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::FormClick {
+                field: FormField::Database,
+                is_double: false,
+            },
+            std::mem::take(&mut s),
+        );
+        assert!(dirty);
+        let f = s.form.expect("form stays open on a click");
+        assert_eq!(f.field, FormField::Database, "single click selects the clicked field");
+        assert_eq!(f.mode, FormMode::Normal, "single click keeps normal mode");
+    }
+
+    #[test]
+    fn form_click_double_enters_insert_mode() {
+        // A double click on a field row selects it and enters insert mode.
+        let mut s = ConnectionsState {
+            form: Some(ConnectionForm {
+                name: "a".into(),
+                field: FormField::Name,
+                mode: FormMode::Normal,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::FormClick {
+                field: FormField::Password,
+                is_double: true,
+            },
+            std::mem::take(&mut s),
+        );
+        assert!(dirty);
+        let f = s.form.expect("form stays open on a double click");
+        assert_eq!(f.field, FormField::Password, "double click moves to the clicked field");
+        assert_eq!(f.mode, FormMode::Insert, "double click enters insert mode");
+    }
+
+    #[test]
+    fn form_click_moving_fields_commits_in_progress_edit() {
+        // Editing Name; a single click on Database commits the Name edit (keeps
+        // its typed value) and moves the cursor to Database in normal mode.
+        let mut s = ConnectionsState {
+            form: Some(ConnectionForm {
+                name: "a".into(),
+                field: FormField::Name,
+                mode: FormMode::Insert,
+                insert_field_snapshot: Some("a".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::FormClick {
+                field: FormField::Database,
+                is_double: false,
+            },
+            std::mem::take(&mut s),
+        );
+        assert!(dirty);
+        let f = s.form.expect("form stays open");
+        assert_eq!(f.field, FormField::Database);
+        assert_eq!(f.mode, FormMode::Normal, "moving fields commits the in-progress edit");
+        assert_eq!(f.name, "a", "the committed edit keeps its typed value");
+    }
+
+    #[test]
+    fn form_click_same_field_in_insert_commits_it() {
+        // A single click on the field currently being edited commits the edit
+        // and returns to normal mode (matching the original dbm).
+        let mut s = ConnectionsState {
+            form: Some(ConnectionForm {
+                name: "abc".into(),
+                field: FormField::Name,
+                mode: FormMode::Insert,
+                insert_field_snapshot: Some("a".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::FormClick {
+                field: FormField::Name,
+                is_double: false,
+            },
+            std::mem::take(&mut s),
+        );
+        assert!(dirty);
+        let f = s.form.unwrap();
+        assert_eq!(f.mode, FormMode::Normal, "clicking the field being edited commits it");
+    }
+
+    #[test]
+    fn form_click_ignored_when_form_closed() {
+        let mut s = ConnectionsState::default();
+        let (_s, _i, effects, dirty) = update(
+            ConnectionsMessage::FormClick {
+                field: FormField::Name,
+                is_double: false,
+            },
+            std::mem::take(&mut s),
+        );
+        assert!(!dirty);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
     fn test_form_emits_test_effect() {
         let mut s = ConnectionsState {
             instance_name: "inst".into(),
@@ -692,6 +834,41 @@ mod tests {
         assert!(!dirty);
         assert!(effects.is_empty(), "insert-mode Enter must not save the whole form");
         assert!(s.form.is_some());
+    }
+
+    #[test]
+    fn test_form_on_edit_with_blank_password_borrows_stored_password() {
+        // Editing "old"; username modified to "newuser", password left blank.
+        // The form test must push `TestEditedFormConnection` with the CURRENT
+        // username/database + the ORIGINAL name (so the store borrows the saved
+        // password) — it must NOT bounce off the unchanged saved connection,
+        // which would test the OLD value instead of the modified one.
+        let mut s = ConnectionsState {
+            instance_name: "inst".into(),
+            form: Some(ConnectionForm {
+                name: "old".into(),
+                username: "newuser".into(),
+                database: "appdb".into(),
+                password: String::new(),
+                edit_original_name: Some("old".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (_s, _i, effects, dirty) = update(ConnectionsMessage::TestForm, std::mem::take(&mut s));
+        assert!(!dirty, "starting a form test must not trigger a redundant repaint");
+        assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                ConnectionsEffect::TestEditedFormConnection { instance_name, original_name, connection }
+                    if instance_name == "inst"
+                       && original_name == "old"
+                       && connection.name == "old"
+                       && connection.username == "newuser"
+                       && connection.database == "appdb"
+            )),
+            "expected TestEditedFormConnection with modified fields, got {effects:?}"
+        );
     }
 
     #[test]

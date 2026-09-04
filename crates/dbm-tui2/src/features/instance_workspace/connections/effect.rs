@@ -50,6 +50,15 @@ pub enum ConnectionsEffect {
         instance_name: String,
         connection: NewInstanceConnection,
     },
+    /// Test an edited connection's current form values, borrowing the stored
+    /// password when the password field is blank (the form's `t` on an edit
+    /// form). Unlike [`ConnectionsEffect::TestConnection`], this uses the form's
+    /// modified name/username/database so edited fields are actually exercised.
+    TestEditedFormConnection {
+        instance_name: String,
+        original_name: String,
+        connection: NewInstanceConnection,
+    },
     /// Test a saved connection from the list (the list's `t` action), recording
     /// the outcome timestamp.
     TestConnection { instance_name: String, connection_name: String },
@@ -143,6 +152,42 @@ impl Effect for ConnectionsEffect {
                             .lock()
                             .expect("iw store lock")
                             .test_instance_connection(&instance_name, &connection, ping)
+                    })
+                    .await;
+                    match result {
+                        Ok(Ok(precheck)) => {
+                            let error = precheck
+                                .issues
+                                .iter()
+                                .find(|i| i.level == dbm_store::PrecheckLevel::Error)
+                                .map(|i| i.message.clone());
+                            vec![ConnectionsAction::TestResult {
+                                ok: error.is_none(),
+                                error,
+                            }]
+                        }
+                        Ok(Err(e)) => vec![ConnectionsAction::TestResult {
+                            ok: false,
+                            error: Some(e.to_string()),
+                        }],
+                        Err(e) => vec![ConnectionsAction::TestResult {
+                            ok: false,
+                            error: Some(e.to_string()),
+                        }],
+                    }
+                }
+                ConnectionsEffect::TestEditedFormConnection { instance_name, original_name, connection } => {
+                    // Ping with the form's current name/username/database but
+                    // borrow the stored password when the password field is blank.
+                    let ping = services.connection_test_ping();
+                    let result = tokio::task::spawn_blocking(move || {
+                        let store = store.lock().expect("iw store lock");
+                        store.test_edited_instance_connection(
+                            &instance_name,
+                            &original_name,
+                            &connection,
+                            ping,
+                        )
                     })
                     .await;
                     match result {

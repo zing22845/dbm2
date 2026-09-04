@@ -309,8 +309,45 @@ fn render_connections_list(
 }
 
 // ---------------------------------------------------------------------------
-//  Form rendering (unchanged from original)
+//  Form rendering
 // ---------------------------------------------------------------------------
+
+/// Popup size in percent of the pane area, shared by the renderer and the
+/// mouse hit-tester so the popup geometry always agrees.
+const FORM_WIDTH_PCT: u16 = 62;
+const FORM_HEIGHT_PCT: u16 = 58;
+
+/// The centered rect of the add/edit connection form over `area` (pure
+/// geometry). Mirrors the popup used in [`render_form`] so mouse hit-testing
+/// and rendering agree on where the popup sits.
+pub fn form_popup_rect(area: Rect) -> Rect {
+    crate::common::view::modal::popup_rect(area, FORM_WIDTH_PCT, FORM_HEIGHT_PCT)
+}
+
+/// Map a mouse position (in the pane's `area`) to the connection form field
+/// under it. The form draws its 4 field lines top-aligned inside the popup's
+/// inner area (just below the top border), so the clicked field index is the
+/// row offset from that first line. Returns `None` for clicks outside the
+/// popup or on a non-field row (top border, footer, status).
+pub fn form_field_at(area: Rect, x: u16, y: u16) -> Option<FormField> {
+    let popup = form_popup_rect(area);
+    if x < popup.x || x >= popup.right() || y < popup.y || y >= popup.bottom() {
+        return None;
+    }
+    // Interior of the bordered popup: the top border sits at `popup.y`, so the
+    // fields begin one row below it (left/right/bottom borders don't affect the
+    // vertical field index).
+    let Some(rel) = y.checked_sub(popup.y.saturating_add(1)) else {
+        return None; // the top border row itself is not a field
+    };
+    match usize::from(rel) {
+        0 => Some(FormField::Name),
+        1 => Some(FormField::Username),
+        2 => Some(FormField::Database),
+        3 => Some(FormField::Password),
+        _ => None,
+    }
+}
 
 fn render_form(
     frame: &mut Frame,
@@ -350,6 +387,20 @@ fn render_form(
             Style::default().fg(p.fg)
         }
     };
+    // An unsaved, modified field value is drawn in the theme's modified color so
+    // the user can see at a glance what has changed but not yet been saved.
+    let value_style = |f: FormField| -> Style {
+        if form.is_field_modified(f) {
+            Style::default().fg(p.modified_text)
+        } else {
+            Style::default()
+        }
+    };
+    // The colon separator stays neutrally styled so an unsaved, modified value
+    // stands out only by its own color (the value), not by a colored colon.
+    let value_span = |f: FormField, value: &str| -> Vec<Span<'static>> {
+        vec![Span::raw(":  "), Span::styled(value.to_string(), value_style(f))]
+    };
     let field_value = |f: FormField, value: &str| -> String {
         if form.field == f && form.mode == FormMode::Insert {
             format!("{value}█")
@@ -366,23 +417,20 @@ fn render_form(
     } else {
         "****".to_string()
     };
-    let mut lines = Vec::new();
-    lines.push(Line::from(vec![
-        Span::styled("name", field_style(FormField::Name)),
-        Span::raw(format!(":  {}", field_value(FormField::Name, &form.name))),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("user", field_style(FormField::Username)),
-        Span::raw(format!(":  {}", field_value(FormField::Username, &form.username))),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("database", field_style(FormField::Database)),
-        Span::raw(format!(":  {}", field_value(FormField::Database, &form.database))),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("password", field_style(FormField::Password)),
-        Span::raw(format!(":  {}", field_value(FormField::Password, &password_display))),
-    ]));
+    let lines = {
+        let line = |label: &str, field: FormField, value: &str| -> Line<'static> {
+            let mut spans = vec![Span::styled(label.to_string(), field_style(field))];
+            // value_span is the styled `:  ` separator + the field value.
+            spans.extend(value_span(field, value));
+            Line::from(spans)
+        };
+        vec![
+            line("name", FormField::Name, &field_value(FormField::Name, &form.name)),
+            line("user", FormField::Username, &field_value(FormField::Username, &form.username)),
+            line("database", FormField::Database, &field_value(FormField::Database, &form.database)),
+            line("password", FormField::Password, &field_value(FormField::Password, &password_display)),
+        ]
+    };
     let footer_text = match form.mode {
         FormMode::Insert => "Keep: ENTER  Revert: ESC".to_string(),
         FormMode::Normal => {
@@ -394,8 +442,8 @@ fn render_form(
         frame,
         theme,
         area,
-        62,
-        58,
+        FORM_WIDTH_PCT,
+        FORM_HEIGHT_PCT,
         state,
         |f, t, popup, s| {
             use ratatui::layout::{Constraint, Layout};
@@ -537,5 +585,36 @@ mod tests {
         // Even clicking the far right column should not produce a hit.
         let hit = v_scrollbar_hit(area, &s, 79, 5);
         assert!(hit.is_none());
+    }
+
+    #[test]
+    fn form_field_at_maps_click_to_field_lines() {
+        let area = Rect::new(10, 20, 120, 50);
+        let popup = form_popup_rect(area);
+        // Fields begin one row below the popup's top border, top-aligned.
+        let top = popup.y.saturating_add(1);
+        assert_eq!(
+            form_field_at(area, popup.x + 1, top),
+            Some(FormField::Name)
+        );
+        assert_eq!(
+            form_field_at(area, popup.x + 1, top + 1),
+            Some(FormField::Username)
+        );
+        assert_eq!(
+            form_field_at(area, popup.x + 1, top + 2),
+            Some(FormField::Database)
+        );
+        assert_eq!(
+            form_field_at(area, popup.x + 1, top + 3),
+            Some(FormField::Password)
+        );
+        // The top border row and the footer/status rows below the fields are
+        // not fields.
+        assert_eq!(form_field_at(area, popup.x + 1, popup.y), None);
+        assert_eq!(form_field_at(area, popup.x + 1, top + 4), None);
+        // Clicks outside the popup (off its left edge / above it) are None.
+        assert_eq!(form_field_at(area, popup.x.saturating_sub(1), top), None);
+        assert_eq!(form_field_at(area, popup.x + 1, popup.y.saturating_sub(1)), None);
     }
 }

@@ -72,6 +72,11 @@ pub struct Palette {
     pub warning: Color,
     /// Error / destructive status.
     pub error: Color,
+    /// Foreground color for text that differs from a saved baseline but is not
+    /// yet committed (e.g. an unsaved field in a connection edit form). Kept
+    /// separate so "unsaved change" reads as its own color against status
+    /// colors like `success`/`error`.
+    pub modified_text: Color,
     /// Informational status.
     pub info: Color,
     /// Muted / de-emphasized text (e.g. footer hints, placeholders).
@@ -204,6 +209,7 @@ pub fn default() -> Theme {
             success: Color::Rgb(0x50, 0xfa, 0x7b),   // green
             warning: Color::Rgb(0xf1, 0xfa, 0x8c),   // yellow
             error: Color::Rgb(0xff, 0x55, 0x55),     // red
+            modified_text: Color::Rgb(0xff, 0x8a, 0x8a), // readable red on dark bg
             info: Color::Rgb(0x8b, 0xe9, 0xfd),      // cyan
             muted: Color::Rgb(0x62, 0x64, 0x74),
         },
@@ -227,6 +233,7 @@ pub fn default() -> Theme {
             success: Color::Rgb(0x1a, 0xb0, 0x4c),
             warning: Color::Rgb(0xa5, 0x8a, 0x00),
             error: Color::Rgb(0xd3, 0x2f, 0x2f),
+            modified_text: Color::Rgb(0xb0, 0x30, 0x30), // readable red on cream bg
             info: Color::Rgb(0x0e, 0x74, 0x9a),
             muted: Color::Rgb(0x62, 0x74, 0x8f),
         },

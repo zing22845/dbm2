@@ -197,6 +197,15 @@ fn focus_pane_of(msg: &AppMsg) -> Option<Pane> {
 /// scan session.
 fn open_discover(state: &mut AppState) {
     tracing::debug!("open_discover: setting focus to Discover parent pane");
+    // An edit connection form with unsaved changes blocks leaving the instance
+    // workspace entirely (including opening Discover), like the original dbm.
+    if connection_form_blocks_focus_change(
+        state,
+        &Pane::Discover(crate::app_shell::nav::DiscoverPane::Engine),
+    ) {
+        block_focus_message(state);
+        return;
+    }
     let preserved_targets = std::mem::take(&mut state.discover.targets).targets;
     // Keep the targets/results splitter width across reopen (process lifetime).
     let preserved_splitter = state.discover.splitter;
@@ -230,6 +239,39 @@ fn close_discover(state: &mut AppState) {
 /// Build a `FocusChanged` shell message for the given pane.
 fn focus_changed(pane: Pane) -> AppMsg {
     AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged { pane })
+}
+
+/// Notice shown when an edit connection form has unsaved changes and the user
+/// tries to switch focus away, mirroring the original dbm's
+/// `PANE_SWITCH_BLOCKED_MSG`.
+const PANE_SWITCH_BLOCKED_MSG: &str =
+    "Unsaved changes — save (Enter) or cancel (Esc) before switching pane";
+
+/// True when an open connection *edit* form has unsaved changes and the focus
+/// is about to leave the connections sub-pane. Add forms (no baseline) and
+/// clean edit forms never block, matching the original dbm's
+/// `connection_form_blocks_pane_switch`.
+fn connection_form_blocks_focus_change(state: &AppState, to: &Pane) -> bool {
+    use crate::app_shell::nav::IwPane;
+    let Some(form) = &state.iw.connections.form else {
+        return false;
+    };
+    if form.edit_original_name.is_none() {
+        return false;
+    }
+    if !form.is_edit_dirty() {
+        return false;
+    }
+    !matches!(to, Pane::InstanceWorkspace(IwPane::Connections))
+}
+
+/// Render the "unsaved changes" notice on the connections footer. Used when a
+/// blocked focus switch attempts to leave the form. The caller is responsible
+/// for marking the `UpdateResult` dirty so the new status repaints.
+fn block_focus_message(state: &mut AppState) {
+    use crate::features::instance_workspace::connections::state::ConnectionStatusKind;
+    state.iw.connections.status = Some(PANE_SWITCH_BLOCKED_MSG.to_string());
+    state.iw.connections.status_kind = ConnectionStatusKind::Failure;
 }
 
 /// An `AppMsg` that reloads the explorer instance tree from the store.
@@ -341,6 +383,14 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                         to = ?pane,
                         "ignoring FocusChanged while discover owns focus"
                     );
+                    return result;
+                }
+                // An edit connection form with unsaved changes blocks switching
+                // to any other pane (keyboard and mouse alike), mirroring the
+                // original dbm. Save or cancel must occur before leaving.
+                if connection_form_blocks_focus_change(state, &pane) {
+                    block_focus_message(state);
+                    result.dirty = true;
                     return result;
                 }
                 // Route the focus change through the single choke point so the
@@ -1005,6 +1055,7 @@ pub fn handle_action(action: Action, state: &mut AppState) -> UpdateResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_shell::nav::IwPane;
 
     fn explorer_load_msg() -> AppMsg {
         AppMsg::Explorer(
@@ -1231,6 +1282,85 @@ mod tests {
             &mut state,
         );
         assert_eq!(state.focus, Pane::SQLWorkspace);
+    }
+
+    /// Helper: open an edit connection form with unsaved changes (baseline set,
+    /// then a field diverged) so `connection_form_blocks_focus_change` fires.
+    fn edit_form_with_unsaved_change(state: &mut AppState) {
+        use crate::features::instance_workspace::connections::state::FormField;
+        state.iw.connections.connections = vec![sample_connection("c1")];
+        state.iw.connections.begin_edit(0);
+        // Modify a field after editing began so the form is dirty.
+        let form = state.iw.connections.form.as_mut().unwrap();
+        form.field = FormField::Name;
+        form.name = "renamed".to_string();
+    }
+
+    #[test]
+    fn focus_change_blocked_while_edit_form_has_unsaved_changes() {
+        let mut state = AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Connections);
+        edit_form_with_unsaved_change(&mut state);
+        let before = state.focus;
+
+        let result = update(
+            focus_changed_msg(Pane::Explorer(
+                crate::app_shell::nav::ExplorerPane::default(),
+            )),
+            &mut state,
+        );
+        // The focus must not move away from the dirty edit form.
+        assert_eq!(state.focus, before, "dirty edit form must block pane switch");
+        assert!(
+            result.dirty,
+            "blocking must repaint so the status notice is shown"
+        );
+        assert_eq!(
+            state.iw.connections.status.as_deref(),
+            Some(PANE_SWITCH_BLOCKED_MSG)
+        );
+    }
+
+    #[test]
+    fn focus_change_not_blocked_by_clean_edit_form() {
+        let mut state = AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Connections);
+        // A clean (unmodified) edit form must not block switching away.
+        state.iw.connections.connections = vec![sample_connection("c1")];
+        state.iw.connections.begin_edit(0);
+
+        update(
+            focus_changed_msg(Pane::Explorer(
+                crate::app_shell::nav::ExplorerPane::default(),
+            )),
+            &mut state,
+        );
+        assert_eq!(
+            state.focus,
+            Pane::Explorer(crate::app_shell::nav::ExplorerPane::default()),
+            "clean edit form must not block pane switch"
+        );
+        assert!(state.iw.connections.status.is_none());
+    }
+
+    #[test]
+    fn focus_change_not_blocked_by_load_form() {
+        let mut state = AppState::default();
+        state.focus = Pane::InstanceWorkspace(IwPane::Connections);
+        // An add form (no baseline) is never dirty and must not block.
+        state.iw.connections.begin_add();
+
+        update(
+            focus_changed_msg(Pane::Explorer(
+                crate::app_shell::nav::ExplorerPane::default(),
+            )),
+            &mut state,
+        );
+        assert_eq!(
+            state.focus,
+            Pane::Explorer(crate::app_shell::nav::ExplorerPane::default()),
+            "add form must not block pane switch"
+        );
     }
 
     #[test]

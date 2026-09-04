@@ -60,6 +60,16 @@ pub enum ConnectionStatusKind {
     Failure,
 }
 
+/// The saved field values an edit form started from, used to detect which
+/// fields the user has modified but not yet saved. Passwords are never stored,
+/// so password is represented implicitly: any non-empty value is "modified".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionFormBaseline {
+    pub name: String,
+    pub username: String,
+    pub database: String,
+}
+
 /// A connection add/edit form in progress.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionForm {
@@ -69,6 +79,9 @@ pub struct ConnectionForm {
     pub password: String,
     /// When editing, the original connection name (used to look up on save).
     pub edit_original_name: Option<String>,
+    /// The saved field values when an edit began, used to detect unsaved
+    /// modifications. `None` for an add form (no baseline to compare against).
+    pub edit_baseline: Option<ConnectionFormBaseline>,
     /// The form field under the edit cursor.
     pub field: FormField,
     /// Whether a field is currently being edited (`Insert`) or not (`Normal`).
@@ -80,6 +93,35 @@ pub struct ConnectionForm {
     /// chord (a second `d` within the timeout clears the field and enters
     /// insert mode, matching the original dbm).
     pub pending_d_at: Option<std::time::Instant>,
+}
+
+impl ConnectionForm {
+    /// Whether an *edit* form has unsaved changes relative to its baseline.
+    /// Add forms (no baseline) are never dirty, matching the original dbm: only
+    /// a modified edit blocks switching pane.
+    pub fn is_edit_dirty(&self) -> bool {
+        let Some(base) = &self.edit_baseline else {
+            return false;
+        };
+        self.name.trim() != base.name.trim()
+            || self.username.trim() != base.username.trim()
+            || self.database.trim() != base.database.trim()
+            || !self.password.is_empty()
+    }
+
+    /// Whether a specific field of an edit form differs from its baseline.
+    /// Returns `false` for add forms (no baseline).
+    pub fn is_field_modified(&self, field: FormField) -> bool {
+        let Some(base) = &self.edit_baseline else {
+            return false;
+        };
+        match field {
+            FormField::Name => self.name.trim() != base.name.trim(),
+            FormField::Username => self.username.trim() != base.username.trim(),
+            FormField::Database => self.database.trim() != base.database.trim(),
+            FormField::Password => !self.password.is_empty(),
+        }
+    }
 }
 
 /// State for the instance connections panel.
@@ -155,6 +197,11 @@ impl ConnectionsState {
             database: conn.database.clone(),
             password: String::new(), // passwords are not stored; a blank keeps the old
             edit_original_name: Some(conn.name.clone()),
+            edit_baseline: Some(ConnectionFormBaseline {
+                name: conn.name.clone(),
+                username: conn.username.clone(),
+                database: conn.database.clone(),
+            }),
             field: FormField::Name,
             ..ConnectionForm::default()
         });

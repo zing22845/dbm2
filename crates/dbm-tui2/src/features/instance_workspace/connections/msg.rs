@@ -46,6 +46,11 @@ pub enum ConnectionsMessage {
     TestSelected,
     /// Move the form field cursor.
     FormField(FormField),
+    /// A mouse click on a form field line: a single click selects the field,
+    /// a double click enters insert mode on it (matching the original dbm's
+    /// form field click handling). `is_double` is computed by the app loop's
+    /// shared double-click detector.
+    FormClick { field: FormField, is_double: bool },
     /// Enter insert mode on the current form field (`i`), snapshotting its value
     /// so `Esc` can revert it.
     BeginFieldInsert,

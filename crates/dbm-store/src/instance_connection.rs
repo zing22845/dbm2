@@ -230,6 +230,35 @@ impl super::Store {
         self.test_instance_connection(instance_name, &input, ping_fn)
     }
 
+    /// Test an edited connection's current values against the instance, borrowing
+    /// the stored password when the password field is blank (not re-entered on
+    /// edit). The name/username/database come from the form, so modified fields
+    /// are actually exercised; only the blank password falls back to the saved
+    /// one so an unchanged password still authenticates (matching the original
+    /// dbm's edit-form test behavior).
+    pub fn test_edited_instance_connection<F, Fut>(
+        &self,
+        instance_name: &str,
+        original_name: &str,
+        input: &NewInstanceConnection,
+        ping_fn: F,
+    ) -> StoreResult<ConnectionPrecheck>
+    where
+        F: FnOnce(&str) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<String, String>> + Send + 'static,
+    {
+        let lookup = if original_name.is_empty() {
+            &input.name
+        } else {
+            original_name
+        };
+        let mut saved = self.new_instance_connection_from_saved(instance_name, lookup)?;
+        saved.name = input.name.clone();
+        saved.username = input.username.clone();
+        saved.database = input.database.clone();
+        self.test_instance_connection(instance_name, &saved, ping_fn)
+    }
+
     /// Record the most recent connection test outcome: set `test_succeeded_at`
     /// on success or `test_failed_at` on failure.
     pub fn record_connection_test_result(
@@ -787,5 +816,57 @@ mod tests {
         assert!(conns[0].test_failed_at.is_some());
         assert!(conns[0].test_succeeded_at.is_some());
         assert_eq!(conns[0].updated_at, "2000-01-01 00:00:00", "test must not update updated_at");
+    }
+
+    #[test]
+    fn edited_test_uses_form_values_but_stored_password() {
+        let store = super::super::Store::open_in_memory().unwrap();
+        store
+            .sqlite()
+            .execute_batch(
+                "INSERT INTO managed_instances (id, fingerprint, name, engine, host, port, registered_at)
+                 VALUES ('inst_t', 'fp', 'pg', 'postgres', '192.168.64.2', 5432, datetime('now'));
+                 INSERT INTO instance_connections (
+                    id, instance_id, name, username, database_name, ssl_mode, updated_at
+                 ) VALUES ('ic_t', 'inst_t', 'main', 'olduser', 'postgres', 'prefer', '2000-01-01 00:00:00');",
+            )
+            .unwrap();
+        let (nonce, enc) = crate::store::encrypt_password(Some("secretpw")).unwrap();
+        store
+            .sqlite()
+            .execute(
+                "UPDATE instance_connections SET password_nonce = ?1, password_enc = ?2 WHERE id = 'ic_t'",
+                params![nonce, enc],
+            )
+            .unwrap();
+
+        // The edited form changed the username to 'newuser' and left the
+        // password blank. The precheck input must carry the new username and
+        // database but inherit the stored password ('secretpw') so an unchanged
+        // password still authenticates while modified fields are exercised.
+        let input = NewInstanceConnection {
+            name: "renamed".into(),
+            username: "newuser".into(),
+            database: "appdb".into(),
+            password: None, // blank -> borrow the stored password
+            ssl_mode: None,
+            env_label: None,
+        };
+        let probe = |url: &str| {
+            let url = url.to_string();
+            async move {
+                // The DSN embeds username/password; assert they reflect the
+                // modified username and the borrowed stored password.
+                assert!(
+                    url.contains("newuser") && url.contains("secretpw"),
+                    "expected modified user + stored password in DSN, got {url}"
+                );
+                Err("probe reached connection build".to_string())
+            }
+        };
+        let precheck = store
+            .test_edited_instance_connection("pg", "main", &input, probe)
+            .unwrap();
+        assert!(!precheck.ok, "probe always fails before reaching the DB");
     }
 }
