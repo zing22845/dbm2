@@ -543,12 +543,15 @@ fn render_table(
             });
             // Matched text uses a uniform accent style so it reads against the
             // pane background. On a selected row/column the accent fg would
-            // clash with the selection background, so we keep the selection
-            // foreground and mark the hit with bold instead. The *current* match
-            // cell is distinguished solely by its frame (`match_cell_border_style`),
-            // so both highlight args below use the same text style.
+            // clash with the selection background, so we instead fill each hit
+            // with the accent *background* (the same background as
+            // `current_match_style`), keeping the selection foreground bold so
+            // matches stay visible inside the crosshair region. The *current*
+            // match cell is distinguished solely by its frame
+            // (`match_cell_border_style`), so both highlight args below use the
+            // same text style.
             let match_text_style = if row_selected || is_active {
-                base_style.add_modifier(Modifier::BOLD)
+                base_style.bg(p.accent)
             } else {
                 p.match_style()
             };
