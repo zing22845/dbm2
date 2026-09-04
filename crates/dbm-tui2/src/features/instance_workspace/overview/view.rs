@@ -6,6 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+use crate::common::utils::text_width::wrapped_line_count;
 use crate::common::view::pane_scrollbar::{
     PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
 };
@@ -163,10 +164,16 @@ pub fn v_scrollbar_hit(
 }
 
 /// Map a click Y coordinate (in the overview pane's `area`) to a data row index.
-/// The `Paragraph` renders data rows starting at `content.y` (no header row), so
-/// `row = start + (y - content.y)`. Returns `None` for clicks on the scrollbar
-/// gutter or beyond the last data row. `conn_count` only affects row text, not
-/// the row count, so callers may pass `0` for hit-testing geometry.
+///
+/// Rows render with `Paragraph::wrap`, so a long row can occupy more than one
+/// pixel line. Unlike the connections list (which draws one row per pixel line),
+/// a linear `row = start + rel` mapping would drift after any wrapped row. We
+/// instead walk the visible data rows accumulating each row's wrapped pixel
+/// height (via the same `wrapped_line_count` the renderer's Paragraph uses) so
+/// the clicked pixel maps to exactly the highlighted data row. Returns `None`
+/// for clicks on the scrollbar gutter or in the blank area below the data rows.
+/// `conn_count` only affects row text, not the row count, so callers may pass
+/// `0` for hit-testing geometry.
 pub fn row_at(area: Rect, state: &OverviewState, conn_count: usize, y: u16) -> Option<usize> {
     let ov = compute_overview_viewport(area, state, conn_count)?;
     let content = ov.content;
@@ -174,8 +181,23 @@ pub fn row_at(area: Rect, state: &OverviewState, conn_count: usize, y: u16) -> O
         return None;
     }
     let rel = usize::from(y.saturating_sub(content.y));
-    let idx = ov.start.saturating_add(rel);
-    (idx < ov.total).then_some(idx)
+    let inst = state.instance.as_ref()?;
+    let rows = overview_rows(inst, conn_count);
+    let width = content.width.max(1);
+
+    let mut pixel_top = 0usize;
+    for (idx, (label, value)) in rows.iter().enumerate().skip(ov.start) {
+        let h = wrapped_line_count(&format!("{label:20} {value}"), width) as usize;
+        if rel < pixel_top + h {
+            return Some(idx);
+        }
+        pixel_top += h;
+        // Stop at the wrapped content fitting the visible height.
+        if pixel_top >= content.height as usize {
+            break;
+        }
+    }
+    None
 }
 
 /// Render the instance overview body: the instance's attribute rows laid out
@@ -461,5 +483,54 @@ mod tests {
         assert!(ov.layout.v_scrollbar.is_some());
         let row_y = ov.content.y;
         assert_eq!(row_at(area, &s, 0, row_y), Some(0));
+    }
+
+    #[test]
+    fn row_at_accounts_for_wrapped_rows() {
+        // A narrow pane makes a long value (e.g. Version full) wrap onto two
+        // pixel lines. row_at must return the data row under the cursor, not a
+        // linear pixel->row mapping that drifts by one after the wrapped row.
+        let mut a = inst();
+        a.version_full =
+            Some("PostgreSQL 17.2 on x86_64-pc-linux-gnu, compiled by gcc x86_64".into());
+        let s = OverviewState {
+            instance: Some(a),
+            cursor: 0,
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 40, 25); // narrow enough that Version full wraps
+        let ov = compute_overview_viewport(area, &s, 0).expect("some viewport");
+        let top = ov.content.y;
+
+        // Version full is data row 3. With wrapping it spans pixel lines; a click
+        // on its first wrapped line must still map to data row 3.
+        // Compute where row 3 actually begins in pixels.
+        let rows = overview_rows(s.instance.as_ref().unwrap(), 0);
+        let width = ov.content.width;
+        let mut pixel = 0usize;
+        let mut row3_pixel = None;
+        for (idx, (label, value)) in rows.iter().enumerate() {
+            if idx == 3 {
+                row3_pixel = Some(pixel);
+                break;
+            }
+            pixel += wrapped_line_count(&format!("{label:20} {value}"), width) as usize;
+        }
+        let row3_px = row3_pixel.expect("row 3 found");
+        let row3_h = wrapped_line_count(&format!("{:20} {}", rows[3].0, rows[3].1), width) as usize;
+        assert!(row3_h >= 2, "row 3 should wrap, got {row3_h} lines");
+
+        // Click on the (now wrapped) Version full row maps to data row 3, and a
+        // click on the following first pixel line (row 4's top) maps to row 4.
+        assert_eq!(row_at(area, &s, 0, top + row3_px as u16), Some(3));
+        // The very next pixel line is still within row 3's wrapped span.
+        if row3_h > 1 {
+            assert_eq!(row_at(area, &s, 0, top + (row3_px + 1) as u16), Some(3));
+        }
+        // The pixel line right after row 3's wrapped span is row 4.
+        assert_eq!(
+            row_at(area, &s, 0, top + (row3_px + row3_h) as u16),
+            Some(4)
+        );
     }
 }
