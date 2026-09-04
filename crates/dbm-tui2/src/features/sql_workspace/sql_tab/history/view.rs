@@ -73,14 +73,12 @@ pub fn render(
     // (`title_bottom`), matching the original dbm's search placement.
     let search_title = pane_search_bottom_title_line(
         &state.list.search,
-        focused,
         cursor,
         visible.len(),
         Some(area.width.saturating_sub(2)),
-        Style::default().fg(p.muted),
         None,
-        Some(p.match_style()),
-        p.search_active_style(),
+        p.match_style(),
+        p.current_match_style(),
     );
 
     let mut block = Block::default()

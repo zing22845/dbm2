@@ -413,43 +413,58 @@ pub fn pane_search_label_line(
 /// border while the search is visible. Returns `None` when search is not
 /// visible (no active input and no filter), so the caller draws a plain border.
 ///
-/// `extra` (when non-empty) is appended as a plain suffix after the counter,
-/// used by the results list to show `scope` / `count` / `offset` read-outs.
+/// Styling rule for the search hint bar: every surrounding element — the
+/// leading `/`, the per-page counter, and `extra` (e.g. `count` / `offset`
+/// read-outs) — is drawn with `other_match_style`; only the query keyword and
+/// the trailing case indicator `Aa` are emphasised with `current_match_style`.
+/// The single space between keyword and `Aa` stays neutral (it is excluded
+/// from the current-match emphasis).
 #[allow(clippy::too_many_arguments)]
 pub fn pane_search_bottom_title_line(
     search: &PaneSearch,
-    pane_focused: bool,
     cursor: usize,
     filtered_count: usize,
     width: Option<u16>,
-    theme_muted: Style,
     extra: Option<&str>,
-    applied_match_style: Option<Style>,
-    accent_style: Style,
+    other_match_style: Style,
+    current_match_style: Style,
 ) -> Option<Line<'static>> {
     if !search.is_visible() {
         return None;
     }
-    // Reuse the title-line builder with an empty label so only the search
-    // query and counter appear on the bottom border. The leading "  /"
-    // separator from `append_search_query_spans` acts as left indentation.
-    let mut line = pane_search_title_line(
-        "",
-        search,
-        pane_focused,
-        false,
-        theme_muted,
-        cursor,
-        filtered_count,
-        width,
-        None,
-        applied_match_style,
-        accent_style,
-    );
-    if let Some(extra) = extra.filter(|e| !e.is_empty()) {
-        line.spans.push(Span::raw(extra.to_string()));
+    let mut spans = Vec::new();
+
+    // Leading "/" prompt (also acts as left indentation).
+    spans.push(Span::styled("  /".to_string(), other_match_style));
+
+    // The keyword (plus the editing cursor while typing) and the case indicator
+    // are the only current-match-emphasised text.
+    let (mut keyword, truncated) = match width {
+        Some(w) => search.truncated_query_part("", w, true, search.active),
+        None => (search.query.clone(), false),
+    };
+    if truncated {
+        keyword.push('…');
     }
-    Some(line)
+    if search.active {
+        keyword.push('_');
+    }
+    spans.push(Span::styled(keyword, current_match_style));
+    spans.push(Span::styled(" ", case_separator_style(current_match_style)));
+    spans.push(Span::styled(
+        search.options.case_label().to_string(),
+        current_match_style,
+    ));
+
+    // Per-page counter and the count/offset read-out share the other-match style.
+    let counter = filter_nav_counter(search, cursor, filtered_count);
+    if !counter.is_empty() {
+        spans.push(Span::styled(counter, other_match_style));
+    }
+    if let Some(extra) = extra.filter(|e| !e.is_empty()) {
+        spans.push(Span::styled(extra.to_string(), other_match_style));
+    }
+    Some(Line::from(spans))
 }
 
 /// Title line for a pane/column label plus optional in-title search and filter counter.
@@ -667,5 +682,50 @@ mod tests {
         );
         assert!(search.active);
         assert_eq!(search.query, "sel");
+    }
+
+    #[test]
+    fn bottom_title_line_only_emphasises_keyword_and_case() {
+        use ratatui::style::Modifier;
+        let other = Style::default().fg(Color::Yellow);
+        let current = Style::default()
+            .fg(Color::Black)
+            .bg(Color::Yellow)
+            .add_modifier(Modifier::BOLD);
+        let search = PaneSearch {
+            query: "sel".into(),
+            ..Default::default()
+        };
+        let line = pane_search_bottom_title_line(
+            &search,
+            2, // cursor
+            10,
+            Some(40),
+            Some("   count(col:name): 3/10   offset/length(cell): 0/3"),
+            other,
+            current,
+        )
+        .expect("visible search line");
+
+        // The "/" prompt uses the other-match style.
+        assert_eq!(line.spans[0].content.as_ref(), "  /");
+        assert_eq!(line.spans[0].style, other);
+
+        // Keyword and the "Aa" case indicator use the current-match style.
+        let kw = line.spans.iter().find(|s| s.content.as_ref() == "sel").unwrap();
+        assert_eq!(kw.style, current);
+        let aa = line.spans.iter().find(|s| s.content.as_ref() == "Aa").unwrap();
+        assert_eq!(aa.style, current);
+
+        // The space between keyword and "Aa" is a neutral separator (no accent
+        // background), excluded from the current-match emphasis.
+        let sep = line.spans.iter().find(|s| s.content.as_ref() == " ").unwrap();
+        assert_ne!(sep.style, current);
+        assert_eq!(sep.style.bg, None);
+
+        // Counter and the count/offset read-out share the other-match style.
+        let counter = line.spans.iter().any(|s| s.content.as_ref() == " 3/10");
+        assert!(counter, "per-page counter must be present");
+        assert_eq!(line.spans.last().unwrap().style, other);
     }
 }
