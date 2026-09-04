@@ -235,7 +235,7 @@ pub fn render(
         &base,
         focused,
         true,
-        Style::default().fg(if focused { p.border_active } else { p.muted }),
+        Style::default().fg(if focused { p.border_active_pane } else { p.muted }),
         Some(Style::default().fg(if focused { p.accent } else { p.muted })),
         p.search_active_style(),
     );
@@ -255,7 +255,7 @@ pub fn render(
     let mut block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(p.active_border(focused));
+        .border_style(p.pane_border(focused));
     if let Some(line) = search_title {
         block = block.title_bottom(line);
     }

@@ -91,7 +91,7 @@ pub fn draw_completion_popup_at(
     let block = Block::default()
         .title(" Complete ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border_active))
+        .border_style(Style::default().fg(p.border_popup))
         .style(Style::default().bg(p.surface));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);

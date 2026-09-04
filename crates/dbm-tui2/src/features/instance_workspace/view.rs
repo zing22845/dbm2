@@ -70,7 +70,7 @@ pub fn render(
     let outer = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(p.active_border(focused));
+        .border_style(p.zone_border(focused));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     if inner.width == 0 || inner.height < 3 {

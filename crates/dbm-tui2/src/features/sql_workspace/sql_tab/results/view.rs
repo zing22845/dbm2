@@ -59,7 +59,7 @@ pub fn render(
     let mut block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(p.active_border(focused));
+        .border_style(p.pane_border(focused));
     if let Some(line) = search_title {
         block = block.title_bottom(line);
     }

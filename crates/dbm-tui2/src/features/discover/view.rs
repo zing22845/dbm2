@@ -39,7 +39,7 @@ pub fn render(
     let outer = ratatui::widgets::Block::default()
         .title(" Discover ")
         .borders(ratatui::widgets::Borders::ALL)
-        .border_style(Style::default().fg(p.border_active));
+        .border_style(Style::default().fg(p.border_popup));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     if inner.width == 0 || inner.height == 0 {

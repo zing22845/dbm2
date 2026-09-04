@@ -109,7 +109,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
         db_active,
         true,
         Style::default().fg(p.muted),
-        Some(Style::default().fg(p.border_active)),
+        Some(Style::default().fg(p.border_popup)),
         Style::default().fg(p.accent),
     );
     let schema_label = pane_search_label_line(
@@ -117,7 +117,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
         schema_active,
         true,
         Style::default().fg(p.muted),
-        Some(Style::default().fg(p.border_active)),
+        Some(Style::default().fg(p.border_popup)),
         Style::default().fg(p.accent),
     );
     let db_search_title = pane_search_bottom_title_line(
@@ -147,7 +147,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
     let mut db_block = Block::default()
         .title(db_label)
         .borders(Borders::ALL)
-        .border_style(p.active_border(db_active))
+        .border_style(p.popup_border(db_active))
         .style(Style::default().bg(p.surface));
     if let Some(line) = db_search_title {
         db_block = db_block.title_bottom(line);
@@ -159,7 +159,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
     let mut schema_block = Block::default()
         .title(schema_label)
         .borders(Borders::ALL)
-        .border_style(p.active_border(schema_active))
+        .border_style(p.popup_border(schema_active))
         .style(Style::default().bg(p.surface));
     if let Some(line) = schema_search_title {
         schema_block = schema_block.title_bottom(line);

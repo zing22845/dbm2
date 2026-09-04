@@ -209,7 +209,7 @@ pub fn render(
     let block = Block::default()
         .title(" [I] Instances ")
         .borders(Borders::ALL)
-        .border_style(p.active_border(region_focused));
+        .border_style(p.pane_border(region_focused));
     frame.render_widget(&block, area);
     let inner = block.inner(area);
     if inner.width == 0 || inner.height == 0 {

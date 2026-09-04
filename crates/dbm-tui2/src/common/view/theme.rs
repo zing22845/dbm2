@@ -28,13 +28,21 @@ pub struct Palette {
     pub surface: Color,
     /// Accent color for the active element (selection, cursor, focus border).
     pub accent: Color,
-    /// Border color of regular panels.
+    /// Border color of regular (inactive) panels.
     pub border: Color,
-    /// Border color of the focused/active panel.
-    pub border_active: Color,
+    /// Border color of the focused/active *top-level* feature zone (header,
+    /// explorer, connection workspace). Mirrors the original dbm's zone border
+    /// (green).
+    pub border_active_zone: Color,
+    /// Border color of a focused/active sub-pane inside a zone (editor, history,
+    /// results, tree branches). Mirrors the original dbm's pane border (yellow).
+    pub border_active_pane: Color,
+    /// Border color of a focused popup / overlay / picker / completion dialog.
+    /// Mirrors the original dbm's popup border (cyan).
+    pub border_popup: Color,
     /// Dedicated foreground color for the *active* workspace marker in the
     /// explorer tree (the node whose workspace is currently shown). Kept
-    /// separate from `accent`/`border_active` so it has its own color and is
+    /// separate from the border colors so it has its own color and is
     /// chosen to not clash with `selection_bg` (the active row may also be the
     /// cursor row, which layers a selection highlight underneath).
     pub active_fg: Color,
@@ -70,12 +78,25 @@ pub struct Palette {
 }
 
 impl Palette {
-    /// The border style for a pane: the active (accent) color when the pane is
-    /// on the focus chain, otherwise the regular border color. Pane views use
-    /// this instead of hand-rolling `if focused { border_active } else { border }`
+    /// The border style for a top-level feature zone: the active zone color
+    /// (green) when the zone is on the focus chain, otherwise the regular border
+    /// color. Views use this instead of hand-rolling the `if active … else …`
     /// so focus highlighting is defined in one place.
-    pub fn active_border(&self, active: bool) -> Style {
-        Style::default().fg(if active { self.border_active } else { self.border })
+    pub fn zone_border(&self, active: bool) -> Style {
+        Style::default().fg(if active { self.border_active_zone } else { self.border })
+    }
+
+    /// The border style for a sub-pane inside a zone: yellow when the pane is on
+    /// the focus chain, otherwise the regular border color.
+    pub fn pane_border(&self, active: bool) -> Style {
+        Style::default().fg(if active { self.border_active_pane } else { self.border })
+    }
+
+    /// The border style for a popup / overlay / picker dialog: cyan when focused,
+    /// otherwise the regular border color. An open popup is its own focus, so
+    /// call sites typically pass `true`.
+    pub fn popup_border(&self, active: bool) -> Style {
+        Style::default().fg(if active { self.border_popup } else { self.border })
     }
 
     /// Style of a (non-current) search match's text — the uniform accent used
@@ -169,7 +190,9 @@ pub fn default() -> Theme {
             surface: Color::Rgb(0x21, 0x23, 0x2e),   // current line
             accent: ACCENT_YELLOW,
             border: Color::Rgb(0x44, 0x47, 0x5a),
-            border_active: Color::Rgb(0xbd, 0x93, 0xf9),
+            border_active_zone: Color::Green,
+            border_active_pane: ACCENT_YELLOW,
+            border_popup: Color::Cyan,
             // Bright green — readable on the blue-grey selection background.
             active_fg: Color::Rgb(0x50, 0xfa, 0x7b),
             selection: Color::Rgb(0x44, 0x47, 0x5a),
@@ -190,7 +213,9 @@ pub fn default() -> Theme {
             surface: Color::Rgb(0xf1, 0xe8, 0xe2),
             accent: ACCENT_YELLOW,
             border: Color::Rgb(0xcf, 0xc9, 0xc2),
-            border_active: Color::Rgb(0xbd, 0x93, 0xf9),
+            border_active_zone: Color::Rgb(0x1a, 0xb0, 0x4c),
+            border_active_pane: ACCENT_YELLOW,
+            border_popup: Color::Rgb(0x0e, 0x74, 0x9a),
             // Deep green — readable on the light blue-grey selection background.
             active_fg: Color::Rgb(0x1a, 0xb0, 0x4c),
             selection: Color::Rgb(0xcf, 0xc9, 0xc2),
@@ -249,5 +274,33 @@ mod tests {
             // active_fg must also be a real color, never Reset.
             assert_ne!(p.active_fg, Color::Reset, "theme {:?} active_fg is Reset", theme.name);
         }
+    }
+
+    #[test]
+    fn active_border_tiers_are_distinct_and_highlight() {
+        // Zone/pane/popup active borders are three distinguishable colors, and
+        // each is only applied when active (the inactive border otherwise wins).
+        let theme = default();
+        for p in [theme.dark.clone(), theme.light.clone()] {
+            assert_ne!(p.border_active_zone, p.border_active_pane);
+            assert_ne!(p.border_active_pane, p.border_popup);
+            assert_ne!(p.border_popup, p.border_active_zone);
+            // all three active colors still differ from the inactive border
+            for active in [p.border_active_zone, p.border_active_pane, p.border_popup] {
+                assert_ne!(active, p.border);
+            }
+            // active == true selects the tier color; active == false falls back
+            // to the regular border.
+            assert_eq!(p.zone_border(true).fg.unwrap(), p.border_active_zone);
+            assert_eq!(p.zone_border(false).fg.unwrap(), p.border);
+            assert_eq!(p.pane_border(true).fg.unwrap(), p.border_active_pane);
+            assert_eq!(p.pane_border(false).fg.unwrap(), p.border);
+            assert_eq!(p.popup_border(true).fg.unwrap(), p.border_popup);
+            assert_eq!(p.popup_border(false).fg.unwrap(), p.border);
+        }
+        // Match the original dbm's convention.
+        assert_eq!(theme.dark.border_active_zone, Color::Green);
+        assert_eq!(theme.dark.border_active_pane, ACCENT_YELLOW);
+        assert_eq!(theme.dark.border_popup, Color::Cyan);
     }
 }

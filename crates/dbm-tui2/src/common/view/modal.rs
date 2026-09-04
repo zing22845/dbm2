@@ -99,7 +99,7 @@ pub fn render_titled_popup(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border_active))
+        .border_style(Style::default().fg(p.border_popup))
         .style(Style::default().bg(p.surface));
     let inner = block.inner(area);
     frame.render_widget(block, area);
