@@ -109,7 +109,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
         db_active,
         true,
         Style::default().fg(p.muted),
-        Some(Style::default().fg(p.border_popup)),
+        Some(Style::default().fg(p.border_active_popup)),
         Style::default().fg(p.accent),
     );
     let schema_label = pane_search_label_line(
@@ -117,7 +117,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
         schema_active,
         true,
         Style::default().fg(p.muted),
-        Some(Style::default().fg(p.border_popup)),
+        Some(Style::default().fg(p.border_active_popup)),
         Style::default().fg(p.accent),
     );
     let db_search_title = pane_search_bottom_title_line(

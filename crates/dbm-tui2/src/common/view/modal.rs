@@ -99,7 +99,7 @@ pub fn render_titled_popup(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(p.border_popup))
+        .border_style(p.popup_border(true))
         .style(Style::default().bg(p.surface));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -253,7 +253,7 @@ pub fn render_confirm_popup(
         .borders(Borders::ALL)
         // The confirm popup shares the cyan popup border with every other
         // popup/overlay, matching the original dbm's popup chrome.
-        .border_style(Style::default().fg(p.border_popup))
+        .border_style(p.popup_border(true))
         .style(Style::default().bg(p.surface));
     let inner = block.inner(popup);
     frame.render_widget(&block, popup);

@@ -40,7 +40,7 @@ pub struct Palette {
     pub border_active_child: Color,
     /// Border color of a focused popup / overlay / picker / completion dialog.
     /// Mirrors the original dbm's popup border (cyan).
-    pub border_popup: Color,
+    pub border_active_popup: Color,
     /// Dedicated foreground color for the *active* workspace marker in the
     /// explorer tree (the node whose workspace is currently shown). Kept
     /// separate from the border colors so it has its own color and is
@@ -97,7 +97,7 @@ impl Palette {
     /// otherwise the regular border color. An open popup is its own focus, so
     /// call sites typically pass `true`.
     pub fn popup_border(&self, active: bool) -> Style {
-        Style::default().fg(if active { self.border_popup } else { self.border })
+        Style::default().fg(if active { self.border_active_popup } else { self.border })
     }
 
     /// Style of a (non-current) search match's text — the uniform accent used
@@ -193,7 +193,7 @@ pub fn default() -> Theme {
             border: Color::Rgb(0x44, 0x47, 0x5a),
             border_active_parent: Color::Green,
             border_active_child: ACCENT_YELLOW,
-            border_popup: Color::Cyan,
+            border_active_popup: Color::Cyan,
             // Bright green — readable on the blue-grey selection background.
             active_fg: Color::Rgb(0x50, 0xfa, 0x7b),
             selection: Color::Rgb(0x44, 0x47, 0x5a),
@@ -216,7 +216,7 @@ pub fn default() -> Theme {
             border: Color::Rgb(0xcf, 0xc9, 0xc2),
             border_active_parent: Color::Rgb(0x1a, 0xb0, 0x4c),
             border_active_child: ACCENT_YELLOW,
-            border_popup: Color::Rgb(0x0e, 0x74, 0x9a),
+            border_active_popup: Color::Rgb(0x0e, 0x74, 0x9a),
             // Deep green — readable on the light blue-grey selection background.
             active_fg: Color::Rgb(0x1a, 0xb0, 0x4c),
             selection: Color::Rgb(0xcf, 0xc9, 0xc2),
@@ -284,13 +284,13 @@ mod tests {
         let theme = default();
         for p in [theme.dark.clone(), theme.light.clone()] {
             assert_ne!(p.border_active_parent, p.border_active_child);
-            assert_ne!(p.border_active_child, p.border_popup);
-            assert_ne!(p.border_popup, p.border_active_parent);
+            assert_ne!(p.border_active_child, p.border_active_popup);
+            assert_ne!(p.border_active_popup, p.border_active_parent);
             // all three active colors still differ from the inactive border
             for active in [
                 p.border_active_parent,
                 p.border_active_child,
-                p.border_popup,
+                p.border_active_popup,
             ] {
                 assert_ne!(active, p.border);
             }
@@ -300,12 +300,12 @@ mod tests {
             assert_eq!(p.parent_border(false).fg.unwrap(), p.border);
             assert_eq!(p.child_border(true).fg.unwrap(), p.border_active_child);
             assert_eq!(p.child_border(false).fg.unwrap(), p.border);
-            assert_eq!(p.popup_border(true).fg.unwrap(), p.border_popup);
+            assert_eq!(p.popup_border(true).fg.unwrap(), p.border_active_popup);
             assert_eq!(p.popup_border(false).fg.unwrap(), p.border);
         }
         // Match the original dbm's convention.
         assert_eq!(theme.dark.border_active_parent, Color::Green);
         assert_eq!(theme.dark.border_active_child, ACCENT_YELLOW);
-        assert_eq!(theme.dark.border_popup, Color::Cyan);
+        assert_eq!(theme.dark.border_active_popup, Color::Cyan);
     }
 }

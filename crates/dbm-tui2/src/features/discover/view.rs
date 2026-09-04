@@ -1,7 +1,6 @@
 //! Discover feature rendering.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
@@ -39,7 +38,7 @@ pub fn render(
     let outer = ratatui::widgets::Block::default()
         .title(" Discover ")
         .borders(ratatui::widgets::Borders::ALL)
-        .border_style(Style::default().fg(p.border_popup));
+        .border_style(p.popup_border(true));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     if inner.width == 0 || inner.height == 0 {

@@ -400,7 +400,7 @@ fn render_form(
             let block = Block::default()
                 .title(title.clone())
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(pp.border_popup));
+                .border_style(pp.popup_border(true));
             let inner = block.inner(popup);
             f.render_widget(block, popup);
             let hint_h = wrapped_line_count(&footer_text, inner.width.max(1))
