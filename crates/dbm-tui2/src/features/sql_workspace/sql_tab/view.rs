@@ -1256,7 +1256,7 @@ mod tests {
 
         let mut state = state_with_tabs(1);
         state.active_tab = Some(0);
-        let theme = crate::common::view::theme::dracula();
+        let theme = crate::common::view::theme::default();
         let area = Rect::new(0, 0, 120, 40);
 
         // Test 1: hover on vertical splitter should light up vertical, not horizontal
@@ -1350,7 +1350,7 @@ mod tests {
     fn render_does_not_panic_at_extreme_split_widths() {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
-        let theme = crate::common::view::theme::dracula();
+        let theme = crate::common::view::theme::default();
         let area = Rect::new(0, 0, 120, 40);
         // After dragging the splitters, detail/history widths can reach their
         // extremes; the renderer must not panic.
@@ -1430,7 +1430,7 @@ mod tests {
         let (instance, connection) = session_view_key(&state.tabs[0].session);
         state.history_store
             .record_success(&instance, &connection, "SELECT * FROM users");
-        let theme = crate::common::view::theme::dracula();
+        let theme = crate::common::view::theme::default();
         // Match the real workspace width (80% of 160 minus the border) so the
         // editor is actually squeezed by the 84-wide history zone.
         let area = Rect::new(0, 0, 126, 40);

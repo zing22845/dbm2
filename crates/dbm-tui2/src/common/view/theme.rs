@@ -11,7 +11,6 @@
 //! functions: pass a different theme to verify different colors.
 
 use ratatui::style::{Color, Modifier, Style};
-use ratatui_themes::ThemeName;
 
 /// The semantic color slots available to every view.
 ///
@@ -71,13 +70,6 @@ pub struct Palette {
 }
 
 impl Palette {
-    /// Build a `Palette` from a `ratatui-themes` palette.
-    ///
-    /// `ratatui-themes` is used purely as a source of curated color data; this
-    /// adapter isolates it from the architecture core so feature views keep
-    /// depending only on our semantic `Palette`. Fields that `ratatui-themes`
-    /// does not expose (`fg_dim`, `surface`, `border`, `border_active`) are
-    /// derived from the closest available slot.
     /// The border style for a pane: the active (accent) color when the pane is
     /// on the focus chain, otherwise the regular border color. Pane views use
     /// this instead of hand-rolling `if focused { border_active } else { border }`
@@ -119,36 +111,6 @@ impl Palette {
             .fg(self.accent)
             .add_modifier(Modifier::BOLD)
     }
-
-    pub fn from_ratatui(p: &ratatui_themes::ThemePalette) -> Self {
-        Palette {
-            fg: p.fg,
-            fg_dim: p.muted,
-            bg: p.bg,
-            // ratatui-themes has no dedicated surface; reuse the background so
-            // panel backgrounds stay consistent.
-            surface: p.bg,
-            accent: p.accent,
-            // No dedicated border slots upstream: borders are drawn with the
-            // muted fg and become the accent when focused.
-            border: p.muted,
-            border_active: p.accent,
-            // A dedicated active-marker foreground derived from the info slot
-            // (typically a bright cyan/green) so it stands out and does not
-            // collide with the row-selection background.
-            active_fg: p.info,
-            selection: p.selection,
-            selection_bg: p.selection,
-            selection_cell_bg: p.selection,
-            selection_text: p.fg,
-            selection_focus_text: p.accent,
-            success: p.success,
-            warning: p.warning,
-            error: p.error,
-            info: p.info,
-            muted: p.muted,
-        }
-    }
 }
 
 /// A theme: a `dark` and a `light` palette plus the current mode flag.
@@ -176,41 +138,6 @@ impl Theme {
     pub fn toggle(&mut self) {
         self.is_dark = !self.is_dark;
     }
-
-    /// Build a theme from two `ratatui-themes` palettes, one for the dark mode
-    /// and one for the light mode. If the scheme has no distinct light variant,
-    /// pass the same name for both (the mode flag still flips, but both modes
-    /// share the palette).
-    pub fn from_ratatui(name: &'static str, dark_name: ThemeName, light_name: ThemeName) -> Self {
-        let mut dark = Palette::from_ratatui(&dark_name.palette());
-        let mut light = Palette::from_ratatui(&light_name.palette());
-        // Match original dbm's results-theme colours: light selection
-        // backgrounds with dark grey text and dark-blue focus cell text.
-        // These are the same for both dark and light modes — the results grid
-        // is always rendered as a light "island" regardless of the overall
-        // terminal theme (matching the original dbm design).
-        dark.selection_bg = Color::Rgb(0xfa, 0xfc, 0xff);
-        light.selection_bg = Color::Rgb(0xfa, 0xfc, 0xff);
-        dark.selection_cell_bg = Color::Rgb(0xe4, 0xea, 0xf5);
-        light.selection_cell_bg = Color::Rgb(0xe4, 0xea, 0xf5);
-        dark.selection_text = Color::Rgb(0x34, 0x37, 0x40);
-        light.selection_text = Color::Rgb(0x34, 0x37, 0x40);
-        dark.selection_focus_text = Color::Rgb(0x1c, 0x48, 0x8c);
-        light.selection_focus_text = Color::Rgb(0x1c, 0x48, 0x8c);
-        // Unify the emphasis accent to the original dbm's match yellow across
-        // every ratatui-derived theme (solarized, catppuccin, ...), and reset
-        // the primary foreground to the terminal default (editor-aligned).
-        dark.accent = ACCENT_YELLOW;
-        light.accent = ACCENT_YELLOW;
-        dark.fg = FG_RESET;
-        light.fg = FG_RESET;
-        Theme {
-            name,
-            is_dark: true,
-            dark,
-            light,
-        }
-    }
 }
 
 /// Original dbm's search-match yellow (ANSI `Color::Yellow`, not a pure RGB
@@ -223,10 +150,17 @@ const ACCENT_YELLOW: Color = Color::Yellow;
 /// primary text aligned with the editor.
 const FG_RESET: Color = Color::Reset;
 
-/// A dark theme modeled after the Dracula color scheme.
-pub fn dracula() -> Theme {
+/// The app's default theme, with a `dark` and a `light` palette.
+///
+/// This is a custom theme tuned for dbm2, not an off-the-shelf color scheme:
+/// the background/border tones draw on the Dracula dark palette, but the
+/// primary foreground follows the terminal default, the accent is fixed to the
+/// original dbm's search-match yellow, and the selection layer is a light
+/// "island" with dark-grey text across both modes (mirroring the original
+/// dbm's results design, independent of the overall light/dark mode).
+pub fn default() -> Theme {
     Theme {
-        name: "dracula",
+        name: "default",
         is_dark: true,
         dark: Palette {
             fg: FG_RESET,                            // editor-aligned default
@@ -273,84 +207,20 @@ pub fn dracula() -> Theme {
     }
 }
 
-/// A dark theme modeled after the Nord color scheme.
-pub fn nord() -> Theme {
-    Theme {
-        name: "nord",
-        is_dark: true,
-        dark: Palette {
-            fg: FG_RESET,                            // editor-aligned default
-            fg_dim: Color::Rgb(0x4c, 0x56, 0x6a),    // nord3
-            bg: Color::Rgb(0x2e, 0x34, 0x40),        // nord0
-            surface: Color::Rgb(0x3b, 0x42, 0x52),   // nord1
-            accent: ACCENT_YELLOW,
-            border: Color::Rgb(0x4c, 0x56, 0x6a),
-            border_active: Color::Rgb(0x88, 0xc0, 0xd0),
-            // Aurora green (nord14) — readable on the nord1 selection bg.
-            active_fg: Color::Rgb(0xa3, 0xbe, 0x8c),
-            selection: Color::Rgb(0x43, 0x4c, 0x5e),
-            selection_bg: Color::Rgb(0xfa, 0xfc, 0xff),
-            selection_cell_bg: Color::Rgb(0xe4, 0xea, 0xf5),
-            selection_text: Color::Rgb(0x34, 0x37, 0x40),
-            selection_focus_text: Color::Rgb(0x1c, 0x48, 0x8c),
-            success: Color::Rgb(0xa3, 0xbe, 0x8c),   // nord14
-            warning: Color::Rgb(0xeb, 0xcb, 0x8b),   // nord13
-            error: Color::Rgb(0xbf, 0x61, 0x6a),     // nord11
-            info: Color::Rgb(0x81, 0xa1, 0xc1),      // nord9
-            muted: Color::Rgb(0x4c, 0x56, 0x6a),
-        },
-        light: Palette {
-            fg: FG_RESET,                            // editor-aligned default
-            fg_dim: Color::Rgb(0x4c, 0x56, 0x6a),
-            bg: Color::Rgb(0xec, 0xef, 0xf4),        // nord6
-            surface: Color::Rgb(0xe5, 0xe9, 0xf0),
-            accent: ACCENT_YELLOW,
-            border: Color::Rgb(0xd8, 0xde, 0xe9),
-            border_active: Color::Rgb(0x88, 0xc0, 0xd0),
-            // Darker aurora green (nord10) — readable on the light selection bg.
-            active_fg: Color::Rgb(0x5e, 0x81, 0xac),
-            selection: Color::Rgb(0xd8, 0xde, 0xe9),
-            selection_bg: Color::Rgb(0xfa, 0xfc, 0xff),
-            selection_cell_bg: Color::Rgb(0xe4, 0xea, 0xf5),
-            selection_text: Color::Rgb(0x34, 0x37, 0x40),
-            selection_focus_text: Color::Rgb(0x1c, 0x48, 0x8c),
-            success: Color::Rgb(0x5e, 0x81, 0xac),
-            warning: Color::Rgb(0xdb, 0xa0, 0x0d),
-            error: Color::Rgb(0xbf, 0x61, 0x6a),
-            info: Color::Rgb(0x81, 0xa1, 0xc1),
-            muted: Color::Rgb(0x4c, 0x56, 0x6a),
-        },
-    }
-}
-
-/// A Solarized theme whose dark/light palettes come from `ratatui-themes`.
-pub fn solarized() -> Theme {
-    Theme::from_ratatui("solarized", ThemeName::SolarizedDark, ThemeName::SolarizedLight)
-}
-
-/// A Catppuccin theme: Mocha for dark, Latte for light.
-pub fn catppuccin() -> Theme {
-    Theme::from_ratatui(
-        "catppuccin",
-        ThemeName::CatppuccinMocha,
-        ThemeName::CatppuccinLatte,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn default_theme_is_dark_and_has_palette() {
-        let theme = dracula();
+        let theme = default();
         assert!(theme.is_dark);
         let _ = theme.palette(); // dark palette returned
     }
 
     #[test]
     fn toggle_switches_palette() {
-        let mut theme = dracula();
+        let mut theme = default();
         assert!(theme.is_dark);
         theme.toggle();
         assert!(!theme.is_dark);
@@ -360,37 +230,7 @@ mod tests {
 
     #[test]
     fn palettes_are_distinct() {
-        let theme = dracula();
-        assert_ne!(theme.dark.bg, theme.light.bg);
-    }
-
-    #[test]
-    fn from_ratatui_maps_semantic_slots() {
-        let p = Palette::from_ratatui(&ThemeName::Dracula.palette());
-        // fg/bg/accent map directly from the source palette.
-        assert_eq!(p.fg, ThemeName::Dracula.palette().fg);
-        assert_eq!(p.bg, ThemeName::Dracula.palette().bg);
-        assert_eq!(p.accent, ThemeName::Dracula.palette().accent);
-        // derived slots are non-empty (never Reset) so UI stays visible.
-        for slot in [p.fg_dim, p.surface, p.border, p.border_active] {
-            assert_ne!(slot, Color::Reset);
-        }
-    }
-
-    #[test]
-    fn solarized_from_ratatui_has_distinct_dark_light() {
-        let theme = solarized();
-        assert!(theme.is_dark);
-        assert_ne!(theme.dark.bg, theme.light.bg);
-        // toggle flips to the light palette.
-        let mut t = theme.clone();
-        t.toggle();
-        assert!(!t.is_dark);
-    }
-
-    #[test]
-    fn catppuccin_has_dark_and_light_variants() {
-        let theme = catppuccin();
+        let theme = default();
         assert_ne!(theme.dark.bg, theme.light.bg);
     }
 
@@ -398,22 +238,16 @@ mod tests {
     fn active_fg_does_not_clash_with_selection_bg() {
         // The active-marker foreground must stay distinct from the row-selection
         // background so an active row that is also the cursor row remains
-        // readable across every theme.
-        for theme in [
-            dracula(),
-            nord(),
-            solarized(),
-            catppuccin(),
-        ] {
-            for p in [theme.dark.clone(), theme.light.clone()] {
-                assert_ne!(
-                    p.active_fg, p.selection_bg,
-                    "theme {:?} active_fg clashes with selection_bg",
-                    theme.name
-                );
-                // active_fg must also be a real color, never Reset.
-                assert_ne!(p.active_fg, Color::Reset, "theme {:?} active_fg is Reset", theme.name);
-            }
+        // readable.
+        let theme = default();
+        for p in [theme.dark.clone(), theme.light.clone()] {
+            assert_ne!(
+                p.active_fg, p.selection_bg,
+                "theme {:?} active_fg clashes with selection_bg",
+                theme.name
+            );
+            // active_fg must also be a real color, never Reset.
+            assert_ne!(p.active_fg, Color::Reset, "theme {:?} active_fg is Reset", theme.name);
         }
     }
 }

@@ -133,7 +133,7 @@ mod tests {
         let area = Rect::new(0, 0, 40, 3);
         let mut terminal = Terminal::new(TestBackend::new(40, 3)).unwrap();
         let state = HeaderState::default();
-        let theme = crate::common::view::theme::dracula();
+        let theme = crate::common::view::theme::default();
         terminal
             .draw(|frame| render(frame, &theme, area, &state, false))
             .unwrap();
@@ -165,7 +165,7 @@ mod tests {
         use ratatui::Terminal;
         let area = Rect::new(0, 0, 40, 3);
         let mut terminal = Terminal::new(TestBackend::new(40, 3)).unwrap();
-        let theme = crate::common::view::theme::dracula();
+        let theme = crate::common::view::theme::default();
         let p = theme.palette();
 
         // Not focused: foreground is the instance text color, no background.

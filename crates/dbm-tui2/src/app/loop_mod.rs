@@ -4082,7 +4082,7 @@ mod tests {
         state.explorer.instances.nodes[0].expanded = false;
         state.explorer.instances.set_active_instance(0);
         state.explorer.instances.cursor = 0;
-        let theme = crate::common::view::theme::dracula();
+        let theme = crate::common::view::theme::default();
         let mut terminal = Terminal::new(TestBackend::new(100, 50)).unwrap();
         terminal
             .draw(|frame| {

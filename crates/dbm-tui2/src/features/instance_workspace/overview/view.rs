@@ -304,7 +304,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
         use crate::common::view::theme;
-        let theme = theme::dracula();
+        let theme = theme::default();
         let area = Rect::new(0, 0, 60, 20);
         let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
 
@@ -343,7 +343,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
         use crate::common::view::theme;
-        let theme = theme::dracula();
+        let theme = theme::default();
         let area = Rect::new(0, 0, 16, 30);
         let mut terminal = Terminal::new(TestBackend::new(16, 30)).unwrap();
 

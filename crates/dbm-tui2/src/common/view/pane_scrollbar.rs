@@ -258,7 +258,7 @@ mod tests {
     use super::*;
 
     fn palette() -> Palette {
-        crate::common::view::theme::dracula().palette().clone()
+        crate::common::view::theme::default().palette().clone()
     }
 
     #[test]

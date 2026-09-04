@@ -180,7 +180,7 @@ impl Default for AppState {
             term_height: 0,
             splitter: crate::features::app_splitter::state::AppSplitterState::default(),
             splitter_hover: SplitterHoverState::default(),
-            theme: crate::common::view::theme::dracula(),
+            theme: crate::common::view::theme::default(),
             header: HeaderState::default(),
             explorer: ExplorerState::default(),
             discover: DiscoverState::default(),

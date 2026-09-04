@@ -433,7 +433,7 @@ mod tests {
         let editor = EditorState::with_sql(
             "SELECT * FROM \"测试表\" WHERE id = 1 AND name ILIKE '%foo%' ORDER BY created_at DESC",
         );
-        let theme = crate::common::view::theme::dracula();
+        let theme = crate::common::view::theme::default();
         let mut terminal = Terminal::new(TestBackend::new(60, 40)).unwrap();
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             terminal
