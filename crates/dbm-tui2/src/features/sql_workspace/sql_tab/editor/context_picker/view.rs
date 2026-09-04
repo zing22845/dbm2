@@ -1,9 +1,10 @@
 //! Context picker sub-module rendering.
 //!
 //! Renders the database + schema selection overlay as two side-by-side
-//! bordered panels. Each panel's title carries the `/` search state and filter
-//! counter (via the shared `pane_search_title_line`); the focused column has an
-//! active border. The picker renders nothing when closed.
+//! bordered panels. Each panel's column label sits on the top border title,
+//! while its `/` search and filter counter render on the bottom border
+//! (via `pane_search_bottom_title_line`), matching every other pane. The
+//! focused column has an active border. The picker renders nothing when closed.
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -11,7 +12,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::common::components::search::{PaneSearch, pane_search_title_line};
+use crate::common::components::search::{PaneSearch, pane_search_bottom_title_line, pane_search_label_line};
 use crate::common::view::theme::Theme;
 
 use super::state::{CachedList, ContextPickerState, PickerColumn, filter_indices};
@@ -100,25 +101,42 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
     let db_filtered = filtered_count(&state.databases, &state.db_search);
     let schema_filtered = filtered_count(&state.schemas, &state.schema_search);
 
-    let db_title = picker_column_title_line(
+    // Column label stays on the top title; the `/` search and its counter move
+    // to the bottom border (title_bottom), matching every other pane. The label
+    // is type/muted when its column is inactive and border-accent when focused.
+    let db_label = pane_search_label_line(
         " databases ",
+        db_active,
+        true,
+        Style::default().fg(p.muted),
+        Some(Style::default().fg(p.border_active)),
+        Style::default().fg(p.accent),
+    );
+    let schema_label = pane_search_label_line(
+        &format!(" schemas ({}) ", state.preview_database),
+        schema_active,
+        true,
+        Style::default().fg(p.muted),
+        Some(Style::default().fg(p.border_active)),
+        Style::default().fg(p.accent),
+    );
+    let db_search_title = pane_search_bottom_title_line(
         &state.db_search,
         state.db_cursor,
         db_filtered,
-        db_active,
-        Style::default().fg(p.muted),
-        Style::default().fg(p.border_active),
-        Style::default().fg(p.accent),
+        Some(db_col.width.saturating_sub(2)),
+        None,
+        p.match_style(),
+        p.current_match_style(),
     );
-    let schema_title = picker_column_title_line(
-        &format!(" schemas ({}) ", state.preview_database),
+    let schema_search_title = pane_search_bottom_title_line(
         &state.schema_search,
         state.schema_cursor,
         schema_filtered,
-        schema_active,
-        Style::default().fg(p.muted),
-        Style::default().fg(p.border_active),
-        Style::default().fg(p.accent),
+        Some(schema_col.width.saturating_sub(2)),
+        None,
+        p.match_style(),
+        p.current_match_style(),
     );
 
     let selected_style = Style::default()
@@ -126,50 +144,29 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
         .bg(p.selection_bg)
         .add_modifier(Modifier::BOLD);
 
-    let db_block = Block::default()
-        .title(db_title)
+    let mut db_block = Block::default()
+        .title(db_label)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(if db_active { p.border_active } else { p.border }))
+        .border_style(p.active_border(db_active))
         .style(Style::default().bg(p.surface));
+    if let Some(line) = db_search_title {
+        db_block = db_block.title_bottom(line);
+    }
     let db_inner = db_block.inner(columns[0]);
     let db_lines = picker_list_lines(&state.databases, &state.db_search, state.db_cursor, db_inner, db_active, selected_style, p);
     frame.render_widget(Paragraph::new(db_lines).block(db_block), columns[0]);
 
-    let schema_block = Block::default()
-        .title(schema_title)
+    let mut schema_block = Block::default()
+        .title(schema_label)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(if schema_active { p.border_active } else { p.border }))
+        .border_style(p.active_border(schema_active))
         .style(Style::default().bg(p.surface));
+    if let Some(line) = schema_search_title {
+        schema_block = schema_block.title_bottom(line);
+    }
     let schema_inner = schema_block.inner(columns[1]);
     let schema_lines = picker_list_lines(&state.schemas, &state.schema_search, state.schema_cursor, schema_inner, schema_active, selected_style, p);
     frame.render_widget(Paragraph::new(schema_lines).block(schema_block), columns[1]);
-}
-
-/// The title line for one picker column: label + `/` search + filter counter.
-#[allow(clippy::too_many_arguments)]
-fn picker_column_title_line(
-    label: &str,
-    search: &PaneSearch,
-    cursor: usize,
-    filtered_count: usize,
-    column_focused: bool,
-    theme_muted: Style,
-    active_label_style: Style,
-    accent_style: Style,
-) -> Line<'static> {
-    pane_search_title_line(
-        label,
-        search,
-        column_focused,
-        true,
-        theme_muted,
-        cursor,
-        filtered_count,
-        None,
-        Some(active_label_style),
-        None,
-        accent_style,
-    )
 }
 
 /// Build the visible (windowed) list lines for one picker column.
