@@ -1380,6 +1380,49 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 }
                             }
 
+                            // IW overview: clicking a row moves the overview
+                            // cursor to it (like the connections list's single
+                            // click). The overview has no double-click action.
+                            if let Some(body) =
+                                iw_body_area_for_hit(size, &state)
+                                && body.contains(point)
+                                && matches!(state.iw.pane, crate::app_shell::nav::IwPane::Overview)
+                            {
+                                use crate::features::instance_workspace::overview::{
+                                    msg::*, view,
+                                };
+                                use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+                                let on_scrollbar = view::v_scrollbar_hit(
+                                    body,
+                                    &state.iw.overview,
+                                    0,
+                                    mouse.column,
+                                    mouse.row,
+                                )
+                                .is_some();
+                                if !on_scrollbar
+                                    && let Some(row) = view::row_at(
+                                        body,
+                                        &state.iw.overview,
+                                        0,
+                                        mouse.row,
+                                    )
+                                {
+                                    let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Overview(
+                                        OverviewMsg::Message(OverviewMessage::SetCursor {
+                                            index: row,
+                                        }),
+                                    )));
+                                    let result = process_message_round(
+                                        &effect_runner,
+                                        &mut action_rx,
+                                        msg,
+                                        &mut state,
+                                    );
+                                    dirty |= result.dirty;
+                                }
+                            }
+
                             // Left-click on the header `Discover` button activates
                             // it, in addition to moving focus to the header.
                             let header_area = Rect::new(0, 0, size.width, 3);

@@ -162,6 +162,22 @@ pub fn v_scrollbar_hit(
     crate::common::view::pane_scrollbar::v_scrollbar_hit(&ov.layout, ov.max_scroll, x, y)
 }
 
+/// Map a click Y coordinate (in the overview pane's `area`) to a data row index.
+/// The `Paragraph` renders data rows starting at `content.y` (no header row), so
+/// `row = start + (y - content.y)`. Returns `None` for clicks on the scrollbar
+/// gutter or beyond the last data row. `conn_count` only affects row text, not
+/// the row count, so callers may pass `0` for hit-testing geometry.
+pub fn row_at(area: Rect, state: &OverviewState, conn_count: usize, y: u16) -> Option<usize> {
+    let ov = compute_overview_viewport(area, state, conn_count)?;
+    let content = ov.content;
+    if y < content.y || y >= content.y.saturating_add(content.height) {
+        return None;
+    }
+    let rel = usize::from(y.saturating_sub(content.y));
+    let idx = ov.start.saturating_add(rel);
+    (idx < ov.total).then_some(idx)
+}
+
 /// Render the instance overview body: the instance's attribute rows laid out
 /// like the original dbm (`label:20 value`), with the cursor row highlighted.
 /// Long rows wrap onto the next line when the pane is too narrow, so no
@@ -403,5 +419,47 @@ mod tests {
         let area = Rect::new(0, 0, 80, 50); // plenty of height for all 17 rows
         let hit = v_scrollbar_hit(area, &s, 0, 79, 5);
         assert!(hit.is_none());
+    }
+
+    #[test]
+    fn row_at_maps_click_to_data_row_and_respects_scroll() {
+        // Scroll to start=5 so clicking the visible top row maps to data row 5
+        // (not 0), and a click far below the rendered rows is None.
+        let s = OverviewState {
+            instance: Some(inst()),
+            cursor: 0,
+            scroll: 5,
+            scroll_locked: true,
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 80, 10);
+        let ov = compute_overview_viewport(area, &s, 0).expect("some viewport");
+        let top = ov.content.y;
+        // Click on the first visible data row must select start (scroll=5).
+        assert_eq!(row_at(area, &s, 0, top), Some(5));
+        // Click on the second visible row -> start + 1.
+        assert_eq!(row_at(area, &s, 0, top + 1), Some(6));
+        // A click well below the rendered rows (data row >= total=17) -> None.
+        let beyond = top + (ov.total - ov.start) as u16 + 2;
+        assert!(row_at(area, &s, 0, beyond).is_none());
+        // No instance loaded -> None.
+        let empty = OverviewState::default();
+        assert!(row_at(area, &empty, 0, top).is_none());
+    }
+
+    #[test]
+    fn row_at_selects_top_data_row_when_scrollbar_present() {
+        // With more rows than height a v_scrollbar appears; the top data row is
+        // still selectable and maps to row 0 at the scroll start.
+        let s = OverviewState {
+            instance: Some(inst()),
+            cursor: 0,
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 80, 5); // 17 rows overflow 5 rows
+        let ov = compute_overview_viewport(area, &s, 0).unwrap();
+        assert!(ov.layout.v_scrollbar.is_some());
+        let row_y = ov.content.y;
+        assert_eq!(row_at(area, &s, 0, row_y), Some(0));
     }
 }

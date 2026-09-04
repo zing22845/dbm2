@@ -58,6 +58,24 @@ pub fn update(
             }
             (state, Vec::new(), Vec::new(), dirty)
         }
+        OverviewMessage::SetCursor { index } => {
+            // The overview has a fixed set of rows regardless of connection
+            // count, so the row limit is the rows for a loaded instance.
+            let len = state
+                .instance
+                .as_ref()
+                .map_or(0, |i| super::view::overview_rows(i, 0).len());
+            if len == 0 {
+                return (state, Vec::new(), Vec::new(), false);
+            }
+            let next = index.min(len - 1);
+            let dirty = next != state.cursor;
+            if dirty {
+                state.cursor = next;
+                state.scroll_locked = false;
+            }
+            (state, Vec::new(), Vec::new(), dirty)
+        }
         OverviewMessage::SetVScroll { position } => {
             let len = state
                 .instance

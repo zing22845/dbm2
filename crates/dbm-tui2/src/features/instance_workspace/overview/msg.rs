@@ -12,6 +12,9 @@ pub enum OverviewMessage {
     Loaded { instance: Box<dbm_store::ManagedInstance> },
     /// Move the overview cursor by `delta` rows (`j`/`k`, `↑`/`↓`).
     MoveCursor(i32),
+    /// Jump the overview cursor to an absolute `index`. Issued by a mouse click
+    /// on a row (like the connections list's `JumpTo`).
+    SetCursor { index: usize },
     /// Set the vertical scroll position (0 = top row visible). Issued by the
     /// v_scrollbar drag handler; sets `scroll_locked = true`.
     SetVScroll { position: usize },
