@@ -339,7 +339,13 @@ fn render_form(
 
     let field_style = |f: FormField| {
         if form.field == f {
-            Style::default().fg(p.selection).add_modifier(Modifier::BOLD)
+            // Distinguish the focused field with the same selected-item style as
+            // list rows (selection_bg + selection_text) instead of a foreground
+            // alone, so the active field reads as an emphasized selection.
+            Style::default()
+                .fg(p.selection_text)
+                .bg(p.selection_bg)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(p.fg)
         }
