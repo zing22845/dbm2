@@ -251,9 +251,9 @@ pub fn render_confirm_popup(
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        // The confirm popup uses the accent (focused) border, matching the
-        // original dbm's popup chrome (a brighter border than regular panels).
-        .border_style(Style::default().fg(p.accent))
+        // The confirm popup shares the cyan popup border with every other
+        // popup/overlay, matching the original dbm's popup chrome.
+        .border_style(Style::default().fg(p.border_popup))
         .style(Style::default().bg(p.surface));
     let inner = block.inner(popup);
     frame.render_widget(&block, popup);
