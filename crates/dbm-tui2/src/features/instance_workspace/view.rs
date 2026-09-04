@@ -117,8 +117,9 @@ pub fn render(
         let text = format!("[ {} ]", label);
         let style = if selected {
             Style::default()
-                .fg(p.fg)
-                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                .fg(p.surface)
+                .bg(p.accent)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(p.muted)
         };
