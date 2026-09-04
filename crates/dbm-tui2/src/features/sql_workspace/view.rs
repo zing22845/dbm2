@@ -46,7 +46,7 @@ pub fn render(
     let outer = Block::default()
         .title(workspace_title(state))
         .borders(Borders::ALL)
-        .border_style(p.zone_border(focused));
+        .border_style(p.parent_border(focused));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
 

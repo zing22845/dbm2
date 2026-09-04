@@ -38,7 +38,7 @@ pub fn render(
     let outer = ratatui::widgets::Block::default()
         .title(" Explorer ")
         .borders(ratatui::widgets::Borders::ALL)
-        .border_style(p.zone_border(focused));
+        .border_style(p.parent_border(focused));
     let inner = outer.inner(area);
     frame.render_widget(outer, area);
     if inner.width == 0 || inner.height < 3 {

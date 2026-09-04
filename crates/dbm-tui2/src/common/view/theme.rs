@@ -30,13 +30,14 @@ pub struct Palette {
     pub accent: Color,
     /// Border color of regular (inactive) panels.
     pub border: Color,
-    /// Border color of the focused/active *top-level* feature zone (header,
-    /// explorer, connection workspace). Mirrors the original dbm's zone border
-    /// (green).
-    pub border_active_zone: Color,
-    /// Border color of a focused/active sub-pane inside a zone (editor, history,
-    /// results, tree branches). Mirrors the original dbm's pane border (yellow).
-    pub border_active_pane: Color,
+    /// Border color of a focused/active *parent* pane — a top-level feature
+    /// region that may host child sub-panes (header, explorer, connection /
+    /// sql workspace). Mirrors the original dbm's zone border (green).
+    pub border_active_parent: Color,
+    /// Border color of a focused/active *child* sub-pane within a parent pane
+    /// (editor, history, results, tree branches). Mirrors the original dbm's
+    /// pane border (yellow).
+    pub border_active_child: Color,
     /// Border color of a focused popup / overlay / picker / completion dialog.
     /// Mirrors the original dbm's popup border (cyan).
     pub border_popup: Color,
@@ -78,18 +79,18 @@ pub struct Palette {
 }
 
 impl Palette {
-    /// The border style for a top-level feature zone: the active zone color
-    /// (green) when the zone is on the focus chain, otherwise the regular border
-    /// color. Views use this instead of hand-rolling the `if active … else …`
-    /// so focus highlighting is defined in one place.
-    pub fn zone_border(&self, active: bool) -> Style {
-        Style::default().fg(if active { self.border_active_zone } else { self.border })
+    /// The border style for a *parent* pane (a top-level feature region that may
+    /// host child sub-panes): green when the pane is on the focus chain,
+    /// otherwise the regular border color. Views use this instead of hand-rolling
+    /// the `if active … else …` so focus highlighting is defined in one place.
+    pub fn parent_border(&self, active: bool) -> Style {
+        Style::default().fg(if active { self.border_active_parent } else { self.border })
     }
 
-    /// The border style for a sub-pane inside a zone: yellow when the pane is on
-    /// the focus chain, otherwise the regular border color.
-    pub fn pane_border(&self, active: bool) -> Style {
-        Style::default().fg(if active { self.border_active_pane } else { self.border })
+    /// The border style for a *child* sub-pane within a parent pane: yellow when
+    /// the pane is on the focus chain, otherwise the regular border color.
+    pub fn child_border(&self, active: bool) -> Style {
+        Style::default().fg(if active { self.border_active_child } else { self.border })
     }
 
     /// The border style for a popup / overlay / picker dialog: cyan when focused,
@@ -190,8 +191,8 @@ pub fn default() -> Theme {
             surface: Color::Rgb(0x21, 0x23, 0x2e),   // current line
             accent: ACCENT_YELLOW,
             border: Color::Rgb(0x44, 0x47, 0x5a),
-            border_active_zone: Color::Green,
-            border_active_pane: ACCENT_YELLOW,
+            border_active_parent: Color::Green,
+            border_active_child: ACCENT_YELLOW,
             border_popup: Color::Cyan,
             // Bright green — readable on the blue-grey selection background.
             active_fg: Color::Rgb(0x50, 0xfa, 0x7b),
@@ -213,8 +214,8 @@ pub fn default() -> Theme {
             surface: Color::Rgb(0xf1, 0xe8, 0xe2),
             accent: ACCENT_YELLOW,
             border: Color::Rgb(0xcf, 0xc9, 0xc2),
-            border_active_zone: Color::Rgb(0x1a, 0xb0, 0x4c),
-            border_active_pane: ACCENT_YELLOW,
+            border_active_parent: Color::Rgb(0x1a, 0xb0, 0x4c),
+            border_active_child: ACCENT_YELLOW,
             border_popup: Color::Rgb(0x0e, 0x74, 0x9a),
             // Deep green — readable on the light blue-grey selection background.
             active_fg: Color::Rgb(0x1a, 0xb0, 0x4c),
@@ -278,29 +279,33 @@ mod tests {
 
     #[test]
     fn active_border_tiers_are_distinct_and_highlight() {
-        // Zone/pane/popup active borders are three distinguishable colors, and
+        // Parent/child/popup active borders are three distinguishable colors, and
         // each is only applied when active (the inactive border otherwise wins).
         let theme = default();
         for p in [theme.dark.clone(), theme.light.clone()] {
-            assert_ne!(p.border_active_zone, p.border_active_pane);
-            assert_ne!(p.border_active_pane, p.border_popup);
-            assert_ne!(p.border_popup, p.border_active_zone);
+            assert_ne!(p.border_active_parent, p.border_active_child);
+            assert_ne!(p.border_active_child, p.border_popup);
+            assert_ne!(p.border_popup, p.border_active_parent);
             // all three active colors still differ from the inactive border
-            for active in [p.border_active_zone, p.border_active_pane, p.border_popup] {
+            for active in [
+                p.border_active_parent,
+                p.border_active_child,
+                p.border_popup,
+            ] {
                 assert_ne!(active, p.border);
             }
             // active == true selects the tier color; active == false falls back
             // to the regular border.
-            assert_eq!(p.zone_border(true).fg.unwrap(), p.border_active_zone);
-            assert_eq!(p.zone_border(false).fg.unwrap(), p.border);
-            assert_eq!(p.pane_border(true).fg.unwrap(), p.border_active_pane);
-            assert_eq!(p.pane_border(false).fg.unwrap(), p.border);
+            assert_eq!(p.parent_border(true).fg.unwrap(), p.border_active_parent);
+            assert_eq!(p.parent_border(false).fg.unwrap(), p.border);
+            assert_eq!(p.child_border(true).fg.unwrap(), p.border_active_child);
+            assert_eq!(p.child_border(false).fg.unwrap(), p.border);
             assert_eq!(p.popup_border(true).fg.unwrap(), p.border_popup);
             assert_eq!(p.popup_border(false).fg.unwrap(), p.border);
         }
         // Match the original dbm's convention.
-        assert_eq!(theme.dark.border_active_zone, Color::Green);
-        assert_eq!(theme.dark.border_active_pane, ACCENT_YELLOW);
+        assert_eq!(theme.dark.border_active_parent, Color::Green);
+        assert_eq!(theme.dark.border_active_child, ACCENT_YELLOW);
         assert_eq!(theme.dark.border_popup, Color::Cyan);
     }
 }

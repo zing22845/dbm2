@@ -35,7 +35,7 @@ pub fn render(
     let block = Block::default()
         .title(" Engine ")
         .borders(Borders::ALL)
-        .border_style(p.pane_border(focused));
+        .border_style(p.child_border(focused));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {

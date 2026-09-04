@@ -61,7 +61,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &HeaderState,
     let block = Block::default()
         .title(" dbm ")
         .borders(Borders::ALL)
-        .border_style(p.zone_border(focused));
+        .border_style(p.parent_border(focused));
     frame.render_widget(block, area);
 
     // The button glyphs come from `discover_button_rect`, the same rect used
