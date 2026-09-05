@@ -6,7 +6,8 @@ use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
 use crate::common::view::pane_scrollbar::{
-    ActiveScrollbar, PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
+    ActiveScrollbar, PaneScrollLayout, RowHeights, draw_vertical_pane_scrollbar, pane_anchor,
+    pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
 
@@ -100,16 +101,18 @@ pub fn compute_targets_viewport(
 
     // Table reserves one row for its header → visible data rows are one less.
     let viewport = content.height.saturating_sub(1).max(1) as usize;
-    let max_scroll = total.saturating_sub(viewport.max(1));
 
-    // Discover-style anchor via shared helper.
-    let start = crate::common::view::pane_scrollbar::discover_anchor(
-        state.scroll_offset,
-        max_scroll,
-        state.row,
+    // Unified viewport anchor (height-aware; uniform for this non-wrapping list).
+    let anchor = pane_anchor(
+        total,
+        RowHeights::Uniform(1),
         viewport,
+        state.scroll_offset,
+        state.row,
         state.scroll_locked,
     );
+    let start = anchor.start;
+    let max_scroll = anchor.max_scroll;
 
     Some(TargetsViewport {
         body,

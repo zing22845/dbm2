@@ -3,9 +3,10 @@
 //! Theme-aware via the semantic `Palette`: the track uses the muted/border slot
 //! and the thumb uses the accent slot, brightening when actively dragged.
 //!
-//! Also provides the shared `discover_anchor` viewport calculation and generic
-//! scrollbar hit-test helpers that every feature reuses — keeping anchor math,
-//! thumb geometry, and drag behavior consistent across the whole app.
+//! Also provides the unified `pane_anchor` viewport calculation (height-aware
+//! via [`RowHeights`]) and generic scrollbar hit-test helpers that every feature
+//! reuses — keeping anchor math, thumb geometry, and drag behavior consistent
+//! across the whole app.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -217,32 +218,145 @@ pub fn point_in_bar(bar: Rect, x: u16, y: u16) -> bool {
         && y < bar.y.saturating_add(bar.height)
 }
 
-/// Discover-style cursor anchor: the viewport's start row is only pushed
-/// when the cursor would fall OUTSIDE the current window. Cursor moving
-/// inside the window does NOT move the viewport. When `scroll_locked` is
-/// true (manual v_scrollbar drag), the anchor is completely skipped so the
-/// drag position is preserved.
+/// Per-step heights along a scroll axis.
 ///
-/// All 7 scrollable panes (instances, objects, discover targets/results,
-/// iw connections/overview, sql history) MUST use this function so their
-/// anchor math stays identical.
-pub fn discover_anchor(
+/// A "step" is one logical unit of content — a data row for vertical scroll, a
+/// column for horizontal scroll. Every scrollable pane anchors through
+/// [`pane_anchor`] using one of these, so there is a single source of truth for
+/// scroll math: non-wrapping panes use [`RowHeights::Uniform(1)`] (one terminal
+/// row per data row) and wrapping panes use [`RowHeights::Variable`] (a wrapped
+/// row occupies several terminal rows). No pane scrolls "by data row" while
+/// another scrolls "by pixel" — the unit is always a logical step; only the
+/// step's extent (height) varies.
+#[derive(Debug, Clone, Copy)]
+pub enum RowHeights<'a> {
+    /// Every step has height `step` (e.g. `1` terminal row / column). Zero alloc.
+    Uniform(usize),
+    /// Per-step heights; `heights.len()` MUST equal `total`.
+    Variable(&'a [usize]),
+}
+
+/// Result of [`pane_anchor`]: the anchored viewport for one scroll axis.
+#[derive(Debug, Clone, Copy)]
+pub struct PaneAnchor {
+    /// Index of the first visible logical step (top row / leftmost column).
+    pub start: usize,
+    /// Maximum `start` the scrollbar can reach (largest top index whose full
+    /// window still fits the content extent — the bottom step is fully visible,
+    /// never split across the edge).
+    pub max_scroll: usize,
+    /// Number of logical steps that fit in the viewport starting at `start`
+    /// without splitting a step across the top/bottom boundary.
+    pub visible: usize,
+}
+
+/// Unified viewport anchor for every scrollable pane.
+///
+/// Anchors the viewport to `scroll` (the draggable / manually-set position),
+/// pushing it only when `cursor` would fall outside the window — and skipped
+/// entirely when `scroll_locked` is true (an in-progress scrollbar drag
+/// preserves the manual position). Always aligns to logical-step boundaries: a
+/// step is shown whole or not at all, which is exactly what prevents cursor
+/// drift in wrapping panes (e.g. overview, whose rows wrap onto several
+/// terminal rows).
+///
+/// `content_extent` is the viewport size along the scroll axis (terminal rows
+/// for vertical scroll, columns for horizontal). `total` is the number of
+/// steps. `heights` describes each step's extent (see [`RowHeights`]).
+pub fn pane_anchor(
+    total: usize,
+    heights: RowHeights,
+    content_extent: usize,
     scroll: usize,
-    max_scroll: usize,
     cursor: usize,
-    viewport: usize,
     scroll_locked: bool,
-) -> usize {
-    let viewport = viewport.max(1);
-    let mut start = scroll.min(max_scroll);
-    if !scroll_locked {
-        if cursor < start {
-            start = cursor;
-        } else if cursor >= start + viewport {
-            start = cursor + 1 - viewport;
+) -> PaneAnchor {
+    let ext = content_extent.max(1);
+    if total == 0 {
+        return PaneAnchor { start: 0, max_scroll: 0, visible: 0 };
+    }
+
+    match heights {
+        RowHeights::Uniform(step) => {
+            let step = step.max(1);
+            let total_ext = total * step;
+            // Largest start with start*step <= total_ext - ext.
+            let max_start = if total_ext <= ext {
+                0
+            } else {
+                total.saturating_sub((ext + step - 1) / step)
+            };
+            let viewport_units = ext / step;
+            let cursor = cursor.min(total - 1);
+            let mut start = scroll.min(max_start);
+            if !scroll_locked {
+                if cursor < start {
+                    start = cursor;
+                } else if cursor >= start + viewport_units {
+                    start = cursor + 1 - viewport_units;
+                }
+            }
+            start = start.min(max_start);
+            let visible = (total - start).min(viewport_units);
+            PaneAnchor { start, max_scroll: max_start, visible }
+        }
+        RowHeights::Variable(h) => {
+            // Cumulative tops: cum[0]=0, cum[i]=sum of heights[0..i].
+            let mut cum = vec![0usize; total + 1];
+            for i in 0..total {
+                cum[i + 1] = cum[i] + h.get(i).copied().unwrap_or(0);
+            }
+            let total_ext = cum[total];
+            // Largest start with cum[start] <= total_ext - ext.
+            let max_pixel = total_ext.saturating_sub(ext);
+            let mut max_start = 0usize;
+            for i in 0..=total {
+                if cum[i] <= max_pixel {
+                    max_start = i;
+                } else {
+                    break;
+                }
+            }
+            let cursor = cursor.min(total - 1);
+            let mut start = scroll.min(max_start);
+            if !scroll_locked {
+                let win_top = cum[start];
+                let win_bottom = win_top + ext;
+                let cur_top = cum[cursor];
+                let cur_bottom = cum[cursor + 1];
+                // Only push when the cursor is not already fully inside the window.
+                if cur_top < win_top {
+                    start = cursor;
+                } else if cur_bottom > win_bottom {
+                    let lo = cur_bottom.saturating_sub(ext);
+                    let mut s = 0usize;
+                    while s < total && cum[s] < lo {
+                        s += 1;
+                    }
+                    start = s.min(cursor);
+                }
+            }
+            start = start.min(max_start);
+            // Steps from `start` that fit in `ext` without crossing the edge.
+            let mut visible = 0usize;
+            let mut px = 0usize;
+            let mut i = start;
+            while i < total {
+                let hh = h.get(i).copied().unwrap_or(0);
+                if px + hh > ext {
+                    break;
+                }
+                px += hh;
+                visible += 1;
+                i += 1;
+            }
+            // Degenerate (a step taller than the pane): show at least the top step.
+            if visible == 0 && start < total {
+                visible = 1;
+            }
+            PaneAnchor { start, max_scroll: max_start, visible }
         }
     }
-    start
 }
 
 pub struct PaneScrollLayout {
@@ -381,5 +495,68 @@ mod tests {
         let idle = results_scrollbar_style(&p, false);
         let drag = results_scrollbar_style(&p, true);
         assert_ne!(idle.thumb, drag.thumb);
+    }
+
+    #[test]
+    fn pane_anchor_uniform_matches_data_row_semantics() {
+        // Uniform(1) must behave exactly like the old data-row anchor:
+        // cursor inside the window keeps the manual scroll; outside pushes it.
+        let total = 30;
+        let ext = 10;
+        // cursor inside window, scroll elsewhere → keep scroll (no jump).
+        let a = pane_anchor(total, RowHeights::Uniform(1), ext, 5, 12, false);
+        assert_eq!(a.start, 5, "cursor 12 inside [5,15) must keep scroll=5");
+        assert_eq!(a.max_scroll, 20);
+        assert_eq!(a.visible, 10);
+        // cursor above window → snap to cursor.
+        let a = pane_anchor(total, RowHeights::Uniform(1), ext, 5, 2, false);
+        assert_eq!(a.start, 2);
+        // cursor below window → push so it sits at the bottom.
+        let a = pane_anchor(total, RowHeights::Uniform(1), ext, 5, 28, false);
+        assert_eq!(a.start, 19, "cursor 28 -> start 28-10+1=19");
+        // scroll_locked preserves manual scroll even if cursor is elsewhere.
+        let a = pane_anchor(total, RowHeights::Uniform(1), ext, 7, 0, true);
+        assert_eq!(a.start, 7);
+        // scroll past max clamps, and a cursor inside that clamped window is kept.
+        let a = pane_anchor(total, RowHeights::Uniform(1), ext, 999, 25, false);
+        assert_eq!(a.start, 20, "scroll clamps to max_scroll; cursor 25 inside [20,30) stays");
+    }
+
+    #[test]
+    fn pane_anchor_uniform_no_overflow_when_total_small() {
+        let a = pane_anchor(3, RowHeights::Uniform(1), 10, 0, 0, false);
+        assert_eq!(a.start, 0);
+        assert_eq!(a.max_scroll, 0);
+        assert_eq!(a.visible, 3);
+    }
+
+    #[test]
+    fn pane_anchor_variable_aligns_without_splitting_rows() {
+        // heights: row0=1, row1=3 (wraps), row2=1, row3=2, row4=1. ext=4.
+        let h = [1usize, 3, 1, 2, 1];
+        let total = h.len();
+        // cum=[0,1,4,5,7,8]; total_ext=8; max_pixel=4; largest cum[i]<=4 → i=2.
+        let a = pane_anchor(total, RowHeights::Variable(&h), 4, 0, 0, false);
+        assert_eq!(a.max_scroll, 2);
+        // cursor=3 (row3, spans px 5..7) → window [cum[2]=4, 8) contains it; start=2.
+        let a = pane_anchor(total, RowHeights::Variable(&h), 4, 0, 3, false);
+        assert_eq!(a.start, 2);
+        assert!(a.start + a.visible <= total);
+        // visible window must not exceed the extent.
+        let mut px = 0;
+        for i in a.start..a.start + a.visible {
+            px += h[i];
+        }
+        assert!(px <= 4, "visible window must not exceed extent, got {px}");
+    }
+
+    #[test]
+    fn pane_anchor_variable_degenerate_tall_step() {
+        // A step taller than the pane still shows at least itself.
+        let h = [10usize];
+        let a = pane_anchor(1, RowHeights::Variable(&h), 4, 0, 0, false);
+        assert_eq!(a.start, 0);
+        assert_eq!(a.max_scroll, 0);
+        assert_eq!(a.visible, 1);
     }
 }

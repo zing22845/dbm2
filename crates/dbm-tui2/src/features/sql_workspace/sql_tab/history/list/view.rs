@@ -19,8 +19,8 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::common::components::line_numbers;
 use crate::common::view::pane_scrollbar::{
-    ActiveScrollbar, PaneScrollLayout, draw_horizontal_pane_scrollbar, draw_vertical_pane_scrollbar,
-    pane_scroll_layout,
+    ActiveScrollbar, PaneScrollLayout, RowHeights, draw_horizontal_pane_scrollbar,
+    draw_vertical_pane_scrollbar, pane_anchor, pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
 
@@ -90,15 +90,16 @@ pub fn compute_history_viewport(
     let content = effective_layout.content_area;
     let viewport = content.height.max(1) as usize;
 
-    // Discover-style cursor anchor via shared helper.
-    let max_scroll = total.saturating_sub(viewport);
-    let start = crate::common::view::pane_scrollbar::discover_anchor(
-        state.v_scroll,
-        max_scroll,
-        cursor,
+    // Unified viewport anchor (height-aware; uniform for this non-wrapping list).
+    let anchor = pane_anchor(
+        total,
+        RowHeights::Uniform(1),
         viewport,
+        state.v_scroll,
+        cursor,
         state.scroll_locked,
     );
+    let start = anchor.start;
     let end = (start + viewport).min(total);
 
     Some(HistoryViewport {

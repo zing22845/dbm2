@@ -8,7 +8,8 @@ use ratatui::Frame;
 
 use crate::common::utils::text_width::wrapped_line_count;
 use crate::common::view::pane_scrollbar::{
-    ActiveScrollbar, PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
+    ActiveScrollbar, PaneScrollLayout, RowHeights, draw_vertical_pane_scrollbar, pane_anchor,
+    pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
 use dbm_store::ManagedInstance;
@@ -100,12 +101,16 @@ pub struct OverviewViewport {
 }
 
 /// Shared viewport computation. Applies discover-style cursor anchoring
-/// (skipped when `scroll_locked`). Note: Overview uses Paragraph::wrap so a
-/// data row can span multiple pixel rows, but this viewport counts **data
-/// rows** (1 data row = 1 Line passed to Paragraph). The `max_scroll` is
-/// computed from content pixel height, which may undercount when many rows
-/// wrap — this is acceptable because v_scrollbar scrolls by data row, not by
-/// wrapped pixel row, and the Paragraph wraps naturally within the content area.
+/// (skipped when `scroll_locked`).
+///
+/// Overview rows render with `Paragraph::wrap`, so a single data row can span
+/// several pixel lines. The scroll math must therefore be **pixel-aware**: we
+/// measure each row's wrapped height and keep the cursor's pixel span inside
+/// the content area. Using a naive data-row `viewport` (= content height) would
+/// over-count visible rows and let the cursor drift below the visible region
+/// once any in-view row wraps. `state.scroll` / `state.cursor` stay in data-row
+/// units (consumed by the scrollbar drag and keyboard nav), but the anchored
+/// `start` and the rendered `viewport` are derived from per-row pixel heights.
 pub fn compute_overview_viewport(
     area: Rect,
     state: &OverviewState,
@@ -118,33 +123,43 @@ pub fn compute_overview_viewport(
         return None;
     }
 
-    // pane_scroll_layout reserves 1 col for v_scrollbar when the data rows
-    // overflow the area height. content_width estimate: overview rows are
-    // "{label:20} {value}" ≈ 21 + typical value length (say 50). Connections
-    // does not h_scroll in practice.
-    let content_width = 80u16; // generous estimate
-    let layout = pane_scroll_layout(area, content_width, total, area.height.max(1) as usize);
+    // pane_scroll_layout reserves 1 col for the v_scrollbar when the data rows
+    // overflow the area height. The v_scrollbar decision only depends on row
+    // count vs. height, so the 80-col content-width estimate is fine here.
+    let content_width_est = 80u16;
+    let layout = pane_scroll_layout(area, content_width_est, total, area.height.max(1) as usize);
     let content = layout.content_area;
+    // Real content width (after the scrollbar column is reserved) for accurate
+    // wrapping — matches what `row_at` and the renderer's Paragraph use.
+    let width = content.width.max(1);
+    let content_height = content.height.max(1) as usize;
 
-    let viewport = content.height.max(1) as usize;
-    let max_scroll = total.saturating_sub(viewport);
+    // Per-row wrapped pixel heights (terminal rows each data row occupies). The
+    // unified `pane_anchor` is height-aware: a wrapped row is counted by its
+    // true extent and the cursor never drifts below the visible region, while
+    // the window always aligns to whole logical rows (no row split across the
+    // top/bottom edge).
+    let heights: Vec<usize> = rows
+        .iter()
+        .map(|(label, value)| wrapped_line_count(&format!("{label:20} {value}"), width) as usize)
+        .collect();
 
-    // Discover-style anchor via shared helper.
-    let start = crate::common::view::pane_scrollbar::discover_anchor(
+    let anchor = pane_anchor(
+        total,
+        RowHeights::Variable(&heights),
+        content_height,
         state.scroll,
-        max_scroll,
         state.cursor,
-        viewport,
         state.scroll_locked,
     );
 
     Some(OverviewViewport {
         layout,
         content,
-        viewport,
-        start,
+        viewport: anchor.visible,
+        start: anchor.start,
         total,
-        max_scroll,
+        max_scroll: anchor.max_scroll,
     })
 }
 
@@ -533,5 +548,56 @@ mod tests {
             row_at(area, &s, 0, top + (row3_px + row3_h) as u16),
             Some(4)
         );
+    }
+
+    #[test]
+    fn cursor_stays_within_pixel_viewport_when_rows_wrap() {
+        // Regression: with a wrapped row AND a vertical scrollbar (short pane),
+        // the anchored `start` must keep the cursor's *pixel* span inside the
+        // content area, not just its data-row index. The old data-row `viewport`
+        // over-counted visible rows and let the cursor drift below the visible
+        // region once an in-view row wrapped.
+        let mut a = inst();
+        a.version_full =
+            Some("PostgreSQL 17.2 on x86_64-pc-linux-gnu, compiled by gcc x86_64-64".into());
+        let total = overview_rows(&a, 0).len();
+        let area = Rect::new(0, 0, 30, 6); // narrow (wraps) + short (v_scrollbar)
+
+        for cursor in 0..total {
+            let s = OverviewState {
+                instance: Some(a.clone()),
+                cursor,
+                ..Default::default()
+            };
+            let ov = compute_overview_viewport(area, &s, 0).expect("some viewport");
+            assert!(
+                ov.layout.v_scrollbar.is_some(),
+                "cursor={cursor}: pane should show a v_scrollbar"
+            );
+            // Cursor must be within the rendered data-row window.
+            assert!(
+                cursor >= ov.start && cursor < ov.start + ov.viewport,
+                "cursor={cursor}: cursor {cursor} outside rendered window [{}, {})",
+                ov.start,
+                ov.start + ov.viewport
+            );
+            // Cursor's pixel span must fit inside the content area height.
+            let rows = overview_rows(s.instance.as_ref().unwrap(), 0);
+            let width = ov.content.width;
+            let mut cum = vec![0usize; rows.len() + 1];
+            for (i, (label, value)) in rows.iter().enumerate() {
+                cum[i + 1] =
+                    cum[i] + wrapped_line_count(&format!("{label:20} {value}"), width) as usize;
+            }
+            let content_h = ov.content.height as usize;
+            assert!(
+                cum[cursor] >= cum[ov.start] && cum[cursor + 1] <= cum[ov.start] + content_h,
+                "cursor={cursor}: cursor pixel span [{}, {}] exceeds visible window [{}, {}]",
+                cum[cursor],
+                cum[cursor + 1],
+                cum[ov.start],
+                cum[ov.start] + content_h
+            );
+        }
     }
 }

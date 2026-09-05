@@ -8,8 +8,8 @@ use ratatui::Frame;
 
 use crate::common::view::hints::{draw_pane_footer, footer_height, instances_pane_footer_text};
 use crate::common::view::pane_scrollbar::{
-    ActiveScrollbar, PaneScrollLayout, draw_horizontal_pane_scrollbar, draw_vertical_pane_scrollbar,
-    pane_scroll_layout,
+    ActiveScrollbar, PaneScrollLayout, RowHeights, draw_horizontal_pane_scrollbar,
+    draw_vertical_pane_scrollbar, pane_anchor, pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
 
@@ -85,17 +85,18 @@ pub fn compute_instances_viewport(
     let content = layout.content_area;
 
     let viewport = content.height.max(1) as usize;
-    let max_scroll = total.saturating_sub(viewport);
 
-    // Discover-style anchor via shared helper — cursor only pushes the viewport
-    // when it would fall outside; skipped when scroll_locked (manual drag).
-    let start = crate::common::view::pane_scrollbar::discover_anchor(
-        state.scroll.get(),
-        max_scroll,
-        state.cursor,
+    // Unified viewport anchor (height-aware; uniform for this non-wrapping tree).
+    let anchor = pane_anchor(
+        total,
+        RowHeights::Uniform(1),
         viewport,
+        state.scroll.get(),
+        state.cursor,
         state.scroll_locked,
     );
+    let start = anchor.start;
+    let max_scroll = anchor.max_scroll;
     // Write back so the next frame starts from the correct position, not stale 0.
     state.scroll.set(start);
 
