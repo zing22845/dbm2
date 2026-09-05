@@ -75,6 +75,12 @@ pub enum ResultsMessage {
     SetVScroll { position: usize },
     /// Set horizontal scroll offset (from scrollbar drag).
     SetHScroll { position: usize },
+    /// Adjust the selected column's width by `delta` columns (clamped) —
+    /// the `,` / `.` column-width shortcuts.
+    AdjustColWidth { delta: i16 },
+    /// Set column `col`'s width to `width` columns (clamped) — from a mouse
+    /// drag on that column's header splitter.
+    AdjustColWidthTo { col: usize, width: u16 },
 
     // ---- Routed variants (for internal sub-feature routing) ----
     /// Route to the list sub-feature.
@@ -155,6 +161,10 @@ impl ResultsMessage {
             ResultsMessage::SyncViewport { rows, width } => ListMessage::SyncViewport { rows, width },
             ResultsMessage::SetVScroll { position } => ListMessage::SetVScroll { position },
             ResultsMessage::SetHScroll { position } => ListMessage::SetHScroll { position },
+            ResultsMessage::AdjustColWidth { delta } => ListMessage::AdjustColWidth { delta },
+            ResultsMessage::AdjustColWidthTo { col, width } => {
+                ListMessage::AdjustColWidthTo { col, width }
+            }
             ResultsMessage::SetDetailDraft { .. } | ResultsMessage::ToggleDetail => {
                 ListMessage::ResetSelection
             }

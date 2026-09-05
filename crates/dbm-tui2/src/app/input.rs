@@ -1053,6 +1053,20 @@ fn results_key(key: KeyEvent, tab_id: usize, results: &crate::features::sql_work
         KeyCode::Down => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 1, dc: 0 }, tab_id)),
         KeyCode::Left => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: -1 }, tab_id)),
         KeyCode::Right => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: 1 }, tab_id)),
+        // `,` / `.` narrow / widen the selected column (Vim-style), mirroring
+        // the original dbm's column-width adjustment.
+        KeyCode::Char(',') if key.modifiers.is_empty() => Some(sql_results(
+            SqlResultsMessage::AdjustColWidth {
+                delta: -crate::common::view::format::RESULTS_COL_WIDTH_STEP,
+            },
+            tab_id,
+        )),
+        KeyCode::Char('.') if key.modifiers.is_empty() => Some(sql_results(
+            SqlResultsMessage::AdjustColWidth {
+                delta: crate::common::view::format::RESULTS_COL_WIDTH_STEP,
+            },
+            tab_id,
+        )),
         // Begin `/` search.
         KeyCode::Char('/') if key.modifiers.is_empty() => {
             Some(sql_results(SqlResultsMessage::BeginSearch, tab_id))

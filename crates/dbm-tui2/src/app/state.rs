@@ -86,6 +86,17 @@ pub struct SplitterHoverState {
     pub sql_history_detail_drag: bool,
     /// The results detail / list internal splitter is being dragged.
     pub sql_results_detail_drag: bool,
+
+    // --- Results column-width resize state ---
+    /// The result-table column whose header splitter the pointer is currently
+    /// over, if any. Set by MouseMove hit-testing; the header border of this
+    /// column is rendered highlighted (accent) so the resizable region is
+    /// visible.
+    pub results_col_resize_hover: Option<usize>,
+    /// The result-table column currently being drag-resized, if any. Set on the
+    /// mouse Down over a column header splitter and cleared on Up; it survives
+    /// a hover recompute so the highlight stays on the dragged column mid-drag.
+    pub results_col_resize_drag: Option<usize>,
 }
 
 impl SplitterHoverState {

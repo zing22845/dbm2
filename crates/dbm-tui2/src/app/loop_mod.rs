@@ -820,6 +820,13 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     {
                                         results_v_scrollbar_drag = Some((track_y, viewport_height, max_scroll));
                                     }
+                                    // A single click on a results column header
+                                    // splitter begins a column-width resize drag.
+                                    if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::ResultsColResize { col } = action
+                                    {
+                                        state.splitter_hover.results_col_resize_drag = Some(col);
+                                        tracing::debug!(col, "results column resize drag started");
+                                    }
                                     for msg in sql_click_msgs(&state.sql.sql_tab, action) {
                                         let result = process_message_round(
                                             &effect_runner,
@@ -1823,6 +1830,39 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 }
                             }
 
+                            // Results column-width resize drag: convert the mouse x to the target
+                            // width of the dragged column using the shared list
+                            // geometry.
+                            if let Some(col) = state.splitter_hover.results_col_resize_drag {
+                                use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+                                use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+                                use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+                                let size = terminal.size()?;
+                                if let Some(tab_area) = sql_tab_area_for_hit(size, &state)
+                                    && let Some(active_tab) = state.sql.sql_tab.active_tab()
+                                    && let Some(list_inner) = crate::features::sql_workspace::sql_tab::view::results_list_rect(
+                                        active_tab,
+                                        tab_area,
+                                    )
+                                {
+                                    let width = crate::features::sql_workspace::sql_tab::results::list::view::col_width_from_drag_x(
+                                        list_inner,
+                                        &active_tab.results.list,
+                                        col,
+                                        point.x,
+                                        active_tab.results.detail_open,
+                                    );
+                                    let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                                        SqlTabMessage::Results {
+                                            tab_id: active_tab.session.id,
+                                            msg: ResultsMsg::Message(ResultsMessage::AdjustColWidthTo { col, width }),
+                                        },
+                                    ))));
+                                    let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
+                                    dirty |= result.dirty;
+                                }
+                            }
+
                             // Discover targets v_scrollbar drag: same linear
                             // mapping as history/results.
                             if let Some((track_y, viewport_height, max_scroll)) = discover_targets_v_scrollbar_drag {
@@ -1967,6 +2007,9 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 state.splitter_hover.sql_history_detail_drag = false;
                                 state.splitter_hover.sql_results_detail_drag = false;
                                 tracing::debug!("splitter drag finished");
+                            }
+                            if let Some(col) = state.splitter_hover.results_col_resize_drag.take() {
+                                tracing::debug!(col, "results column resize drag finished");
                             }
                             // Re-evaluate hover after drag end — the cursor may
                             // still be over a splitter.
@@ -3371,8 +3414,10 @@ fn update_splitter_hover(
     // event handlers and must survive a hover recompute (e.g. a `Moved` event
     // arriving mid-drag). Only the hover bits are recomputed here.
     let drag = before.dragging_flags();
+    let results_col_resize_drag = before.results_col_resize_drag;
     state.splitter_hover = crate::app::state::SplitterHoverState::default();
     state.splitter_hover.set_dragging_flags(drag);
+    state.splitter_hover.results_col_resize_drag = results_col_resize_drag;
 
     if !can_hover {
         return before != state.splitter_hover;
@@ -3450,6 +3495,27 @@ fn update_splitter_hover(
                 }
             }
         }
+
+    // Results column-width resize hover: a pointer over a result header
+    // splitter highlights that column's border so the resizable region is
+    // visible. Uses the same shared list geometry as the render.
+    if state.focus == Pane::SQLWorkspace
+        && let Some(tab_area) = sql_tab_area_for_hit(size, state)
+        && let Some(active_tab) = state.sql.sql_tab.active_tab()
+        && let Some(list_inner) = crate::features::sql_workspace::sql_tab::view::results_list_rect(
+            active_tab,
+            tab_area,
+        )
+    {
+        state.splitter_hover.results_col_resize_hover =
+            crate::features::sql_workspace::sql_tab::results::list::view::col_resize_hit_at(
+                list_inner,
+                &active_tab.results.list,
+                x,
+                y,
+                active_tab.results.detail_open,
+            );
+    }
 
     before != state.splitter_hover
 }
@@ -3724,6 +3790,10 @@ fn sql_click_msgs(
             };
             vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::ToggleTableCompletion { tab_id }))))]
         }
+        // A column-width resize drag is handled entirely by the shell's mouse
+        // Down/Drag/Up handlers (geometry is computed there); no feature
+        // message is dispatched for the initiating click itself.
+        SqlClickAction::ResultsColResize { .. } => Vec::new(),
         SqlClickAction::EditorVScrollbar { track_y, y, max_scroll, viewport_height } => {
             let Some(tab_id) = tab_id(sql.active_tab) else {
                 return Vec::new();

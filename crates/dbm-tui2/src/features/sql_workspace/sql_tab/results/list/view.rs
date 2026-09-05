@@ -34,6 +34,7 @@ pub fn render(
     state: &ListState,
     focused: bool,
     detail_open: bool,
+    col_resize: Option<usize>,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -100,6 +101,7 @@ pub fn render(
         table_body,
         state,
         focused,
+        col_resize,
     );
 
     // Pagination toolbar (full width, below the content area, inside the Block).
@@ -299,6 +301,7 @@ fn render_table(
     area: Rect,
     state: &ListState,
     _focused: bool,
+    col_resize: Option<usize>,
 ) {
     // Extract all needed values first to avoid borrow conflicts.
     let result = match state.result.as_ref() {
@@ -423,7 +426,10 @@ fn render_table(
             Rect::new(col_x, table_area.y + 1, tv.text_w, 1),
         );
 
-        // Column border (│) at the right edge of this column.
+        // Column border (│) at the right edge of this column. When the mouse
+        // hovers / drags this column's right-edge splitter, the border is
+        // highlighted (accent) so the resizable region is visible — the theme
+        // is the only source of color.
         let col_right = crate::common::view::format::col_x_end(col, col_widths);
         let border_x = table_area
             .x
@@ -431,10 +437,15 @@ fn render_table(
             .saturating_sub(h_scroll)
             .saturating_sub(1);
         if border_x >= table_area.x && border_x < table_area.x + table_area.width {
+            let border_style = if Some(col) == col_resize {
+                Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
+            } else {
+                grid_style
+            };
             for y in table_area.y..(table_area.y + RESULTS_HEADER_HEIGHT).min(table_area.bottom()) {
                 frame
                     .buffer_mut()
-                    .set_string(border_x, y, "│", grid_style);
+                    .set_string(border_x, y, "│", border_style);
             }
         }
     }
@@ -833,4 +844,86 @@ pub fn cell_hit_at(
 
 fn contains(r: Rect, x: u16, y: u16) -> bool {
     x >= r.x && x < r.x.saturating_add(r.width) && y >= r.y && y < r.y.saturating_add(r.height)
+}
+
+/// Resolve the shared results-list geometry used by both this hit-test and the
+/// drag width mapping: `(table_area, content_area, h_scroll)`. `table_area` is
+/// the table body rect via [`compute_table_area`]; `content_area` and
+/// `h_scroll` come from [`compute_viewport_scroll`], the same source of truth
+/// the renderer uses. Returns `None` when there is no table to resize.
+fn results_geometry(
+    inner: Rect,
+    state: &ListState,
+    detail_open: bool,
+) -> Option<(Rect, Rect, usize)> {
+    if inner.width == 0 || inner.height == 0 || state.result.is_none() {
+        return None;
+    }
+    let result = state.result.as_ref()?;
+    if result.columns.is_empty() || result.rows.is_empty() {
+        return None;
+    }
+    let col_widths = &state.col_widths;
+    let (table_area, _a, _p, _f) = compute_table_area(
+        inner,
+        state.row_count(),
+        state.search.text_input_active(),
+        detail_open,
+        &state.executed_sql_display(),
+    );
+    let table_width = crate::common::view::format::results_table_width(col_widths);
+    let vs = compute_viewport_scroll(
+        table_area,
+        state,
+        result.rows.len(),
+        col_widths,
+        table_width as usize,
+    )?;
+    Some((table_area, vs.layout.content_area, vs.h_scroll))
+}
+
+/// Column index whose header boundary the pointer is over in the results
+/// table, if any. Mirrors the original dbm's `resize_hit_column`: only the
+/// top header lines (`RESULTS_HEADER_CONTENT_HEIGHT`) count, and the pointer
+/// must be within one column of a column's right edge. Used for the splitter
+/// hover indicator and to begin a column-width drag.
+pub fn col_resize_hit_at(
+    inner: Rect,
+    state: &ListState,
+    x: u16,
+    y: u16,
+    detail_open: bool,
+) -> Option<usize> {
+    let (_table_area, content_area, h_scroll) = results_geometry(inner, state, detail_open)?;
+    if !contains(content_area, x, y) {
+        return None;
+    }
+    let rel_y = y.saturating_sub(content_area.y);
+    let rel_x = x.saturating_sub(content_area.x) as usize;
+    crate::common::view::format::resize_hit_column(
+        rel_x,
+        rel_y,
+        h_scroll as u16,
+        &state.col_widths,
+    )
+}
+
+/// The target width for column `col` given a drag pointer `x`, computed over
+/// the same shared geometry as [`col_resize_hit_at`]. The caller clamps the
+/// final value via the update message.
+pub fn col_width_from_drag_x(
+    inner: Rect,
+    state: &ListState,
+    col: usize,
+    x: u16,
+    detail_open: bool,
+) -> u16 {
+    let (_table_area, content_area, h_scroll) =
+        match results_geometry(inner, state, detail_open) {
+            Some(g) => g,
+            None => return crate::common::view::format::DEFAULT_RESULTS_COL_WIDTH,
+        };
+    let rel_x = x.saturating_sub(content_area.x) as usize + h_scroll;
+    let start = crate::common::view::format::col_x_start(col, &state.col_widths);
+    rel_x.saturating_sub(start) as u16
 }

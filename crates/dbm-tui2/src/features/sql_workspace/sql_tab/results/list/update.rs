@@ -253,6 +253,28 @@ pub fn update(
             state.h_scroll.set(position.min(max));
             state.h_scroll.get() != before
         }
+        ListMessage::AdjustColWidth { delta } => {
+            use crate::common::view::format::{MAX_RESULTS_COL_WIDTH, MIN_RESULTS_COL_WIDTH};
+            let Some(width) = state.col_widths.get_mut(state.col) else {
+                return (state, effects, false);
+            };
+            let next = (*width as i16 + delta)
+                .clamp(MIN_RESULTS_COL_WIDTH as i16, MAX_RESULTS_COL_WIDTH as i16)
+                as u16;
+            let changed = next != *width;
+            *width = next;
+            changed
+        }
+        ListMessage::AdjustColWidthTo { col, width } => {
+            use crate::common::view::format::{MAX_RESULTS_COL_WIDTH, MIN_RESULTS_COL_WIDTH};
+            let Some(cw) = state.col_widths.get_mut(col) else {
+                return (state, effects, false);
+            };
+            let next = width.clamp(MIN_RESULTS_COL_WIDTH, MAX_RESULTS_COL_WIDTH);
+            let changed = next != *cw;
+            *cw = next;
+            changed
+        }
     };
     (state, effects, dirty)
 }
@@ -454,5 +476,59 @@ mod tests {
 
         let (s, _e, _d) = update(ListMessage::ClearResult, state);
         assert!(s.query_error.is_none());
+    }
+
+    #[test]
+    fn adjust_col_width_shifts_selected_column_and_clamps() {
+        // `,` / `.` step the selected column's width by the configured delta.
+        let (state, _e, _d) = update(
+            ListMessage::SetResult {
+                result: sample_result(),
+                paginated: false,
+            },
+            ListState::default(),
+        );
+        let start = state.col_widths[0];
+
+        let (s, _e, dirty) = update(ListMessage::AdjustColWidth { delta: 2 }, state);
+        assert!(dirty);
+        let state = s;
+        assert_eq!(state.col_widths[0], start + 2, "widening adds the step");
+
+        // A negative delta narrows the column.
+        let (s, _e, _d) = update(ListMessage::AdjustColWidth { delta: -4 }, state);
+        assert_eq!(s.col_widths[0], start - 2, "narrowing subtracts the step");
+
+        // The width is clamped to the permitted range (both directions).
+        let (s, _e, _d) = update(ListMessage::AdjustColWidth { delta: -100 }, s);
+        assert_eq!(s.col_widths[0], crate::common::view::format::MIN_RESULTS_COL_WIDTH);
+
+        let (s, _e, _d) = update(ListMessage::AdjustColWidth { delta: 100 }, s);
+        assert_eq!(s.col_widths[0], crate::common::view::format::MAX_RESULTS_COL_WIDTH);
+    }
+
+    #[test]
+    fn adjust_col_width_to_sets_drag_target_and_clamps() {
+        // A mouse drag on a column's header splitter sets an absolute width.
+        let (state, _e, _d) = update(
+            ListMessage::SetResult {
+                result: sample_result(),
+                paginated: false,
+            },
+            ListState::default(),
+        );
+        let (s, _e, dirty) = update(ListMessage::AdjustColWidthTo { col: 0, width: 30 }, state);
+        assert!(dirty);
+        assert_eq!(s.col_widths[0], 30);
+
+        // Out-of-range targets are clamped.
+        let (s, _e, _d) = update(ListMessage::AdjustColWidthTo { col: 0, width: 1 }, s);
+        assert_eq!(s.col_widths[0], crate::common::view::format::MIN_RESULTS_COL_WIDTH);
+        let (s, _e, _d) = update(ListMessage::AdjustColWidthTo { col: 0, width: 5000 }, s);
+        assert_eq!(s.col_widths[0], crate::common::view::format::MAX_RESULTS_COL_WIDTH);
+
+        // An unknown column is a safe no-op.
+        let (_s, _e, dirty) = update(ListMessage::AdjustColWidthTo { col: 99, width: 30 }, s);
+        assert!(!dirty);
     }
 }

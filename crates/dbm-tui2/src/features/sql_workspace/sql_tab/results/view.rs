@@ -19,6 +19,7 @@ use super::state::ResultsState;
 
 /// Render the Results feature. The single outer Block + title wraps the
 /// entire `area` (both list and, when `detail_open`, the detail preview).
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
@@ -27,6 +28,7 @@ pub fn render(
     focused: bool,
     splitter_hover: bool,
     splitter_drag: bool,
+    col_resize: Option<usize>,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -72,7 +74,7 @@ pub fn render(
         state.splitter.detail_pane_width,
     );
 
-    list_view::render(frame, theme, list_inner, &state.list, focused, state.detail_open);
+    list_view::render(frame, theme, list_inner, &state.list, focused, state.detail_open, col_resize);
 
     if let Some(rect) = splitter_rect {
         splitter_view::render(frame, rect, splitter_hover, splitter_drag);

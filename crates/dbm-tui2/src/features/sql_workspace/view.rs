@@ -54,6 +54,11 @@ pub fn render(
     // hint belongs here, not in any single pane's footer. It is only shown when
     // the active connection has at least one open tab.
     if !state.sql_tab.active_connection_is_empty() {
+        // The results column being resized: the drag takes precedence over the
+        // hover so the label stays highlighted on the dragged column mid-drag.
+        let results_col_resize = splitter_hover
+            .results_col_resize_drag
+            .or(splitter_hover.results_col_resize_hover);
         let hint = sql_workspace_footer_text();
         let footer_h = footer_height(&hint, inner.width).min(inner.height.saturating_sub(1));
         let chunks = Layout::default()
@@ -74,6 +79,7 @@ pub fn render(
             splitter_hover.sql_history_detail_drag,
             splitter_hover.results_detail,
             splitter_hover.sql_results_detail_drag,
+            results_col_resize,
         );
         draw_footer(frame, theme, chunks[1], &hint);
         (cursor, v_scroll)
@@ -94,6 +100,7 @@ pub fn render(
             splitter_hover.sql_history_detail_drag,
             splitter_hover.results_detail,
             splitter_hover.sql_results_detail_drag,
+            None,
         )
     }
 }

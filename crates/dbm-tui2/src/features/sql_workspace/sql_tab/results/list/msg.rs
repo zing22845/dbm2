@@ -63,6 +63,12 @@ pub enum ListMessage {
     SetVScroll { position: usize },
     /// Set horizontal scroll offset (from scrollbar drag).
     SetHScroll { position: usize },
+    /// Adjust the selected column's width by `delta` columns (clamped) —
+    /// the `,` / `.` column-width shortcuts.
+    AdjustColWidth { delta: i16 },
+    /// Set column `col`'s width to `width` columns (clamped) — from a mouse
+    /// drag on that column's header splitter.
+    AdjustColWidthTo { col: usize, width: u16 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
