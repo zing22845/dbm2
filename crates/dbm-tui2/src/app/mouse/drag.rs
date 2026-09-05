@@ -4,7 +4,9 @@
 //! grab) or when the pointer moves with no button held at all.
 
 use crossterm::event::MouseEvent;
-use ratatui::layout::{Position, Rect};
+use ratatui::layout::{
+    Size, {Position, Rect},
+};
 use tokio::sync::mpsc;
 
 use crate::app::action::Action;
@@ -17,7 +19,7 @@ use crate::features::global_footer::view as footer_view;
 use super::hover::update_splitter_hover;
 use super::splitter::SplitterDrag;
 use crate::app::geometry::{app_explorer_rect, sql_tab_area_for_hit, workspace_rect_for_hit};
-use crate::app::loop_mod::{AppTerminal, process_message_round};
+use crate::app::round::process_message_round;
 
 /// End every in-progress held-button drag at once: the active scrollbar, all
 /// splitter drag flags, and the results column-resize drag.
@@ -40,7 +42,7 @@ pub(crate) fn clear_active_drags(state: &mut AppState) {
 /// A held-button drag: follow the pointer for whichever scrollbar or
 /// splitter the press armed.
 pub(crate) fn handle_drag(
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
@@ -55,7 +57,6 @@ pub(crate) fn handle_drag(
     // axis (a vertical splitter reads `x`, a horizontal
     // one reads `y`).
     if *splitter_drag == Some(SplitterDrag::Discover) {
-        let size = terminal.size()?;
         let body_top = 3u16;
         let body_h = size
             .height
@@ -83,7 +84,6 @@ pub(crate) fn handle_drag(
         }
     }
     if *splitter_drag == Some(SplitterDrag::Explorer) {
-        let size = terminal.size()?;
         let body_top = 3u16;
         let body_h = size
             .height
@@ -111,7 +111,6 @@ pub(crate) fn handle_drag(
         }
     }
     if *splitter_drag == Some(SplitterDrag::App) {
-        let size = terminal.size()?;
         let body_top = 3u16;
         let body_h = size
             .height
@@ -128,7 +127,6 @@ pub(crate) fn handle_drag(
     }
     if let Some(SplitterDrag::Sql(tab_id, splitter)) = *splitter_drag {
         tracing::trace!(?splitter, ?point, "drag move begin");
-        let size = terminal.size()?;
         // The feature resolves the drag to a resize
         // message; the shell only supplies the area and
         // the coordinates.
@@ -286,7 +284,6 @@ pub(crate) fn handle_drag(
         use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
         use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
         use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
-        let size = terminal.size()?;
         if let Some(tab_area) = sql_tab_area_for_hit(size, state)
             && let Some(active_tab) = state.sql.sql_tab.active_tab()
             && let Some(list_inner) =
@@ -433,7 +430,7 @@ pub(crate) fn handle_drag(
 /// splitter (if any) the cursor is now over.
 pub(crate) fn handle_up(
     mouse: &MouseEvent,
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     dirty: &mut bool,
     splitter_drag: &mut Option<SplitterDrag>,
@@ -486,7 +483,6 @@ pub(crate) fn handle_up(
     *dirty |= was_dragging;
     // Re-evaluate hover after drag end — the cursor may
     // still be over a splitter.
-    let size = terminal.size()?;
     if update_splitter_hover(state, mouse.column, mouse.row, size) {
         *dirty = true;
     }
@@ -497,7 +493,7 @@ pub(crate) fn handle_up(
 /// outside the window), then re-evaluate the splitter hover highlight.
 pub(crate) fn handle_moved(
     mouse: &MouseEvent,
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     dirty: &mut bool,
     splitter_drag: &mut Option<SplitterDrag>,
@@ -523,7 +519,6 @@ pub(crate) fn handle_moved(
     // Hover is a continuous gesture: only request a
     // redraw when some hover bit actually toggles,
     // avoiding wasteful repaints on every mouse pixel.
-    let size = terminal.size()?;
     if update_splitter_hover(state, mouse.column, mouse.row, size) {
         *dirty = true;
     }

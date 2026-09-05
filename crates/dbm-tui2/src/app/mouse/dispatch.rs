@@ -6,11 +6,10 @@
 //! the messages it dispatches.
 
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::Position;
+use ratatui::layout::{Position, Size};
 use tokio::sync::mpsc;
 
 use crate::app::action::Action;
-use crate::app::loop_mod::AppTerminal;
 use crate::app::state::AppState;
 use crate::app_shell::effect::EffectRunner;
 use crate::app_shell::pane::Pane;
@@ -31,7 +30,7 @@ use super::wheel::{
 /// [`MouseInteraction`]); it is written back on every exit path.
 pub(crate) fn handle_mouse_event(
     mouse: MouseEvent,
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
@@ -87,7 +86,7 @@ pub(crate) fn handle_mouse_event(
                     .is_some_and(crate::common::view::modal::is_confirm_modal) =>
             {
                 handle_confirm_modal_click(
-                    terminal,
+                    size,
                     state,
                     effect_runner,
                     action_rx,
@@ -103,7 +102,7 @@ pub(crate) fn handle_mouse_event(
                     && state.discover.close_confirm =>
             {
                 handle_discover_close_confirm_click(
-                    terminal,
+                    size,
                     state,
                     effect_runner,
                     action_rx,
@@ -113,7 +112,7 @@ pub(crate) fn handle_mouse_event(
             }
             MouseEventKind::Down(MouseButton::Left) if state.modal.is_none() => handle_down(
                 &mouse,
-                terminal,
+                size,
                 state,
                 effect_runner,
                 action_rx,
@@ -123,7 +122,7 @@ pub(crate) fn handle_mouse_event(
                 &mut last_click,
             )?,
             MouseEventKind::Drag(MouseButton::Left) => handle_drag(
-                terminal,
+                size,
                 state,
                 effect_runner,
                 action_rx,
@@ -132,10 +131,10 @@ pub(crate) fn handle_mouse_event(
                 &mut splitter_drag,
             )?,
             MouseEventKind::Up(MouseButton::Left) => {
-                handle_up(&mouse, terminal, state, &mut dirty, &mut splitter_drag)?
+                handle_up(&mouse, size, state, &mut dirty, &mut splitter_drag)?
             }
             MouseEventKind::Moved => {
-                handle_moved(&mouse, terminal, state, &mut dirty, &mut splitter_drag)?
+                handle_moved(&mouse, size, state, &mut dirty, &mut splitter_drag)?
             }
 
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
@@ -146,7 +145,7 @@ pub(crate) fn handle_mouse_event(
             {
                 if handle_wheel_discover_targets(
                     &mouse,
-                    terminal,
+                    size,
                     state,
                     effect_runner,
                     action_rx,
@@ -171,7 +170,7 @@ pub(crate) fn handle_mouse_event(
             {
                 if handle_wheel_discover_results(
                     &mouse,
-                    terminal,
+                    size,
                     state,
                     effect_runner,
                     action_rx,
@@ -198,7 +197,7 @@ pub(crate) fn handle_mouse_event(
             {
                 if handle_wheel_explorer_objects(
                     &mouse,
-                    terminal,
+                    size,
                     state,
                     effect_runner,
                     action_rx,
@@ -225,7 +224,7 @@ pub(crate) fn handle_mouse_event(
             {
                 if handle_wheel_explorer_instances(
                     &mouse,
-                    terminal,
+                    size,
                     state,
                     effect_runner,
                     action_rx,
@@ -249,7 +248,7 @@ pub(crate) fn handle_mouse_event(
             {
                 if handle_wheel_iw_connections(
                     &mouse,
-                    terminal,
+                    size,
                     state,
                     effect_runner,
                     action_rx,
@@ -273,7 +272,7 @@ pub(crate) fn handle_mouse_event(
             {
                 if handle_wheel_iw_overview(
                     &mouse,
-                    terminal,
+                    size,
                     state,
                     effect_runner,
                     action_rx,
@@ -301,7 +300,7 @@ pub(crate) fn handle_mouse_event(
             {
                 if handle_wheel_sql(
                     &mouse,
-                    terminal,
+                    size,
                     state,
                     effect_runner,
                     action_rx,

@@ -8,7 +8,9 @@
 use std::time::Instant;
 
 use crossterm::event::MouseEvent;
-use ratatui::layout::{Position, Rect};
+use ratatui::layout::{
+    Size, {Position, Rect},
+};
 use tokio::sync::mpsc;
 
 use crate::app::action::Action;
@@ -29,19 +31,18 @@ use crate::app::geometry::{
     app_explorer_rect, iw_body_area_for_hit, sql_picker_area_for_hit, sql_tab_area_for_hit,
     workspace_rect_for_hit,
 };
-use crate::app::loop_mod::{AppTerminal, process_message_round};
+use crate::app::round::process_message_round;
 
 /// A left press while a confirm modal is open: hit-test the Yes/No
 /// buttons against the rendered popup.
 pub(crate) fn handle_confirm_modal_click(
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
     point: Position,
     dirty: &mut bool,
 ) -> anyhow::Result<()> {
-    let size = terminal.size()?;
     let footer_h = footer_view::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
@@ -73,14 +74,13 @@ pub(crate) fn handle_confirm_modal_click(
 
 /// A left press on discover's close-confirmation dialog.
 pub(crate) fn handle_discover_close_confirm_click(
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
     point: Position,
     dirty: &mut bool,
 ) -> anyhow::Result<()> {
-    let size = terminal.size()?;
     let footer_h = footer_view::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
@@ -136,7 +136,7 @@ pub(crate) fn handle_discover_close_confirm_click(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_down(
     mouse: &MouseEvent,
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
@@ -155,7 +155,6 @@ pub(crate) fn handle_down(
     // Map the click to a focus pane by region. The layout
     // mirrors `app/view.rs`: header (top 3 rows), explorer
     // (left 20% of the body), workspace (right 80%).
-    let size = terminal.size()?;
     let footer_h = footer_view::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size

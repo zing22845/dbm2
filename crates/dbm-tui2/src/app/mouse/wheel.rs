@@ -7,7 +7,7 @@
 use std::time::Instant;
 
 use crossterm::event::{MouseEvent, MouseEventKind};
-use ratatui::layout::Position;
+use ratatui::layout::{Position, Size};
 use tokio::sync::mpsc;
 
 use crate::app::action::Action;
@@ -20,7 +20,7 @@ use super::click::explorer_child_areas;
 use crate::app::geometry::{
     app_explorer_rect, iw_body_area_for_hit, sql_tab_area_for_hit, workspace_rect_for_hit,
 };
-use crate::app::loop_mod::{AppTerminal, process_message_round};
+use crate::app::round::process_message_round;
 
 /// Trackpad wheel debounce window: a macOS trackpad emits a burst of ticks per
 /// physical gesture, so ticks closer together than this collapse into one.
@@ -47,7 +47,7 @@ pub(crate) enum WheelOutcome {
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_wheel_discover_targets(
     mouse: &MouseEvent,
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
@@ -73,7 +73,6 @@ pub(crate) fn handle_wheel_discover_targets(
     }
     *last_wheel = Some((now, dir, horizontal));
 
-    let size = terminal.size()?;
     let footer_h = footer_view::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
@@ -121,7 +120,7 @@ pub(crate) fn handle_wheel_discover_targets(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_wheel_discover_results(
     mouse: &MouseEvent,
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
@@ -144,7 +143,6 @@ pub(crate) fn handle_wheel_discover_results(
     }
     *last_wheel = Some((now, dir, horizontal));
 
-    let size = terminal.size()?;
     let footer_h = footer_view::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
@@ -193,7 +191,7 @@ pub(crate) fn handle_wheel_discover_results(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_wheel_explorer_objects(
     mouse: &MouseEvent,
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
@@ -216,7 +214,6 @@ pub(crate) fn handle_wheel_explorer_objects(
     }
     *last_wheel = Some((now, dir, horizontal));
 
-    let size = terminal.size()?;
     let footer_h = footer_view::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
@@ -259,7 +256,7 @@ pub(crate) fn handle_wheel_explorer_objects(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_wheel_explorer_instances(
     mouse: &MouseEvent,
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
@@ -282,7 +279,6 @@ pub(crate) fn handle_wheel_explorer_instances(
     }
     *last_wheel = Some((now, dir, horizontal));
 
-    let size = terminal.size()?;
     let footer_h = footer_view::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
@@ -325,7 +321,7 @@ pub(crate) fn handle_wheel_explorer_instances(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_wheel_iw_connections(
     mouse: &MouseEvent,
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
@@ -348,7 +344,6 @@ pub(crate) fn handle_wheel_iw_connections(
     }
     *last_wheel = Some((now, dir, horizontal));
 
-    let size = terminal.size()?;
     if let Some(body) = iw_body_area_for_hit(size, state)
         && let point = ratatui::layout::Position::new(mouse.column, mouse.row)
         && body.contains(point)
@@ -378,7 +373,7 @@ pub(crate) fn handle_wheel_iw_connections(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_wheel_iw_overview(
     mouse: &MouseEvent,
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
@@ -401,7 +396,6 @@ pub(crate) fn handle_wheel_iw_overview(
     }
     *last_wheel = Some((now, dir, horizontal));
 
-    let size = terminal.size()?;
     if let Some(body) = iw_body_area_for_hit(size, state)
         && let point = ratatui::layout::Position::new(mouse.column, mouse.row)
         && body.contains(point)
@@ -423,7 +417,7 @@ pub(crate) fn handle_wheel_iw_overview(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_wheel_sql(
     mouse: &MouseEvent,
-    terminal: &mut AppTerminal,
+    size: Size,
     state: &mut AppState,
     effect_runner: &EffectRunner<Action>,
     action_rx: &mut mpsc::UnboundedReceiver<Action>,
@@ -448,8 +442,7 @@ pub(crate) fn handle_wheel_sql(
     }
     *last_wheel = Some((now, dir, horizontal));
 
-    if let Some(size) = terminal.size().ok()
-        && let Some(tab_area) = sql_tab_area_for_hit(size, state)
+    if let Some(tab_area) = sql_tab_area_for_hit(size, state)
         && let Some(tab_idx) = state.sql.sql_tab.active_tab
         && let Some(tab) = state.sql.sql_tab.tabs.get(tab_idx)
     {

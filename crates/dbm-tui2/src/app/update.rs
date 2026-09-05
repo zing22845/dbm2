@@ -76,7 +76,10 @@ fn sync_objects_binding(
 ) -> Option<AppMsg> {
     use crate::features::explorer::instances::state::ActiveWorkspaceKind;
     match instances.active_workspace {
-        Some(ActiveWorkspaceKind::Connection { instance_idx, conn_idx }) => {
+        Some(ActiveWorkspaceKind::Connection {
+            instance_idx,
+            conn_idx,
+        }) => {
             let instance = instances.instance_name(instance_idx);
             let connection = instances
                 .nodes
@@ -84,20 +87,21 @@ fn sync_objects_binding(
                 .and_then(|n| n.connections.get(conn_idx))
                 .map(|c| c.name.clone());
             if let Some(connection) = connection
-                && (objects.bound_instance != instance || objects.bound_connection != connection) {
-                    return Some(AppMsg::Explorer(
-                        crate::features::explorer::msg::ExplorerMsg::Message(
-                            crate::features::explorer::msg::ExplorerMessage::Objects(
-                                crate::features::explorer::objects::msg::ObjectsMsg::Message(
-                                    crate::features::explorer::objects::msg::ObjectsMessage::Bind {
-                                        instance,
-                                        connection,
-                                    },
-                                ),
+                && (objects.bound_instance != instance || objects.bound_connection != connection)
+            {
+                return Some(AppMsg::Explorer(
+                    crate::features::explorer::msg::ExplorerMsg::Message(
+                        crate::features::explorer::msg::ExplorerMessage::Objects(
+                            crate::features::explorer::objects::msg::ObjectsMsg::Message(
+                                crate::features::explorer::objects::msg::ObjectsMessage::Bind {
+                                    instance,
+                                    connection,
+                                },
                             ),
                         ),
-                    ));
-                }
+                    ),
+                ));
+            }
             None
         }
         _ => {
@@ -182,7 +186,9 @@ fn focus_pane_of(msg: &AppMsg) -> Option<Pane> {
             crate::app_shell::nav::ExplorerPane::default(),
         )),
         AppMsg::Discover(_) => Some(Pane::Discover(DiscoverPane::default())),
-        AppMsg::Iw(_) => Some(Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::default())),
+        AppMsg::Iw(_) => Some(Pane::InstanceWorkspace(
+            crate::app_shell::nav::IwPane::default(),
+        )),
         AppMsg::Sql(_) => Some(Pane::SQLWorkspace),
         AppMsg::Perf(_) => Some(Pane::SQLWorkspace),
     }
@@ -404,19 +410,17 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                 // Keep the objects tree's binding + active schema synced to the
                 // active SQL tab on focus changes too (not just SQL edits), so
                 // entering or leaving the workspace reflects the current state.
-                if let Some(bind) = sync_objects_binding(
-                    &mut state.explorer.objects,
-                    &state.explorer.instances,
-                ) {
+                if let Some(bind) =
+                    sync_objects_binding(&mut state.explorer.objects, &state.explorer.instances)
+                {
                     result.pending.push_back(bind);
                 }
-                if let Some(effect) = sync_objects_active(
-                    &mut state.explorer.objects,
-                    &state.sql,
-                ) {
+                if let Some(effect) = sync_objects_active(&mut state.explorer.objects, &state.sql) {
                     // Lift the objects effect into an explorer effect so it can
                     // be type-erased against the global action type.
-                    result.effects.push(box_effect(ExplorerEffect::Objects(effect)));
+                    result
+                        .effects
+                        .push(box_effect(ExplorerEffect::Objects(effect)));
                 }
             }
             crate::app_shell::msg::ShellMsg::ToggleTheme => {
@@ -431,12 +435,13 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // header feature's own update so the modal state is ready for the
             // frame that follows.
             let opened_discover = if let HeaderMsg::Message(HeaderMessage::Activate) = &m
-                && state.header.button == 0 {
-                    open_discover(state);
-                    true
-                } else {
-                    false
-                };
+                && state.header.button == 0
+            {
+                open_discover(state);
+                true
+            } else {
+                false
+            };
             let HeaderMsg::Message(inner) = m;
             // The header feature's update is a pure by-value transition: move
             // the state out, update it, move the result back. No deep clone.
@@ -734,7 +739,9 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                 //   - other objects (procedure/function/sequence) open a new SQL
                 //     tab scoped to the object's database/schema.
                 if let ExplorerIntent::Objects(
-                    crate::features::explorer::objects::intent::ObjectsIntent::OpenObject { target },
+                    crate::features::explorer::objects::intent::ObjectsIntent::OpenObject {
+                        target,
+                    },
                 ) = intent
                 {
                     let instance = state.explorer.objects.bound_instance.clone();
@@ -794,11 +801,7 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                     },
                 ) = intent
                 {
-                    let tab_id = state
-                        .sql
-                        .sql_tab
-                        .active_tab()
-                        .map(|t| t.session.id);
+                    let tab_id = state.sql.sql_tab.active_tab().map(|t| t.session.id);
                     if let Some(tab_id) = tab_id {
                         let sql_msg = SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                             SqlTabMessage::ApplyContext {
@@ -821,17 +824,15 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // connection selected in the tree — changes `active_workspace`, so
             // the objects tree must rebind here too, not only on SQL/focus
             // changes. `Bind` is idempotent, so a redundant bind is a no-op.
-            if let Some(bind) = sync_objects_binding(
-                &mut state.explorer.objects,
-                &state.explorer.instances,
-            ) {
+            if let Some(bind) =
+                sync_objects_binding(&mut state.explorer.objects, &state.explorer.instances)
+            {
                 result.pending.push_back(bind);
             }
-            if let Some(effect) = sync_objects_active(
-                &mut state.explorer.objects,
-                &state.sql,
-            ) {
-                result.effects.push(box_effect(ExplorerEffect::Objects(effect)));
+            if let Some(effect) = sync_objects_active(&mut state.explorer.objects, &state.sql) {
+                result
+                    .effects
+                    .push(box_effect(ExplorerEffect::Objects(effect)));
             }
         }
         AppMsg::Discover(m) => {
@@ -903,13 +904,14 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // to the explorer (matching the original dbm's post-unregister
             // `reload_tree` + focus return).
             if let IwMsg::Message(IwMessage::Unregistered { instance }) = &m {
-                tracing::debug!(instance, "shell: instance unregistered; returning to explorer");
+                tracing::debug!(
+                    instance,
+                    "shell: instance unregistered; returning to explorer"
+                );
                 result.pending.push_back(explorer_load_instances_msg());
                 result.pending.push_back(AppMsg::Shell(
                     crate::app_shell::msg::ShellMsg::FocusChanged {
-                        pane: Pane::Explorer(
-                            crate::app_shell::nav::ExplorerPane::default(),
-                        ),
+                        pane: Pane::Explorer(crate::app_shell::nav::ExplorerPane::default()),
                     },
                 ));
             }
@@ -992,17 +994,15 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
             // Keep the objects tree's binding + active schema in sync with the
             // active SQL tab / connection. The active path is forced expanded
             // and cannot be collapsed (original dbm).
-            if let Some(bind) = sync_objects_binding(
-                &mut state.explorer.objects,
-                &state.explorer.instances,
-            ) {
+            if let Some(bind) =
+                sync_objects_binding(&mut state.explorer.objects, &state.explorer.instances)
+            {
                 result.pending.push_back(bind);
             }
-            if let Some(effect) = sync_objects_active(
-                &mut state.explorer.objects,
-                &state.sql,
-            ) {
-                result.effects.push(box_effect(ExplorerEffect::Objects(effect)));
+            if let Some(effect) = sync_objects_active(&mut state.explorer.objects, &state.sql) {
+                result
+                    .effects
+                    .push(box_effect(ExplorerEffect::Objects(effect)));
             }
         }
         AppMsg::Footer(m) => {
@@ -1032,41 +1032,19 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
     result
 }
 
-/// Apply an action produced by an effect.
-///
-/// Every action is converted into the message(s) it should dispatch back into
-/// the router via [`action_to_app_msgs`], then applied through `update_unchecked`
-/// (which bypasses the focus guard, since effect results are delivered
-/// programmatically). This mirrors the message-round drain exactly, so an
-/// async action received here as a `recv()` seed is never dropped or handled
-/// differently from one drained in bulk.
-pub fn handle_action(action: Action, state: &mut AppState) -> UpdateResult {
-    let mut result = UpdateResult::new();
-    for msg in crate::app::loop_mod::action_to_app_msgs(action) {
-        let sub = update_unchecked(msg, state);
-        result.dirty |= sub.dirty;
-        result.intents.extend(sub.intents);
-        result.effects.extend(sub.effects);
-        result.pending.extend(sub.pending);
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::app_shell::nav::IwPane;
 
     fn explorer_load_msg() -> AppMsg {
-        AppMsg::Explorer(
-            crate::features::explorer::msg::ExplorerMsg::Message(
-                crate::features::explorer::msg::ExplorerMessage::Instances(
-                    crate::features::explorer::instances::msg::InstancesMsg::Message(
-                        crate::features::explorer::instances::msg::InstancesMessage::Load,
-                    ),
+        AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
+            crate::features::explorer::msg::ExplorerMessage::Instances(
+                crate::features::explorer::instances::msg::InstancesMsg::Message(
+                    crate::features::explorer::instances::msg::InstancesMessage::Load,
                 ),
             ),
-        )
+        ))
     }
 
     fn focus_changed_msg(pane: Pane) -> AppMsg {
@@ -1105,7 +1083,10 @@ mod tests {
         // Active workspace is an instance -> objects are unbound (prompt shown).
         instances.set_active_instance(0);
         assert!(sync_objects_binding(&mut objects, &instances).is_none());
-        assert!(objects.bound_connection.is_empty(), "instance-active must unbind objects");
+        assert!(
+            objects.bound_connection.is_empty(),
+            "instance-active must unbind objects"
+        );
     }
 
     #[test]
@@ -1114,7 +1095,10 @@ mod tests {
         use crate::features::explorer::instances::state::ActiveWorkspaceKind;
 
         let mut state = AppState::default();
-        state.explorer.instances.set_instances(vec![sample_managed_instance("inst")]);
+        state
+            .explorer
+            .instances
+            .set_instances(vec![sample_managed_instance("inst")]);
         state.explorer.instances.nodes[0].expanded = true;
         // A saved connection-active pending restore (set by `apply_snapshot`);
         // loading this instance's connections refines the active workspace onto
@@ -1135,22 +1119,30 @@ mod tests {
         );
         assert_eq!(
             state.explorer.instances.active_workspace,
-            Some(ActiveWorkspaceKind::Connection { instance_idx: 0, conn_idx: 0 })
+            Some(ActiveWorkspaceKind::Connection {
+                instance_idx: 0,
+                conn_idx: 0
+            })
         );
         // The pending queue must carry a Bind for the active connection.
-        let has_bind = r.pending.iter().any(|m| matches!(
-            m,
-            AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
-                crate::features::explorer::msg::ExplorerMessage::Objects(
-                    crate::features::explorer::objects::msg::ObjectsMsg::Message(
-                        crate::features::explorer::objects::msg::ObjectsMessage::Bind {
-                            instance, connection
-                        }
+        let has_bind = r.pending.iter().any(|m| {
+            matches!(
+                m,
+                AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
+                    crate::features::explorer::msg::ExplorerMessage::Objects(
+                        crate::features::explorer::objects::msg::ObjectsMsg::Message(
+                            crate::features::explorer::objects::msg::ObjectsMessage::Bind {
+                                instance, connection
+                            }
+                        )
                     )
-                )
-            )) if instance == "inst" && connection == "c1"
-        ));
-        assert!(has_bind, "explorer-driven activation must request an objects bind");
+                )) if instance == "inst" && connection == "c1"
+            )
+        });
+        assert!(
+            has_bind,
+            "explorer-driven activation must request an objects bind"
+        );
     }
 
     #[test]
@@ -1175,7 +1167,10 @@ mod tests {
             },
             s,
         );
-        assert!(effects.is_empty(), "duplicate bind must not reload databases");
+        assert!(
+            effects.is_empty(),
+            "duplicate bind must not reload databases"
+        );
         assert!(!dirty, "duplicate bind must not mark the view dirty");
         assert!(s.bound_connection == "c1");
     }
@@ -1214,8 +1209,6 @@ mod tests {
             "sub-pane focus must survive leaving and re-entering the workspace"
         );
     }
-
-
 
     #[test]
     fn focus_changed_rejected_while_discover_owns_focus() {
@@ -1277,10 +1270,7 @@ mod tests {
     fn focus_changed_allowed_when_not_discover() {
         let mut state = AppState::default();
         state.focus = Pane::Header;
-        update(
-            focus_changed_msg(Pane::SQLWorkspace),
-            &mut state,
-        );
+        update(focus_changed_msg(Pane::SQLWorkspace), &mut state);
         assert_eq!(state.focus, Pane::SQLWorkspace);
     }
 
@@ -1310,7 +1300,10 @@ mod tests {
             &mut state,
         );
         // The focus must not move away from the dirty edit form.
-        assert_eq!(state.focus, before, "dirty edit form must block pane switch");
+        assert_eq!(
+            state.focus, before,
+            "dirty edit form must block pane switch"
+        );
         assert!(
             result.dirty,
             "blocking must repaint so the status notice is shown"
@@ -1366,15 +1359,15 @@ mod tests {
     #[test]
     fn focus_history_not_dirty_when_workspace_already_focused() {
         use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-        let focus_msg = |focus| AppMsg::Sql(
-            crate::features::sql_workspace::msg::SqlMsg::Message(
+        let focus_msg = |focus| {
+            AppMsg::Sql(crate::features::sql_workspace::msg::SqlMsg::Message(
                 crate::features::sql_workspace::msg::SqlMessage::SqlTab(
                     crate::features::sql_workspace::sql_tab::msg::SqlTabMsg::Message(
                         crate::features::sql_workspace::sql_tab::msg::SqlTabMessage::Focus(focus),
                     ),
                 ),
-            ),
-        );
+            ))
+        };
 
         // While the workspace already owns focus, a `Focus(History)` that
         // doesn't change the sub-pane must not dirty — otherwise clicking an
@@ -1457,14 +1450,14 @@ mod tests {
         );
     }
 
-    fn explorer_instances_msg(m: crate::features::explorer::instances::msg::InstancesMessage) -> AppMsg {
-        AppMsg::Explorer(
-            crate::features::explorer::msg::ExplorerMsg::Message(
-                crate::features::explorer::msg::ExplorerMessage::Instances(
-                    crate::features::explorer::instances::msg::InstancesMsg::Message(m),
-                ),
+    fn explorer_instances_msg(
+        m: crate::features::explorer::instances::msg::InstancesMessage,
+    ) -> AppMsg {
+        AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
+            crate::features::explorer::msg::ExplorerMessage::Instances(
+                crate::features::explorer::instances::msg::InstancesMsg::Message(m),
             ),
-        )
+        ))
     }
 
     fn sample_managed_instance(name: &str) -> dbm_store::ManagedInstance {
@@ -1510,7 +1503,10 @@ mod tests {
         use crate::features::explorer::instances::msg::InstancesMessage;
 
         let mut state = AppState::default();
-        state.explorer.instances.set_instances(vec![sample_managed_instance("inst")]);
+        state
+            .explorer
+            .instances
+            .set_instances(vec![sample_managed_instance("inst")]);
         // Expand the instance and load one connection so `cursor_selection`
         // resolves to a connection row.
         state.explorer.instances.nodes[0].expanded = true;
@@ -1536,11 +1532,17 @@ mod tests {
         assert_eq!(state.sql.sql_tab.tabs[0].session.sequence, 1);
 
         // `n` always opens a fresh tab -> <sql 2>, then <sql 3>.
-        drain(&mut state, explorer_instances_msg(InstancesMessage::NewConnectionTab));
+        drain(
+            &mut state,
+            explorer_instances_msg(InstancesMessage::NewConnectionTab),
+        );
         assert_eq!(state.sql.sql_tab.tabs.len(), 2);
         assert_eq!(state.sql.sql_tab.tabs[1].session.sequence, 2);
 
-        drain(&mut state, explorer_instances_msg(InstancesMessage::NewConnectionTab));
+        drain(
+            &mut state,
+            explorer_instances_msg(InstancesMessage::NewConnectionTab),
+        );
         assert_eq!(state.sql.sql_tab.tabs.len(), 3);
         assert_eq!(state.sql.sql_tab.tabs[2].session.sequence, 3);
     }
@@ -1551,7 +1553,10 @@ mod tests {
         use crate::features::explorer::instances::state::ActiveWorkspaceKind;
 
         let mut state = AppState::default();
-        state.explorer.instances.set_instances(vec![sample_managed_instance("inst")]);
+        state
+            .explorer
+            .instances
+            .set_instances(vec![sample_managed_instance("inst")]);
         // Collapsed and not loaded (right after startup).
         state.explorer.instances.nodes[0].expanded = false;
         state.explorer.instances.nodes[0].loaded = false;
@@ -1560,10 +1565,7 @@ mod tests {
         // Selecting the collapsed instance force-expands it (active workspace)
         // and must keep the expanded/loaded state consistent by requesting its
         // connections (a LoadConnections effect).
-        let r = update_unchecked(
-            explorer_instances_msg(InstancesMessage::Select),
-            &mut state,
-        );
+        let r = update_unchecked(explorer_instances_msg(InstancesMessage::Select), &mut state);
         assert_eq!(
             state.explorer.instances.active_workspace,
             Some(ActiveWorkspaceKind::Instance(0))
@@ -1577,8 +1579,8 @@ mod tests {
 
     #[test]
     fn closing_all_tabs_leaves_sql_tab_empty() {
-        use crate::features::sql_workspace::sql_tab::msg::SqlTabMessage;
         use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+        use crate::features::sql_workspace::sql_tab::msg::SqlTabMessage;
 
         let mut state = AppState::default();
         // Open one tab for the active connection.
