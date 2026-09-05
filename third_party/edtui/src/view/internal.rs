@@ -369,7 +369,7 @@ mod tests {
         // given a highlighted line
         let base = Style::default();
         let hightlighted = Style::default().red();
-        let line = "Hello".chars().into_iter().collect::<Vec<char>>();
+        let line = "Hello".chars().collect::<Vec<char>>();
 
         let selection = Some(Selection::new(Index2::new(0, 0), Index2::new(0, 2)));
         let selections = vec![&selection];
@@ -394,7 +394,7 @@ mod tests {
         ];
 
         // when `split_spans` is called
-        let new_spans = InternalSpan::split_spans(&spans, 1, 1, &hightlighted);
+        let new_spans = InternalSpan::split_spans(&spans, 1, 1, hightlighted);
 
         // then the span is split correctly
         assert_eq!(new_spans[0], InternalSpan::new("H", base));
@@ -403,7 +403,7 @@ mod tests {
         assert_eq!(new_spans[3], InternalSpan::new("lo!", base));
 
         // when
-        let new_spans = InternalSpan::split_spans(&spans, 1, 2, &hightlighted);
+        let new_spans = InternalSpan::split_spans(&spans, 1, 2, hightlighted);
 
         // then
         assert_eq!(new_spans[0], InternalSpan::new("H", base));
@@ -411,7 +411,7 @@ mod tests {
         assert_eq!(new_spans[2], InternalSpan::new("lo!", base));
 
         // when
-        let new_spans = InternalSpan::split_spans(&spans, 1, 3, &hightlighted);
+        let new_spans = InternalSpan::split_spans(&spans, 1, 3, hightlighted);
 
         // then
         assert_eq!(new_spans[0], InternalSpan::new("H", base));
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(new_spans[3], InternalSpan::new("o!", base));
 
         // when
-        let new_spans = InternalSpan::split_spans(&spans, 1, 10, &hightlighted);
+        let new_spans = InternalSpan::split_spans(&spans, 1, 10, hightlighted);
 
         // then
         assert_eq!(new_spans[0], InternalSpan::new("H", base));
@@ -436,7 +436,7 @@ mod tests {
         let spans = vec![InternalSpan::new("Hell🙂!", base)];
 
         // when `split_spans` is called
-        let new_spans = InternalSpan::split_spans(&spans, 2, 4, &hightlighted);
+        let new_spans = InternalSpan::split_spans(&spans, 2, 4, hightlighted);
 
         // then the span is split correctly
         assert_eq!(new_spans[0], InternalSpan::new("He", base));
@@ -494,7 +494,7 @@ mod tests {
         // when `split_at_selection` is called
         let selection = Selection::new(Index2::new(0, 1), Index2::new(0, 3));
         let new_spans =
-            InternalSpan::split_at_selection(&spans, 0, &selection, &hightlighted).unwrap();
+            InternalSpan::split_at_selection(&spans, 0, &selection, hightlighted).unwrap();
 
         // then spans are correctly split
         assert_eq!(new_spans[0], InternalSpan::new("H", base));
@@ -516,7 +516,7 @@ mod tests {
         // when `split_at_selection` is called
         let selection = Selection::new(Index2::new(0, 3), Index2::new(0, 5));
         let new_spans =
-            InternalSpan::split_at_selection(&spans, 0, &selection, &hightlighted).unwrap();
+            InternalSpan::split_at_selection(&spans, 0, &selection, hightlighted).unwrap();
 
         // then spans are correctly split
         assert_eq!(new_spans[0], InternalSpan::new("Hel", base));

@@ -67,11 +67,9 @@ impl ActiveScrollbar {
     /// The axis this scrollbar scrolls along.
     pub fn axis(self) -> ScrollAxis {
         match self {
-            Self::TreeH
-            | Self::ObjectsH
-            | Self::ResultsH
-            | Self::HistoryH
-            | Self::OverviewH => ScrollAxis::Horizontal,
+            Self::TreeH | Self::ObjectsH | Self::ResultsH | Self::HistoryH | Self::OverviewH => {
+                ScrollAxis::Horizontal
+            }
             Self::TreeV
             | Self::ObjectsV
             | Self::ResultsV
@@ -116,7 +114,12 @@ impl ScrollbarDrag {
             ScrollAxis::Horizontal => x,
             ScrollAxis::Vertical => y,
         };
-        scroll_offset_from_track(pointer, self.track_start, self.viewport_len, self.max_scroll)
+        scroll_offset_from_track(
+            pointer,
+            self.track_start,
+            self.viewport_len,
+            self.max_scroll,
+        )
     }
 }
 
@@ -130,8 +133,11 @@ pub struct ScrollbarStyle {
 pub fn results_scrollbar_style(palette: &Palette, dragging: bool) -> ScrollbarStyle {
     ScrollbarStyle {
         track: Style::default().fg(palette.border),
-        thumb: Style::default()
-            .fg(if dragging { palette.accent } else { palette.muted }),
+        thumb: Style::default().fg(if dragging {
+            palette.accent
+        } else {
+            palette.muted
+        }),
     }
 }
 
@@ -150,7 +156,9 @@ pub fn scroll_offset_from_track(
         return 0;
     }
     let denom = track_len.saturating_sub(1);
-    let rel = pointer.saturating_sub(track_start).min(track_len.saturating_sub(1) as u16) as usize;
+    let rel = pointer
+        .saturating_sub(track_start)
+        .min(track_len.saturating_sub(1) as u16) as usize;
     let pos = (rel * max_scroll) / denom;
     pos.min(max_scroll)
 }
@@ -273,7 +281,11 @@ pub fn pane_anchor(
 ) -> PaneAnchor {
     let ext = content_extent.max(1);
     if total == 0 {
-        return PaneAnchor { start: 0, max_scroll: 0, visible: 0 };
+        return PaneAnchor {
+            start: 0,
+            max_scroll: 0,
+            visible: 0,
+        };
     }
 
     match heights {
@@ -284,7 +296,7 @@ pub fn pane_anchor(
             let max_start = if total_ext <= ext {
                 0
             } else {
-                total.saturating_sub((ext + step - 1) / step)
+                total.saturating_sub(ext.div_ceil(step))
             };
             let viewport_units = ext / step;
             let cursor = cursor.min(total - 1);
@@ -298,7 +310,11 @@ pub fn pane_anchor(
             }
             start = start.min(max_start);
             let visible = (total - start).min(viewport_units);
-            PaneAnchor { start, max_scroll: max_start, visible }
+            PaneAnchor {
+                start,
+                max_scroll: max_start,
+                visible,
+            }
         }
         RowHeights::Variable(h) => {
             // Cumulative tops: cum[0]=0, cum[i]=sum of heights[0..i].
@@ -309,14 +325,13 @@ pub fn pane_anchor(
             let total_ext = cum[total];
             // Largest start with cum[start] <= total_ext - ext.
             let max_pixel = total_ext.saturating_sub(ext);
-            let mut max_start = 0usize;
-            for i in 0..=total {
-                if cum[i] <= max_pixel {
-                    max_start = i;
-                } else {
-                    break;
-                }
-            }
+            // `cum` is ascending and cum[0] == 0 <= max_pixel, so the count is
+            // at least 1 and the last qualifying index is count - 1.
+            let max_start = cum
+                .iter()
+                .take_while(|&&top| top <= max_pixel)
+                .count()
+                .saturating_sub(1);
             let cursor = cursor.min(total - 1);
             let mut start = scroll.min(max_start);
             if !scroll_locked {
@@ -354,7 +369,11 @@ pub fn pane_anchor(
             if visible == 0 && start < total {
                 visible = 1;
             }
-            PaneAnchor { start, max_scroll: max_start, visible }
+            PaneAnchor {
+                start,
+                max_scroll: max_start,
+                visible,
+            }
         }
     }
 }
@@ -519,7 +538,10 @@ mod tests {
         assert_eq!(a.start, 7);
         // scroll past max clamps, and a cursor inside that clamped window is kept.
         let a = pane_anchor(total, RowHeights::Uniform(1), ext, 999, 25, false);
-        assert_eq!(a.start, 20, "scroll clamps to max_scroll; cursor 25 inside [20,30) stays");
+        assert_eq!(
+            a.start, 20,
+            "scroll clamps to max_scroll; cursor 25 inside [20,30) stays"
+        );
     }
 
     #[test]
@@ -544,8 +566,8 @@ mod tests {
         assert!(a.start + a.visible <= total);
         // visible window must not exceed the extent.
         let mut px = 0;
-        for i in a.start..a.start + a.visible {
-            px += h[i];
+        for &row_h in &h[a.start..a.start + a.visible] {
+            px += row_h;
         }
         assert!(px <= 4, "visible window must not exceed extent, got {px}");
     }

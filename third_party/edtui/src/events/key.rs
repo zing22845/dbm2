@@ -1,6 +1,8 @@
 pub(crate) mod deprecated;
 pub(crate) mod input;
 
+#[cfg(feature = "system-editor")]
+use crate::actions::OpenSystemEditor;
 use crate::actions::cpaste::PasteOverSelection;
 use crate::actions::delete::{
     DeleteCharForward, DeleteToEndOfLine, DeleteToFirstCharOfLine, DeleteWordBackward,
@@ -10,8 +12,6 @@ use crate::actions::motion::{
     MoveHalfPageDown, MovePageDown, MovePageUp, MoveToFirstRow, MoveToLastRow,
 };
 use crate::actions::search::StartSearch;
-#[cfg(feature = "system-editor")]
-use crate::actions::OpenSystemEditor;
 use crate::actions::{
     Action, AppendCharToSearch, AppendNewline, Chainable, ChangeInnerBetween, ChangeInnerWord,
     ChangeSelection, CopyLine, CopySelection, DeleteChar, DeleteLine, DeleteSelection, Execute,
@@ -1032,8 +1032,10 @@ mod tests {
     fn test_insert_hello_world() {
         use crate::EditorState;
 
-        let mut state = EditorState::default();
-        state.mode = EditorMode::Insert;
+        let mut state = EditorState {
+            mode: EditorMode::Insert,
+            ..EditorState::default()
+        };
 
         let mut handler = KeyEventHandler::default();
 
@@ -1068,8 +1070,10 @@ mod tests {
         use crate::EditorState;
         use crossterm::event::{KeyEvent as CTKeyEvent, KeyModifiers as CTMods};
 
-        let mut state = EditorState::default();
-        state.mode = EditorMode::Insert;
+        let mut state = EditorState {
+            mode: EditorMode::Insert,
+            ..EditorState::default()
+        };
 
         let mut handler = KeyEventHandler::emacs_mode();
 

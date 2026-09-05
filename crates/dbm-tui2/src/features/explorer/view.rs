@@ -6,22 +6,28 @@
 //! child panes are always visible; the one that owns focus draws an active
 //! border.
 
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 
 use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
-use super::state::{ExplorerPane, ExplorerState};
 use super::instances::view as instances_view;
 use super::objects::view as objects_view;
 use super::splitter::view as splitter_view;
+use super::state::{ExplorerPane, ExplorerState};
 
 /// Render the explorer parent pane: a bordered " Explorer " block wrapping the
 /// instances tree (top) and objects tree (bottom). `focused` controls whether
 /// the outer explorer border is the active one; the active child sub-pane's own
 /// border highlights too (matching the original dbm where the focused pane
 /// draws an active border).
+///
+/// `render` is a thin assembler that fans its inputs out to the three child
+/// views (instances, splitter, objects) — every parameter is a distinct piece
+/// of state one of those children needs, so the signature is kept flat rather
+/// than bundled into a context struct.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
