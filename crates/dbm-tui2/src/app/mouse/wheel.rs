@@ -17,10 +17,10 @@ use crate::app_shell::effect::EffectRunner;
 use crate::features::global_footer::view as footer_view;
 
 use super::click::explorer_child_areas;
-use super::geometry::{
+use crate::app::geometry::{
     app_explorer_rect, iw_body_area_for_hit, sql_tab_area_for_hit, workspace_rect_for_hit,
 };
-use super::loop_mod::{AppTerminal, process_message_round};
+use crate::app::loop_mod::{AppTerminal, process_message_round};
 
 /// Trackpad wheel debounce window: a macOS trackpad emits a burst of ticks per
 /// physical gesture, so ticks closer together than this collapse into one.

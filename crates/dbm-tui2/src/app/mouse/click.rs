@@ -9,7 +9,7 @@ use ratatui::layout::Rect;
 use crate::app::msg::AppMsg;
 use crate::app::state::AppState;
 
-use super::geometry::app_explorer_rect;
+use crate::app::geometry::app_explorer_rect;
 
 /// Compute the two explorer child tree areas (instances top / objects bottom)
 /// from the explorer's outer rect, mirroring `explorer/view.rs` (the stored

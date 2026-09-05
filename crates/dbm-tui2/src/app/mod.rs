@@ -2,9 +2,7 @@
 //! central update dispatcher and the run loop.
 
 pub mod action;
-pub mod click;
 pub mod geometry;
-pub mod hover;
 pub mod input;
 pub mod loop_mod;
 pub mod mouse;
@@ -13,7 +11,6 @@ pub mod session;
 pub mod state;
 pub mod update;
 pub mod view;
-pub mod wheel;
 
 pub use msg::AppMsg;
 pub use state::{AppState, ModalKind};

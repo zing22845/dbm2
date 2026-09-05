@@ -26,8 +26,8 @@ use ratatui::layout::Rect;
 use tokio::sync::mpsc;
 
 use crate::app::action::Action;
-use crate::app::hover::normalize_splitter_tracks;
 use crate::app::mouse::clear_active_drags;
+use crate::app::mouse::hover::normalize_splitter_tracks;
 use crate::app::msg::AppMsg;
 use crate::app::state::AppState;
 use crate::app::update::{UpdateResult, handle_action, update_unchecked};

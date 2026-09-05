@@ -9,7 +9,7 @@ use ratatui::layout::Rect;
 use crate::app_shell::pane::Pane;
 use crate::features::global_footer::view as footer_view;
 
-use super::geometry::{
+use crate::app::geometry::{
     app_body_geometry, app_explorer_rect, sql_tab_area_for_hit, workspace_rect_for_hit,
 };
 
