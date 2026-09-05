@@ -63,6 +63,27 @@ fn clear_active_drags(state: &mut AppState) {
     state.splitter_hover.results_col_resize_drag = None;
 }
 
+/// The splitter a mouse press resolved to, i.e. the one being drag-resized.
+///
+/// A single `Option` (rather than one flag per splitter) makes a drag mutually
+/// exclusive **by construction**: `Down` arms at most one target, and `Drag`
+/// dispatches on that target alone, so a drag can never resize a second split.
+///
+/// Each variant also fixes the axis its drag reads — a vertical splitter owns a
+/// width (reads `x`), a horizontal one owns a height (reads `y`) — so dragging
+/// a splitter cannot move the other dimension either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SplitterDrag {
+    /// App-level Explorer / workspace splitter (vertical: width, reads `x`).
+    App,
+    /// Explorer instances / objects splitter (horizontal: height, reads `y`).
+    Explorer,
+    /// Discover targets / results splitter (horizontal: height, reads `y`).
+    Discover,
+    /// A SQL-tab splitter inside the given tab (axis depends on the variant).
+    Sql(usize, crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter),
+}
+
 pub async fn run_event_loop() -> anyhow::Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -143,11 +164,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         Err(e) => tracing::warn!("failed to restore TUI session: {e}"),
     }
 
-    // Which SQL-tab splitter is being drag-resized, if any. This is transient
+    // Which splitter is being drag-resized, if any. This is transient
     // interaction state that lives only for the lifetime of a drag gesture; it
     // never reaches `AppState` (TEA: state mutations still flow through
     // `update` via split-resize messages).
-    let mut split_drag: Option<(usize, crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter)> = None;
+    //
+    // One slot covers every splitter, so releasing the button ends whichever
+    // one was armed. The previous four independent flags were never reset on
+    // `Up`, so a drag of one splitter kept firing on every later drag.
+    let mut splitter_drag: Option<SplitterDrag> = None;
 
     // The hardware caret position placed on the previous frame. The editor's
     // caret is written straight to the terminal (crossterm `MoveTo`) rather
@@ -155,20 +180,6 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // change count stays 0. Tracking it lets the redundancy metric tell a
     // caret-only move apart from a genuinely redundant repaint.
     let mut last_cursor_pos: Option<ratatui::layout::Position> = None;
-
-    // Whether the app-level Explorer / workspace splitter is being dragged.
-    // This is separate from `split_drag` because the app splitter is draggable
-    // from any focus pane (it separates two peer top-level panes), not just
-    // from within the SQL workspace.
-    let mut app_split_drag = false;
-
-    // Whether the discover targets/results splitter is being dragged (only
-    // meaningful while the discover parent pane owns focus).
-    let mut discover_split_drag = false;
-
-    // Whether the explorer instances/objects splitter is being dragged (only
-    // meaningful while the explorer owns focus).
-    let mut explorer_split_drag = false;
 
     // Which scrollbar (if any) is being dragged lives in `state.scrollbar_drag`
     // rather than in a local per-bar `Option`. Only one drag can be active at a
@@ -179,7 +190,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
     // lives outside `AppState` because it is transient interaction state, like
-    // `split_drag`.
+    // `splitter_drag`.
     let mut last_click: Option<(ratatui::layout::Position, std::time::Instant)> = None;
 
     // Event-driven, on-demand redraw (mirrors the original dbm "Route B"): the
@@ -376,9 +387,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     // intervening `Up`.
                     if matches!(mouse.kind, MouseEventKind::Down(_))
                         && (state.scrollbar_drag.is_some()
+                            || splitter_drag.is_some()
                             || state.splitter_hover.results_col_resize_drag.is_some()
                             || state.splitter_hover.dragging_flags().iter().any(|&f| f))
                     {
+                        splitter_drag = None;
                         state.scrollbar_drag = None;
                         state.splitter_hover.set_dragging_flags([false; 7]);
                         state.splitter_hover.results_col_resize_drag = None;
@@ -547,7 +560,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 )
                                 && crate::features::discover::splitter::view::splitter_at(&layout, point.x, point.y)
                             {
-                                discover_split_drag = true;
+                                splitter_drag = Some(SplitterDrag::Discover);
                                 state.splitter_hover.discover_splitter_drag = true;
                                 tracing::debug!("discover targets/results splitter drag started");
                             }
@@ -897,7 +910,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // ignored (only Enter/Esc operate on the dialog).
                             if let Pane::Discover(sub) = state.focus
                                 && !state.discover.close_confirm
-                                && !discover_split_drag
+                                && splitter_drag.is_none()
                                 && let Some(workspace) =
                                     workspace_rect_for_hit(size, body_top, body_h, &state)
                                 && let Some(next) = discover_subpane_for_click(
@@ -928,7 +941,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // click (matching original dbm behavior).
                             if let Pane::Discover(sub) = state.focus
                                 && !state.discover.close_confirm
-                                && !discover_split_drag
+                                && splitter_drag.is_none()
                                 && matches!(
                                     sub,
                                     crate::app_shell::nav::DiscoverPane::Targets
@@ -1044,7 +1057,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // toggle). Much simpler than targets (no cells).
                             if let Pane::Discover(sub) = state.focus
                                 && !state.discover.close_confirm
-                                && !discover_split_drag
+                                && splitter_drag.is_none()
                                 && matches!(sub, crate::app_shell::nav::DiscoverPane::Results)
                                 && let Some(workspace) =
                                     workspace_rect_for_hit(size, body_top, body_h, &state)
@@ -1574,97 +1587,46 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 tracing::debug!("dispatching HeaderMessage::Activate");
                             }
 
-                            // Starting a drag on the app-level Explorer /
-                            // workspace splitter begins a resize gesture. It is
-                            // draggable from any focus pane (it separates two
-                            // peer top-level panes), so it is checked before the
-                            // SQL-tab splitters below.
-                            let body_top = 3u16;
-                            let body_h = terminal
-                                .size()?
-                                .height
-                                .saturating_sub(body_top)
-                                .saturating_sub(footer_view::footer_height(&state.footer, size.width));
-                            if body_h >= 3
-                                && {
-                                    let body_area = Rect::new(0, body_top, size.width, body_h);
-                                    let layout = crate::features::app_splitter::view::app_body_layout(
-                                        body_area,
-                                        state.splitter.explorer_pane_width,
-                                    );
-                                    crate::features::app_splitter::view::splitter_at(&layout, point.x, point.y)
-                                }
+                            // Resolve the press to the *single* splitter being
+                            // dragged (see `resolve_splitter_drag`). The
+                            // discover splitter is resolved earlier — before the
+                            // click re-maps focus — and already holds the slot
+                            // when it hit, which is why this is skipped then.
+                            if splitter_drag.is_none()
+                                && let Some(target) =
+                                    resolve_splitter_drag(&state, size, point.x, point.y)
                             {
-                                app_split_drag = true;
-                                state.splitter_hover.app_splitter_drag = true;
-                                tracing::debug!("app explorer/workspace splitter drag started");
-                            }
-
-                            // Starting a drag on the explorer instances/objects
-                            // splitter (only while the explorer owns focus) begins
-                            // a resize gesture.
-                            if matches!(state.focus, Pane::Explorer(_))
-                                && body_h >= 3
-                                && let Some(explorer) =
-                                    app_explorer_rect(size, body_top, body_h, &state)
-                                && explorer.height >= 3
-                                && {
-                                    let inner = Rect::new(
-                                        explorer.x.saturating_add(1),
-                                        explorer.y.saturating_add(1),
-                                        explorer.width.saturating_sub(2),
-                                        explorer.height.saturating_sub(2),
-                                    );
-                                    let layout =
-                                        crate::features::explorer::splitter::view::explorer_body_layout(
-                                            inner,
-                                            state.explorer.splitter.instances_height,
-                                        );
-                                    crate::features::explorer::splitter::view::splitter_at(
-                                        &layout, point.x, point.y,
-                                    )
-                                }
-                            {
-                                explorer_split_drag = true;
-                                state.splitter_hover.explorer_splitter_drag = true;
-                                tracing::debug!("explorer instances/objects splitter drag started");
-                            }
-
-                            // Starting a drag on a SQL-tab splitter begins a
-                            // resize gesture (only when the SQL workspace owns
-                            // focus and it is actually rendered). The feature
-                            // resolves the point to a splitter; the shell only
-                            // supplies the area and the coordinates.
-                            if state.focus == Pane::SQLWorkspace
-                                && let Some(tab_area) = sql_tab_area_for_hit(terminal.size()?, &state)
-                                && let Some((tab_id, splitter)) = crate::features::sql_workspace::sql_tab::splitter::view::sql_tab_splitter_at(
-                                    &state.sql.sql_tab,
-                                    tab_area,
-                                    point.x,
-                                    point.y,
-                                ) {
-                                    split_drag = Some((tab_id, splitter));
-                                    use crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter;
-                                    let sh = &mut state.splitter_hover;
-                                    match splitter {
-                                        SqlSplitter::EditorResults => {
-                                            sh.sql_editor_results_drag = true;
-                                        }
-                                        SqlSplitter::EditorHistory => {
-                                            sh.sql_editor_history_drag = true;
-                                        }
-                                        SqlSplitter::HistoryDetail => {
-                                            sh.sql_history_detail_drag = true;
-                                        }
-                                        SqlSplitter::ResultsDetail => {
-                                            sh.sql_results_detail_drag = true;
-                                        }
+                                splitter_drag = Some(target);
+                                use crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter;
+                                let sh = &mut state.splitter_hover;
+                                match target {
+                                    SplitterDrag::App => sh.app_splitter_drag = true,
+                                    SplitterDrag::Explorer => sh.explorer_splitter_drag = true,
+                                    SplitterDrag::Discover => sh.discover_splitter_drag = true,
+                                    SplitterDrag::Sql(_, SqlSplitter::EditorResults) => {
+                                        sh.sql_editor_results_drag = true
                                     }
-                                    tracing::debug!(?splitter, "splitter drag started");
+                                    SplitterDrag::Sql(_, SqlSplitter::EditorHistory) => {
+                                        sh.sql_editor_history_drag = true
+                                    }
+                                    SplitterDrag::Sql(_, SqlSplitter::HistoryDetail) => {
+                                        sh.sql_history_detail_drag = true
+                                    }
+                                    SplitterDrag::Sql(_, SqlSplitter::ResultsDetail) => {
+                                        sh.sql_results_detail_drag = true
+                                    }
                                 }
+                                tracing::debug!(?target, "splitter drag started");
+                            }
                         }
                         MouseEventKind::Drag(MouseButton::Left) => {
-                            if discover_split_drag {
+                            // Exactly one of the arms below can match:
+                            // `splitter_drag` is a single slot armed by the
+                            // press, so a drag resizes only the splitter it
+                            // started on — and only along that splitter's own
+                            // axis (a vertical splitter reads `x`, a horizontal
+                            // one reads `y`).
+                            if splitter_drag == Some(SplitterDrag::Discover) {
                                 let size = terminal.size()?;
                                 let body_top = 3u16;
                                 let body_h = size
@@ -1702,7 +1664,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     }
                                 }
                             }
-                            if explorer_split_drag {
+                            if splitter_drag == Some(SplitterDrag::Explorer) {
                                 let size = terminal.size()?;
                                 let body_top = 3u16;
                                 let body_h = size
@@ -1742,7 +1704,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     dirty |= result.dirty;
                                 }
                             }
-                            if app_split_drag {
+                            if splitter_drag == Some(SplitterDrag::App) {
                                 let size = terminal.size()?;
                                 let body_top = 3u16;
                                 let body_h = size
@@ -1763,7 +1725,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     dirty |= result.dirty;
                                 }
                             }
-                            if let Some((tab_id, splitter)) = split_drag {
+                            if let Some(SplitterDrag::Sql(tab_id, splitter)) = splitter_drag {
                                 tracing::trace!(?splitter, ?point, "drag move begin");
                                 let size = terminal.size()?;
                                 // The feature resolves the drag to a resize
@@ -2070,17 +2032,27 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // once (scrollbar, splitters, results column-resize).
                             // The debug logs below are kept for diagnostics; the
                             // state clear itself is delegated to `clear_active_drags`.
-                            if explorer_split_drag {
-                                tracing::debug!("explorer instances/objects splitter drag finished");
-                            }
-                            if discover_split_drag {
-                                tracing::debug!("discover targets/results splitter drag finished");
-                            }
-                            if app_split_drag {
-                                tracing::debug!("app explorer/workspace splitter drag finished");
-                            }
-                            if split_drag.take().is_some() {
-                                tracing::debug!("splitter drag finished");
+                            // `take()` *ends* the drag: the target is cleared,
+                            // not merely logged, so a finished drag cannot leak
+                            // into the next one. The old per-splitter booleans
+                            // were only read here and never reset, so every
+                            // later drag also resized whatever had been dragged
+                            // before (a vertical move resizing a horizontal
+                            // split and vice versa).
+                            match splitter_drag.take() {
+                                Some(SplitterDrag::Explorer) => tracing::debug!(
+                                    "explorer instances/objects splitter drag finished"
+                                ),
+                                Some(SplitterDrag::Discover) => tracing::debug!(
+                                    "discover targets/results splitter drag finished"
+                                ),
+                                Some(SplitterDrag::App) => {
+                                    tracing::debug!("app explorer/workspace splitter drag finished")
+                                }
+                                Some(SplitterDrag::Sql(_, splitter)) => {
+                                    tracing::debug!(?splitter, "splitter drag finished")
+                                }
+                                None => {}
                             }
                             let col_resize = state.splitter_hover.results_col_resize_drag;
                             if col_resize.is_some() {
@@ -2117,9 +2089,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // real (button-held) drag produces `Drag` events, never
                             // `Moved`, so this can never fire mid-drag.
                             if state.scrollbar_drag.is_some()
+                                || splitter_drag.is_some()
                                 || state.splitter_hover.results_col_resize_drag.is_some()
                                 || state.splitter_hover.dragging_flags().iter().any(|&f| f)
                             {
+                                splitter_drag = None;
                                 clear_active_drags(&mut state);
                                 needs_redraw = true;
                             }
@@ -2688,9 +2662,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     // "active" forever (the scrollbar thumb keeps its accent
                     // color). Clear every in-progress drag here so the UI resets.
                     let was_dragging = state.scrollbar_drag.is_some()
+                        || splitter_drag.is_some()
                         || state.splitter_hover.results_col_resize_drag.is_some()
                         || state.splitter_hover.dragging_flags().iter().any(|&f| f);
                     if was_dragging {
+                        splitter_drag = None;
                         clear_active_drags(&mut state);
                         needs_redraw = true;
                     }
@@ -2761,18 +2737,31 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
 /// are always cleaned up, even if the event loop exits via an error (`?`) or a
 /// panic. Without this, an early return leaves the terminal in raw mode and the
 /// alternate screen, which makes it look frozen and unresponsive to keys.
+/// Restore the terminal to its normal state: raw mode off, alternate screen
+/// left, mouse capture off, hardware cursor back to the user's default shape.
+///
+/// Every step ignores its error and the whole function is idempotent, so it is
+/// safe to call from a panic hook: a partially restored terminal (or a second
+/// call after the normal teardown) must never block the rest of the cleanup or
+/// make the crash report itself fail.
+pub fn restore_terminal() {
+    let _ = crossterm::terminal::disable_raw_mode();
+    let _ = crossterm::execute!(
+        std::io::stdout(),
+        crossterm::terminal::LeaveAlternateScreen,
+        crossterm::event::DisableMouseCapture,
+        crossterm::event::DisableFocusChange,
+        crossterm::event::DisableBracketedPaste
+    );
+    let _ = crate::common::editor::reset_hardware_cursor();
+    let _ = crossterm::execute!(std::io::stdout(), crossterm::cursor::Show);
+}
+
 struct TerminalGuard;
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::LeaveAlternateScreen,
-            crossterm::event::DisableMouseCapture,
-            crossterm::event::DisableFocusChange,
-            crossterm::event::DisableBracketedPaste
-        );
+        restore_terminal();
     }
 }
 
@@ -2896,6 +2885,84 @@ fn sql_tab_area_for_hit(
         inner.width,
         inner.height.saturating_sub(footer_h),
     ))
+}
+
+/// Resolve which splitter a press at `(x, y)` starts a drag on.
+///
+/// Covers the splitters hit-tested **after** the click has re-mapped focus —
+/// the app-level Explorer/workspace one, the Explorer instances/objects one and
+/// the SQL-tab ones. (The discover splitter is resolved earlier, while focus is
+/// still the pre-click one, so it is deliberately not part of this function.)
+///
+/// Candidates are checked in a fixed priority order and the first hit wins, so
+/// a press arms **at most one** splitter: a single drag can never resize two
+/// splits, and each target later reads only the axis it owns. Every candidate
+/// is gated on actually being rendered, so a drag cannot start on a splitter
+/// the user cannot see.
+fn resolve_splitter_drag(
+    state: &AppState,
+    size: ratatui::layout::Size,
+    x: u16,
+    y: u16,
+) -> Option<SplitterDrag> {
+    let body_top = 3u16;
+    let body_h = size
+        .height
+        .saturating_sub(body_top)
+        .saturating_sub(footer_view::footer_height(&state.footer, size.width));
+    if body_h < 3 {
+        return None;
+    }
+
+    // The app-level Explorer / workspace splitter is draggable from any focus
+    // pane: it separates two peer top-level panes rather than the panes of one
+    // feature.
+    {
+        let body_area = Rect::new(0, body_top, size.width, body_h);
+        let layout = crate::features::app_splitter::view::app_body_layout(
+            body_area,
+            state.splitter.explorer_pane_width,
+        );
+        if crate::features::app_splitter::view::splitter_at(&layout, x, y) {
+            return Some(SplitterDrag::App);
+        }
+    }
+
+    // The Explorer instances / objects splitter: only while the Explorer owns
+    // focus, since the split lives inside the Explorer pane.
+    if matches!(state.focus, Pane::Explorer(_))
+        && let Some(explorer) = app_explorer_rect(size, body_top, body_h, state)
+        && explorer.height >= 3
+    {
+        let inner = Rect::new(
+            explorer.x.saturating_add(1),
+            explorer.y.saturating_add(1),
+            explorer.width.saturating_sub(2),
+            explorer.height.saturating_sub(2),
+        );
+        let layout = crate::features::explorer::splitter::view::explorer_body_layout(
+            inner,
+            state.explorer.splitter.instances_height,
+        );
+        if crate::features::explorer::splitter::view::splitter_at(&layout, x, y) {
+            return Some(SplitterDrag::Explorer);
+        }
+    }
+
+    // The SQL-tab splitters: only while the SQL workspace owns focus. The
+    // feature resolves the point to a splitter; the shell only supplies the
+    // area and the coordinates.
+    if state.focus == Pane::SQLWorkspace
+        && let Some(tab_area) = sql_tab_area_for_hit(size, state)
+        && let Some((tab_id, splitter)) =
+            crate::features::sql_workspace::sql_tab::splitter::view::sql_tab_splitter_at(
+                &state.sql.sql_tab, tab_area, x, y,
+            )
+    {
+        return Some(SplitterDrag::Sql(tab_id, splitter));
+    }
+
+    None
 }
 
 /// Compute the Instance Workspace's **body** rect (active sub-pane content,
@@ -4166,6 +4233,151 @@ mod tests {
     use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
     use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
     use crate::features::sql_workspace::sql_tab::results::state::QueryResultData;
+
+    /// The app body geometry (top row, height) that mouse hit-testing is
+    /// computed against, for a given terminal size.
+    fn test_body(state: &AppState, size: ratatui::layout::Size) -> (u16, u16) {
+        let body_top = 3u16;
+        let body_h = size
+            .height
+            .saturating_sub(body_top)
+            .saturating_sub(footer_view::footer_height(&state.footer, size.width));
+        (body_top, body_h)
+    }
+
+    /// The rect of the Explorer instances/objects horizontal splitter.
+    fn test_explorer_splitter_rect(
+        state: &AppState,
+        size: ratatui::layout::Size,
+        body_top: u16,
+        body_h: u16,
+    ) -> Rect {
+        let explorer = app_explorer_rect(size, body_top, body_h, state).expect("explorer rect");
+        let inner = Rect::new(
+            explorer.x.saturating_add(1),
+            explorer.y.saturating_add(1),
+            explorer.width.saturating_sub(2),
+            explorer.height.saturating_sub(2),
+        );
+        crate::features::explorer::splitter::view::explorer_body_layout(
+            inner,
+            state.explorer.splitter.instances_height,
+        )
+        .splitter
+    }
+
+    /// One press arms **at most one** splitter. Regression guard: the drag
+    /// targets used to be four independent booleans that were never reset on
+    /// `Up`, so a drag of one splitter also resized every split dragged earlier
+    /// (a vertical move changing a height, a horizontal move changing a width).
+    #[test]
+    fn resolve_splitter_drag_arms_exactly_one_target() {
+        use crate::features::explorer::state::ExplorerPane;
+
+        let mut state = AppState::default();
+        state.term_width = 120;
+        state.term_height = 40;
+        // The Explorer owns focus, so its instances/objects splitter is
+        // eligible — the app-level splitter must still win on its own column.
+        state.focus = Pane::Explorer(ExplorerPane::Instances);
+        let size = ratatui::layout::Size::new(120, 40);
+        let (body_top, body_h) = test_body(&state, size);
+        let layout = crate::features::app_splitter::view::app_body_layout(
+            Rect::new(0, body_top, size.width, body_h),
+            state.splitter.explorer_pane_width,
+        );
+
+        // On the app-level vertical splitter: only the app splitter arms.
+        assert_eq!(
+            resolve_splitter_drag(&state, size, layout.v_splitter.x, layout.v_splitter.y + 5),
+            Some(SplitterDrag::App)
+        );
+
+        // On the Explorer's horizontal splitter: only that one arms.
+        let ex = test_explorer_splitter_rect(&state, size, body_top, body_h);
+        assert_eq!(
+            resolve_splitter_drag(&state, size, ex.x + 3, ex.y),
+            Some(SplitterDrag::Explorer)
+        );
+
+        // Inside a pane (on no splitter at all): nothing arms.
+        assert_eq!(resolve_splitter_drag(&state, size, 2, body_top + 1), None);
+    }
+
+    /// Every row of the app-level vertical splitter resolves to `App` —
+    /// including the row the Explorer's horizontal splitter occupies. The two
+    /// own different axes, so a vertical drag must never reach a height split.
+    #[test]
+    fn vertical_splitter_rows_never_resolve_to_a_height_split() {
+        use crate::features::explorer::state::ExplorerPane;
+
+        let mut state = AppState::default();
+        state.term_width = 120;
+        state.term_height = 40;
+        state.focus = Pane::Explorer(ExplorerPane::Instances);
+        let size = ratatui::layout::Size::new(120, 40);
+        let (body_top, body_h) = test_body(&state, size);
+        let layout = crate::features::app_splitter::view::app_body_layout(
+            Rect::new(0, body_top, size.width, body_h),
+            state.splitter.explorer_pane_width,
+        );
+        for dy in 0..layout.v_splitter.height {
+            assert_eq!(
+                resolve_splitter_drag(&state, size, layout.v_splitter.x, layout.v_splitter.y + dy),
+                Some(SplitterDrag::App),
+                "row {dy} of the vertical splitter must not resolve to another split"
+            );
+        }
+    }
+
+    /// With the SQL workspace focused, a press on the editor/history splitter
+    /// arms that splitter alone — not the app-level one — so a drag there cannot
+    /// resize the Explorer width (the reported "horizontal drag moves the
+    /// Explorer" symptom).
+    #[test]
+    fn sql_tab_splitter_arms_without_the_app_splitter() {
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+
+        let mut state = AppState::default();
+        state.term_width = 120;
+        state.term_height = 40;
+        state.focus = Pane::SQLWorkspace;
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+            None,
+        );
+        state.sql.sql_tab.tabs[0].focus = SqlFocus::Editor;
+        let size = ratatui::layout::Size::new(120, 40);
+        let tab_area = sql_tab_area_for_hit(size, &state).expect("sql tab area");
+        let body = Rect::new(
+            tab_area.x,
+            tab_area.y.saturating_add(1),
+            tab_area.width,
+            tab_area.height.saturating_sub(1),
+        );
+        let tab = &state.sql.sql_tab.tabs[0];
+        let layout = crate::features::sql_workspace::sql_tab::layout::sql_tab_layout(
+            body,
+            tab.splitter.editor_top_height,
+            tab.splitter.history_pane_width,
+        );
+
+        let got =
+            resolve_splitter_drag(&state, size, layout.v_splitter.x, layout.v_splitter.y + 1);
+        assert!(
+            matches!(got, Some(SplitterDrag::Sql(_, _))),
+            "a press on the SQL editor/history splitter must arm it, got {got:?}"
+        );
+        assert_ne!(
+            got,
+            Some(SplitterDrag::App),
+            "the app-level width splitter must not arm alongside it"
+        );
+    }
 
     #[test]
     fn wheel_axis_maps_shift_and_native_horizontal_ticks() {

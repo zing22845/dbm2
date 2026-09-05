@@ -30,8 +30,53 @@ pub fn run() -> anyhow::Result<()> {
 ///   `warn`, written to stderr).
 pub fn run_with_log_file(log_file: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     init_tracing(log_file);
+    install_panic_hook();
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(run_async())
+    // Catch a panic from anywhere in the TUI (event loop, update, render) so a
+    // crash is reported as an error carrying the panic message, instead of
+    // unwinding out of `main`. The hook installed above has already restored the
+    // terminal and printed the message plus a backtrace, so this only shapes the
+    // process exit; it never swallows the diagnostic.
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        runtime.block_on(run_async())
+    })) {
+        Ok(result) => result,
+        Err(payload) => {
+            let message = panic_payload_message(payload);
+            Err(anyhow::anyhow!("TUI panicked: {message}"))
+        }
+    }
+}
+
+/// Install a panic hook that restores the terminal **before** the panic report
+/// is written, so a crash never leaves the terminal in raw mode / the alternate
+/// screen — it would look frozen and swallow the panic text. Mirrors the
+/// original dbm's `install_panic_hook`.
+///
+/// The hook also forces a backtrace: the default hook only prints one when
+/// `RUST_BACKTRACE` is set, so without this a crash reported from the field
+/// would have no stack to go on unless the user reproduced it with the env var.
+fn install_panic_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            crate::app::loop_mod::restore_terminal();
+            default_hook(info);
+            eprintln!("{}", std::backtrace::Backtrace::force_capture());
+        }));
+    });
+}
+
+/// Extract the human-readable message from a caught panic payload.
+fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(msg) = payload.downcast_ref::<&str>() {
+        return (*msg).to_string();
+    }
+    if let Some(msg) = payload.downcast_ref::<String>() {
+        return msg.clone();
+    }
+    "unknown panic".to_string()
 }
 
 /// Initialize the tracing subscriber.
