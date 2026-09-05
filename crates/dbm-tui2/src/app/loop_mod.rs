@@ -26,7 +26,8 @@ use ratatui::layout::Rect;
 use tokio::sync::mpsc;
 
 use crate::app::action::Action;
-use crate::app::mouse::{clear_active_drags, normalize_splitter_tracks};
+use crate::app::hover::normalize_splitter_tracks;
+use crate::app::mouse::clear_active_drags;
 use crate::app::msg::AppMsg;
 use crate::app::state::AppState;
 use crate::app::update::{UpdateResult, handle_action, update_unchecked};
@@ -35,6 +36,10 @@ use crate::app_shell::effect::EffectRunner;
 use crate::app_shell::intent::IntentRouter;
 use crate::features::global_footer::view as footer_view;
 use crate::features::perf_monitor::backend::CountingBackend;
+
+/// The terminal the run loop drives: a cell-change counting backend wrapping
+/// crossterm. Only its size is needed here (to hit-test against the layout).
+pub(crate) type AppTerminal = Terminal<CountingBackend<CrosstermBackend<std::io::Stdout>>>;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
 /// Upper bound on how many messages are processed in a single event round
