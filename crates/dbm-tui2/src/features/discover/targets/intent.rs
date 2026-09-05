@@ -1,7 +1,7 @@
 //! Discovery targets editor feature intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::TargetsMsg;
+use crate::app_shell::intent::Intent;
 
 #[derive(Debug, Clone)]
 pub enum TargetsIntent {}

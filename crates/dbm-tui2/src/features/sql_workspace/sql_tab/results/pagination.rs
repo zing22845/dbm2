@@ -295,7 +295,14 @@ pub fn layout_pagination_bar(
         };
     }
 
-    let pieces = toolbar_pieces(row_limit, page, total, row_count, counting, show_count_button);
+    let pieces = toolbar_pieces(
+        row_limit,
+        page,
+        total,
+        row_count,
+        counting,
+        show_count_button,
+    );
     let text_len = pieces.iter().map(|p| p.text.chars().count()).sum::<usize>() as u16;
     let bar_width = text_len.min(area.width);
     let bar_x = area.x.saturating_add(area.width.saturating_sub(bar_width));

@@ -1,10 +1,10 @@
 //! Instance overview feature rendering.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::common::utils::text_width::wrapped_line_count;
 use crate::common::view::pane_scrollbar::{
@@ -321,10 +321,23 @@ mod tests {
         assert_eq!(
             labels,
             vec![
-                "Name", "Engine", "Version", "Version (full)", "Version checked",
-                "Instance ID", "Fingerprint", "Host", "Port", "Socket",
-                "Data directory", "Environment", "Registered at", "Connections",
-                "Management scope", "Lifecycle checked", "Query readiness",
+                "Name",
+                "Engine",
+                "Version",
+                "Version (full)",
+                "Version checked",
+                "Instance ID",
+                "Fingerprint",
+                "Host",
+                "Port",
+                "Socket",
+                "Data directory",
+                "Environment",
+                "Registered at",
+                "Connections",
+                "Management scope",
+                "Lifecycle checked",
+                "Query readiness",
             ]
         );
         assert_eq!(rows[13].1, "3 registered");
@@ -355,9 +368,9 @@ mod tests {
 
     #[test]
     fn lifecycle_change_repaints_nonzero_cells() {
-        use ratatui::backend::TestBackend;
-        use ratatui::Terminal;
         use crate::common::view::theme;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
         let theme = theme::default();
         let area = Rect::new(0, 0, 60, 20);
         let mut terminal = Terminal::new(TestBackend::new(60, 20)).unwrap();
@@ -389,14 +402,17 @@ mod tests {
             .zip(buf2.content().iter())
             .filter(|(a, b)| a.symbol() != b.symbol())
             .count();
-        assert!(changed > 0, "lifecycle change must repaint cells, got {changed}");
+        assert!(
+            changed > 0,
+            "lifecycle change must repaint cells, got {changed}"
+        );
     }
 
     #[test]
     fn narrow_width_wraps_long_rows_instead_of_cropping() {
-        use ratatui::backend::TestBackend;
-        use ratatui::Terminal;
         use crate::common::view::theme;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
         let theme = theme::default();
         let area = Rect::new(0, 0, 16, 30);
         let mut terminal = Terminal::new(TestBackend::new(16, 30)).unwrap();
@@ -412,11 +428,7 @@ mod tests {
             .unwrap();
         let buf = terminal.backend().buffer().clone();
 
-        let text: String = buf
-            .content()
-            .iter()
-            .map(|c| c.symbol())
-            .collect();
+        let text: String = buf.content().iter().map(|c| c.symbol()).collect();
         assert!(
             text.contains("x86_64-pc-linux-gnu"),
             "long value should wrap into view, buffer contains: {text:?}"
@@ -435,16 +447,22 @@ mod tests {
             ..Default::default()
         };
         let area = Rect::new(0, 0, 80, 6); // v_scrollbar reserves 1 col → 59 rows wide? No, scrollbar only on overflow
-                                          // area.height=6, rows=17 → overflow → v_scrollbar → content.height=5
+        // area.height=6, rows=17 → overflow → v_scrollbar → content.height=5
         let ov = compute_overview_viewport(area, &s, 0).expect("some viewport");
-        assert_eq!(ov.start, 12, "anchor: cursor=16, viewport=5 -> start=16-5+1");
+        assert_eq!(
+            ov.start, 12,
+            "anchor: cursor=16, viewport=5 -> start=16-5+1"
+        );
 
         // scroll_locked skips anchor.
         s.scroll_locked = true;
         s.scroll = 5;
         s.cursor = 0;
         let ov = compute_overview_viewport(area, &s, 0).expect("some viewport");
-        assert_eq!(ov.start, 5, "scroll_locked keeps manual scroll even if cursor is at top");
+        assert_eq!(
+            ov.start, 5,
+            "scroll_locked keeps manual scroll even if cursor is at top"
+        );
     }
 
     #[test]

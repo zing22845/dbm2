@@ -49,7 +49,11 @@ pub enum IwEffect {
 impl Effect for IwEffect {
     type Action = IwAction;
 
-    fn run(self, emit: Emitter<Self::Action>, services: Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
+    fn run(
+        self,
+        emit: Emitter<Self::Action>,
+        services: Arc<Services>,
+    ) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             match self {
                 IwEffect::Overview(e) => {

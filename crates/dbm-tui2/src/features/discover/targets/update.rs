@@ -2,10 +2,10 @@
 
 use dbm_discovery::{parse_port_spec, parse_targets_lines_lenient, validate_host};
 
+use super::effect::TargetsEffect;
+use super::intent::TargetsIntent;
 use super::msg::TargetsMessage;
 use super::state::{TargetCol, TargetRow, TargetsState};
-use super::intent::TargetsIntent;
-use super::effect::TargetsEffect;
 
 /// Update the targets editor state. Pure by-value transition: the caller moves
 /// the state in and receives the new state back.
@@ -273,7 +273,9 @@ fn push_undo(state: &mut TargetsState) {
 
 fn undo_targets(state: &mut TargetsState) -> bool {
     if let Some(prev) = state.undo_stack.pop() {
-        state.redo_stack.push(std::mem::replace(&mut state.targets, prev));
+        state
+            .redo_stack
+            .push(std::mem::replace(&mut state.targets, prev));
         state.row = state.row.min(state.targets.len().saturating_sub(1));
         state.status = Some(format!("Undone {} target(s)", state.targets.len()));
         true
@@ -285,7 +287,9 @@ fn undo_targets(state: &mut TargetsState) -> bool {
 
 fn redo_targets(state: &mut TargetsState) -> bool {
     if let Some(next) = state.redo_stack.pop() {
-        state.undo_stack.push(std::mem::replace(&mut state.targets, next));
+        state
+            .undo_stack
+            .push(std::mem::replace(&mut state.targets, next));
         state.row = state.row.min(state.targets.len().saturating_sub(1));
         state.status = Some(format!("Redone {} target(s)", state.targets.len()));
         true
@@ -383,7 +387,10 @@ mod tests {
     use super::*;
 
     fn paste(state: &mut TargetsState, contents: &str) -> bool {
-        let (s, _i, _e, dirty) = update(TargetsMessage::Paste(contents.to_string()), std::mem::take(state));
+        let (s, _i, _e, dirty) = update(
+            TargetsMessage::Paste(contents.to_string()),
+            std::mem::take(state),
+        );
         *state = s;
         dirty
     }
@@ -438,7 +445,10 @@ mod tests {
         // The first re-fed identical payload shows "Duplicate paste ignored"
         // and repaints once so the feedback is visible.
         let dirty = paste(&mut s, "db.example.com\t5432\n");
-        assert!(dirty, "first duplicate paste must repaint to show the status");
+        assert!(
+            dirty,
+            "first duplicate paste must repaint to show the status"
+        );
         assert_eq!(s.status.as_deref(), Some("Duplicate paste ignored"));
         // A further held-Cmd+V repeat keeps the same status, so it must NOT
         // repaint again (no redraw storm).
@@ -458,7 +468,10 @@ mod tests {
         let (s1, _i, _e, _d) = update(TargetsMessage::MoveDown, std::mem::take(&mut s));
         s = s1;
         let dirty = paste(&mut s, "db.example.com\t5432\n");
-        assert!(dirty, "a fresh paste that only duplicates must repaint the status");
+        assert!(
+            dirty,
+            "a fresh paste that only duplicates must repaint the status"
+        );
         let status = s.status.as_deref().expect("paste sets a status");
         assert!(status.contains("0/1 added"), "{status}");
         assert!(status.contains("1/1 duplicated"), "{status}");
@@ -482,14 +495,12 @@ mod tests {
         let mut s = TargetsState::with_default_targets();
         paste(&mut s, "db.example.com\t5432\n");
         // Undo the paste -> back to one target.
-        let (s1, _i, _e, dirty) =
-            update(TargetsMessage::Undo, std::mem::take(&mut s));
+        let (s1, _i, _e, dirty) = update(TargetsMessage::Undo, std::mem::take(&mut s));
         s = s1;
         assert!(dirty);
         assert!(s.status.as_deref().is_some_and(|t| t.contains("Undone")));
         // Redo -> target list grows again.
-        let (s2, _i, _e, dirty) =
-            update(TargetsMessage::Redo, std::mem::take(&mut s));
+        let (s2, _i, _e, dirty) = update(TargetsMessage::Redo, std::mem::take(&mut s));
         s = s2;
         assert!(dirty);
         assert!(s.status.as_deref().is_some_and(|t| t.contains("Redone")));

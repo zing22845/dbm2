@@ -125,7 +125,11 @@ pub fn analyze_editable_query_editability(sql: &str) -> QueryEditability {
     };
 
     let select_star = is_select_star(select_body, source.alias.as_deref());
-    let columns = if select_star { Vec::new() } else { parse_select_columns(select_body) };
+    let columns = if select_star {
+        Vec::new()
+    } else {
+        parse_select_columns(select_body)
+    };
     if !select_star && columns.is_empty() {
         return not_editable(EditabilityReason::ComputedColumns);
     }
@@ -146,7 +150,11 @@ pub fn analyze_editable_query_editability(sql: &str) -> QueryEditability {
 }
 
 fn not_editable(reason: EditabilityReason) -> QueryEditability {
-    QueryEditability { editable: false, analysis: None, reason: Some(reason) }
+    QueryEditability {
+        editable: false,
+        analysis: None,
+        reason: Some(reason),
+    }
 }
 
 /// Strip comments, then trim trailing whitespace and statement terminators.
@@ -243,10 +251,17 @@ fn parse_expression_alias(column: &str) -> Option<ExpressionAlias> {
     let trimmed_end = column.trim_end();
     for (index, _) in trimmed_end.match_indices(['A', 'a']) {
         let candidate = &trimmed_end[index..];
-        if !candidate.get(..2).is_some_and(|prefix| prefix.eq_ignore_ascii_case("AS")) {
+        if !candidate
+            .get(..2)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("AS"))
+        {
             continue;
         }
-        let before = if index == 0 { "" } else { &trimmed_end[..index] };
+        let before = if index == 0 {
+            ""
+        } else {
+            &trimmed_end[..index]
+        };
         if before.chars().last().is_some_and(is_identifier_char) {
             continue;
         }
@@ -263,7 +278,10 @@ fn parse_expression_alias(column: &str) -> Option<ExpressionAlias> {
         if expression.is_empty() {
             return None;
         }
-        return Some(ExpressionAlias { expression, result_name: alias.value });
+        return Some(ExpressionAlias {
+            expression,
+            result_name: alias.value,
+        });
     }
     None
 }
@@ -341,7 +359,13 @@ fn parse_from_source(body: &str) -> Option<FromSource> {
     } else {
         (None, false)
     };
-    Some(FromSource { schema, schema_quoted, table_name, table_name_quoted, alias })
+    Some(FromSource {
+        schema,
+        schema_quoted,
+        table_name,
+        table_name_quoted,
+        alias,
+    })
 }
 
 fn is_external_from_source(body: &str) -> bool {
@@ -365,7 +389,8 @@ fn is_single_quoted_source_with_optional_alias(text: &str) -> bool {
                 return true;
             }
             let alias_text = strip_leading_as(tail).unwrap_or(tail).trim();
-            return read_identifier(alias_text, 0).is_some_and(|alias| alias.end == alias_text.len());
+            return read_identifier(alias_text, 0)
+                .is_some_and(|alias| alias.end == alias_text.len());
         }
     }
     false
@@ -409,7 +434,11 @@ fn read_identifier(text: &str, start: usize) -> Option<Identifier> {
         let mut value = String::new();
         for (offset, ch) in chars {
             if ch == close {
-                return Some(Identifier { value, quoted: true, end: pos + offset + ch.len_utf8() });
+                return Some(Identifier {
+                    value,
+                    quoted: true,
+                    end: pos + offset + ch.len_utf8(),
+                });
             }
             value.push(ch);
         }
@@ -422,11 +451,19 @@ fn read_identifier(text: &str, start: usize) -> Option<Identifier> {
     let mut end = pos + first.len_utf8();
     for (offset, ch) in text[end..].char_indices() {
         if !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '$') {
-            return Some(Identifier { value: text[pos..end + offset].to_string(), quoted: false, end: end + offset });
+            return Some(Identifier {
+                value: text[pos..end + offset].to_string(),
+                quoted: false,
+                end: end + offset,
+            });
         }
     }
     end = text.len();
-    Some(Identifier { value: text[pos..end].to_string(), quoted: false, end })
+    Some(Identifier {
+        value: text[pos..end].to_string(),
+        quoted: false,
+        end,
+    })
 }
 
 fn skip_whitespace(text: &str, pos: usize) -> usize {
@@ -471,11 +508,16 @@ fn strip_sql_comments(sql: &str) -> String {
 }
 
 fn has_top_level_keyword(sql: &str, keywords: &[&str]) -> bool {
-    keywords.iter().any(|keyword| find_top_level_keyword(sql, keyword, 0).is_some())
+    keywords
+        .iter()
+        .any(|keyword| find_top_level_keyword(sql, keyword, 0).is_some())
 }
 
 fn first_top_level_keyword_index(sql: &str, keywords: &[&str], start: usize) -> Option<usize> {
-    keywords.iter().filter_map(|keyword| find_top_level_keyword(sql, keyword, start)).min()
+    keywords
+        .iter()
+        .filter_map(|keyword| find_top_level_keyword(sql, keyword, start))
+        .min()
 }
 
 fn find_top_level_keyword(sql: &str, keyword: &str, start: usize) -> Option<usize> {
@@ -535,7 +577,10 @@ fn starts_with_keyword(sql: &str, keyword: &str) -> bool {
     if !candidate.eq_ignore_ascii_case(keyword) {
         return false;
     }
-    !trimmed[keyword.len()..].chars().next().is_some_and(is_identifier_char)
+    !trimmed[keyword.len()..]
+        .chars()
+        .next()
+        .is_some_and(is_identifier_char)
 }
 
 fn contains_keyword(sql: &str, keyword: &str) -> bool {
@@ -583,8 +628,7 @@ pub fn all_primary_keys_present(pk: &[String], result_columns: &[&str]) -> bool 
 /// exactly 1 row (a multi-row or zero-row match is a stale-snapshot conflict).
 pub fn statement_requires_one_row(sql: &str) -> bool {
     let t = sql.trim_start();
-    t.len() >= 6
-        && (t[..6].eq_ignore_ascii_case("UPDATE") || t[..6].eq_ignore_ascii_case("DELETE"))
+    t.len() >= 6 && (t[..6].eq_ignore_ascii_case("UPDATE") || t[..6].eq_ignore_ascii_case("DELETE"))
 }
 
 #[cfg(test)]
@@ -647,7 +691,10 @@ mod tests {
     #[test]
     fn all_primary_keys_present_case_insensitive() {
         assert!(all_primary_keys_present(&["Id".into()], &["id", "name"]));
-        assert!(!all_primary_keys_present(&["id".into(), "tenant".into()], &["id", "name"]));
+        assert!(!all_primary_keys_present(
+            &["id".into(), "tenant".into()],
+            &["id", "name"]
+        ));
     }
 
     #[test]
@@ -740,8 +787,9 @@ mod tests {
 
     #[test]
     fn reports_joined_query_as_complex_source() {
-        let result =
-            analyze_editable_query_editability("select u.id, o.total from users u join orders o on o.user_id = u.id");
+        let result = analyze_editable_query_editability(
+            "select u.id, o.total from users u join orders o on o.user_id = u.id",
+        );
 
         assert!(!result.editable);
         assert_eq!(result.reason, Some(EditabilityReason::ComplexSource));
@@ -749,7 +797,9 @@ mod tests {
 
     #[test]
     fn reports_external_file_scan_as_external_source() {
-        let result = analyze_editable_query_editability("SELECT * FROM '/tmp/duckdb_excel_extension_test.xlsx'");
+        let result = analyze_editable_query_editability(
+            "SELECT * FROM '/tmp/duckdb_excel_extension_test.xlsx'",
+        );
 
         assert!(!result.editable);
         assert_eq!(result.reason, Some(EditabilityReason::ExternalSource));
@@ -757,7 +807,9 @@ mod tests {
 
     #[test]
     fn reports_grouped_query_as_aggregation() {
-        let result = analyze_editable_query_editability("select id, count(*) as total from users group by id");
+        let result = analyze_editable_query_editability(
+            "select id, count(*) as total from users group by id",
+        );
 
         assert!(!result.editable);
         assert_eq!(result.reason, Some(EditabilityReason::Aggregation));

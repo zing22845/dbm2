@@ -1,9 +1,9 @@
 //! Instance workspace feature intents.
 
-use crate::app_shell::intent::Intent;
-use super::msg::IwMsg;
 use super::connections::intent::ConnectionsIntent;
+use super::msg::IwMsg;
 use super::overview::intent::OverviewIntent;
+use crate::app_shell::intent::Intent;
 
 /// Intents emitted by the instance workspace feature. Child intents are
 /// wrapped so they can be lifted into the global router via `IwMsg`.

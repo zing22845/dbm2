@@ -5,11 +5,11 @@
 //! themed renderer (`draw_history_detail`) plus pure helpers for line
 //! counting, wrapping, and search-to-scroll mapping.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::common::components::line_numbers;
 use crate::common::components::search::{TextSearchOptions, find_match_starts};
@@ -66,7 +66,8 @@ pub fn clamp_detail_scroll(
     text_width_after: u16,
     viewport_lines: usize,
 ) {
-    let max = detail_display_line_count_at(text_width_after, sql).saturating_sub(viewport_lines.max(1));
+    let max =
+        detail_display_line_count_at(text_width_after, sql).saturating_sub(viewport_lines.max(1));
     state.scroll = state.scroll.min(max);
 }
 
@@ -141,7 +142,12 @@ fn highlight_style(current: bool, theme: &Theme) -> Style {
     }
 }
 
-fn line_to_spans(line: &str, query: &str, opts: TextSearchOptions, theme: &Theme) -> Vec<Span<'static>> {
+fn line_to_spans(
+    line: &str,
+    query: &str,
+    opts: TextSearchOptions,
+    theme: &Theme,
+) -> Vec<Span<'static>> {
     let query = query.trim();
     if query.is_empty() {
         return vec![Span::raw(line.to_string())];
@@ -287,7 +293,10 @@ pub fn draw_history_detail(
         .collect();
 
     if visible.is_empty() {
-        frame.render_widget(Paragraph::new("").style(Style::default().bg(p.surface)), text_area);
+        frame.render_widget(
+            Paragraph::new("").style(Style::default().bg(p.surface)),
+            text_area,
+        );
     } else {
         frame.render_widget(Paragraph::new(visible), text_area);
     }

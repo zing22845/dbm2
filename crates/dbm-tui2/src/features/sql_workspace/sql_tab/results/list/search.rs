@@ -13,9 +13,7 @@ use ratatui::text::{Line, Span};
 
 use crate::common::components::search::{PaneSearch, TextSearchOptions, find_match_starts};
 use crate::common::utils::text_width;
-use crate::common::view::format::{
-    display_width_char_prefix, truncate_cell_display_from,
-};
+use crate::common::view::format::{display_width_char_prefix, truncate_cell_display_from};
 
 use super::super::state::QueryResultData;
 
@@ -65,11 +63,7 @@ pub fn find_matches(
 }
 
 /// The match start char-indices within one cell, for highlight rendering.
-pub fn match_starts_in_cell(
-    matches: &[ResultsSearchMatch],
-    row: usize,
-    col: usize,
-) -> Vec<usize> {
+pub fn match_starts_in_cell(matches: &[ResultsSearchMatch], row: usize, col: usize) -> Vec<usize> {
     matches
         .iter()
         .filter(|m| m.row == row && m.col == col)
@@ -252,9 +246,9 @@ pub fn search_title_extra(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::style::Color;
     use crate::common::view::format::{results_col_text_view, results_table_width};
     use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+    use ratatui::style::Color;
 
     fn col(name: &str) -> ColumnInfo {
         ColumnInfo {
@@ -300,7 +294,10 @@ mod tests {
     #[test]
     fn find_matches_case_sensitive_by_default() {
         let r = sample();
-        assert_eq!(find_matches(&r, "BET", Some(1), TextSearchOptions::default()).len(), 0);
+        assert_eq!(
+            find_matches(&r, "BET", Some(1), TextSearchOptions::default()).len(),
+            0
+        );
     }
 
     #[test]
@@ -314,9 +311,21 @@ mod tests {
     fn match_starts_in_cell_lists_occurrences() {
         // "alpha": 'a' at char offsets 0 and 4.
         let matches = vec![
-            ResultsSearchMatch { row: 0, col: 1, start: 0 },
-            ResultsSearchMatch { row: 0, col: 1, start: 4 },
-            ResultsSearchMatch { row: 1, col: 1, start: 1 },
+            ResultsSearchMatch {
+                row: 0,
+                col: 1,
+                start: 0,
+            },
+            ResultsSearchMatch {
+                row: 0,
+                col: 1,
+                start: 4,
+            },
+            ResultsSearchMatch {
+                row: 1,
+                col: 1,
+                start: 1,
+            },
         ];
         assert_eq!(match_starts_in_cell(&matches, 0, 1), vec![0, 4]);
         assert_eq!(match_starts_in_cell(&matches, 1, 1), vec![1]);
@@ -343,7 +352,10 @@ mod tests {
             current,
         );
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "alpha beta", "highlight must not change the visible text");
+        assert_eq!(
+            text, "alpha beta",
+            "highlight must not change the visible text"
+        );
 
         // Segments: [0,1) current match, [1,4) plain, [4,5) other match, [5,10) plain.
         assert_eq!(line.spans.len(), 4);

@@ -4,30 +4,36 @@
 //! resolving the result's editability (via `Services::list_primary_keys`) and
 //! committing an edit batch (via `Services::commit_batch`).
 
+use super::detail::effect::DetailEffect;
+use super::edit_sql::EditTarget;
+use super::list::effect::ListEffect;
+use super::state::QueryResultData;
 use crate::app::action::Action;
 use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
 use crate::common::service::services::Services;
+use crate::common::utils::sql_editability::{
+    EditabilityReason, all_primary_keys_present, analyze_editable_query_editability,
+    editability_reason_message,
+};
 use crate::features::sql_workspace::effect::SqlAction;
 use crate::features::sql_workspace::sql_tab::effect::SqlTabAction;
-use crate::common::utils::sql_editability::{
-    all_primary_keys_present, analyze_editable_query_editability, editability_reason_message,
-    EditabilityReason,
-};
-use super::detail::effect::DetailEffect;
-use super::list::effect::ListEffect;
-use super::edit_sql::EditTarget;
-use super::state::QueryResultData;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResultsAction {
     /// A query completed with a result.
-    ResultReady { result: QueryResultData, paginated: bool },
+    ResultReady {
+        result: QueryResultData,
+        paginated: bool,
+    },
     /// A query failed.
     QueryError { message: String },
     /// The edit batch commit outcome.
     CommitResult { ok: bool, message: String },
     /// The editability of the result was resolved.
-    EditabilityReady { target: Option<EditTarget>, blocked: Option<String> },
+    EditabilityReady {
+        target: Option<EditTarget>,
+        blocked: Option<String>,
+    },
 }
 
 impl From<ResultsAction> for Action {
@@ -39,7 +45,10 @@ impl From<ResultsAction> for Action {
         // tab 0 as a safe default (the real routed path never goes through
         // here, so tab 0 is only reached by `sql_action_to_msg` for a streamed
         // child action).
-        Action::Sql(SqlAction::SqlTab(SqlTabAction::Results { tab_id: 0, action: a }))
+        Action::Sql(SqlAction::SqlTab(SqlTabAction::Results {
+            tab_id: 0,
+            action: a,
+        }))
     }
 }
 
@@ -80,13 +89,20 @@ pub enum ResultsEffect {
     Detail(DetailEffect),
     List(ListEffect),
     /// Sync the viewport dimensions after render (pure state update).
-    SyncViewport { rows: usize, width: u16 },
+    SyncViewport {
+        rows: usize,
+        width: u16,
+    },
 }
 
 impl Effect for ResultsEffect {
     type Action = ResultsAction;
 
-    fn run(self, _emit: Emitter<Self::Action>, services: std::sync::Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
+    fn run(
+        self,
+        _emit: Emitter<Self::Action>,
+        services: std::sync::Arc<Services>,
+    ) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             match self {
                 ResultsEffect::RunQuery {
@@ -155,8 +171,7 @@ impl Effect for ResultsEffect {
                     // Structural analysis first (pure, no DB round-trip).
                     let analysis = analyze_editable_query_editability(&sql);
                     if !analysis.editable {
-                        let reason =
-                            analysis.reason.unwrap_or(EditabilityReason::ComplexSource);
+                        let reason = analysis.reason.unwrap_or(EditabilityReason::ComplexSource);
                         return vec![ResultsAction::EditabilityReady {
                             target: None,
                             blocked: Some(editability_reason_message(reason)),
@@ -200,7 +215,9 @@ impl Effect for ResultsEffect {
                                 target: None,
                                 blocked: Some(format!(
                                     "{}: {e}",
-                                    editability_reason_message(EditabilityReason::MetadataUnavailable)
+                                    editability_reason_message(
+                                        EditabilityReason::MetadataUnavailable
+                                    )
                                 )),
                             }];
                         }
@@ -208,7 +225,9 @@ impl Effect for ResultsEffect {
                     if pks.is_empty() {
                         return vec![ResultsAction::EditabilityReady {
                             target: None,
-                            blocked: Some(editability_reason_message(EditabilityReason::NoPrimaryKey)),
+                            blocked: Some(editability_reason_message(
+                                EditabilityReason::NoPrimaryKey,
+                            )),
                         }];
                     }
                     if !all_primary_keys_present(&pks, &col_refs) {
@@ -221,7 +240,9 @@ impl Effect for ResultsEffect {
                             target: None,
                             blocked: Some(format!(
                                 "{}: missing {}",
-                                editability_reason_message(EditabilityReason::PrimaryKeyNotReturned),
+                                editability_reason_message(
+                                    EditabilityReason::PrimaryKeyNotReturned
+                                ),
                                 missing.join(", ")
                             )),
                         }];

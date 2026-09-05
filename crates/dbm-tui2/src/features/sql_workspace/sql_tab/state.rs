@@ -7,11 +7,11 @@
 
 use std::collections::HashMap;
 
-use super::session::TabSession;
 use super::editor::state::EditorState;
 use super::history::state::HistoryState;
 use super::history::store::SqlHistoryStore;
 use super::results::state::ResultsState;
+use super::session::TabSession;
 
 /// Which sub-pane of the SQL tab currently owns the keyboard focus. The editor
 /// and results/history panes share the workspace, so keys must be routed to one
@@ -166,7 +166,10 @@ impl SqlTabState {
         let Some(ref conn) = self.active_connection else {
             return 0;
         };
-        self.tabs.iter().filter(|tab| self.connection_key(&tab.session) == *conn).count()
+        self.tabs
+            .iter()
+            .filter(|tab| self.connection_key(&tab.session) == *conn)
+            .count()
     }
 
     /// Map a visible-tab offset (0-based, within the active connection's tabs)
@@ -314,7 +317,8 @@ impl SqlTabState {
         // Record this tab as the connection's last-active tab so every
         // connection always has a current tab (even one never switched away
         // from), letting new tabs inherit its context reliably.
-        self.connection_last_tab.insert(key.clone(), self.tabs.len() - 1);
+        self.connection_last_tab
+            .insert(key.clone(), self.tabs.len() - 1);
     }
 
     /// Resolve the database/schema for a newly opened tab. An explicit
@@ -400,7 +404,14 @@ impl SqlTabState {
             return false;
         }
         // 3) No existing tab: open a new one.
-        self.open_connection_tab(instance, connection, connection_id, database, schema, default_database);
+        self.open_connection_tab(
+            instance,
+            connection,
+            connection_id,
+            database,
+            schema,
+            default_database,
+        );
         true
     }
 
@@ -442,8 +453,7 @@ impl SqlTabState {
         // `None` the new tab inherits the connection's current context from its
         // most recent tab, or falls back to `default_database` + "public" when
         // the connection has no tab yet. `n` and `Alt+t` share this rule.
-        let (database, schema) =
-            self.inherit_context_for(&key, database, schema, default_database);
+        let (database, schema) = self.inherit_context_for(&key, database, schema, default_database);
         self.tabs.push(SqlTab {
             session: TabSession {
                 id,
@@ -487,7 +497,11 @@ impl SqlTabState {
 
         // Drop the last-active-tab bookmark when no tabs remain for this
         // connection, so a later reopen restores it fresh.
-        if !self.tabs.iter().any(|tab| self.connection_key(&tab.session) == key) {
+        if !self
+            .tabs
+            .iter()
+            .any(|tab| self.connection_key(&tab.session) == key)
+        {
             self.connection_last_tab.remove(&key);
         }
 
@@ -687,7 +701,11 @@ mod tests {
         let mut sorted = ids.clone();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(sorted.len(), ids.len(), "session ids must be globally unique");
+        assert_eq!(
+            sorted.len(),
+            ids.len(),
+            "session ids must be globally unique"
+        );
     }
 
     #[test]
@@ -861,7 +879,14 @@ mod tests {
 
         // Case A: a brand-new connection gets the connection's default database
         // (passed as `default_database`) + "public", matching the original dbm.
-        state.open_connection_tab("inst".into(), "c3".into(), "id3".into(), None, None, Some("postgres"));
+        state.open_connection_tab(
+            "inst".into(),
+            "c3".into(),
+            "id3".into(),
+            None,
+            None,
+            Some("postgres"),
+        );
         let case_a = state.tabs.last().unwrap();
         assert_eq!(case_a.session.database.as_deref(), Some("postgres"));
         assert_eq!(case_a.session.schema.as_deref(), Some("public"));
@@ -935,7 +960,10 @@ mod tests {
         if let Some(global) = state.visible_to_global(0) {
             state.close_tab(global);
         }
-        assert!(state.tabs.is_empty(), "closing the last tab must empty tabs");
+        assert!(
+            state.tabs.is_empty(),
+            "closing the last tab must empty tabs"
+        );
         assert_eq!(state.active_tab, None);
     }
 

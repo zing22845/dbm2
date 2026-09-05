@@ -8,8 +8,8 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
-use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::state::ModalKind;
 use crate::common::view::overlay_clear::clear_overlay;
@@ -82,9 +82,17 @@ pub fn render_modal_popup<'a, S, F>(
 ) where
     F: Fn(&mut Frame, &Theme, Rect, &'a S),
 {
-    render_popup(frame, theme, base, width_pct, height_pct, false, |f, popup| {
-        inner(f, theme, popup, state);
-    });
+    render_popup(
+        frame,
+        theme,
+        base,
+        width_pct,
+        height_pct,
+        false,
+        |f, popup| {
+            inner(f, theme, popup, state);
+        },
+    );
 }
 
 /// Render a titled, bordered popup containing `body_lines` (no header row).
@@ -113,9 +121,7 @@ pub fn modal_footer_text(modal: Option<&ModalKind>) -> String {
         Some(ModalKind::ResultsRowLimitPicker { .. }) => {
             "Select: ENTER · Move: j/k · Custom: c · Close: ESC".to_string()
         }
-        Some(ModalKind::ResultsPageInput { .. }) => {
-            "Go: ENTER · Close: ESC".to_string()
-        }
+        Some(ModalKind::ResultsPageInput { .. }) => "Go: ENTER · Close: ESC".to_string(),
         Some(ModalKind::DeleteConnectionConfirm { .. })
         | Some(ModalKind::UnregisterInstanceConfirm { .. })
         | Some(ModalKind::ResultsEditCommitPreview { .. }) => {
@@ -189,8 +195,12 @@ pub fn confirm_popup_rect(area: Rect, body_rows: usize) -> Rect {
     // border top + body rows + blank row + button row + border bottom.
     let popup_h = (body_rows as u16).saturating_add(4).clamp(6, 14);
     Rect {
-        x: area.x.saturating_add(area.width.saturating_sub(popup_w) / 2),
-        y: area.y.saturating_add(area.height.saturating_sub(popup_h) / 2),
+        x: area
+            .x
+            .saturating_add(area.width.saturating_sub(popup_w) / 2),
+        y: area
+            .y
+            .saturating_add(area.height.saturating_sub(popup_h) / 2),
         width: popup_w,
         height: popup_h.min(area.height),
     }
@@ -264,7 +274,11 @@ pub fn render_confirm_popup(
     // body rows, a blank spacer row, then the Yes/No button row.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
         .split(inner);
     // Wrap long body lines so a wide message (e.g. many SQL statements) folds
     // within the popup instead of being clipped.
@@ -400,8 +414,14 @@ mod tests {
         // Each rect is large enough for its (widened) label.
         assert!(b.yes_rect.width >= yes_button_label().chars().count() as u16);
         assert!(b.no_rect.width >= no_button_label().chars().count() as u16);
-        assert!(b.yes_rect.contains(Position::new(b.yes_rect.x + 1, b.yes_rect.y)));
-        assert!(b.no_rect.contains(Position::new(b.no_rect.x + 1, b.no_rect.y)));
+        assert!(
+            b.yes_rect
+                .contains(Position::new(b.yes_rect.x + 1, b.yes_rect.y))
+        );
+        assert!(
+            b.no_rect
+                .contains(Position::new(b.no_rect.x + 1, b.no_rect.y))
+        );
     }
 
     #[test]

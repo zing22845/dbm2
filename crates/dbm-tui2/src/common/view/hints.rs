@@ -141,10 +141,7 @@ pub fn sql_pane_footer_text(
 /// The detail pane's own footer already advertises "Back: ESC" and the global
 /// footer exposes the ["/"] pane-width hint, so neither the close-ESC nor the
 /// detail-width splitter is repeated here.
-pub fn results_pane_footer_text(
-    search_active: bool,
-    status: &str,
-) -> String {
+pub fn results_pane_footer_text(search_active: bool, status: &str) -> String {
     if search_active {
         return pane_search_active_footer(&[]);
     }
@@ -217,7 +214,11 @@ pub fn discover_engine_footer_text(status: Option<&str>) -> String {
 /// `has_loopback` appends a note that loopback also runs local discovery, and
 /// `status` (the last paste/undo/redo feedback, e.g. "Paste: 1/3 added …") is
 /// appended on a second line when non-empty.
-pub fn discover_targets_footer_text(editing: bool, has_loopback: bool, status: Option<&str>) -> String {
+pub fn discover_targets_footer_text(
+    editing: bool,
+    has_loopback: bool,
+    status: Option<&str>,
+) -> String {
     if editing {
         return keys(&[("Commit", lit("ENTER")), ("Cancel", lit("ESC"))]);
     }
@@ -331,10 +332,9 @@ pub fn objects_pane_footer_text() -> String {
 /// Add/Edit/Delete/Test.
 pub fn instance_workspace_footer_text(pane: crate::app_shell::nav::IwPane) -> String {
     match pane {
-        crate::app_shell::nav::IwPane::Overview => keys(&[
-            ("Refresh", lit("r")),
-            ("Unregister", lit("u")),
-        ]),
+        crate::app_shell::nav::IwPane::Overview => {
+            keys(&[("Refresh", lit("r")), ("Unregister", lit("u"))])
+        }
         crate::app_shell::nav::IwPane::Connections => keys(&[
             ("Add", lit("a")),
             ("Edit", lit("i")),
@@ -362,7 +362,12 @@ pub fn footer_height(text: &str, cols: u16) -> u16 {
 /// Draw a footer hint string into `area`, wrapping to the area width when it is
 /// too narrow. Pure `state -> view`: reads only the theme and text. Callers
 /// should size `area` with [`footer_height`] so wrapped lines have room.
-pub fn draw_footer(frame: &mut ratatui::Frame, theme: &Theme, area: ratatui::layout::Rect, text: &str) {
+pub fn draw_footer(
+    frame: &mut ratatui::Frame,
+    theme: &Theme,
+    area: ratatui::layout::Rect,
+    text: &str,
+) {
     if text.is_empty() || area.height == 0 || area.width == 0 {
         return;
     }
@@ -374,12 +379,20 @@ pub fn draw_footer(frame: &mut ratatui::Frame, theme: &Theme, area: ratatui::lay
         .split('\n')
         .map(|l| Line::from(Span::styled(l.to_string(), style)))
         .collect();
-    frame.render_widget(Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }), area);
+    frame.render_widget(
+        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
+        area,
+    );
 }
 
 /// Draw a pane's footer hint line into `area` (already the bottom strip of the
 /// pane's inner rect). Pure `state -> view`: reads only the theme and text.
-pub fn draw_pane_footer(frame: &mut ratatui::Frame, theme: &Theme, area: ratatui::layout::Rect, text: &str) {
+pub fn draw_pane_footer(
+    frame: &mut ratatui::Frame,
+    theme: &Theme,
+    area: ratatui::layout::Rect,
+    text: &str,
+) {
     draw_footer(frame, theme, area, text);
 }
 

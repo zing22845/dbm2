@@ -1,9 +1,9 @@
 //! Explorer feature intents.
 
-use crate::app_shell::intent::Intent;
-use super::msg::ExplorerMsg;
 use super::instances::intent::InstancesIntent;
+use super::msg::ExplorerMsg;
 use super::objects::intent::ObjectsIntent;
+use crate::app_shell::intent::Intent;
 
 /// Intents emitted by the explorer feature. Child intents are wrapped so they
 /// can be lifted into the global router via `ExplorerMsg`.

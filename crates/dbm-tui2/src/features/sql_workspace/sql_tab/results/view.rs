@@ -5,10 +5,10 @@
 //! is visible the Block's inner area splits horizontally into
 //! `[list | splitter | detail]`; otherwise the list fills the whole inner area.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
 use crate::common::view::hints::{draw_pane_footer, results_pane_footer_text};
@@ -58,7 +58,11 @@ pub fn render(
         state.list.row,
         state.list.row_count(),
         Some(area.width.saturating_sub(2)),
-        state.list.search.is_visible().then_some(search_extra.as_str()),
+        state
+            .list
+            .search
+            .is_visible()
+            .then_some(search_extra.as_str()),
         p.match_style(),
         p.current_match_style(),
     );
@@ -147,10 +151,7 @@ pub fn render(
     }
 
     // Full-width list footer (spans both the table and the detail).
-    let hint = results_pane_footer_text(
-        state.list.search.text_input_active(),
-        &sql_status,
-    );
+    let hint = results_pane_footer_text(state.list.search.text_input_active(), &sql_status);
     draw_pane_footer(frame, theme, layout.footer, &hint);
 }
 
@@ -183,7 +184,8 @@ pub fn compute_results_layout(
 ) -> ResultsLayout {
     let (content, pagination, footer) =
         list_view::results_vertical_layout(inner, row_count, search_active, sql_status);
-    let (list, splitter, detail) = splitter_view::split_inner(content, detail_open, detail_pane_width);
+    let (list, splitter, detail) =
+        splitter_view::split_inner(content, detail_open, detail_pane_width);
     ResultsLayout {
         list,
         splitter,

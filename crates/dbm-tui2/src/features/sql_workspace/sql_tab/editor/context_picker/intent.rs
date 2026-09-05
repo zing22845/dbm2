@@ -1,7 +1,7 @@
 //! Context picker sub-module intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::ContextPickerMsg;
+use crate::app_shell::intent::Intent;
 
 /// Intents emitted by the context picker. Only one exists today: applying a
 /// selection, which the `sql_tab` parent resolves into a session update (the

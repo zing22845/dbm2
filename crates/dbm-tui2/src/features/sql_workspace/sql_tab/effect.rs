@@ -1,10 +1,10 @@
 //! `sql_tab` feature effects and actions.
 
-use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
-use crate::common::service::services::Services;
 use super::editor::effect::{EditorAction, EditorEffect};
 use super::history::effect::{HistoryAction, HistoryEffect};
 use super::results::effect::{ResultsAction, ResultsEffect};
+use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
+use crate::common::service::services::Services;
 
 /// Actions produced by `sql_tab` effects. Each carries the `tab_id` of the tab
 /// it originated from so the resulting action can be routed back to the same
@@ -14,9 +14,15 @@ pub enum SqlTabAction {
     /// An editor action from the tab with `tab_id`.
     Editor { tab_id: usize, action: EditorAction },
     /// A results action from the tab with `tab_id`.
-    Results { tab_id: usize, action: ResultsAction },
+    Results {
+        tab_id: usize,
+        action: ResultsAction,
+    },
     /// A history action from the tab with `tab_id`.
-    History { tab_id: usize, action: HistoryAction },
+    History {
+        tab_id: usize,
+        action: HistoryAction,
+    },
 }
 
 // Streaming emission from a child editor effect carries no tab context (the
@@ -48,15 +54,25 @@ pub enum SqlTabEffect {
     /// An editor effect from the tab with `tab_id`.
     Editor { tab_id: usize, effect: EditorEffect },
     /// A results effect from the tab with `tab_id`.
-    Results { tab_id: usize, effect: ResultsEffect },
+    Results {
+        tab_id: usize,
+        effect: ResultsEffect,
+    },
     /// A history effect from the tab with `tab_id`.
-    History { tab_id: usize, effect: HistoryEffect },
+    History {
+        tab_id: usize,
+        effect: HistoryEffect,
+    },
 }
 
 impl Effect for SqlTabEffect {
     type Action = SqlTabAction;
 
-    fn run(self, emit: Emitter<Self::Action>, services: std::sync::Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
+    fn run(
+        self,
+        emit: Emitter<Self::Action>,
+        services: std::sync::Arc<Services>,
+    ) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             match self {
                 SqlTabEffect::Editor { tab_id, effect } => {

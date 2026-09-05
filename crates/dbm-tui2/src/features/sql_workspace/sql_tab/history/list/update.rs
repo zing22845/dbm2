@@ -7,9 +7,9 @@
 
 use crate::common::components::search::PaneSearchInput;
 
+use super::super::store::SqlHistoryStore;
 use super::msg::ListMessage;
 use super::state::ListState;
-use super::super::store::SqlHistoryStore;
 
 /// Update the list state. Pure by-value transition.
 ///
@@ -42,7 +42,9 @@ pub fn update(
         ListMessage::SearchKey(key) => {
             handle_search_key(&mut state, store, instance, connection, key)
         }
-        ListMessage::ScrollHScroll { delta } => scroll_hscroll(&mut state, store, instance, connection, delta),
+        ListMessage::ScrollHScroll { delta } => {
+            scroll_hscroll(&mut state, store, instance, connection, delta)
+        }
         ListMessage::SetHScroll { position } => {
             state.scroll_locked = true;
             set_hscroll(&mut state, store, instance, connection, position)
@@ -120,7 +122,13 @@ fn handle_search_key(
     };
 
     if let PaneSearchInput::Navigate { forward } = action {
-        move_cursor(state, store, instance, connection, if forward { 1 } else { -1 });
+        move_cursor(
+            state,
+            store,
+            instance,
+            connection,
+            if forward { 1 } else { -1 },
+        );
     } else if matches!(
         action,
         PaneSearchInput::QueryChanged | PaneSearchInput::OptionsChanged

@@ -5,8 +5,8 @@
 //! child panes are the focused region while it is open. `DiscoverState` holds
 //! only the feature's content state.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use super::engine::state::EngineState;
 use super::results::state::ResultsState;

@@ -10,8 +10,7 @@ use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use edtui::clipboard::InternalClipboard;
 use edtui::{
-    EditorMode, EditorState, EditorTheme, EditorView, Index2, Lines, LineNumbers,
-    SyntaxHighlighter,
+    EditorMode, EditorState, EditorTheme, EditorView, Index2, LineNumbers, Lines, SyntaxHighlighter,
 };
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Style};
@@ -140,8 +139,7 @@ fn register_normal_delete_operator(key_handler: &mut edtui::events::KeyEventHand
 pub fn new_editor_handler() -> edtui::EditorEventHandler {
     use edtui::actions::delete::DeleteToEndOfLine;
     use edtui::actions::{
-        DeleteChar, MoveBackward, MoveDown, MoveForward, MoveToEndOfLine, MoveToStartOfLine,
-        MoveUp,
+        DeleteChar, MoveBackward, MoveDown, MoveForward, MoveToEndOfLine, MoveToStartOfLine, MoveUp,
     };
     use edtui::events::{KeyEventHandler, KeyEventRegister, KeyInput};
 
@@ -328,7 +326,12 @@ impl EditorStateSnapshot {
         let cursor = editor.cursor;
         let mode = editor.mode;
         let selection_hash = hash_selection(&editor.selection);
-        Self { text, cursor, mode, selection_hash }
+        Self {
+            text,
+            cursor,
+            mode,
+            selection_hash,
+        }
     }
 
     pub fn matches_full(&self, editor: &EditorState) -> bool {

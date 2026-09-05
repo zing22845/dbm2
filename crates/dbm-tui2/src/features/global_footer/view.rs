@@ -1,10 +1,10 @@
 //! Global footer feature rendering.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::Span;
 use ratatui::widgets::{Paragraph, Wrap};
-use ratatui::Frame;
 
 use crate::common::utils::text_width;
 use crate::common::view::hints::global_footer_text;
@@ -39,10 +39,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &FooterState)
     } else {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(hints_h),
-                Constraint::Min(0),
-            ])
+            .constraints([Constraint::Length(hints_h), Constraint::Min(0)])
             .split(area);
         (chunks[0], chunks[1])
     };
@@ -58,8 +55,11 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &FooterState)
     // The status line (if any) is muted via the current palette's muted slot.
     if !state.status.is_empty() {
         frame.render_widget(
-            Paragraph::new(Span::styled(state.status.clone(), Style::default().fg(p.muted)))
-                .wrap(Wrap { trim: false }),
+            Paragraph::new(Span::styled(
+                state.status.clone(),
+                Style::default().fg(p.muted),
+            ))
+            .wrap(Wrap { trim: false }),
             status_area,
         );
     }

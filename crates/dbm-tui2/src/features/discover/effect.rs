@@ -4,8 +4,8 @@
 //! They run the (synchronous, blocking) `dbm-store` calls on a blocking task and
 //! stream progress back through the effect emitter.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use dbm_discovery::{DiscoveryConfig, ScanOptions, ScanProgress};
 use dbm_store::RunDiscoveryOptions;
@@ -19,14 +19,18 @@ pub enum DiscoverAction {
     /// Streamed scan progress update.
     ScanProgress { done: u32, total: u32 },
     /// The scan completed, producing the discovered instances.
-    ScanComplete { items: Vec<dbm_discovery::DiscoveredInstance> },
+    ScanComplete {
+        items: Vec<dbm_discovery::DiscoveredInstance>,
+    },
     /// The scan was cancelled before completing.
     ScanCancelled,
     /// The scan failed.
     ScanError { error: String },
     /// A batch of instances was registered. Carries the refreshed discovered
     /// list so the results pane can drop (or re-mark) the now-registered rows.
-    RegisterComplete { items: Vec<dbm_discovery::DiscoveredInstance> },
+    RegisterComplete {
+        items: Vec<dbm_discovery::DiscoveredInstance>,
+    },
     /// Registering failed.
     RegisterError { error: String },
 }
@@ -38,18 +42,28 @@ pub enum DiscoverEffect {
     /// the user can set via `CancelScan` (`c`) to stop the scan at the next
     /// host boundary. The results list is read back as the full set; the
     /// unregistered-only filter is applied in the UI layer.
-    StartScan { config: DiscoveryConfig, cancel: Arc<AtomicBool> },
+    StartScan {
+        config: DiscoveryConfig,
+        cancel: Arc<AtomicBool>,
+    },
     /// Ask an in-flight scan (identified by its shared flag) to stop.
     CancelScan { cancel: Arc<AtomicBool> },
     /// Register the discovered instances with the given discovery ids.
     /// `force` bypasses precheck warnings (the `R` key); errors still block.
-    RegisterInstances { discovery_ids: Vec<String>, force: bool },
+    RegisterInstances {
+        discovery_ids: Vec<String>,
+        force: bool,
+    },
 }
 
 impl Effect for DiscoverEffect {
     type Action = DiscoverAction;
 
-    fn run(self, emit: Emitter<Self::Action>, services: Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
+    fn run(
+        self,
+        emit: Emitter<Self::Action>,
+        services: Arc<Services>,
+    ) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             match self {
                 DiscoverEffect::StartScan { config, cancel } => {
@@ -59,9 +73,10 @@ impl Effect for DiscoverEffect {
                     cancel.store(true, Ordering::Relaxed);
                     Vec::new()
                 }
-                DiscoverEffect::RegisterInstances { discovery_ids, force } => {
-                    run_register(discovery_ids, force, emit, services).await
-                }
+                DiscoverEffect::RegisterInstances {
+                    discovery_ids,
+                    force,
+                } => run_register(discovery_ids, force, emit, services).await,
             }
         })
     }
@@ -107,10 +122,16 @@ async fn run_scan(
 
     let scan = match scan {
         Ok(result) => result,
-        Err(e) => return vec![DiscoverAction::ScanError { error: e.to_string() }],
+        Err(e) => {
+            return vec![DiscoverAction::ScanError {
+                error: e.to_string(),
+            }];
+        }
     };
     if let Err(e) = scan {
-        return vec![DiscoverAction::ScanError { error: e.to_string() }];
+        return vec![DiscoverAction::ScanError {
+            error: e.to_string(),
+        }];
     }
 
     // The scan was persisted by the store; read the fresh cache back as the
@@ -126,8 +147,12 @@ async fn run_scan(
 
     match listed {
         Ok(Ok(items)) => vec![DiscoverAction::ScanComplete { items }],
-        Ok(Err(e)) => vec![DiscoverAction::ScanError { error: e.to_string() }],
-        Err(e) => vec![DiscoverAction::ScanError { error: e.to_string() }],
+        Ok(Err(e)) => vec![DiscoverAction::ScanError {
+            error: e.to_string(),
+        }],
+        Err(e) => vec![DiscoverAction::ScanError {
+            error: e.to_string(),
+        }],
     }
 }
 
@@ -194,7 +219,9 @@ async fn run_register(
         }
         Err(e) => {
             tracing::warn!(error = %e, "run_register: spawn_blocking join failed");
-            vec![DiscoverAction::RegisterError { error: e.to_string() }]
+            vec![DiscoverAction::RegisterError {
+                error: e.to_string(),
+            }]
         }
     }
 }

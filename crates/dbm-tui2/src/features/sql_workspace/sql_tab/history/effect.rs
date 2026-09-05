@@ -24,7 +24,10 @@ impl From<HistoryAction> for Action {
         // streamed emission.
         use crate::features::sql_workspace::effect::SqlAction;
         use crate::features::sql_workspace::sql_tab::effect::SqlTabAction;
-        Action::Sql(SqlAction::SqlTab(SqlTabAction::History { tab_id: 0, action: a }))
+        Action::Sql(SqlAction::SqlTab(SqlTabAction::History {
+            tab_id: 0,
+            action: a,
+        }))
     }
 }
 

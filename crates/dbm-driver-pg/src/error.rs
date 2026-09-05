@@ -89,10 +89,7 @@ mod tests {
 
     #[test]
     fn severity_from_parsed_maps_tokio_severity() {
-        assert_eq!(
-            severity_from_parsed(Severity::Error),
-            ErrorSeverity::Error
-        );
+        assert_eq!(severity_from_parsed(Severity::Error), ErrorSeverity::Error);
         assert_eq!(
             severity_from_parsed(Severity::Warning),
             ErrorSeverity::Warning

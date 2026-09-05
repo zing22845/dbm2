@@ -1,7 +1,7 @@
 //! Global footer feature intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::FooterMsg;
+use crate::app_shell::intent::Intent;
 
 #[derive(Debug, Clone)]
 pub enum FooterIntent {}

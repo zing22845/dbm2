@@ -1,8 +1,8 @@
 //! Explorer objects feature intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::ObjectsMsg;
 use super::state::ObjectsTarget;
+use crate::app_shell::intent::Intent;
 
 /// Intents emitted by the objects tree.
 #[derive(Debug, Clone)]

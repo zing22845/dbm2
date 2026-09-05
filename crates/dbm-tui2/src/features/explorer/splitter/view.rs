@@ -4,10 +4,10 @@
 //! row, and the objects tree (bottom) sit. Both the view (to render) and the
 //! run loop (to hit-test mouse drags) call [`explorer_body_layout`].
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Frame;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-use crate::common::view::splitter::{clamp_split_px, draw, hit, SplitOrientation};
+use crate::common::view::splitter::{SplitOrientation, clamp_split_px, draw, hit};
 
 /// The panes computed by [`explorer_body_layout`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -76,7 +76,13 @@ pub fn instances_height_for_y(area: Rect, y: u16) -> u16 {
 
 /// Render the explorer instances/objects horizontal splitter strip.
 pub fn render(frame: &mut Frame, layout: &ExplorerSplitLayout, hover: bool, dragging: bool) {
-    draw(frame, layout.splitter, SplitOrientation::Horizontal, hover, dragging);
+    draw(
+        frame,
+        layout.splitter,
+        SplitOrientation::Horizontal,
+        hover,
+        dragging,
+    );
 }
 
 #[cfg(test)]

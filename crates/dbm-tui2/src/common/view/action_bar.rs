@@ -178,7 +178,12 @@ pub fn draw_action_button_label(
 
 /// Enabled = selection background; disabled = default. Edit mode on keeps the
 /// selection background but forces a red foreground on the Edit button.
-fn button_style(action: ResultsAction, enabled: bool, edit_active: bool, palette: &Palette) -> Style {
+fn button_style(
+    action: ResultsAction,
+    enabled: bool,
+    edit_active: bool,
+    palette: &Palette,
+) -> Style {
     if !enabled {
         return Style::default();
     }

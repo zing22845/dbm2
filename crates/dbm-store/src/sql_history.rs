@@ -117,7 +117,10 @@ mod tests {
 
         let map = store.load_sql_history().unwrap();
         let entries = map.get(&(instance, connection)).unwrap();
-        assert_eq!(entries.as_slice(), &["SELECT 1".to_string(), "SELECT 2".to_string()]);
+        assert_eq!(
+            entries.as_slice(),
+            &["SELECT 1".to_string(), "SELECT 2".to_string()]
+        );
     }
 
     #[test]
@@ -134,6 +137,9 @@ mod tests {
         let map = store.load_sql_history().unwrap();
         let entries = map.get(&(instance, connection)).unwrap();
         assert_eq!(entries.len(), SQL_HISTORY_MAX_PER_CONNECTION);
-        assert_eq!(entries[0], format!("SELECT {}", SQL_HISTORY_MAX_PER_CONNECTION + 4));
+        assert_eq!(
+            entries[0],
+            format!("SELECT {}", SQL_HISTORY_MAX_PER_CONNECTION + 4)
+        );
     }
 }

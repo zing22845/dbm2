@@ -66,7 +66,11 @@ impl DiscoverSplitterState {
     pub fn nudge_targets_height(&mut self, plus: bool, top_focused: bool) -> bool {
         use crate::common::view::splitter::WIDTH_NUDGE_STEP;
         let grow_top = if plus { top_focused } else { !top_focused };
-        let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
+        let delta = if grow_top {
+            WIDTH_NUDGE_STEP
+        } else {
+            -WIDTH_NUDGE_STEP
+        };
         // Clamp to the layout's actual bounds intersected with the storage
         // range `set_targets_height` clamps to, so the target and stored value
         // always agree (no redundant repaint at the boundary).
@@ -130,11 +134,17 @@ mod tests {
         s.targets_height = 3;
         assert!(s.nudge_targets_height(false, true)); // 3 -> 2
         assert_eq!(s.targets_height, 2);
-        assert!(!s.nudge_targets_height(false, true), "below min must not dirty");
+        assert!(
+            !s.nudge_targets_height(false, true),
+            "below min must not dirty"
+        );
         assert_eq!(s.targets_height, 2);
         s.targets_height = 6;
         assert!(s.nudge_targets_height(true, true)); // 6 -> 7
-        assert!(!s.nudge_targets_height(true, true), "above max must not dirty");
+        assert!(
+            !s.nudge_targets_height(true, true),
+            "above max must not dirty"
+        );
         assert_eq!(s.targets_height, 7);
     }
 }

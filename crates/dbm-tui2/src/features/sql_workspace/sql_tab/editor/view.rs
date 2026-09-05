@@ -3,10 +3,10 @@
 //! Renders the SQL editor buffer (via the shared `render_editor`), the SQL
 //! completion popup over it, and the context picker panel.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders};
-use ratatui::Frame;
 
 use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
 use crate::common::editor;
@@ -16,9 +16,9 @@ use crate::common::view::pane_scrollbar::{
 };
 use crate::common::view::theme::Theme;
 
-use super::state::EditorState;
 use super::context_picker::view as cp_view;
 use super::sql_completion::view as sc_view;
+use super::state::EditorState;
 
 /// Render the editor feature. Returns the hardware cursor position if the
 /// editor is visible (the caller places the terminal cursor). `focused` drives
@@ -59,12 +59,25 @@ pub fn context_trigger_rects(
     // multi-byte (2 bytes) yet render as one cell, so using `str::len()` would
     // over-cover the clickable region and mis-hit the schema segment as the
     // database column.
-    let prefix_len = crate::common::utils::text_width::width(&format!(" [S] SQL [{}] ", editor_mode_label(mode))) as u16;
+    let prefix_len = crate::common::utils::text_width::width(&format!(
+        " [S] SQL [{}] ",
+        editor_mode_label(mode)
+    )) as u16;
     let x = area.x.saturating_add(1).saturating_add(prefix_len);
     let db_seg = format!("· {db}");
     let ctx = format!("{db_seg} › {schema}");
-    let db_rect = Rect::new(x, area.y, crate::common::utils::text_width::width(&db_seg) as u16, 1);
-    let full_rect = Rect::new(x, area.y, crate::common::utils::text_width::width(&ctx) as u16, 1);
+    let db_rect = Rect::new(
+        x,
+        area.y,
+        crate::common::utils::text_width::width(&db_seg) as u16,
+        1,
+    );
+    let full_rect = Rect::new(
+        x,
+        area.y,
+        crate::common::utils::text_width::width(&ctx) as u16,
+        1,
+    );
     (db_rect, full_rect)
 }
 
@@ -83,11 +96,21 @@ pub fn tblcmp_rect(
     }
     let db = database.filter(|d| !d.is_empty()).unwrap_or("…");
     let schema = schema.filter(|s| !s.is_empty()).unwrap_or("…");
-    let full_title = format!(" [S] SQL [INSERT] · {db} › {schema} · TblCmp:{}", if complete_table_names { "ON" } else { "OFF" });
-    let chip_text = format!("· TblCmp:{}", if complete_table_names { "ON" } else { "OFF" });
+    let full_title = format!(
+        " [S] SQL [INSERT] · {db} › {schema} · TblCmp:{}",
+        if complete_table_names { "ON" } else { "OFF" }
+    );
+    let chip_text = format!(
+        "· TblCmp:{}",
+        if complete_table_names { "ON" } else { "OFF" }
+    );
     let total_w = crate::common::utils::text_width::width(&full_title) as u16;
     let chip_w = crate::common::utils::text_width::width(&chip_text) as u16;
-    let x = area.x.saturating_add(1).saturating_add(total_w).saturating_sub(chip_w);
+    let x = area
+        .x
+        .saturating_add(1)
+        .saturating_add(total_w)
+        .saturating_sub(chip_w);
     Some(Rect::new(x, area.y, chip_w, 1))
 }
 
@@ -139,8 +162,16 @@ pub fn compute_editor_body_area(
         .constraints(constraints)
         .split(inner);
 
-    let editor_body = if picker_area.is_some() { chunks[1] } else { chunks[0] };
-    let footer_area = if picker_area.is_some() { chunks[2] } else { chunks[1] };
+    let editor_body = if picker_area.is_some() {
+        chunks[1]
+    } else {
+        chunks[0]
+    };
+    let footer_area = if picker_area.is_some() {
+        chunks[2]
+    } else {
+        chunks[1]
+    };
 
     (editor_body, footer_area, picker_area)
 }
@@ -167,7 +198,8 @@ pub fn editor_body_v_scrollbar_info(
         .saturating_sub(1)
         .saturating_sub(gutter_w)
         .max(1) as usize;
-    let provisional_row_count = editor::editor_display_row_count(editor_state, provisional_wrap as u16);
+    let provisional_row_count =
+        editor::editor_display_row_count(editor_state, provisional_wrap as u16);
     let needs_v = provisional_row_count > viewport_rows;
 
     let scrollbar_w: u16 = if needs_v { 1 } else { 0 };
@@ -236,7 +268,11 @@ pub fn render(
         &base,
         focused,
         true,
-        Style::default().fg(if focused { p.border_active_child } else { p.muted }),
+        Style::default().fg(if focused {
+            p.border_active_child
+        } else {
+            p.muted
+        }),
         Some(Style::default().fg(if focused { p.accent } else { p.muted })),
         p.search_active_style(),
     );
@@ -427,8 +463,8 @@ mod tests {
         // width the widened History zone leaves it used to hang (100% CPU).
         // A wide history pane (e.g. 84) squeezes the editor; edtui's wrapped
         // render must still terminate.
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
         let editor = EditorState::with_sql(
             "SELECT * FROM \"测试表\" WHERE id = 1 AND name ILIKE '%foo%' ORDER BY created_at DESC",
         );
@@ -451,6 +487,9 @@ mod tests {
                 })
                 .unwrap();
         }));
-        assert!(r.is_ok(), "editor render hung or panicked at a narrow width");
+        assert!(
+            r.is_ok(),
+            "editor render hung or panicked at a narrow width"
+        );
     }
 }

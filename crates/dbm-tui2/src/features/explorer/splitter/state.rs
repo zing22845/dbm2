@@ -68,7 +68,11 @@ impl ExplorerSplitterState {
     pub fn nudge_instances_height(&mut self, plus: bool, top_focused: bool) -> bool {
         use crate::common::view::splitter::WIDTH_NUDGE_STEP;
         let grow_top = if plus { top_focused } else { !top_focused };
-        let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
+        let delta = if grow_top {
+            WIDTH_NUDGE_STEP
+        } else {
+            -WIDTH_NUDGE_STEP
+        };
         // Clamp to the layout's actual bounds intersected with the storage
         // range `set_instances_height` clamps to, so the target and stored value
         // always agree (no redundant repaint at the boundary).
@@ -88,7 +92,10 @@ mod tests {
         let mut s = ExplorerSplitterState::default();
         assert!(s.set_instances_height(15));
         assert_eq!(s.instances_height, 15);
-        assert!(!s.set_instances_height(15), "unchanged height must not dirty");
+        assert!(
+            !s.set_instances_height(15),
+            "unchanged height must not dirty"
+        );
         assert!(s.set_instances_height(16));
     }
 
@@ -132,11 +139,17 @@ mod tests {
         s.instances_height = 3;
         assert!(s.nudge_instances_height(false, true)); // 3 -> 2
         assert_eq!(s.instances_height, 2);
-        assert!(!s.nudge_instances_height(false, true), "below min must not dirty");
+        assert!(
+            !s.nudge_instances_height(false, true),
+            "below min must not dirty"
+        );
         assert_eq!(s.instances_height, 2);
         s.instances_height = 6;
         assert!(s.nudge_instances_height(true, true)); // 6 -> 7
-        assert!(!s.nudge_instances_height(true, true), "above max must not dirty");
+        assert!(
+            !s.nudge_instances_height(true, true),
+            "above max must not dirty"
+        );
         assert_eq!(s.instances_height, 7);
     }
 }

@@ -1,11 +1,11 @@
 //! Results detail sub-module rendering: read-only cell body preview with
 //! optional action buttons (Save/Discard when editing) and a detail footer.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::common::components::line_numbers;
 use crate::common::utils::text_width;
@@ -47,7 +47,9 @@ pub fn detail_display_line_count(body: &str, text_width: u16) -> usize {
     }
     let logical = body.lines().count().max(1);
     let w = line_numbers::text_width_after_gutter(text_width, logical) as usize;
-    body.lines().map(|line| wrap_plain_line(line, w).len()).sum()
+    body.lines()
+        .map(|line| wrap_plain_line(line, w).len())
+        .sum()
 }
 
 fn build_detail_lines(body: &str, text_width: u16) -> Vec<Line<'static>> {
@@ -92,12 +94,10 @@ fn detail_action_buttons_line(detail: &DetailState, edit_active: bool) -> Option
         return None;
     }
     let p = String::from(" [Ctrl-S] Save   [Ctrl-D] Discard");
-    Some(Line::from(vec![
-        Span::styled(
-            p,
-            Style::default().fg(Color::Yellow),
-        ),
-    ]))
+    Some(Line::from(vec![Span::styled(
+        p,
+        Style::default().fg(Color::Yellow),
+    )]))
 }
 
 /// Render the detail sub-pane with its own border, optional action buttons,
@@ -152,20 +152,23 @@ pub fn render(
     } else {
         Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(footer_h),
-            ])
+            .constraints([Constraint::Min(0), Constraint::Length(footer_h)])
             .split(inner)
     };
 
-    let body_area = if has_action_btns { chunks[1] } else { chunks[0] };
-    let footer_area = if has_action_btns { chunks[2] } else { chunks[1] };
+    let body_area = if has_action_btns {
+        chunks[1]
+    } else {
+        chunks[0]
+    };
+    let footer_area = if has_action_btns {
+        chunks[2]
+    } else {
+        chunks[1]
+    };
 
     // Detail action buttons (only when editing and dirty).
-    if has_action_btns
-        && let Some(line) = detail_action_buttons_line(detail, edit_active)
-    {
+    if has_action_btns && let Some(line) = detail_action_buttons_line(detail, edit_active) {
         frame.render_widget(Paragraph::new(line), chunks[0]);
     }
 

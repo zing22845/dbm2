@@ -63,7 +63,10 @@ impl SqlHistoryStore {
 
 /// First (non-empty) line of a history statement, trimmed.
 pub fn history_one_line(sql: &str) -> &str {
-    sql.lines().find(|l| !l.trim().is_empty()).unwrap_or(sql).trim()
+    sql.lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or(sql)
+        .trim()
 }
 
 /// Horizontal display: skip `skip` cells, then truncate to `width` cells.

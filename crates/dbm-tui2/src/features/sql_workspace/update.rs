@@ -1,10 +1,10 @@
 //! SQL workspace feature update.
 
-use super::msg::SqlMessage;
-use super::state::SqlState;
-use super::intent::SqlIntent;
 use super::effect::SqlEffect;
+use super::intent::SqlIntent;
+use super::msg::SqlMessage;
 use super::sql_tab;
+use super::state::SqlState;
 
 /// Update the SQL workspace state. Delegates `SqlTab` messages to the
 /// `sql_tab` child feature by moving the child state in and out, so only the

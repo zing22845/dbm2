@@ -1,7 +1,7 @@
 //! Header feature intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::HeaderMsg;
+use crate::app_shell::intent::Intent;
 
 /// Intents emitted by the header feature.
 #[derive(Debug, Clone)]

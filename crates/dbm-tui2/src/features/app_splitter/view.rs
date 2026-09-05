@@ -4,10 +4,10 @@
 //! hit-test mouse drags) call [`app_body_layout`], so a splitter can only ever
 //! be found where it is drawn.
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Frame;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-use crate::common::view::splitter::{draw, hit, SplitOrientation};
+use crate::common::view::splitter::{SplitOrientation, draw, hit};
 
 use super::state::{MAX_EXPLORER_WIDTH, MIN_EXPLORER_WIDTH};
 
@@ -76,7 +76,13 @@ pub fn explorer_width_for_x(area: Rect, x: u16) -> u16 {
 
 /// Render the Explorer/workspace vertical splitter strip.
 pub fn render(frame: &mut Frame, layout: &AppBodyLayout, hover: bool, dragging: bool) {
-    draw(frame, layout.v_splitter, SplitOrientation::Vertical, hover, dragging);
+    draw(
+        frame,
+        layout.v_splitter,
+        SplitOrientation::Vertical,
+        hover,
+        dragging,
+    );
 }
 
 #[cfg(test)]
@@ -116,7 +122,11 @@ mod tests {
     fn hit_detects_splitter_column() {
         let area = Rect::new(0, 0, 120, 40);
         let layout = app_body_layout(area, 24);
-        assert!(splitter_at(&layout, layout.v_splitter.x, layout.v_splitter.y));
+        assert!(splitter_at(
+            &layout,
+            layout.v_splitter.x,
+            layout.v_splitter.y
+        ));
         assert!(!splitter_at(&layout, 10, 10));
     }
 

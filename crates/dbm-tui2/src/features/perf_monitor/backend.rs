@@ -65,10 +65,7 @@ impl<B: Backend> Backend for CountingBackend<B> {
         let exclude = self.exclude_rects.clone();
         let mut count = 0usize;
         let result = self.inner.draw(content.inspect(|&(x, y, _)| {
-            if !exclude
-                .iter()
-                .any(|r| r.contains(Position::new(x, y)))
-            {
+            if !exclude.iter().any(|r| r.contains(Position::new(x, y))) {
                 count += 1;
             }
         }));
@@ -129,8 +126,7 @@ mod tests {
         where
             I: Iterator<Item = (u16, u16, &'a Cell)>,
         {
-            self._cells
-                .extend(content.map(|(x, y, _)| (x, y)));
+            self._cells.extend(content.map(|(x, y, _)| (x, y)));
             Ok(())
         }
         fn hide_cursor(&mut self) -> Result<(), Self::Error> {
@@ -176,9 +172,9 @@ mod tests {
         let c1 = Cell::default();
         let c2 = Cell::default();
         let content: Vec<(u16, u16, &Cell)> = vec![
-            (0, 0, &c0),    // normal changed cell -> counts
-            (90, 29, &c1),  // inside excluded strip -> ignored
-            (99, 29, &c2),  // inside excluded strip -> ignored
+            (0, 0, &c0),   // normal changed cell -> counts
+            (90, 29, &c1), // inside excluded strip -> ignored
+            (99, 29, &c2), // inside excluded strip -> ignored
         ];
         // Draw via the Backend trait.
         {

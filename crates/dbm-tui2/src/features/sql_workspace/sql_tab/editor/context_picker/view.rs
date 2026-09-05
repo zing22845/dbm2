@@ -6,13 +6,15 @@
 //! (via `pane_search_bottom_title_line`), matching every other pane. The
 //! focused column has an active border. The picker renders nothing when closed.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
-use crate::common::components::search::{PaneSearch, pane_search_bottom_title_line, pane_search_label_line};
+use crate::common::components::search::{
+    PaneSearch, pane_search_bottom_title_line, pane_search_label_line,
+};
 use crate::common::view::theme::Theme;
 
 use super::state::{CachedList, ContextPickerState, PickerColumn, filter_indices};
@@ -30,17 +32,36 @@ pub fn column_rects(area: Rect) -> (Rect, Rect) {
 /// Hit-test the picker rows at `(x, y)`. Returns `(column, filtered-index)` for
 /// a row that is currently visible, or `None` when the picker is closed / the
 /// point is not on a row. Mirrors the geometry produced by `picker_list_lines`.
-pub fn row_hit_at(area: Rect, state: &ContextPickerState, x: u16, y: u16) -> Option<(PickerColumn, usize)> {
+pub fn row_hit_at(
+    area: Rect,
+    state: &ContextPickerState,
+    x: u16,
+    y: u16,
+) -> Option<(PickerColumn, usize)> {
     if !state.open {
         return None;
     }
     let (db_rect, schema_rect) = column_rects(area);
     let db_block_inner = Block::default().borders(Borders::ALL).inner(db_rect);
     let schema_block_inner = Block::default().borders(Borders::ALL).inner(schema_rect);
-    if let Some(idx) = column_row_hit(&state.databases, &state.db_search, state.db_cursor, db_block_inner, x, y) {
+    if let Some(idx) = column_row_hit(
+        &state.databases,
+        &state.db_search,
+        state.db_cursor,
+        db_block_inner,
+        x,
+        y,
+    ) {
         return Some((PickerColumn::Database, idx));
     }
-    if let Some(idx) = column_row_hit(&state.schemas, &state.schema_search, state.schema_cursor, schema_block_inner, x, y) {
+    if let Some(idx) = column_row_hit(
+        &state.schemas,
+        &state.schema_search,
+        state.schema_cursor,
+        schema_block_inner,
+        x,
+        y,
+    ) {
         return Some((PickerColumn::Schema, idx));
     }
     None
@@ -153,7 +174,15 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
         db_block = db_block.title_bottom(line);
     }
     let db_inner = db_block.inner(columns[0]);
-    let db_lines = picker_list_lines(&state.databases, &state.db_search, state.db_cursor, db_inner, db_active, selected_style, p);
+    let db_lines = picker_list_lines(
+        &state.databases,
+        &state.db_search,
+        state.db_cursor,
+        db_inner,
+        db_active,
+        selected_style,
+        p,
+    );
     frame.render_widget(Paragraph::new(db_lines).block(db_block), columns[0]);
 
     let mut schema_block = Block::default()
@@ -165,7 +194,15 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &ContextPicke
         schema_block = schema_block.title_bottom(line);
     }
     let schema_inner = schema_block.inner(columns[1]);
-    let schema_lines = picker_list_lines(&state.schemas, &state.schema_search, state.schema_cursor, schema_inner, schema_active, selected_style, p);
+    let schema_lines = picker_list_lines(
+        &state.schemas,
+        &state.schema_search,
+        state.schema_cursor,
+        schema_inner,
+        schema_active,
+        selected_style,
+        p,
+    );
     frame.render_widget(Paragraph::new(schema_lines).block(schema_block), columns[1]);
 }
 

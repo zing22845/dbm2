@@ -4,16 +4,16 @@
 //! highlighted. The popup is anchored within the editor area and renders
 //! nothing when closed.
 
+use ratatui::Frame;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use crate::common::view::theme::Theme;
 
-use super::state::SqlCompletionState;
 use super::provider::{CompletionItem, CompletionKind};
+use super::state::SqlCompletionState;
 
 const MAX_VISIBLE: usize = 8;
 const POPUP_WIDTH: u16 = 48;
@@ -104,7 +104,15 @@ pub fn draw_completion_popup_at(
         .skip(start)
         .take(visible)
         .enumerate()
-        .map(|(row, item)| completion_line(item, start + row == state.selected, p.selection_text, p.selection_bg, p.muted))
+        .map(|(row, item)| {
+            completion_line(
+                item,
+                start + row == state.selected,
+                p.selection_text,
+                p.selection_bg,
+                p.muted,
+            )
+        })
         .collect();
     frame.render_widget(Paragraph::new(lines), inner);
     popup

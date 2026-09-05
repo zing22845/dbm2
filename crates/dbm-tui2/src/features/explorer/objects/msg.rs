@@ -37,17 +37,26 @@ pub enum ObjectsMessage {
     /// open an object (e.g. a table) — matching the original dbm's `Enter`.
     Select,
     /// Rebind the tree to an instance/connection.
-    Bind { instance: String, connection: String },
+    Bind {
+        instance: String,
+        connection: String,
+    },
     /// The databases of the bound connection were loaded.
     DatabasesLoaded { databases: Vec<String> },
     /// Loading databases failed.
     DatabasesError { error: String },
     /// The schemas (and extensions) of a database were loaded.
-    SchemasLoaded { database: String, schemas: Vec<String> },
+    SchemasLoaded {
+        database: String,
+        schemas: Vec<String>,
+    },
     /// Loading schemas failed.
     SchemasError { database: String, error: String },
     /// The extensions of a database were loaded.
-    ExtensionsLoaded { database: String, extensions: Vec<String> },
+    ExtensionsLoaded {
+        database: String,
+        extensions: Vec<String>,
+    },
     /// Loading extensions failed.
     ExtensionsError { database: String, error: String },
     /// A schema-scoped object list was loaded.

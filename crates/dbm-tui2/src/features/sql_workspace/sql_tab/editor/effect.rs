@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
-use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
-use crate::common::service::services::Services;
 use super::context_picker::effect::{ContextPickerAction, ContextPickerEffect};
 use super::sql_completion::effect::SqlCompletionEffect;
+use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
+use crate::common::service::services::Services;
 
 /// The SQL-completion catalog loaded for a tab's connection/schema.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +54,11 @@ pub enum EditorEffect {
 impl Effect for EditorEffect {
     type Action = EditorAction;
 
-    fn run(self, emit: Emitter<Self::Action>, services: std::sync::Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
+    fn run(
+        self,
+        emit: Emitter<Self::Action>,
+        services: std::sync::Arc<Services>,
+    ) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             match self {
                 EditorEffect::ContextPicker(e) => {
@@ -80,22 +84,14 @@ impl Effect for EditorEffect {
                     schema,
                 } => {
                     match services
-                        .completion_catalog(
-                            &instance,
-                            &connection,
-                            database.as_deref(),
-                            &schema,
-                        )
+                        .completion_catalog(&instance, &connection, database.as_deref(), &schema)
                         .await
                     {
                         Ok((tables, columns_by_table)) => {
                             let columns_by_table = columns_by_table
                                 .into_iter()
                                 .map(|(name, cols)| {
-                                    (
-                                        name,
-                                        cols.into_iter().map(Into::into).collect(),
-                                    )
+                                    (name, cols.into_iter().map(Into::into).collect())
                                 })
                                 .collect();
                             vec![EditorAction::CompletionCatalogLoaded(

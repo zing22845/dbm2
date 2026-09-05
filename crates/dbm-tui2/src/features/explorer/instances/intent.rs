@@ -1,7 +1,7 @@
 //! Explorer instances feature intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::InstancesMsg;
+use crate::app_shell::intent::Intent;
 
 /// Intents emitted by the instances (connection tree) feature.
 ///

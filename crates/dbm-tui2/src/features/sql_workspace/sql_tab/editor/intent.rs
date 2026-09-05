@@ -1,9 +1,9 @@
 //! Editor feature intents.
 
-use crate::app_shell::intent::Intent;
-use super::msg::EditorMsg;
 use super::context_picker::intent::ContextPickerIntent;
+use super::msg::EditorMsg;
 use super::sql_completion::intent::SqlCompletionIntent;
+use crate::app_shell::intent::Intent;
 
 #[derive(Debug, Clone)]
 pub enum EditorIntent {
@@ -11,7 +11,9 @@ pub enum EditorIntent {
     SqlCompletion(SqlCompletionIntent),
     /// Run the editor's current SQL (resolved by `sql_tab`, which knows the
     /// tab's connection context).
-    RunQuery { sql: String },
+    RunQuery {
+        sql: String,
+    },
     /// Request that the tab (re)load its SQL-completion catalog. Raised when
     /// the editor hits a table-intent slot (TblCmp ON) but has no cached table
     /// names yet, mirroring the original dbm's `schedule_metadata_refresh`.
@@ -39,4 +41,3 @@ impl Intent for EditorIntent {
         }
     }
 }
-

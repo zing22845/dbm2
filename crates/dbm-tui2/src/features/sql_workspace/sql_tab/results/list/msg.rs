@@ -8,9 +8,15 @@ use super::super::state::QueryResultData;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListMessage {
     /// Set the latest query result (replaces any previous result).
-    SetResult { result: QueryResultData, paginated: bool },
+    SetResult {
+        result: QueryResultData,
+        paginated: bool,
+    },
     /// The editability of the current result was resolved.
-    EditabilityReady { target: Option<EditTarget>, blocked: Option<String> },
+    EditabilityReady {
+        target: Option<EditTarget>,
+        blocked: Option<String>,
+    },
     /// Clear the current result.
     ClearResult,
     /// A query failed: clear the current result and store the error message.

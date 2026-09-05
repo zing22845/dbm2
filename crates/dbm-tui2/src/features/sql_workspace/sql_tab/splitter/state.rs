@@ -131,12 +131,14 @@ impl SqlTabSplitterState {
         // `+` grows the focused pane; the top height moves opposite to a
         // bottom focus.
         let grow_top = if plus { top_focused } else { !top_focused };
-        let delta = if grow_top { WIDTH_NUDGE_STEP } else { -WIDTH_NUDGE_STEP };
+        let delta = if grow_top {
+            WIDTH_NUDGE_STEP
+        } else {
+            -WIDTH_NUDGE_STEP
+        };
         let lo = self.editor_top_min.max(1);
         let hi = self.editor_top_max.min(1000);
-        let next = (self.editor_top_height as i16 + delta)
-            .clamp(lo as i16, hi as i16)
-            as u16;
+        let next = (self.editor_top_height as i16 + delta).clamp(lo as i16, hi as i16) as u16;
         self.set_editor_top_height(next)
     }
 }

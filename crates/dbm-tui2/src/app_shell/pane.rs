@@ -74,14 +74,18 @@ mod tests {
         // correctly instead of both collapsing to SQLWorkspace).
         assert_eq!(pane_name(Pane::SQLWorkspace), "sql_workspace");
         assert_eq!(
-            pane_name(Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::default())),
+            pane_name(Pane::InstanceWorkspace(
+                crate::app_shell::nav::IwPane::default()
+            )),
             "instance_workspace"
         );
 
         assert_eq!(pane_from_name("sql_workspace"), Some(Pane::SQLWorkspace));
         assert_eq!(
             pane_from_name("instance_workspace"),
-            Some(Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::default()))
+            Some(Pane::InstanceWorkspace(
+                crate::app_shell::nav::IwPane::default()
+            ))
         );
     }
 

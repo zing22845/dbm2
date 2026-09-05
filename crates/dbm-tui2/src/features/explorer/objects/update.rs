@@ -51,7 +51,10 @@ pub fn update(
         ObjectsMessage::Collapse => {
             dirty |= state.collapse();
         }
-        ObjectsMessage::ScrollHorizontal { delta, term_width: _ } => {
+        ObjectsMessage::ScrollHorizontal {
+            delta,
+            term_width: _,
+        } => {
             // Use the viewport-aware max cached by the renderer — this is the
             // same bound used by Paragraph::scroll + h_scrollbar thumb, so an
             // already-at-boundary press is a pure no-op.
@@ -103,7 +106,10 @@ pub fn update(
                 dirty = true;
             }
         }
-        ObjectsMessage::Bind { instance, connection } => {
+        ObjectsMessage::Bind {
+            instance,
+            connection,
+        } => {
             // Idempotent: only rebind (and re-fetch databases) when the binding
             // actually changes. The shell's binding sync may emit duplicate
             // `Bind` messages before the first one is applied; an unconditional
@@ -112,7 +118,10 @@ pub fn update(
             let changed = state.sync_binding(instance.clone(), connection.clone());
             dirty = changed;
             if changed {
-                effects.push(ObjectsEffect::LoadDatabases { instance, connection });
+                effects.push(ObjectsEffect::LoadDatabases {
+                    instance,
+                    connection,
+                });
             }
         }
         ObjectsMessage::DatabasesLoaded { databases } => {
@@ -156,7 +165,10 @@ pub fn update(
                 .insert(database, CatalogList::Error(error));
             dirty = state.rebuild_rows();
         }
-        ObjectsMessage::ExtensionsLoaded { database, extensions } => {
+        ObjectsMessage::ExtensionsLoaded {
+            database,
+            extensions,
+        } => {
             state
                 .catalog
                 .extensions
@@ -170,18 +182,28 @@ pub fn update(
                 .insert(database, CatalogList::Error(error));
             dirty = state.rebuild_rows();
         }
-        ObjectsMessage::ObjectListLoaded { database, schema, kind, items } => {
-            state.catalog.objects.insert(
-                (database, schema, kind),
-                CatalogList::Ready(items),
-            );
+        ObjectsMessage::ObjectListLoaded {
+            database,
+            schema,
+            kind,
+            items,
+        } => {
+            state
+                .catalog
+                .objects
+                .insert((database, schema, kind), CatalogList::Ready(items));
             dirty = state.rebuild_rows();
         }
-        ObjectsMessage::ObjectListError { database, schema, kind, error } => {
-            state.catalog.objects.insert(
-                (database, schema, kind),
-                CatalogList::Error(error),
-            );
+        ObjectsMessage::ObjectListError {
+            database,
+            schema,
+            kind,
+            error,
+        } => {
+            state
+                .catalog
+                .objects
+                .insert((database, schema, kind), CatalogList::Error(error));
             dirty = state.rebuild_rows();
         }
     }
@@ -218,7 +240,11 @@ fn maybe_fetch_on_expand(
             // Child groups fetch their lists lazily; nothing to load here.
             let _ = (database, name);
         }
-        ObjectsNode::Group { database, schema, kind } => match kind {
+        ObjectsNode::Group {
+            database,
+            schema,
+            kind,
+        } => match kind {
             ObjectKind::Extensions => {
                 if !state.catalog.extensions.contains_key(database) {
                     effects.push(ObjectsEffect::LoadExtensions {
@@ -257,7 +283,9 @@ mod tests {
             expanded: false,
             expandable: true,
             active: false,
-            node: ObjectsNode::Database { name: name.to_string() },
+            node: ObjectsNode::Database {
+                name: name.to_string(),
+            },
             label: name.to_string(),
         }
     }
@@ -327,15 +355,11 @@ mod tests {
         s.cursor = 0;
         let (s, intents, _effects, dirty) = update(ObjectsMessage::Expand, s);
         assert!(dirty);
+        assert!(s.expanded.contains("db\tpublic"), "schema row is expanded");
         assert!(
-            s.expanded.contains("db\tpublic"),
-            "schema row is expanded"
-        );
-        assert!(
-            !intents.iter().any(|i| matches!(
-                i,
-                ObjectsIntent::ApplySchema { .. }
-            )),
+            !intents
+                .iter()
+                .any(|i| matches!(i, ObjectsIntent::ApplySchema { .. })),
             "Expand must not activate the schema"
         );
         assert_eq!(s.active_db, None, "active state is untouched");
@@ -442,8 +466,7 @@ mod tests {
         // Capture the group's expand key before the update (rebuild_rows inside
         // toggle_expand_at regenerates rows from the catalog).
         let group_key = s.expand_key_of(&s.rows[1].node);
-        let (s, _intents, _effects, dirty) =
-            update(ObjectsMessage::ToggleExpandAt { row: 1 }, s);
+        let (s, _intents, _effects, dirty) = update(ObjectsMessage::ToggleExpandAt { row: 1 }, s);
         assert!(dirty);
         assert!(
             s.expanded.contains(&group_key),
@@ -465,7 +488,9 @@ mod tests {
         assert!(dirty);
         assert!(s.expanded.contains("db"));
         assert!(
-            effects.iter().any(|e| matches!(e, ObjectsEffect::LoadSchemas { .. })),
+            effects
+                .iter()
+                .any(|e| matches!(e, ObjectsEffect::LoadSchemas { .. })),
             "expected LoadSchemas on db expand, got {effects:?}"
         );
 
@@ -475,7 +500,11 @@ mod tests {
         s.cursor = 0;
         let (_, intents, _, dirty) = update(ObjectsMessage::Select, s);
         assert!(!dirty);
-        assert!(intents.iter().any(|i| matches!(i, ObjectsIntent::OpenObject { .. })));
+        assert!(
+            intents
+                .iter()
+                .any(|i| matches!(i, ObjectsIntent::OpenObject { .. }))
+        );
     }
 
     #[test]
@@ -498,13 +527,25 @@ mod tests {
     #[test]
     fn horizontal_scroll_clamps_and_reports_noop() {
         let s = ObjectsState::default();
-        let (s, _i, _e, dirty) = update(ObjectsMessage::ScrollHorizontal { delta: -1, term_width: 80 }, s);
+        let (s, _i, _e, dirty) = update(
+            ObjectsMessage::ScrollHorizontal {
+                delta: -1,
+                term_width: 80,
+            },
+            s,
+        );
         assert!(!dirty, "left scroll at boundary is a no-op");
         assert_eq!(s.h_scroll, 0);
 
         // Empty state has no content → max=0 → scrolling right is also a
         // no-op (content fits fully in viewport).
-        let (s, _i, _e, dirty) = update(ObjectsMessage::ScrollHorizontal { delta: 4, term_width: 80 }, s);
+        let (s, _i, _e, dirty) = update(
+            ObjectsMessage::ScrollHorizontal {
+                delta: 4,
+                term_width: 80,
+            },
+            s,
+        );
         assert!(!dirty, "right scroll on empty state is a no-op");
         assert_eq!(s.h_scroll, 0);
     }

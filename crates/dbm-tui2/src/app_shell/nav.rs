@@ -165,11 +165,7 @@ mod tests {
             Some(PaneDir::Left)
         );
         // Extra modifiers are rejected.
-        assert!(pane_dir_from_key(&key(
-            KeyCode::Char('j'),
-            ctrl | KeyModifiers::SHIFT
-        ))
-        .is_none());
+        assert!(pane_dir_from_key(&key(KeyCode::Char('j'), ctrl | KeyModifiers::SHIFT)).is_none());
     }
 
     #[test]

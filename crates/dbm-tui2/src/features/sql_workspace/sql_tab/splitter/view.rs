@@ -4,14 +4,14 @@
 //! drag routing. The app shell only passes a point and an area; all geometry
 //! lives here or in the `history::splitter` feature.
 
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 
-use crate::common::view::splitter::{draw, hit, SplitOrientation};
+use crate::common::view::splitter::{SplitOrientation, draw, hit};
 
-use super::super::state::SqlTabState;
-use super::super::msg::SqlTabMessage;
 use super::super::layout::sql_tab_layout;
+use super::super::msg::SqlTabMessage;
+use super::super::state::SqlTabState;
 use crate::features::sql_workspace::sql_tab::history::splitter::view::{
     history_detail_splitter, history_zone_x,
 };
@@ -30,7 +30,11 @@ pub enum SqlSplitter {
 }
 
 /// The splitter the position `(x, y)` is on, if any, in a static layout.
-pub fn splitter_at(layout: &super::super::layout::SqlTabLayout, x: u16, y: u16) -> Option<SqlSplitter> {
+pub fn splitter_at(
+    layout: &super::super::layout::SqlTabLayout,
+    x: u16,
+    y: u16,
+) -> Option<SqlSplitter> {
     if hit(layout.h_splitter, x, y) {
         return Some(SqlSplitter::EditorResults);
     }
@@ -64,14 +68,20 @@ pub fn splitter_at_with_detail(
     // A moves to the widened zone's left edge (the editor is shrunk); B sits
     // just right of the detail.
     let zone_x = history_zone_x(area, layout, detail_pane_width);
-    let editor_history = Rect::new(zone_x.saturating_sub(1), layout.v_splitter.y, 1, layout.v_splitter.height);
+    let editor_history = Rect::new(
+        zone_x.saturating_sub(1),
+        layout.v_splitter.y,
+        1,
+        layout.v_splitter.height,
+    );
     if hit(editor_history, x, y) {
         return Some(SqlSplitter::EditorHistory);
     }
     if let Some(r) = history_detail_splitter(area, layout, true, detail_pane_width)
-        && hit(r, x, y) {
-            return Some(SqlSplitter::HistoryDetail);
-        }
+        && hit(r, x, y)
+    {
+        return Some(SqlSplitter::HistoryDetail);
+    }
     None
 }
 
@@ -86,11 +96,20 @@ pub fn sql_tab_splitter_at(
     use crate::features::sql_workspace::sql_tab::session::session_view_key;
     use crate::features::sql_workspace::sql_tab::state::SqlFocus;
     let tab = state.active_tab()?;
-    let body = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
+    let body = Rect::new(
+        area.x,
+        area.y.saturating_add(1),
+        area.width,
+        area.height.saturating_sub(1),
+    );
     if body.width == 0 || body.height == 0 {
         return None;
     }
-    let layout = sql_tab_layout(body, tab.splitter.editor_top_height, tab.splitter.history_pane_width);
+    let layout = sql_tab_layout(
+        body,
+        tab.splitter.editor_top_height,
+        tab.splitter.history_pane_width,
+    );
     if layout.editor.width == 0 {
         return None;
     }
@@ -115,9 +134,8 @@ pub fn sql_tab_splitter_at(
         splitter_at(&layout, x, y)
     };
     // History Detail (B) is only draggable while History has focus.
-    splitter = splitter.filter(|s| {
-        !matches!(s, SqlSplitter::HistoryDetail) || tab.focus == SqlFocus::History
-    });
+    splitter = splitter
+        .filter(|s| !matches!(s, SqlSplitter::HistoryDetail) || tab.focus == SqlFocus::History);
     // Results-internal detail/list splitter (C) — independent of History, hit
     // only when results detail is open AND Results has focus.
     if splitter.is_none() && tab.results.detail_open && tab.focus == SqlFocus::Results {
@@ -150,8 +168,17 @@ pub fn sql_tab_splitter_resize_msg(
 ) -> Option<SqlTabMessage> {
     use super::super::history::splitter::view::detail_width_for_x;
     let tab = state.tabs.get(state.index_of(tab_id)?)?;
-    let body = Rect::new(area.x, area.y.saturating_add(1), area.width, area.height.saturating_sub(1));
-    let layout = sql_tab_layout(body, tab.splitter.editor_top_height, tab.splitter.history_pane_width);
+    let body = Rect::new(
+        area.x,
+        area.y.saturating_add(1),
+        area.width,
+        area.height.saturating_sub(1),
+    );
+    let layout = sql_tab_layout(
+        body,
+        tab.splitter.editor_top_height,
+        tab.splitter.history_pane_width,
+    );
     if layout.editor.width == 0 {
         return None;
     }
@@ -192,7 +219,8 @@ pub fn sql_tab_splitter_resize_msg(
             Some(SqlTabMessage::SetHistoryWidth { tab_id, width })
         }
         SqlSplitter::HistoryDetail => {
-            let width = detail_width_for_x(body, &layout, tab.history.splitter.detail_pane_width, x);
+            let width =
+                detail_width_for_x(body, &layout, tab.history.splitter.detail_pane_width, x);
             Some(SqlTabMessage::SetHistoryDetailWidth { tab_id, width })
         }
         SqlSplitter::ResultsDetail => {
@@ -216,14 +244,26 @@ pub fn render(
     hover_editor_history: bool,
     dragging_editor_history: bool,
 ) {
-    draw(frame, h_splitter, SplitOrientation::Horizontal, hover_editor_results, dragging_editor_results);
-    draw(frame, v_splitter, SplitOrientation::Vertical, hover_editor_history, dragging_editor_history);
+    draw(
+        frame,
+        h_splitter,
+        SplitOrientation::Horizontal,
+        hover_editor_results,
+        dragging_editor_results,
+    );
+    draw(
+        frame,
+        v_splitter,
+        SplitOrientation::Vertical,
+        hover_editor_history,
+        dragging_editor_history,
+    );
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::super::state::SqlTabState;
+    use super::*;
 
     #[test]
     fn hit_test_identifies_a_and_editor_results() {
@@ -249,17 +289,23 @@ mod tests {
         state.active_tab = Some(0);
         state.tabs[0].focus = SqlFocus::History;
         let (instance, connection) = session_view_key(&state.tabs[0].session);
-        state.history_store
+        state
+            .history_store
             .record_success(&instance, &connection, "SELECT 1");
         let area = Rect::new(0, 0, 120, 40);
         let body = Rect::new(0, 1, 120, 39);
-        let layout = sql_tab_layout(body, state.tabs[0].splitter.editor_top_height, state.tabs[0].splitter.history_pane_width);
+        let layout = sql_tab_layout(
+            body,
+            state.tabs[0].splitter.editor_top_height,
+            state.tabs[0].splitter.history_pane_width,
+        );
         let detail_split =
             crate::features::sql_workspace::sql_tab::history::splitter::view::history_detail_splitter(
                 body, &layout, true, state.tabs[0].history.splitter.detail_pane_width,
             )
             .unwrap();
-        let (tab_id, s) = sql_tab_splitter_at(&state, area, detail_split.x, detail_split.y + 1).unwrap();
+        let (tab_id, s) =
+            sql_tab_splitter_at(&state, area, detail_split.x, detail_split.y + 1).unwrap();
         assert_eq!(tab_id, state.tabs[0].session.id);
         assert_eq!(s, SqlSplitter::HistoryDetail);
     }
@@ -272,12 +318,23 @@ mod tests {
         // When detail is visible, clicking on the horizontal splitter must
         // still resolve to EditorResults — the h_splitter row geometry is
         // unaffected by the detail panel expansion.
-        let result = splitter_at_with_detail(&layout, body, layout.h_splitter.x, layout.h_splitter.y, true, detail_w);
+        let result = splitter_at_with_detail(
+            &layout,
+            body,
+            layout.h_splitter.x,
+            layout.h_splitter.y,
+            true,
+            detail_w,
+        );
         assert_eq!(result, Some(SqlSplitter::EditorResults));
         // The vertical editor/history splitter must also still be hittable.
-        let zone_x = crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(body, &layout, detail_w);
+        let zone_x =
+            crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(
+                body, &layout, detail_w,
+            );
         let a_x = zone_x.saturating_sub(1);
-        let result_a = splitter_at_with_detail(&layout, body, a_x, layout.v_splitter.y, true, detail_w);
+        let result_a =
+            splitter_at_with_detail(&layout, body, a_x, layout.v_splitter.y, true, detail_w);
         assert_eq!(result_a, Some(SqlSplitter::EditorHistory));
     }
 
@@ -288,10 +345,16 @@ mod tests {
         state.active_tab = Some(0);
         let tab_id = state.tabs[0].session.id;
         let area = Rect::new(0, 0, 120, 40);
-        let msg = sql_tab_splitter_resize_msg(&state, area, tab_id, SqlSplitter::EditorHistory, 60, 0).unwrap();
+        let msg =
+            sql_tab_splitter_resize_msg(&state, area, tab_id, SqlSplitter::EditorHistory, 60, 0)
+                .unwrap();
         assert!(matches!(msg, SqlTabMessage::SetHistoryWidth { tab_id: t, .. } if t == tab_id));
-        let msg = sql_tab_splitter_resize_msg(&state, area, tab_id, SqlSplitter::HistoryDetail, 80, 0).unwrap();
-        assert!(matches!(msg, SqlTabMessage::SetHistoryDetailWidth { tab_id: t, .. } if t == tab_id));
+        let msg =
+            sql_tab_splitter_resize_msg(&state, area, tab_id, SqlSplitter::HistoryDetail, 80, 0)
+                .unwrap();
+        assert!(
+            matches!(msg, SqlTabMessage::SetHistoryDetailWidth { tab_id: t, .. } if t == tab_id)
+        );
     }
 
     #[test]
@@ -303,20 +366,32 @@ mod tests {
         assert_eq!(layout.v_splitter.width, 1);
 
         // The h_splitter row must be BELOW the v_splitter bottom.
-        assert!(layout.h_splitter.y >= layout.v_splitter.bottom(),
+        assert!(
+            layout.h_splitter.y >= layout.v_splitter.bottom(),
             "h_splitter at row {} should be at or below v_splitter bottom at row {}",
-            layout.h_splitter.y, layout.v_splitter.bottom());
+            layout.h_splitter.y,
+            layout.v_splitter.bottom()
+        );
 
         // Hovering over the v_splitter must return EditorHistory, NOT EditorResults.
         let vx = layout.v_splitter.x;
         let vy = layout.v_splitter.y;
-        assert_eq!(splitter_at(&layout, vx, vy), Some(SqlSplitter::EditorHistory));
-        assert_eq!(splitter_at(&layout, vx, vy + layout.v_splitter.height - 1), Some(SqlSplitter::EditorHistory));
+        assert_eq!(
+            splitter_at(&layout, vx, vy),
+            Some(SqlSplitter::EditorHistory)
+        );
+        assert_eq!(
+            splitter_at(&layout, vx, vy + layout.v_splitter.height - 1),
+            Some(SqlSplitter::EditorHistory)
+        );
 
         // Hovering over the h_splitter must return EditorResults.
         let hx = layout.h_splitter.x;
         let hy = layout.h_splitter.y;
-        assert_eq!(splitter_at(&layout, hx, hy), Some(SqlSplitter::EditorResults));
+        assert_eq!(
+            splitter_at(&layout, hx, hy),
+            Some(SqlSplitter::EditorResults)
+        );
     }
 
     #[test]
@@ -328,7 +403,10 @@ mod tests {
         let detail_w = 40u16;
 
         // v_splitter hit at its top should NOT match h_splitter.
-        let zone_x = crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(body, &layout, detail_w);
+        let zone_x =
+            crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(
+                body, &layout, detail_w,
+            );
         let vx = zone_x.saturating_sub(1);
         let vy = layout.v_splitter.y;
         assert_eq!(
@@ -339,7 +417,14 @@ mod tests {
 
         // h_splitter hit must still work.
         assert_eq!(
-            splitter_at_with_detail(&layout, body, layout.h_splitter.x, layout.h_splitter.y, true, detail_w),
+            splitter_at_with_detail(
+                &layout,
+                body,
+                layout.h_splitter.x,
+                layout.h_splitter.y,
+                true,
+                detail_w
+            ),
             Some(SqlSplitter::EditorResults),
             "h_splitter must still be EditorResults"
         );
@@ -348,7 +433,14 @@ mod tests {
         // the hit must resolve to h_splitter, not v_splitter.
         if layout.h_splitter.y == layout.v_splitter.bottom() {
             assert_eq!(
-                splitter_at_with_detail(&layout, body, vx, layout.v_splitter.bottom(), true, detail_w),
+                splitter_at_with_detail(
+                    &layout,
+                    body,
+                    vx,
+                    layout.v_splitter.bottom(),
+                    true,
+                    detail_w
+                ),
                 Some(SqlSplitter::EditorResults),
                 "at boundary row, h_splitter should win"
             );

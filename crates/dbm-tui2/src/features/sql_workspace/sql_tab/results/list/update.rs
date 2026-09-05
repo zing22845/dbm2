@@ -5,14 +5,11 @@
 
 use crate::common::components::search::PaneSearchInput;
 
+use super::super::effect::ResultsEffect;
 use super::msg::ListMessage;
 use super::state::ListState;
-use super::super::effect::ResultsEffect;
 
-pub fn update(
-    msg: ListMessage,
-    mut state: ListState,
-) -> (ListState, Vec<ResultsEffect>, bool) {
+pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<ResultsEffect>, bool) {
     let mut effects = Vec::new();
     let dirty = match msg {
         ListMessage::SetResult { result, paginated } => {
@@ -72,8 +69,8 @@ pub fn update(
             changed
         }
         ListMessage::QueryError { message } => {
-            let changed = state.result.is_some()
-                || state.query_error.as_deref() != Some(message.as_str());
+            let changed =
+                state.result.is_some() || state.query_error.as_deref() != Some(message.as_str());
             state.result = None;
             state.col_widths.clear();
             state.query_error = Some(message);
@@ -98,7 +95,9 @@ pub fn update(
         ListMessage::SetSelection { row, col } => {
             let result = state.result.as_ref();
             let max_row = result.map(|r| r.rows.len().saturating_sub(1)).unwrap_or(0);
-            let max_col = result.map(|r| r.columns.len().saturating_sub(1)).unwrap_or(0);
+            let max_col = result
+                .map(|r| r.columns.len().saturating_sub(1))
+                .unwrap_or(0);
             let row = row.min(max_row);
             let col = col.min(max_col);
             let changed = state.row != row || state.col != col;
@@ -468,7 +467,10 @@ mod tests {
             state,
         );
         state = s;
-        assert!(!dirty, "an ignored search key must not mark the state dirty");
+        assert!(
+            !dirty,
+            "an ignored search key must not mark the state dirty"
+        );
 
         let (s, _e, dirty) = update(
             ListMessage::SearchKey(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
@@ -559,10 +561,16 @@ mod tests {
 
         // The width is clamped to the permitted range (both directions).
         let (s, _e, _d) = update(ListMessage::AdjustColWidth { delta: -100 }, s);
-        assert_eq!(s.col_widths[0], crate::common::view::format::MIN_RESULTS_COL_WIDTH);
+        assert_eq!(
+            s.col_widths[0],
+            crate::common::view::format::MIN_RESULTS_COL_WIDTH
+        );
 
         let (s, _e, _d) = update(ListMessage::AdjustColWidth { delta: 100 }, s);
-        assert_eq!(s.col_widths[0], crate::common::view::format::MAX_RESULTS_COL_WIDTH);
+        assert_eq!(
+            s.col_widths[0],
+            crate::common::view::format::MAX_RESULTS_COL_WIDTH
+        );
     }
 
     #[test]
@@ -581,9 +589,21 @@ mod tests {
 
         // Out-of-range targets are clamped.
         let (s, _e, _d) = update(ListMessage::AdjustColWidthTo { col: 0, width: 1 }, s);
-        assert_eq!(s.col_widths[0], crate::common::view::format::MIN_RESULTS_COL_WIDTH);
-        let (s, _e, _d) = update(ListMessage::AdjustColWidthTo { col: 0, width: 5000 }, s);
-        assert_eq!(s.col_widths[0], crate::common::view::format::MAX_RESULTS_COL_WIDTH);
+        assert_eq!(
+            s.col_widths[0],
+            crate::common::view::format::MIN_RESULTS_COL_WIDTH
+        );
+        let (s, _e, _d) = update(
+            ListMessage::AdjustColWidthTo {
+                col: 0,
+                width: 5000,
+            },
+            s,
+        );
+        assert_eq!(
+            s.col_widths[0],
+            crate::common::view::format::MAX_RESULTS_COL_WIDTH
+        );
 
         // An unknown column is a safe no-op.
         let (_s, _e, dirty) = update(ListMessage::AdjustColWidthTo { col: 99, width: 30 }, s);

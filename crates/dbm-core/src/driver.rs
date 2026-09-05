@@ -70,7 +70,10 @@ pub trait DatabaseDriver: Send + Sync {
     fn engine(&self) -> Engine;
     fn display_name(&self) -> &'static str;
 
-    async fn connect(&self, opts: &ConnectOpts) -> std::result::Result<ConnectionPool, ApplicationError>;
+    async fn connect(
+        &self,
+        opts: &ConnectOpts,
+    ) -> std::result::Result<ConnectionPool, ApplicationError>;
 
     async fn ping(&self, pool: &ConnectionPool) -> std::result::Result<String, ApplicationError>;
 
@@ -134,9 +137,15 @@ pub trait DatabaseDriver: Send + Sync {
 /// significantly different concerns and call patterns.
 #[async_trait]
 pub trait SchemaIntrospector: Send + Sync {
-    async fn list_databases(&self, pool: &ConnectionPool) -> std::result::Result<Vec<String>, ApplicationError>;
+    async fn list_databases(
+        &self,
+        pool: &ConnectionPool,
+    ) -> std::result::Result<Vec<String>, ApplicationError>;
 
-    async fn list_schemas(&self, pool: &ConnectionPool) -> std::result::Result<Vec<String>, ApplicationError>;
+    async fn list_schemas(
+        &self,
+        pool: &ConnectionPool,
+    ) -> std::result::Result<Vec<String>, ApplicationError>;
 
     async fn list_tables(
         &self,
@@ -174,7 +183,10 @@ pub trait SchemaIntrospector: Send + Sync {
         schema: &str,
     ) -> std::result::Result<Vec<String>, ApplicationError>;
 
-    async fn list_extensions(&self, pool: &ConnectionPool) -> std::result::Result<Vec<String>, ApplicationError>;
+    async fn list_extensions(
+        &self,
+        pool: &ConnectionPool,
+    ) -> std::result::Result<Vec<String>, ApplicationError>;
 
     async fn list_columns(
         &self,
@@ -240,11 +252,17 @@ mod mock_driver {
             "Mock PostgreSQL"
         }
 
-        async fn connect(&self, _opts: &ConnectOpts) -> std::result::Result<ConnectionPool, ApplicationError> {
+        async fn connect(
+            &self,
+            _opts: &ConnectOpts,
+        ) -> std::result::Result<ConnectionPool, ApplicationError> {
             Ok(ConnectionPool::new(Engine::Postgres, "mock_pool"))
         }
 
-        async fn ping(&self, _pool: &ConnectionPool) -> std::result::Result<String, ApplicationError> {
+        async fn ping(
+            &self,
+            _pool: &ConnectionPool,
+        ) -> std::result::Result<String, ApplicationError> {
             Ok("mock-1.0".to_string())
         }
 
@@ -326,7 +344,10 @@ mod mock_driver {
             mut _after_each: F,
         ) -> std::result::Result<Vec<u64>, ApplicationError>
         where
-            F: FnMut(usize, u64) -> std::result::Result<(), ApplicationError> + Send + Sync + 'static,
+            F: FnMut(usize, u64) -> std::result::Result<(), ApplicationError>
+                + Send
+                + Sync
+                + 'static,
         {
             Ok(vec![])
         }
@@ -336,11 +357,17 @@ mod mock_driver {
 
     #[async_trait]
     impl SchemaIntrospector for MockSchemaIntrospector {
-        async fn list_databases(&self, _pool: &ConnectionPool) -> std::result::Result<Vec<String>, ApplicationError> {
+        async fn list_databases(
+            &self,
+            _pool: &ConnectionPool,
+        ) -> std::result::Result<Vec<String>, ApplicationError> {
             Ok(vec!["test_db".to_string()])
         }
 
-        async fn list_schemas(&self, _pool: &ConnectionPool) -> std::result::Result<Vec<String>, ApplicationError> {
+        async fn list_schemas(
+            &self,
+            _pool: &ConnectionPool,
+        ) -> std::result::Result<Vec<String>, ApplicationError> {
             Ok(vec!["public".to_string()])
         }
 
@@ -392,7 +419,10 @@ mod mock_driver {
             Ok(vec![])
         }
 
-        async fn list_extensions(&self, _pool: &ConnectionPool) -> std::result::Result<Vec<String>, ApplicationError> {
+        async fn list_extensions(
+            &self,
+            _pool: &ConnectionPool,
+        ) -> std::result::Result<Vec<String>, ApplicationError> {
             Ok(vec![])
         }
 
@@ -436,7 +466,10 @@ mod mock_driver {
     #[tokio::test]
     async fn mock_driver_connect_and_ping() {
         let driver = MockDatabaseDriver;
-        let pool = driver.connect(&ConnectOpts::new("postgres://localhost/test")).await.unwrap();
+        let pool = driver
+            .connect(&ConnectOpts::new("postgres://localhost/test"))
+            .await
+            .unwrap();
         assert_eq!(pool.engine(), Engine::Postgres);
         let version = driver.ping(&pool).await.unwrap();
         assert_eq!(version, "mock-1.0");

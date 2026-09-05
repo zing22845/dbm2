@@ -12,8 +12,7 @@
 /// from the tab's index in `SqlTabState::tabs`. The remaining fields are the
 /// persistence-relevant context that will be (de)serialized once real session
 /// data exists; they are placeholders today.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TabSession {
     /// Stable identity across app restarts (used for persistence and routing).
     pub id: usize,
@@ -44,4 +43,3 @@ pub fn session_view_key(session: &TabSession) -> (String, String) {
         .unwrap_or_default();
     (instance, connection)
 }
-

@@ -1,10 +1,10 @@
 //! Header feature rendering.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use crate::common::view::theme::Theme;
 
@@ -43,7 +43,11 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &HeaderState,
     // the header owns the shell focus.
     let discover_focused = state.button == 0 && focused;
     let discover_style = Style::default()
-        .fg(if discover_focused { p.selection_text } else { p.fg })
+        .fg(if discover_focused {
+            p.selection_text
+        } else {
+            p.fg
+        })
         .bg(if discover_focused {
             p.selection_bg
         } else {
@@ -68,10 +72,7 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &HeaderState,
     // for mouse hit-testing — render and hit-test can never drift apart.
     let button_text = " Discover ";
     if let Some(rect) = discover_button_rect(area) {
-        let visible: String = button_text
-            .chars()
-            .take(rect.width as usize)
-            .collect();
+        let visible: String = button_text.chars().take(rect.width as usize).collect();
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(visible, discover_style))),
             rect,
@@ -128,8 +129,8 @@ mod tests {
         // Render the header and confirm the literal "Discover" glyphs land
         // exactly inside the clickable rect (so clicking the drawn button
         // activates it). The view stays a pure `state -> view` function.
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
         let area = Rect::new(0, 0, 40, 3);
         let mut terminal = Terminal::new(TestBackend::new(40, 3)).unwrap();
         let state = HeaderState::default();
@@ -141,9 +142,7 @@ mod tests {
         let r = discover_button_rect(area).expect("button drawn");
         // The whole "Discover" glyphs should be inside the rect.
         let text: String = (r.x..r.right())
-            .map(|x| {
-                buf[(x, r.y)].symbol().chars().next().unwrap_or(' ')
-            })
+            .map(|x| buf[(x, r.y)].symbol().chars().next().unwrap_or(' '))
             .collect();
         assert!(text.contains("Discover"), "got: {text:?}");
         // The drawn rect must be at the header's interior.
@@ -152,17 +151,15 @@ mod tests {
 
         // The "ENTER: activate" hint must render just to the right of the button.
         let hint: String = (r.right().saturating_add(1)..buf.area().right())
-            .map(|x| {
-                buf[(x, r.y)].symbol().chars().next().unwrap_or(' ')
-            })
+            .map(|x| buf[(x, r.y)].symbol().chars().next().unwrap_or(' '))
             .collect();
         assert!(hint.contains("ENTER: activate"), "got: {hint:?}");
     }
 
     #[test]
     fn discover_button_fg_is_instance_color_and_focus_uses_selection_bg() {
-        use ratatui::backend::TestBackend;
         use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
         let area = Rect::new(0, 0, 40, 3);
         let mut terminal = Terminal::new(TestBackend::new(40, 3)).unwrap();
         let theme = crate::common::view::theme::default();
@@ -170,25 +167,28 @@ mod tests {
 
         // Not focused: foreground is the instance text color, no background.
         terminal
-            .draw(|frame| {
-                render(frame, &theme, area, &HeaderState::default(), false)
-            })
+            .draw(|frame| render(frame, &theme, area, &HeaderState::default(), false))
             .unwrap();
         let r = discover_button_rect(area).unwrap();
         let cell = &terminal.backend().buffer()[(r.x, r.y)];
         assert_eq!(cell.fg, p.fg, "button fg matches the instance font color");
-        assert_eq!(cell.bg, ratatui::style::Color::Reset, "no bg when unfocused");
+        assert_eq!(
+            cell.bg,
+            ratatui::style::Color::Reset,
+            "no bg when unfocused"
+        );
 
         // Focused: foreground switches to selection_text for legibility on the
         // light selection background, with the instances cursor-row selection
         // background applied.
         terminal
-            .draw(|frame| {
-                render(frame, &theme, area, &HeaderState::default(), true)
-            })
+            .draw(|frame| render(frame, &theme, area, &HeaderState::default(), true))
             .unwrap();
         let cell = &terminal.backend().buffer()[(r.x, r.y)];
-        assert_eq!(cell.fg, p.selection_text, "fg uses selection_text when focused for legibility on light bg");
+        assert_eq!(
+            cell.fg, p.selection_text,
+            "fg uses selection_text when focused for legibility on light bg"
+        );
         assert_eq!(
             cell.bg, p.selection_bg,
             "focused button bg matches the instances cursor background"

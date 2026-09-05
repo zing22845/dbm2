@@ -90,7 +90,11 @@ pub trait Effect: Send + 'static {
     /// Run the effect. `services` provides access to infrastructure (store,
     /// file IO, ...), `emit` forwards streaming actions (e.g. progress) while
     /// running, and the returned `Vec` holds any final actions.
-    fn run(self, emit: Emitter<Self::Action>, services: Arc<Services>) -> BoxFuture<Vec<Self::Action>>;
+    fn run(
+        self,
+        emit: Emitter<Self::Action>,
+        services: Arc<Services>,
+    ) -> BoxFuture<Vec<Self::Action>>;
 }
 
 /// A type-erased effect that resolves directly to the global action type `A`.

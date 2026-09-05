@@ -8,13 +8,13 @@
 //! message. Intents/effects are re-tagged with the same `tab_id` so the
 //! cascade lands back on the originating tab.
 
-use super::msg::SqlTabMessage;
-use super::state::{SqlFocus, SqlTabState};
-use super::intent::SqlTabIntent;
-use super::effect::SqlTabEffect;
 use super::editor;
+use super::effect::SqlTabEffect;
 use super::history;
+use super::intent::SqlTabIntent;
+use super::msg::SqlTabMessage;
 use super::results;
+use super::state::{SqlFocus, SqlTabState};
 
 /// Update the `sql_tab` state, delegating to child modules.
 ///
@@ -47,10 +47,7 @@ pub fn update(
             dirty = before != state.active_tab;
         }
         SqlTabMessage::Focus(focus) => {
-            if let Some(tab) = state
-                .active_tab
-                .and_then(|i| state.tabs.get_mut(i))
-            {
+            if let Some(tab) = state.active_tab.and_then(|i| state.tabs.get_mut(i)) {
                 let mut changed = tab.focus != focus;
                 // Track the sub-pane that was active before entering Results, so
                 // Ctrl+Up from Results returns to the previous editor/history
@@ -113,14 +110,8 @@ pub fn update(
             );
             // Load the SQL-completion catalog for the newly bound tab so table
             // and column completion is available immediately.
-            let tab_id = state
-                .tabs
-                .last()
-                .map(|t| t.session.id)
-                .unwrap_or_default();
-            let schema_name = schema
-                .clone()
-                .unwrap_or_else(|| "public".to_string());
+            let tab_id = state.tabs.last().map(|t| t.session.id).unwrap_or_default();
+            let schema_name = schema.clone().unwrap_or_else(|| "public".to_string());
             effects.push(SqlTabEffect::Editor {
                 tab_id,
                 effect: editor::effect::EditorEffect::LoadCompletionCatalog {
@@ -158,11 +149,7 @@ pub fn update(
                 state.close_active_context_picker();
             }
             if created {
-                let tab_id = state
-                    .tabs
-                    .last()
-                    .map(|t| t.session.id)
-                    .unwrap_or_default();
+                let tab_id = state.tabs.last().map(|t| t.session.id).unwrap_or_default();
                 let schema_name = schema.clone().unwrap_or_else(|| "public".to_string());
                 effects.push(SqlTabEffect::Editor {
                     tab_id,
@@ -189,7 +176,10 @@ pub fn update(
             // redundant redraw and inflate the waste metric.
             dirty = created || focused_different_tab;
         }
-        SqlTabMessage::SetActiveConnection { instance, connection } => {
+        SqlTabMessage::SetActiveConnection {
+            instance,
+            connection,
+        } => {
             // Clear a leftover picker on the now-active tab (only when actually
             // switching connections) so it can't block that tab's editor.
             let key = (instance.clone(), connection.clone());
@@ -200,7 +190,11 @@ pub fn update(
             }
             dirty = true;
         }
-        SqlTabMessage::ApplyContext { tab_id, database, schema } => {
+        SqlTabMessage::ApplyContext {
+            tab_id,
+            database,
+            schema,
+        } => {
             if let Some(idx) = state.index_of(tab_id) {
                 let tab = &mut state.tabs[idx];
                 let changed = tab.session.database.as_ref() != Some(&database)
@@ -248,8 +242,7 @@ pub fn update(
                 let tab = &state.tabs[idx];
                 let (instance, connection) = session_key(&tab.session);
                 let detail_visible = super::history::detail_visible(
-                    tab.focus
-                        == crate::features::sql_workspace::sql_tab::state::SqlFocus::History,
+                    tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History,
                     &tab.history.list,
                     &state.history_store,
                     &instance,
@@ -308,7 +301,10 @@ pub fn update(
         SqlTabMessage::SetHistoryDetailWidth { tab_id, width } => {
             if let Some(idx) = state.index_of(tab_id) {
                 let before = state.tabs[idx].history.splitter.detail_pane_width;
-                state.tabs[idx].history.splitter.set_detail_pane_width(width);
+                state.tabs[idx]
+                    .history
+                    .splitter
+                    .set_detail_pane_width(width);
                 dirty = before != state.tabs[idx].history.splitter.detail_pane_width;
                 // The History zone holds list + detail + splitter, capped at
                 // `area.width - MIN_SQL_PANE_WIDTH` (the editor keeps its min
@@ -350,9 +346,12 @@ pub fn update(
         }
         SqlTabMessage::NudgeHistoryDetailWidth { tab_id, nudge } => {
             if let Some(idx) = state.index_of(tab_id) {
-                let delta =
-                    crate::common::view::splitter::width_delta_for_left_pane(nudge, crate::common::view::splitter::WIDTH_NUDGE_STEP);
-                let next = (state.tabs[idx].history.splitter.detail_pane_width as i16 + delta).max(0) as u16;
+                let delta = crate::common::view::splitter::width_delta_for_left_pane(
+                    nudge,
+                    crate::common::view::splitter::WIDTH_NUDGE_STEP,
+                );
+                let next = (state.tabs[idx].history.splitter.detail_pane_width as i16 + delta)
+                    .max(0) as u16;
                 let before = state.tabs[idx].history.splitter.detail_pane_width;
                 state.tabs[idx].history.splitter.set_detail_pane_width(next);
                 dirty = before != state.tabs[idx].history.splitter.detail_pane_width;
@@ -363,7 +362,10 @@ pub fn update(
         SqlTabMessage::SetResultsDetailWidth { tab_id, width } => {
             if let Some(idx) = state.index_of(tab_id) {
                 let before = state.tabs[idx].results.splitter.detail_pane_width;
-                state.tabs[idx].results.splitter.set_detail_pane_width(width);
+                state.tabs[idx]
+                    .results
+                    .splitter
+                    .set_detail_pane_width(width);
                 dirty = before != state.tabs[idx].results.splitter.detail_pane_width;
             } else {
                 warn_tab_missing(tab_id);
@@ -373,9 +375,12 @@ pub fn update(
             if let Some(idx) = state.index_of(tab_id) {
                 // Results detail is on the RIGHT side of its splitter, so the
                 // delta flips sign vs. History detail (which is on the left).
-                let delta =
-                    crate::common::view::splitter::width_delta_for_right_pane(nudge, crate::common::view::splitter::WIDTH_NUDGE_STEP);
-                let next = (state.tabs[idx].results.splitter.detail_pane_width as i16 + delta).max(0) as u16;
+                let delta = crate::common::view::splitter::width_delta_for_right_pane(
+                    nudge,
+                    crate::common::view::splitter::WIDTH_NUDGE_STEP,
+                );
+                let next = (state.tabs[idx].results.splitter.detail_pane_width as i16 + delta)
+                    .max(0) as u16;
                 let before = state.tabs[idx].results.splitter.detail_pane_width;
                 state.tabs[idx].results.splitter.set_detail_pane_width(next);
                 dirty = before != state.tabs[idx].results.splitter.detail_pane_width;
@@ -417,9 +422,11 @@ pub fn update(
             // a query immediately (the recall list is interactive as an input).
             if let Some(idx) = state.index_of(tab_id) {
                 let (instance, connection) = session_key(&state.tabs[idx].session);
-                state.tabs[idx]
-                    .history
-                    .pin_most_recent(&state.history_store, &instance, &connection);
+                state.tabs[idx].history.pin_most_recent(
+                    &state.history_store,
+                    &instance,
+                    &connection,
+                );
                 state.tabs[idx].history.list.search.start();
                 state.tabs[idx].focus = SqlFocus::History;
                 dirty = true;
@@ -533,11 +540,7 @@ pub fn update(
                 // `RunQueryFromEditor` would, using the pinned session context.
                 // Snapshot the session context as owned values so no reference
                 // into `state.tabs[idx]` outlives the mutable take below.
-                let q_instance = state.tabs[idx]
-                    .session
-                    .instance
-                    .clone()
-                    .unwrap_or_default();
+                let q_instance = state.tabs[idx].session.instance.clone().unwrap_or_default();
                 let conn = state.tabs[idx]
                     .session
                     .connection
@@ -568,7 +571,10 @@ pub fn update(
                     results_state,
                 );
                 state.tabs[idx].results = rs;
-                intents.extend(ri.into_iter().map(|i| SqlTabIntent::Results { tab_id, intent: i }));
+                intents.extend(
+                    ri.into_iter()
+                        .map(|i| SqlTabIntent::Results { tab_id, intent: i }),
+                );
                 effects.extend(
                     re.into_iter()
                         .map(|e| SqlTabEffect::Results { tab_id, effect: e }),
@@ -592,7 +598,10 @@ pub fn update(
             // mode. The header shows the status there. The flag is mirrored
             // into the editor so the completion engine can gate table names.
             if let Some(idx) = state.index_of(tab_id)
-                && matches!(state.tabs[idx].editor.editor.mode, edtui::EditorMode::Insert)
+                && matches!(
+                    state.tabs[idx].editor.editor.mode,
+                    edtui::EditorMode::Insert
+                )
             {
                 let on = !state.tabs[idx].complete_table_names;
                 state.tabs[idx].complete_table_names = on;
@@ -726,8 +735,15 @@ pub fn update(
                 // Intercept RecordSuccess at parent level: update the shared
                 // history store (per connection, shared across all tabs) and
                 // emit the persist effect.
-                if let history::msg::HistoryMessage::RecordSuccess { ref instance, ref connection, ref sql } = inner {
-                    state.history_store.record_success(instance, connection, sql);
+                if let history::msg::HistoryMessage::RecordSuccess {
+                    ref instance,
+                    ref connection,
+                    ref sql,
+                } = inner
+                {
+                    state
+                        .history_store
+                        .record_success(instance, connection, sql);
                     effects.push(SqlTabEffect::History {
                         tab_id,
                         effect: history::effect::HistoryEffect::PersistSuccess {
@@ -738,9 +754,17 @@ pub fn update(
                     });
                     // The current tab's cursor/detail may need updating too.
                     let history_state = std::mem::take(&mut state.tabs[idx].history);
-                    let selected_sql = history_state.list.selected_entry(&state.history_store, instance.as_str(), connection.as_str());
+                    let selected_sql = history_state.list.selected_entry(
+                        &state.history_store,
+                        instance.as_str(),
+                        connection.as_str(),
+                    );
                     let (s, _i, _e, _d) = history::update::update(
-                        history::msg::HistoryMessage::RecordSuccess { instance: instance.clone(), connection: connection.clone(), sql: sql.clone() },
+                        history::msg::HistoryMessage::RecordSuccess {
+                            instance: instance.clone(),
+                            connection: connection.clone(),
+                            sql: sql.clone(),
+                        },
                         history_state,
                         &state.history_store,
                         instance.as_str(),
@@ -753,7 +777,11 @@ pub fn update(
                     dirty = true;
                 } else {
                     let history_state = std::mem::take(&mut state.tabs[idx].history);
-                    let selected_sql = history_state.list.selected_entry(&state.history_store, instance.as_str(), connection.as_str());
+                    let selected_sql = history_state.list.selected_entry(
+                        &state.history_store,
+                        instance.as_str(),
+                        connection.as_str(),
+                    );
                     let (s, i, e, d) = history::update::update(
                         inner,
                         history_state,
@@ -803,15 +831,16 @@ fn session_key(session: &super::session::TabSession) -> (String, String) {
 /// Re-clamp the stored list to `history_max - detail` so storage and rendered
 /// geometry stay identical (no redundant repaints at the drag limit). Returns
 /// `true` when the stored width changed.
-fn clamp_list_for_history_detail(tab: &mut super::state::SqlTab, store: &history::store::SqlHistoryStore) -> bool {
+fn clamp_list_for_history_detail(
+    tab: &mut super::state::SqlTab,
+    store: &history::store::SqlHistoryStore,
+) -> bool {
     use crate::features::sql_workspace::sql_tab::splitter::state::{
         MAX_HISTORY_WIDTH, MIN_HISTORY_WIDTH,
     };
     let (instance, connection) = session_key(&tab.session);
     if tab.focus != crate::features::sql_workspace::sql_tab::state::SqlFocus::History
-        || store
-            .entries(&instance, &connection)
-            .is_empty()
+        || store.entries(&instance, &connection).is_empty()
     {
         return false;
     }
@@ -860,7 +889,10 @@ mod tests {
         // In INSERT mode, Alt+Tab toggles TblCmp on.
         let (s, _i, _e, dirty) = update(SqlTabMessage::ToggleTableCompletion { tab_id }, s);
         assert!(dirty);
-        assert!(s.tabs[0].complete_table_names, "INSERT mode toggles TblCmp on");
+        assert!(
+            s.tabs[0].complete_table_names,
+            "INSERT mode toggles TblCmp on"
+        );
         assert!(
             s.tabs[0].editor.complete_table_names,
             "flag is mirrored into the editor so completion can gate table names"
@@ -922,8 +954,8 @@ mod tests {
 
     #[test]
     fn tblcmp_on_after_from_offers_table_names() {
-        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
         use crate::features::sql_workspace::sql_tab::editor::state::CompletionCatalog;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
         let char_key = |c: char| KeyEvent {
             code: KeyCode::Char(c),
@@ -943,8 +975,7 @@ mod tests {
         };
 
         // Alt+Tab enables TblCmp.
-        let (mut s, _i, _e, _d) =
-            update(SqlTabMessage::ToggleTableCompletion { tab_id }, s);
+        let (mut s, _i, _e, _d) = update(SqlTabMessage::ToggleTableCompletion { tab_id }, s);
         assert!(s.tabs[0].complete_table_names);
         assert!(s.tabs[0].editor.complete_table_names);
 
@@ -963,7 +994,10 @@ mod tests {
             s = s2;
         }
         let items = &s.tabs[0].editor.sql_completion.items;
-        assert!(s.tabs[0].editor.sql_completion.is_open(), "popup should open after `from `");
+        assert!(
+            s.tabs[0].editor.sql_completion.is_open(),
+            "popup should open after `from `"
+        );
         assert!(
             items.iter().any(|i| i.label == "users"),
             "table names must be offered with TblCmp on, got: {items:?}"
@@ -975,9 +1009,9 @@ mod tests {
         // Column completion for `update t set ` must work regardless of TblCmp:
         // the original dbm only gates *table-name* completion on TblCmp, not
         // column completion.
-        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
         use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
         use crate::features::sql_workspace::sql_tab::editor::state::CompletionCatalog;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
         let char_key = |c: char| KeyEvent {
             code: KeyCode::Char(c),
@@ -1046,9 +1080,9 @@ mod tests {
         // `select * from t where ` must pop the column list right away — the
         // cursor sits after a space, so the clause-keyword auto-open fix is
         // required (it used to only pop after deleting and retyping the space).
-        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
         use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
         use crate::features::sql_workspace::sql_tab::editor::state::CompletionCatalog;
+        use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
         let char_key = |c: char| KeyEvent {
             code: KeyCode::Char(c),
@@ -1326,9 +1360,13 @@ mod tests {
         );
 
         assert!(
-            !intents
-                .iter()
-                .any(|i| matches!(i, SqlTabIntent::History { intent: HistoryIntent::RecordSuccess { .. }, .. })),
+            !intents.iter().any(|i| matches!(
+                i,
+                SqlTabIntent::History {
+                    intent: HistoryIntent::RecordSuccess { .. },
+                    ..
+                }
+            )),
             "a failed query must not record history, got: {intents:?}"
         );
     }
@@ -1342,8 +1380,7 @@ mod tests {
         s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
         let tab_id = s.tabs[0].session.id;
         // Seed history so there is an entry to pin.
-        s.history_store
-            .record_success("inst", "c1", "SELECT 1");
+        s.history_store.record_success("inst", "c1", "SELECT 1");
 
         let (s, _i, _e, _d) = update(SqlTabMessage::EnterHistoryRecall { tab_id }, s);
 
@@ -1377,15 +1414,11 @@ mod tests {
         s.tabs[0].history.splitter.detail_pane_width = 40;
         s.tabs[0].splitter.history_pane_width = 24;
         s.tabs[0].splitter.history_max = 200; // so the drag width isn't clamped
-        s.history_store
-            .record_success("inst", "c1", "SELECT 1");
+        s.history_store.record_success("inst", "c1", "SELECT 1");
 
         // zone = 100, detail = 40, splitter = 1, border = 2
         // -> list = 100 - 40 - 1 - 2 = 57.
-        let (s, _i, _e, _d) = update(
-            SqlTabMessage::SetHistoryWidth { tab_id, width: 100 },
-            s,
-        );
+        let (s, _i, _e, _d) = update(SqlTabMessage::SetHistoryWidth { tab_id, width: 100 }, s);
         assert_eq!(
             s.tabs[0].splitter.history_pane_width, 57,
             "with the detail visible, A drags change the list, not the detail"
@@ -1412,26 +1445,22 @@ mod tests {
         // Simulate the layout's `history_max` for a 120-wide body:
         // track - MIN_SQL_PANE_WIDTH - 1 = 120 - 20 - 1 = 99.
         s.tabs[0].splitter.history_max = 99;
-        s.history_store
-            .record_success("inst", "c1", "SELECT 1");
+        s.history_store.record_success("inst", "c1", "SELECT 1");
 
         // A drag far past the zone limit: the zone max is 120 - 20 = 100, so
         // the list can be at most 100 - 40 - 1 - 2 (border) = 57.
-        let (s, _i, _e, d) = update(
-            SqlTabMessage::SetHistoryWidth { tab_id, width: 150 },
-            s,
-        );
+        let (s, _i, _e, d) = update(SqlTabMessage::SetHistoryWidth { tab_id, width: 150 }, s);
         assert_eq!(
             s.tabs[0].splitter.history_pane_width, 57,
             "the list must clamp at history_max - detail - border (zone max - detail - splitter - border)"
         );
-        assert!(d, "the width changed from its default, so this run is dirty");
+        assert!(
+            d,
+            "the width changed from its default, so this run is dirty"
+        );
 
         // Re-dragging to the same extreme must not dirty (no redundant repaint).
-        let (s2, _i, _e, d2) = update(
-            SqlTabMessage::SetHistoryWidth { tab_id, width: 150 },
-            s,
-        );
+        let (s2, _i, _e, d2) = update(SqlTabMessage::SetHistoryWidth { tab_id, width: 150 }, s);
         assert_eq!(s2.tabs[0].splitter.history_pane_width, 57);
         assert!(
             !d2,
@@ -1454,8 +1483,7 @@ mod tests {
         s.tabs[0].history.splitter.detail_pane_width = 40;
         s.tabs[0].splitter.history_max = 99; // 120-wide body: 120 - 20 - 1
         s.tabs[0].splitter.history_pane_width = 57; // A already at the limit (99 - 40 - 2 border)
-        s.history_store
-            .record_success("inst", "c1", "SELECT 1");
+        s.history_store.record_success("inst", "c1", "SELECT 1");
 
         // Drag B to grow the detail to its max (72).
         let (s, _i, _e, d) = update(
@@ -1467,7 +1495,10 @@ mod tests {
             s.tabs[0].splitter.history_pane_width, 25,
             "the list must shrink to history_max - detail - border = 99 - 72 - 2"
         );
-        assert!(d, "both the detail and the list changed, so this run is dirty");
+        assert!(
+            d,
+            "both the detail and the list changed, so this run is dirty"
+        );
 
         // Repeating the same drag must not dirty (no redundant repaint).
         let (s2, _i, _e, d2) = update(
@@ -1493,10 +1524,7 @@ mod tests {
         s.tabs[0].focus = SqlFocus::Editor; // no detail visible
         s.tabs[0].splitter.history_max = 200; // so the drag width isn't clamped
 
-        let (s, _i, _e, _d) = update(
-            SqlTabMessage::SetHistoryWidth { tab_id, width: 80 },
-            s,
-        );
+        let (s, _i, _e, _d) = update(SqlTabMessage::SetHistoryWidth { tab_id, width: 80 }, s);
         assert_eq!(s.tabs[0].splitter.history_pane_width, 80);
     }
 
@@ -1515,8 +1543,7 @@ mod tests {
         s.tabs[0].splitter.history_pane_width = 93;
         s.tabs[0].splitter.history_max = 93; // 114-wide body: 114 - 20 - 1
         s.tabs[0].history.splitter.detail_pane_width = 40;
-        s.history_store
-            .record_success("inst", "c1", "SELECT 1");
+        s.history_store.record_success("inst", "c1", "SELECT 1");
 
         // Enter History -> the detail pane shows, so the list must give way.
         let (s, _i, _e, d) = update(SqlTabMessage::Focus(SqlFocus::History), s);

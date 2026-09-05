@@ -6,7 +6,11 @@ use crossterm::event::KeyEvent;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HistoryMessage {
     /// Record a successful statement for the connection.
-    RecordSuccess { instance: String, connection: String, sql: String },
+    RecordSuccess {
+        instance: String,
+        connection: String,
+        sql: String,
+    },
     /// Move the list cursor by `delta` (`-1`/`+1`).
     MoveCursor { delta: i32 },
     /// Set the list cursor to an absolute index (from a mouse click).

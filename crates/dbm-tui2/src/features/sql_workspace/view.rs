@@ -6,16 +6,16 @@
 //! the active one. A workspace-level footer hint (tab management) sits at the
 //! bottom inside the border, distinct from any single pane's footer.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Block, Borders};
-use ratatui::Frame;
 
 use crate::common::view::hints::{draw_footer, footer_height, sql_workspace_footer_text};
 use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
-use super::state::SqlState;
 use super::sql_tab::view as sql_tab_view;
+use super::state::SqlState;
 use crate::app::state::SplitterHoverState;
 
 /// The outer block title for the SQL workspace, showing the active connection
@@ -43,7 +43,10 @@ pub fn render(
     focused: bool,
     splitter_hover: &SplitterHoverState,
     active_scrollbar: Option<ActiveScrollbar>,
-) -> (Option<crate::common::editor::EditorHardwareCursor>, Option<usize>) {
+) -> (
+    Option<crate::common::editor::EditorHardwareCursor>,
+    Option<usize>,
+) {
     let p = theme.palette();
     let outer = Block::default()
         .title(workspace_title(state))

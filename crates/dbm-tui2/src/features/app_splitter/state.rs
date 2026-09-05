@@ -46,7 +46,8 @@ impl AppSplitterState {
     /// grows it and `[` shrinks it.
     pub fn nudge_explorer_width(&mut self, delta: i16) {
         let next = self.explorer_pane_width as i16 + delta;
-        self.explorer_pane_width = next.clamp(MIN_EXPLORER_WIDTH as i16, MAX_EXPLORER_WIDTH as i16) as u16;
+        self.explorer_pane_width =
+            next.clamp(MIN_EXPLORER_WIDTH as i16, MAX_EXPLORER_WIDTH as i16) as u16;
     }
 }
 

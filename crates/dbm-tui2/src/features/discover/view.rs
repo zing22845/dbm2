@@ -1,17 +1,17 @@
 //! Discover feature rendering.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::Frame;
 
 use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
-use super::state::DiscoverState;
 use super::engine::view as engine_view;
 use super::results::view as results_view;
-use super::targets::view as targets_view;
 use super::splitter::view as splitter_view;
+use super::state::DiscoverState;
+use super::targets::view as targets_view;
 
 /// Render the discover feature: engine selector on top, with the targets editor
 /// and results list stacked vertically below (mirrors the original dbm layout,
@@ -32,7 +32,9 @@ pub fn render(
     active_scrollbar: Option<ActiveScrollbar>,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     use crate::common::utils::text_width::wrapped_line_count;
-    use crate::common::view::hints::{discover_engine_footer_text, discover_footer_text, draw_pane_footer};
+    use crate::common::view::hints::{
+        discover_engine_footer_text, discover_footer_text, draw_pane_footer,
+    };
     let p = theme.palette();
 
     // The discover parent pane wraps the three child panes (engine, targets,
@@ -71,9 +73,9 @@ pub fn render(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(engine_h),    // engine selector + its footer
-            Constraint::Min(0),              // targets + results
-            Constraint::Length(footer_h),    // discover dialog footer
+            Constraint::Length(engine_h), // engine selector + its footer
+            Constraint::Min(0),           // targets + results
+            Constraint::Length(footer_h), // discover dialog footer
         ])
         .split(inner);
 
@@ -82,7 +84,8 @@ pub fn render(
     // Stacked vertically, like the original: targets (top), a 1-row splitter,
     // then results (bottom). The splitter width is owned by the discover
     // `splitter` child feature (targets height in rows).
-    let body = super::splitter::view::discover_body_layout(chunks[1], state.splitter.targets_height);
+    let body =
+        super::splitter::view::discover_body_layout(chunks[1], state.splitter.targets_height);
 
     let caret = targets_view::render(
         frame,
@@ -152,7 +155,9 @@ fn render_close_confirm(frame: &mut Frame, theme: &Theme, area: Rect) {
         theme,
         area,
         " Close Discover ",
-        vec![Line::from(Span::raw("Close Discover and return to the tree?"))],
+        vec![Line::from(Span::raw(
+            "Close Discover and return to the tree?",
+        ))],
         true,
     );
 }
@@ -187,7 +192,10 @@ pub fn discover_body_area(area: Rect, state: &DiscoverState) -> Rect {
     };
     let engine_h = 3u16.saturating_add(engine_footer_h);
     let body_top = inner.y + engine_h;
-    let body_h = inner.height.saturating_sub(engine_h).saturating_sub(footer_h);
+    let body_h = inner
+        .height
+        .saturating_sub(engine_h)
+        .saturating_sub(footer_h);
     Rect::new(inner.x, body_top, inner.width, body_h)
 }
 

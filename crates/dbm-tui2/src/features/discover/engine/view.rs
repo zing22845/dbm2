@@ -1,10 +1,10 @@
 //! Engine selector feature rendering.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use crate::common::view::theme::Theme;
 
@@ -27,9 +27,7 @@ pub fn render(
         Span::styled(" engine: ", Style::default().fg(p.muted)),
         Span::styled(
             state.engine.to_string(),
-            Style::default()
-                .fg(p.accent)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
         ),
     ]);
     let block = Block::default()

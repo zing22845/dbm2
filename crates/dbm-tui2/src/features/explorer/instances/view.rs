@@ -1,10 +1,10 @@
 //! Explorer instances (connection tree) feature rendering.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use crate::common::view::hints::{draw_pane_footer, footer_height, instances_pane_footer_text};
 use crate::common::view::pane_scrollbar::{
@@ -56,10 +56,7 @@ fn compute_instances_body(area: Rect, state: &InstancesState) -> Option<Rect> {
 /// Compute the instances tree viewport. One source of truth for render, row_at,
 /// toggle_at, and v_scrollbar_hit. Applies discover-style cursor anchoring
 /// (skipped when `scroll_locked`).
-pub fn compute_instances_viewport(
-    area: Rect,
-    state: &InstancesState,
-) -> Option<InstancesViewport> {
+pub fn compute_instances_viewport(area: Rect, state: &InstancesState) -> Option<InstancesViewport> {
     let total = state.visible_count();
     if total == 0 {
         return None;
@@ -178,7 +175,8 @@ pub fn toggle_at(area: Rect, state: &InstancesState, x: u16, y: u16) -> Option<u
     let iv = compute_instances_viewport(area, state)?;
     // Instance rows render as " {marker}": marker is the 2nd char after the
     // leading space, at content.x + 1 (after leading space).
-    let marker_col = iv.content
+    let marker_col = iv
+        .content
         .x
         .saturating_add(1)
         .saturating_sub(state.h_scroll);
@@ -207,7 +205,8 @@ pub fn render(
         .map(|(_, conn)| conn.is_none())
         .unwrap_or(false);
     let hint = instances_pane_footer_text(instance_row);
-    let footer_h = footer_height(&hint, area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
+    let footer_h =
+        footer_height(&hint, area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
     let block = Block::default()
         .title(" [I] Instances ")
         .borders(Borders::ALL)
@@ -226,7 +225,9 @@ pub fn render(
             if footer_h > 0 {
                 let footer_area = Rect::new(
                     inner.x,
-                    inner.y.saturating_add(inner.height.saturating_sub(footer_h)),
+                    inner
+                        .y
+                        .saturating_add(inner.height.saturating_sub(footer_h)),
                     inner.width,
                     footer_h,
                 );
@@ -274,10 +275,13 @@ pub fn render(
             // Active rows reserve 1 cell for the trailing ● marker (tight
             // against the right border); inactive rows use the full width.
             let dot = "●";
-            let text_max = if active { viewport_w.saturating_sub(1) } else { viewport_w };
-            let display_text = crate::common::utils::text_width::truncate_from(
-                &full_text, row_h_scroll, text_max,
-            );
+            let text_max = if active {
+                viewport_w.saturating_sub(1)
+            } else {
+                viewport_w
+            };
+            let display_text =
+                crate::common::utils::text_width::truncate_from(&full_text, row_h_scroll, text_max);
             if active && viewport_w >= 2 {
                 let text_w = crate::common::utils::text_width::width(&display_text);
                 let padding = text_max.saturating_sub(text_w);
@@ -309,11 +313,21 @@ pub fn render(
                         Style::default().fg(p.fg)
                     };
                     let full_text = format!("    └ {}/{}", conn.name, conn.database);
-                    let row_h_scroll: usize = if conn_focused { effective_h as usize } else { 0 };
+                    let row_h_scroll: usize = if conn_focused {
+                        effective_h as usize
+                    } else {
+                        0
+                    };
                     let dot = "●";
-                    let text_max = if conn_active { viewport_w.saturating_sub(1) } else { viewport_w };
+                    let text_max = if conn_active {
+                        viewport_w.saturating_sub(1)
+                    } else {
+                        viewport_w
+                    };
                     let display_text = crate::common::utils::text_width::truncate_from(
-                        &full_text, row_h_scroll, text_max,
+                        &full_text,
+                        row_h_scroll,
+                        text_max,
                     );
                     if conn_active && viewport_w >= 2 {
                         let text_w = crate::common::utils::text_width::width(&display_text);
@@ -460,6 +474,10 @@ mod tests {
         s.scroll_locked = true; // manual scroll — prevent cursor anchor from resetting it
         let area = Rect::new(0, 5, 40, 5); // very small: only 1 body row after borders+footer
         // Row at content top (body_top = 6) should be row 1 (instance b).
-        assert_eq!(row_at(area, &s, 6), Some(1), "scrolled viewport must add start offset");
+        assert_eq!(
+            row_at(area, &s, 6),
+            Some(1),
+            "scrolled viewport must add start offset"
+        );
     }
 }

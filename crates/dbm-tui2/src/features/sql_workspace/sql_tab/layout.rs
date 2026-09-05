@@ -45,9 +45,9 @@ pub fn sql_tab_layout(area: Rect, editor_top_height: u16, history_width: u16) ->
     let body = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(0), // top row (editor + history)
+            Constraint::Min(0),    // top row (editor + history)
             Constraint::Length(1), // horizontal splitter
-            Constraint::Min(0), // results
+            Constraint::Min(0),    // results
         ])
         .split(area);
     if body.len() != 3 || body[0].height < 2 || body[2].height < 2 {
@@ -84,7 +84,9 @@ pub fn sql_tab_layout(area: Rect, editor_top_height: u16, history_width: u16) ->
     // clamp) so the history nudge/drag clamp to the exact values the layout
     // accepts — stored and rendered widths never disagree.
     let history_min = crate::features::sql_workspace::sql_tab::splitter::state::MIN_HISTORY_WIDTH;
-    let history_max = track_w.saturating_sub(MIN_SQL_PANE_WIDTH + 1).max(history_min);
+    let history_max = track_w
+        .saturating_sub(MIN_SQL_PANE_WIDTH + 1)
+        .max(history_min);
     let history_w = history_width.clamp(history_min, history_max);
     let top = Layout::default()
         .direction(Direction::Horizontal)
@@ -111,7 +113,6 @@ pub fn sql_tab_layout(area: Rect, editor_top_height: u16, history_width: u16) ->
         history_max,
     }
 }
-
 
 #[cfg(test)]
 mod tests {

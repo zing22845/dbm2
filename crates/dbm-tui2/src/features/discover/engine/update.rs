@@ -1,9 +1,9 @@
 //! Engine selector feature update.
 
+use super::effect::EngineEffect;
+use super::intent::EngineIntent;
 use super::msg::EngineMessage;
 use super::state::EngineState;
-use super::intent::EngineIntent;
-use super::effect::EngineEffect;
 
 /// Update the engine selector state. Pure by-value transition.
 ///
@@ -40,7 +40,8 @@ mod tests {
         // There is only one engine today, but `Select` is the future hook for
         // switching engines, so it must still work if more are added.
         let state = EngineState::default();
-        let (state, _i, _e, dirty) = update(EngineMessage::Select(EngineState::default().engine), state);
+        let (state, _i, _e, dirty) =
+            update(EngineMessage::Select(EngineState::default().engine), state);
         assert!(!dirty);
         assert_eq!(state.status, None);
     }
@@ -51,10 +52,16 @@ mod tests {
         // First `e`/`Enter` sets the note and repaints.
         let (state, _i, _e, dirty) = update(EngineMessage::ShowOnlyEngineNote, state);
         assert!(dirty);
-        assert_eq!(state.status.as_deref(), Some("Postgres is the only available engine"));
+        assert_eq!(
+            state.status.as_deref(),
+            Some("Postgres is the only available engine")
+        );
         // Repeating keeps the same status, so it must not repaint again.
         let (state, _i, _e, dirty) = update(EngineMessage::ShowOnlyEngineNote, state);
         assert!(!dirty);
-        assert_eq!(state.status.as_deref(), Some("Postgres is the only available engine"));
+        assert_eq!(
+            state.status.as_deref(),
+            Some("Postgres is the only available engine")
+        );
     }
 }

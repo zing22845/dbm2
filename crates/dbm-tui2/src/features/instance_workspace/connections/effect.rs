@@ -11,7 +11,9 @@ use crate::common::service::services::Services;
 #[derive(Debug, Clone)]
 pub enum ConnectionsAction {
     /// The store returned the connections.
-    Loaded { connections: Vec<dbm_store::InstanceConnection> },
+    Loaded {
+        connections: Vec<dbm_store::InstanceConnection>,
+    },
     /// A connection was saved (added or edited).
     Saved,
     /// A connection was deleted.
@@ -43,7 +45,10 @@ pub enum ConnectionsEffect {
         connection: NewInstanceConnection,
     },
     /// Delete a connection.
-    DeleteConnection { instance_name: String, connection_name: String },
+    DeleteConnection {
+        instance_name: String,
+        connection_name: String,
+    },
     /// Test the form's current values against the instance (ping), without
     /// saving (the form's `t` action).
     TestFormConnection {
@@ -61,28 +66,45 @@ pub enum ConnectionsEffect {
     },
     /// Test a saved connection from the list (the list's `t` action), recording
     /// the outcome timestamp.
-    TestConnection { instance_name: String, connection_name: String },
+    TestConnection {
+        instance_name: String,
+        connection_name: String,
+    },
 }
 
 impl Effect for ConnectionsEffect {
     type Action = ConnectionsAction;
 
-    fn run(self, _emit: Emitter<Self::Action>, services: Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
+    fn run(
+        self,
+        _emit: Emitter<Self::Action>,
+        services: Arc<Services>,
+    ) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             let store = services.store.clone();
             match self {
                 ConnectionsEffect::LoadConnections { instance_name } => {
                     let result = tokio::task::spawn_blocking(move || {
-                        store.lock().expect("iw store lock").list_instance_connections(&instance_name)
+                        store
+                            .lock()
+                            .expect("iw store lock")
+                            .list_instance_connections(&instance_name)
                     })
                     .await;
                     match result {
                         Ok(Ok(connections)) => vec![ConnectionsAction::Loaded { connections }],
-                        Ok(Err(e)) => vec![ConnectionsAction::Error { error: e.to_string() }],
-                        Err(e) => vec![ConnectionsAction::Error { error: e.to_string() }],
+                        Ok(Err(e)) => vec![ConnectionsAction::Error {
+                            error: e.to_string(),
+                        }],
+                        Err(e) => vec![ConnectionsAction::Error {
+                            error: e.to_string(),
+                        }],
                     }
                 }
-                ConnectionsEffect::AddConnection { instance_name, connection } => {
+                ConnectionsEffect::AddConnection {
+                    instance_name,
+                    connection,
+                } => {
                     // The store's precheck pings the real server via the driver
                     // before persisting, so an unreachable database fails the
                     // save instead of silently succeeding.
@@ -96,11 +118,19 @@ impl Effect for ConnectionsEffect {
                     .await;
                     match result {
                         Ok(Ok(_)) => vec![ConnectionsAction::Saved],
-                        Ok(Err(e)) => vec![ConnectionsAction::Error { error: e.to_string() }],
-                        Err(e) => vec![ConnectionsAction::Error { error: e.to_string() }],
+                        Ok(Err(e)) => vec![ConnectionsAction::Error {
+                            error: e.to_string(),
+                        }],
+                        Err(e) => vec![ConnectionsAction::Error {
+                            error: e.to_string(),
+                        }],
                     }
                 }
-                ConnectionsEffect::EditConnection { instance_name, original_name, connection } => {
+                ConnectionsEffect::EditConnection {
+                    instance_name,
+                    original_name,
+                    connection,
+                } => {
                     let patch = UpdateInstanceConnection {
                         name: Some(connection.name),
                         username: Some(connection.username),
@@ -117,32 +147,44 @@ impl Effect for ConnectionsEffect {
                         store
                             .lock()
                             .expect("iw store lock")
-                            .update_instance_connection(
-                                &instance_name,
-                                &original_name,
-                                patch,
-                                ping,
-                            )
+                            .update_instance_connection(&instance_name, &original_name, patch, ping)
                     })
                     .await;
                     match result {
                         Ok(Ok(_)) => vec![ConnectionsAction::Saved],
-                        Ok(Err(e)) => vec![ConnectionsAction::Error { error: e.to_string() }],
-                        Err(e) => vec![ConnectionsAction::Error { error: e.to_string() }],
+                        Ok(Err(e)) => vec![ConnectionsAction::Error {
+                            error: e.to_string(),
+                        }],
+                        Err(e) => vec![ConnectionsAction::Error {
+                            error: e.to_string(),
+                        }],
                     }
                 }
-                ConnectionsEffect::DeleteConnection { instance_name, connection_name } => {
+                ConnectionsEffect::DeleteConnection {
+                    instance_name,
+                    connection_name,
+                } => {
                     let result = tokio::task::spawn_blocking(move || {
-                        store.lock().expect("iw store lock").delete_instance_connection(&instance_name, &connection_name)
+                        store
+                            .lock()
+                            .expect("iw store lock")
+                            .delete_instance_connection(&instance_name, &connection_name)
                     })
                     .await;
                     match result {
                         Ok(Ok(_)) => vec![ConnectionsAction::Deleted],
-                        Ok(Err(e)) => vec![ConnectionsAction::Error { error: e.to_string() }],
-                        Err(e) => vec![ConnectionsAction::Error { error: e.to_string() }],
+                        Ok(Err(e)) => vec![ConnectionsAction::Error {
+                            error: e.to_string(),
+                        }],
+                        Err(e) => vec![ConnectionsAction::Error {
+                            error: e.to_string(),
+                        }],
                     }
                 }
-                ConnectionsEffect::TestFormConnection { instance_name, connection } => {
+                ConnectionsEffect::TestFormConnection {
+                    instance_name,
+                    connection,
+                } => {
                     // Ping the database with the form's current values; nothing
                     // is saved. A store error or any error-level precheck issue
                     // means the connection did not reach the database.
@@ -176,7 +218,11 @@ impl Effect for ConnectionsEffect {
                         }],
                     }
                 }
-                ConnectionsEffect::TestEditedFormConnection { instance_name, original_name, connection } => {
+                ConnectionsEffect::TestEditedFormConnection {
+                    instance_name,
+                    original_name,
+                    connection,
+                } => {
                     // Ping with the form's current name/username/database but
                     // borrow the stored password when the password field is blank.
                     let ping = services.connection_test_ping();
@@ -212,7 +258,10 @@ impl Effect for ConnectionsEffect {
                         }],
                     }
                 }
-                ConnectionsEffect::TestConnection { instance_name, connection_name } => {
+                ConnectionsEffect::TestConnection {
+                    instance_name,
+                    connection_name,
+                } => {
                     // Test a saved connection with its stored credentials and
                     // record the outcome timestamp on the row.
                     let ping = services.connection_test_ping();

@@ -8,10 +8,10 @@
 //! The list returns a reconciled viewport start row (discover-style layout_out
 //! pattern) that the caller feeds back to state.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders};
-use ratatui::Frame;
 
 use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
 use crate::common::view::hints::{draw_pane_footer, footer_height, history_list_footer_text};
@@ -108,10 +108,15 @@ pub fn render(
                 Constraint::Min(0),
             ])
             .split(inner);
-        tracing::debug!("history: split done inner={inner:?} detail={:?} list={:?}", body_h[0], body_h[2]);
+        tracing::debug!(
+            "history: split done inner={inner:?} detail={:?} list={:?}",
+            body_h[0],
+            body_h[2]
+        );
         // Detail preview of the selected / pinned / first statement.
         if let Some(sql) = state
-            .list.selected_entry(store, instance, connection)
+            .list
+            .selected_entry(store, instance, connection)
             .or_else(|| state.detail.pinned_sql.clone())
             .or_else(|| store.entries(instance, connection).first().cloned())
         {
@@ -150,7 +155,14 @@ pub fn render(
     };
 
     let v_scroll_out = list_view::render(
-        frame, theme, list_area, &state.list, entries, &visible, cursor, focused,
+        frame,
+        theme,
+        list_area,
+        &state.list,
+        entries,
+        &visible,
+        cursor,
+        focused,
         active_scrollbar,
     );
 

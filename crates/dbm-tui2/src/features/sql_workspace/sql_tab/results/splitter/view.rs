@@ -4,8 +4,8 @@
 //! helpers to hit-test the splitter strip and translate a mouse-x drag into a
 //! new detail pane width. The render path mirrors `history::splitter::view`.
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::Frame;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 use crate::common::view::splitter::{SplitOrientation, draw};
 
@@ -62,15 +62,14 @@ pub fn results_detail_splitter(
         return None;
     }
     let inner = block_inner(outer);
-    let layout =
-        crate::features::sql_workspace::sql_tab::results::view::compute_results_layout(
-            inner,
-            true,
-            detail_pane_width,
-            row_count,
-            search_active,
-            sql_status,
-        );
+    let layout = crate::features::sql_workspace::sql_tab::results::view::compute_results_layout(
+        inner,
+        true,
+        detail_pane_width,
+        row_count,
+        search_active,
+        sql_status,
+    );
     layout.splitter
 }
 

@@ -9,7 +9,9 @@ pub enum OverviewMessage {
     Reload,
     /// The store returned the instance. Boxed to keep the enum small (a
     /// `ManagedInstance` is large and would otherwise bloat every message).
-    Loaded { instance: Box<dbm_store::ManagedInstance> },
+    Loaded {
+        instance: Box<dbm_store::ManagedInstance>,
+    },
     /// Move the overview cursor by `delta` rows (`j`/`k`, `↑`/`↓`).
     MoveCursor(i32),
     /// Jump the overview cursor to an absolute `index`. Issued by a mouse click

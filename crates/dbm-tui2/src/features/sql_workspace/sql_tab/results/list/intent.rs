@@ -1,7 +1,7 @@
 //! Results list sub-module intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::ListMsg;
+use crate::app_shell::intent::Intent;
 
 #[derive(Debug, Clone)]
 pub enum ListIntent {}

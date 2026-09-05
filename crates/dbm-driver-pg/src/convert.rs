@@ -1,6 +1,6 @@
 use dbm_core::{ColumnMeta, QueryResult, Row};
-use tokio_postgres::types::Type;
 use tokio_postgres::Row as PgRow;
+use tokio_postgres::types::Type;
 
 pub fn format_pg_column_type(type_: &Type, type_modifier: i32) -> String {
     let name = type_.name().to_ascii_lowercase();

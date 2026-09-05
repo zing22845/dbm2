@@ -7,11 +7,11 @@ use std::cell::Cell;
 use crate::common::components::search::PaneSearch;
 use crate::common::view::format::init_results_layout;
 
-use super::search::ResultsSearchMatch;
 use super::super::edit::ResultsEditState;
 use super::super::edit_sql::EditTarget;
 use super::super::pagination::{DEFAULT_RESULTS_ROW_LIMIT, can_go_next};
 use super::super::state::QueryResultData;
+use super::search::ResultsSearchMatch;
 
 /// State for the results list sub-feature.
 #[derive(Debug, Default, Clone)]
@@ -176,11 +176,13 @@ impl ListState {
             if vr > 0 {
                 let vs = self.v_scroll.get();
                 if self.row >= vs + vr {
-                    self.v_scroll.set(self.row.saturating_sub(vr.saturating_sub(1)));
+                    self.v_scroll
+                        .set(self.row.saturating_sub(vr.saturating_sub(1)));
                 } else if self.row < vs {
                     self.v_scroll.set(self.row);
                 }
-                self.v_scroll.set(self.v_scroll.get().min(row_count.saturating_sub(1)));
+                self.v_scroll
+                    .set(self.v_scroll.get().min(row_count.saturating_sub(1)));
             }
         }
         if dc != 0 {
@@ -320,7 +322,8 @@ impl ListState {
         self.v_scroll.set(self.v_scroll.get().min(max));
         // Clamp h_scroll to the new viewport.
         if !self.col_widths.is_empty() {
-            let table_w = crate::common::view::format::results_table_width(&self.col_widths) as usize;
+            let table_w =
+                crate::common::view::format::results_table_width(&self.col_widths) as usize;
             let max_h = table_w.saturating_sub(width as usize);
             self.h_scroll.set(self.h_scroll.get().min(max_h));
         }
@@ -357,10 +360,10 @@ impl ListState {
         self.edit.apply_cell(row, col, value.clone());
         if let Some(result) = self.result.as_mut()
             && row < result.rows.len()
-                && let Some(cell) = result.rows.get_mut(row).and_then(|r| r.get_mut(col))
-            {
-                *cell = value;
-            }
+            && let Some(cell) = result.rows.get_mut(row).and_then(|r| r.get_mut(col))
+        {
+            *cell = value;
+        }
     }
 
     /// Add an empty row at the end (pending insert).
@@ -378,7 +381,12 @@ impl ListState {
         if !self.edit.editing {
             return;
         }
-        let Some(values) = self.result.as_ref().and_then(|r| r.rows.get(self.row)).cloned() else {
+        let Some(values) = self
+            .result
+            .as_ref()
+            .and_then(|r| r.rows.get(self.row))
+            .cloned()
+        else {
             return;
         };
         if values.is_empty() {

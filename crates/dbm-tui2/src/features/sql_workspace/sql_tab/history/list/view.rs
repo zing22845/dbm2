@@ -10,11 +10,11 @@
 //! the renderer's split geometry so click handling can resolve row indices
 //! consistently.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
 use crate::common::components::line_numbers;
@@ -24,9 +24,9 @@ use crate::common::view::pane_scrollbar::{
 };
 use crate::common::view::theme::Theme;
 
-use super::state::ListState;
 use super::super::splitter::state::clamp_detail_pane_width;
 use super::super::store::{SqlHistoryStore, history_one_line};
+use super::state::ListState;
 
 /// Shared viewport computation used by both [`render`] and [`row_hit_at`].
 /// Encodes gutter splitting, effective-layout (re-run pane_scroll_layout
@@ -137,17 +137,17 @@ pub fn render(
             "No history yet"
         };
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                hint,
-                Style::default().fg(p.muted),
-            ))),
+            Paragraph::new(Line::from(Span::styled(hint, Style::default().fg(p.muted)))),
             list_area,
         );
         return None;
     }
 
     // Compute selected entry's display width for h_scrollbar detection.
-    let selected_idx = visible.get(cursor).copied().and_then(|idx| entries.get(idx));
+    let selected_idx = visible
+        .get(cursor)
+        .copied()
+        .and_then(|idx| entries.get(idx));
     let selected_width = selected_idx
         .map(|sql| super::super::store::history_line_display_width(sql) as usize)
         .unwrap_or(0);
@@ -174,9 +174,7 @@ pub fn render(
         let num_span = if selected {
             Span::styled(
                 line_numbers::format_gutter(row_num, gutter_w),
-                Style::default()
-                    .fg(p.selection_text)
-                    .bg(p.selection_bg),
+                Style::default().fg(p.selection_text).bg(p.selection_bg),
             )
         } else {
             Span::styled(line_numbers::format_gutter(row_num, gutter_w), gutter_style)
@@ -217,9 +215,7 @@ pub fn render(
             let display_text = format!("{shown_text}{right_label}");
 
             let style = if selected {
-                Style::default()
-                    .fg(p.selection_text)
-                    .bg(p.selection_bg)
+                Style::default().fg(p.selection_text).bg(p.selection_bg)
             } else {
                 Style::default().fg(p.fg)
             };
@@ -323,8 +319,7 @@ pub fn compute_list_area(
     list_footer_height: u16,
 ) -> Rect {
     if detail_visible {
-        let clamped_detail = clamp_detail_pane_width(detail_w)
-            .min(inner.width.saturating_sub(2));
+        let clamped_detail = clamp_detail_pane_width(detail_w).min(inner.width.saturating_sub(2));
         let body_w = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -335,19 +330,13 @@ pub fn compute_list_area(
             .split(inner);
         let list_col = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(list_footer_height),
-            ])
+            .constraints([Constraint::Min(1), Constraint::Length(list_footer_height)])
             .split(body_w[2]);
         list_col[0]
     } else {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(list_footer_height),
-            ])
+            .constraints([Constraint::Min(1), Constraint::Length(list_footer_height)])
             .split(inner);
         chunks[0]
     }

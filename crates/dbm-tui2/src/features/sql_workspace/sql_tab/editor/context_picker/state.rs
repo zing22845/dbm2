@@ -16,15 +16,13 @@ pub enum PickerColumn {
 }
 
 /// The state of a single catalog list fetch (databases or schemas).
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub enum CachedList {
     #[default]
     Loading,
     Ready(Vec<String>),
     Error(String),
 }
-
 
 /// Interactive database/schema picker state.
 #[derive(Debug, Clone, Default)]

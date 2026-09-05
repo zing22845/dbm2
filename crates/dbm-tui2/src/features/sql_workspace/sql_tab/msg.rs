@@ -17,7 +17,11 @@ pub enum SqlTabMessage {
     /// Close the tab at `idx`.
     CloseTab(usize),
     /// Apply a chosen database/schema context to the tab's session.
-    ApplyContext { tab_id: usize, database: String, schema: String },
+    ApplyContext {
+        tab_id: usize,
+        database: String,
+        schema: String,
+    },
     /// Recall `sql` into the tab's editor (history apply).
     RecallHistory { tab_id: usize, sql: String },
     /// Enter history recall from the editor (`ctrl+r`): pin the most recent

@@ -18,8 +18,13 @@ pub const TUI_SESSION_VERSION: u32 = 1;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TuiTreeSelection {
-    Instance { instance: String },
-    Connection { instance: String, connection: String },
+    Instance {
+        instance: String,
+    },
+    Connection {
+        instance: String,
+        connection: String,
+    },
 }
 
 /// Snapshot of the explorer tree state.

@@ -5,11 +5,11 @@
 //! `super::render()` — this module renders borderless content into the
 //! already-inner area.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::common::view::action_bar::{
     RESULTS_ACTION_BAR_HEIGHT, ResultsToolbarModel, action_bar_width, draw_action_bar,
@@ -19,11 +19,11 @@ use crate::common::view::format::{
     results_col_text_view,
 };
 use crate::common::view::hints::footer_height;
-use crate::common::view::theme::Theme;
 use crate::common::view::pane_scrollbar::{ActiveScrollbar, PaneScrollLayout, pane_scroll_layout};
+use crate::common::view::theme::Theme;
 
-use super::state::ListState;
 use super::super::pagination::RESULTS_PAGINATION_BAR_HEIGHT;
+use super::state::ListState;
 
 /// Render the list sub-feature: the action bar and the result table, borderless
 /// — the outer Block with border + title, the full-width pagination toolbar,
@@ -110,13 +110,14 @@ pub fn results_vertical_layout(
     search_active: bool,
     sql_status: &str,
 ) -> (Rect, Option<Rect>, Rect) {
-    let hint = crate::common::view::hints::results_pane_footer_text(
-        search_active,
-        sql_status,
-    );
+    let hint = crate::common::view::hints::results_pane_footer_text(search_active, sql_status);
     let footer_h = footer_height(&hint, inner.width).min(inner.height.saturating_sub(4));
 
-    let pagination_h = if row_count > 0 { RESULTS_PAGINATION_BAR_HEIGHT } else { 0 };
+    let pagination_h = if row_count > 0 {
+        RESULTS_PAGINATION_BAR_HEIGHT
+    } else {
+        0
+    };
 
     let chunks = if pagination_h > 0 {
         Layout::default()
@@ -130,16 +131,21 @@ pub fn results_vertical_layout(
     } else {
         Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(1),
-                Constraint::Length(footer_h),
-            ])
+            .constraints([Constraint::Min(1), Constraint::Length(footer_h)])
             .split(inner)
     };
 
     let content = chunks[0];
-    let pagination = if pagination_h > 0 { Some(chunks[1]) } else { None };
-    let footer = if pagination_h > 0 { chunks[2] } else { chunks[1] };
+    let pagination = if pagination_h > 0 {
+        Some(chunks[1])
+    } else {
+        None
+    };
+    let footer = if pagination_h > 0 {
+        chunks[2]
+    } else {
+        chunks[1]
+    };
     (content, pagination, footer)
 }
 
@@ -305,10 +311,7 @@ fn render_table(
             None => "Query completed".to_string(),
         };
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                text,
-                Style::default().fg(p.fg),
-            ))),
+            Paragraph::new(Line::from(Span::styled(text, Style::default().fg(p.fg)))),
             area,
         );
         return;
@@ -324,7 +327,8 @@ fn render_table(
     // One source of truth: both render and cell_hit_at call this exact
     // function so the anchored v_scroll / h_scroll / visible_data_rows
     // always match between what we draw and what we hit-test.
-    let vs = match compute_viewport_scroll(area, state, row_count, col_widths, table_width as usize) {
+    let vs = match compute_viewport_scroll(area, state, row_count, col_widths, table_width as usize)
+    {
         Some(v) => v,
         None => return,
     };
@@ -354,7 +358,7 @@ fn render_table(
     // on top, so a transition to unselected/cleared can never leave residue.
     let body_height = (RESULTS_HEADER_HEIGHT
         + (visible_data_rows as u16).saturating_mul(RESULTS_ROW_HEIGHT))
-        .min(table_area.height);
+    .min(table_area.height);
     frame.render_widget(
         ratatui::widgets::Clear,
         Rect::new(table_area.x, table_area.y, content_width, body_height),
@@ -365,7 +369,9 @@ fn render_table(
     // Line 1: type labels (green)
     // Line 2: separator
     for col in 0..num_cols {
-        let Some(meta) = result.columns.get(col) else { break };
+        let Some(meta) = result.columns.get(col) else {
+            break;
+        };
         let Some(tv) = results_col_text_view(col, col_widths, table_area.width, h_scroll) else {
             continue;
         };
@@ -407,7 +413,9 @@ fn render_table(
         // column, so hovering/resizing the header never over-loads a second
         // highlighted row.
         let type_label = column_type_label(meta);
-        let type_style = Style::default().fg(Color::Green).add_modifier(Modifier::BOLD);
+        let type_style = Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD);
         let type_text = crate::common::view::format::truncate_cell_display_from(
             &type_label,
             tv.table_text_skip,
@@ -510,7 +518,8 @@ fn render_table(
 
         // Draw each cell.
         for col in 0..num_cols {
-            let Some(tv) = results_col_text_view(col, col_widths, table_area.width, h_scroll) else {
+            let Some(tv) = results_col_text_view(col, col_widths, table_area.width, h_scroll)
+            else {
                 continue;
             };
             if tv.text_w == 0 {
@@ -546,8 +555,13 @@ fn render_table(
             let text_skip = if is_match_cell {
                 let m = current_match.unwrap();
                 let q = search_query.unwrap_or("");
-                tv.table_text_skip
-                    .saturating_add(match_cell_text_skip(value, m, q, tv.text_w, tv.table_text_skip))
+                tv.table_text_skip.saturating_add(match_cell_text_skip(
+                    value,
+                    m,
+                    q,
+                    tv.text_w,
+                    tv.table_text_skip,
+                ))
             } else {
                 tv.table_text_skip
             };
@@ -598,9 +612,7 @@ fn render_table(
             } else {
                 Line::from(Span::styled(
                     crate::common::view::format::truncate_cell_display_from(
-                        value,
-                        text_skip,
-                        tv.text_w,
+                        value, text_skip, tv.text_w,
                     ),
                     base_style,
                 ))
@@ -619,9 +631,7 @@ fn render_table(
                 .saturating_sub(1);
             if border_x >= table_area.x && border_x < table_area.x + table_area.width {
                 for y in y_base..(y_base + RESULTS_ROW_HEIGHT).min(table_area.bottom()) {
-                    frame
-                        .buffer_mut()
-                        .set_string(border_x, y, "│", grid_style);
+                    frame.buffer_mut().set_string(border_x, y, "│", grid_style);
                 }
             }
 
@@ -648,7 +658,13 @@ fn render_table(
             for x in table_area.x..sep_right.min(table_area.right()) {
                 let (glyph, style) = match match_bottom_span {
                     Some((l, r)) if x >= l && x <= r => {
-                        let c = if x == l { "└" } else if x == r { "┘" } else { "─" };
+                        let c = if x == l {
+                            "└"
+                        } else if x == r {
+                            "┘"
+                        } else {
+                            "─"
+                        };
                         (c, accent)
                     }
                     _ => ("─", grid_style),
@@ -736,16 +752,13 @@ pub fn compute_viewport_scroll(
         return None;
     }
 
-    let visible_data_rows = usize::from(
-        content_area
-            .height
-            .saturating_sub(RESULTS_HEADER_HEIGHT)
-            / RESULTS_ROW_HEIGHT,
-    );
+    let visible_data_rows =
+        usize::from(content_area.height.saturating_sub(RESULTS_HEADER_HEIGHT) / RESULTS_ROW_HEIGHT);
     let vr = visible_data_rows.max(1);
     let max_v_scroll = row_count.saturating_sub(vr);
-    let max_h_scroll = crate::common::view::format::results_max_h_scroll(table_width as u16, content_area.width)
-        as usize;
+    let max_h_scroll =
+        crate::common::view::format::results_max_h_scroll(table_width as u16, content_area.width)
+            as usize;
 
     let scroll_locked = state.scroll_locked.get();
 
@@ -792,12 +805,7 @@ pub fn compute_viewport_scroll(
 ///
 /// Uses [`results_list_regions`] so hit-test geometry always matches the
 /// renderer's split logic exactly.
-pub fn cell_hit_at(
-    list_area: Rect,
-    state: &ListState,
-    x: u16,
-    y: u16,
-) -> Option<(usize, usize)> {
+pub fn cell_hit_at(list_area: Rect, state: &ListState, x: u16, y: u16) -> Option<(usize, usize)> {
     if list_area.width == 0 || list_area.height == 0 {
         return None;
     }
@@ -818,7 +826,13 @@ pub fn cell_hit_at(
     // ---- SHARED VIEWPORT CALCULATION ----
     // Use the exact same compute_viewport_scroll that render_table uses —
     // no more duplicated anchor logic that silently drifts from render.
-    let vs = compute_viewport_scroll(table_area, state, row_count, col_widths, table_width as usize)?;
+    let vs = compute_viewport_scroll(
+        table_area,
+        state,
+        row_count,
+        col_widths,
+        table_width as usize,
+    )?;
 
     if !contains(vs.layout.content_area, x, y) {
         return None;
@@ -859,10 +873,7 @@ fn contains(r: Rect, x: u16, y: u16) -> bool {
 /// the table body rect via [`results_list_regions`]; `content_area` and
 /// `h_scroll` come from [`compute_viewport_scroll`], the same source of truth
 /// the renderer uses. Returns `None` when there is no table to resize.
-fn results_geometry(
-    list_area: Rect,
-    state: &ListState,
-) -> Option<(Rect, Rect, usize)> {
+fn results_geometry(list_area: Rect, state: &ListState) -> Option<(Rect, Rect, usize)> {
     if list_area.width == 0 || list_area.height == 0 || state.result.is_none() {
         return None;
     }
@@ -888,40 +899,24 @@ fn results_geometry(
 /// top header lines (`RESULTS_HEADER_CONTENT_HEIGHT`) count, and the pointer
 /// must be within one column of a column's right edge. Used for the splitter
 /// hover indicator and to begin a column-width drag.
-pub fn col_resize_hit_at(
-    list_area: Rect,
-    state: &ListState,
-    x: u16,
-    y: u16,
-) -> Option<usize> {
+pub fn col_resize_hit_at(list_area: Rect, state: &ListState, x: u16, y: u16) -> Option<usize> {
     let (_table_area, content_area, h_scroll) = results_geometry(list_area, state)?;
     if !contains(content_area, x, y) {
         return None;
     }
     let rel_y = y.saturating_sub(content_area.y);
     let rel_x = x.saturating_sub(content_area.x) as usize;
-    crate::common::view::format::resize_hit_column(
-        rel_x,
-        rel_y,
-        h_scroll as u16,
-        &state.col_widths,
-    )
+    crate::common::view::format::resize_hit_column(rel_x, rel_y, h_scroll as u16, &state.col_widths)
 }
 
 /// The target width for column `col` given a drag pointer `x`, computed over
 /// the same shared geometry as [`col_resize_hit_at`]. The caller clamps the
 /// final value via the update message.
-pub fn col_width_from_drag_x(
-    list_area: Rect,
-    state: &ListState,
-    col: usize,
-    x: u16,
-) -> u16 {
-    let (_table_area, content_area, h_scroll) =
-        match results_geometry(list_area, state) {
-            Some(g) => g,
-            None => return crate::common::view::format::DEFAULT_RESULTS_COL_WIDTH,
-        };
+pub fn col_width_from_drag_x(list_area: Rect, state: &ListState, col: usize, x: u16) -> u16 {
+    let (_table_area, content_area, h_scroll) = match results_geometry(list_area, state) {
+        Some(g) => g,
+        None => return crate::common::view::format::DEFAULT_RESULTS_COL_WIDTH,
+    };
     let rel_x = x.saturating_sub(content_area.x) as usize + h_scroll;
     let start = crate::common::view::format::col_x_start(col, &state.col_widths);
     rel_x.saturating_sub(start) as u16
@@ -929,12 +924,12 @@ pub fn col_width_from_drag_x(
 
 #[cfg(test)]
 mod tests {
-    use ratatui::backend::TestBackend;
-    use ratatui::layout::Rect;
-    use ratatui::Terminal;
     use crate::common::view::theme;
     use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
     use crate::features::sql_workspace::sql_tab::results::state::QueryResultData;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
 
     fn sample_result() -> QueryResultData {
         QueryResultData {
@@ -984,7 +979,17 @@ mod tests {
         // Baseline: a fresh terminal rendered directly at the destination h_scroll.
         let mut fresh = Terminal::new(TestBackend::new(30, 10)).unwrap();
         fresh
-            .draw(|f| super::render(f, &theme::default(), area, &make_state(to, col), true, None, None))
+            .draw(|f| {
+                super::render(
+                    f,
+                    &theme::default(),
+                    area,
+                    &make_state(to, col),
+                    true,
+                    None,
+                    None,
+                )
+            })
             .unwrap();
         let fresh_buf = fresh.backend().buffer().clone();
 
@@ -993,7 +998,17 @@ mod tests {
         let mut cumul = Terminal::new(TestBackend::new(30, 10)).unwrap();
         for h in (from..=to).step_by(3) {
             cumul
-                .draw(|f| super::render(f, &theme::default(), area, &make_state(h, col), true, None, None))
+                .draw(|f| {
+                    super::render(
+                        f,
+                        &theme::default(),
+                        area,
+                        &make_state(h, col),
+                        true,
+                        None,
+                        None,
+                    )
+                })
                 .unwrap();
         }
 

@@ -1,9 +1,9 @@
 //! Instance overview feature update.
 
+use super::effect::OverviewEffect;
+use super::intent::OverviewIntent;
 use super::msg::OverviewMessage;
 use super::state::OverviewState;
-use super::intent::OverviewIntent;
-use super::effect::OverviewEffect;
 
 /// Update the overview panel state. Pure by-value transition.
 ///
@@ -13,7 +13,12 @@ use super::effect::OverviewEffect;
 pub fn update(
     msg: OverviewMessage,
     mut state: OverviewState,
-) -> (OverviewState, Vec<OverviewIntent>, Vec<OverviewEffect>, bool) {
+) -> (
+    OverviewState,
+    Vec<OverviewIntent>,
+    Vec<OverviewEffect>,
+    bool,
+) {
     match msg {
         OverviewMessage::Load { instance_name } => {
             let changed = state.instance_name != instance_name;
@@ -50,8 +55,8 @@ pub fn update(
                 return (state, Vec::new(), Vec::new(), false);
             }
             let prev = state.cursor;
-            state.cursor = ((state.cursor as i64) + (delta as i64))
-                .clamp(0, (len - 1) as i64) as usize;
+            state.cursor =
+                ((state.cursor as i64) + (delta as i64)).clamp(0, (len - 1) as i64) as usize;
             let dirty = state.cursor != prev;
             if dirty {
                 state.scroll_locked = false;

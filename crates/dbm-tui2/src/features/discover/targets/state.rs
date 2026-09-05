@@ -10,8 +10,7 @@ pub struct TargetRow {
 }
 
 /// The editable column of a target row currently in focus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TargetCol {
     #[default]
     Host,
@@ -64,7 +63,6 @@ pub struct TargetsState {
     pub scroll_locked: bool,
 }
 
-
 impl TargetsState {
     /// A freshly opened discover modal starts with a loopback target.
     pub fn with_default_targets() -> Self {
@@ -86,7 +84,10 @@ impl TargetsState {
 
     /// Resolve `(host, ports_spec)` to a parsed `DiscoveryTarget` if valid.
     pub fn resolve_target(&self, row: usize) -> Result<dbm_discovery::DiscoveryTarget, String> {
-        let row = self.targets.get(row).ok_or_else(|| "target row out of range".to_string())?;
+        let row = self
+            .targets
+            .get(row)
+            .ok_or_else(|| "target row out of range".to_string())?;
         let host = validate_host(&row.host)?;
         let ports = parse_port_spec(&row.ports_spec)?;
         Ok(dbm_discovery::DiscoveryTarget { host, ports })

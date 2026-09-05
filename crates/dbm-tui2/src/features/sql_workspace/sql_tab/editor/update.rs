@@ -6,12 +6,12 @@
 
 use crossterm::event::KeyEvent;
 
-use super::msg::EditorMessage;
-use super::state::EditorState;
-use super::intent::EditorIntent;
-use super::effect::EditorEffect;
 use super::context_picker;
+use super::effect::EditorEffect;
+use super::intent::EditorIntent;
+use super::msg::EditorMessage;
 use super::sql_completion;
+use super::state::EditorState;
 
 pub fn update(
     msg: EditorMessage,
@@ -21,7 +21,10 @@ pub fn update(
     let mut effects = Vec::new();
     let mut dirty = false;
     match msg {
-        EditorMessage::KeyEvent { key, tracked_caps_lock } => {
+        EditorMessage::KeyEvent {
+            key,
+            tracked_caps_lock,
+        } => {
             // Editing resumes: re-enable cursor-following auto-scroll so
             // subsequent edtui render keeps the cursor in view.
             state.editor.set_scroll_locked(false);
@@ -149,10 +152,7 @@ pub fn update(
 
 /// Resolve any `SqlCompletionIntent::Apply` intents by inserting the completion
 /// into the buffer; non-apply intents bubble unchanged.
-fn resolve_apply_intents(
-    state: &mut EditorState,
-    intents: Vec<EditorIntent>,
-) -> Vec<EditorIntent> {
+fn resolve_apply_intents(state: &mut EditorState, intents: Vec<EditorIntent>) -> Vec<EditorIntent> {
     use super::sql_completion::intent::SqlCompletionIntent;
 
     let mut remaining = Vec::new();
@@ -195,7 +195,10 @@ fn apply_completion(
 
     crate::common::editor::set_editor_text(&mut state.editor, &new_text);
     let new_row = new_text[..insert_end_byte].matches('\n').count();
-    let new_line_start = new_text[..insert_end_byte].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let new_line_start = new_text[..insert_end_byte]
+        .rfind('\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
     let new_col = new_text[new_line_start..insert_end_byte].chars().count();
     state.editor.cursor = edtui::Index2::new(new_row, new_col);
     state.editor.mode = edtui::EditorMode::Insert;
@@ -225,19 +228,26 @@ fn handle_key(
     // Ctrl+R opens the history recall overlay (mirrors the original dbm's
     // `ctrl+r` in the SQL editor). It must be intercepted before reaching the
     // buffer, which has no such binding.
-    if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+    if key
+        .modifiers
+        .contains(crossterm::event::KeyModifiers::CONTROL)
         && key.code == crossterm::event::KeyCode::Char('r')
     {
         return Err(EditorIntent::HistoryRecall);
     }
     // In-buffer `/` search takes the key first (active input, `/` to start,
     // `n`/`N` to jump). Consumed keys never reach the buffer.
-    if super::sql_search::handle_sql_pane_search_key(&mut state.sql_search, &mut state.editor, key) {
+    if super::sql_search::handle_sql_pane_search_key(&mut state.sql_search, &mut state.editor, key)
+    {
         return Ok(true);
     }
     // Non-ASCII chars (IME commits) route through insert_text in Insert mode.
-    if editor::try_insert_non_ascii_key(&mut state.handler, &mut state.editor, key, tracked_caps_lock)
-    {
+    if editor::try_insert_non_ascii_key(
+        &mut state.handler,
+        &mut state.editor,
+        key,
+        tracked_caps_lock,
+    ) {
         refresh_completion(state, false);
         return Ok(true);
     }
@@ -367,8 +377,8 @@ mod tests {
 
     #[test]
     fn scoped_columns_only_include_referenced_tables() {
-        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
         use super::super::state::CompletionCatalog;
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
         let mut catalog = CompletionCatalog {
             tables: vec!["users".into(), "orders".into()],
             columns_by_table: Default::default(),
@@ -403,12 +413,18 @@ mod tests {
         let mut state = EditorState::with_sql("");
         // Enter insert mode.
         let (s, _i, _e, _d) = update(
-            EditorMessage::KeyEvent { key: char_key('i'), tracked_caps_lock: false },
+            EditorMessage::KeyEvent {
+                key: char_key('i'),
+                tracked_caps_lock: false,
+            },
             state,
         );
         state = s;
         let (s, _i, _e, _d) = update(
-            EditorMessage::KeyEvent { key: char_key('s'), tracked_caps_lock: false },
+            EditorMessage::KeyEvent {
+                key: char_key('s'),
+                tracked_caps_lock: false,
+            },
             state,
         );
         state = s;
@@ -465,12 +481,18 @@ mod tests {
         state.editor.mode = edtui::EditorMode::Insert;
         for c in ['i', 's'] {
             let (s, _i, _e, _d) = update(
-                EditorMessage::KeyEvent { key: char_key(c), tracked_caps_lock: false },
+                EditorMessage::KeyEvent {
+                    key: char_key(c),
+                    tracked_caps_lock: false,
+                },
                 state,
             );
             state = s;
         }
-        assert!(state.sql_completion.is_open(), "typing should open the popup");
+        assert!(
+            state.sql_completion.is_open(),
+            "typing should open the popup"
+        );
         let (_s, _i, _e, dirty) = update(
             EditorMessage::CatalogLoaded {
                 tables: vec!["users".into()],
@@ -495,7 +517,10 @@ mod tests {
         let mut s = state;
         for c in "select * from ".chars() {
             let (s2, i, _e, _d) = update(
-                EditorMessage::KeyEvent { key: char_key(c), tracked_caps_lock: false },
+                EditorMessage::KeyEvent {
+                    key: char_key(c),
+                    tracked_caps_lock: false,
+                },
                 s,
             );
             requested |= i
@@ -503,7 +528,10 @@ mod tests {
                 .any(|int| matches!(int, EditorIntent::LoadCompletionCatalog));
             s = s2;
         }
-        assert!(requested, "empty catalog + TblCmp on should request a catalog reload");
+        assert!(
+            requested,
+            "empty catalog + TblCmp on should request a catalog reload"
+        );
         assert!(
             !s.completion_catalog_needs_load,
             "transient needs-load flag must be cleared"
@@ -524,7 +552,10 @@ mod tests {
         let mut s = state;
         for c in "update tb1 set ".chars() {
             let (s2, i, _e, _d) = update(
-                EditorMessage::KeyEvent { key: char_key(c), tracked_caps_lock: false },
+                EditorMessage::KeyEvent {
+                    key: char_key(c),
+                    tracked_caps_lock: false,
+                },
                 s,
             );
             requested |= i
@@ -560,7 +591,10 @@ mod tests {
         );
 
         let (s, _i, _e, _d) = update(
-            EditorMessage::KeyEvent { key: char_key('t'), tracked_caps_lock: false },
+            EditorMessage::KeyEvent {
+                key: char_key('t'),
+                tracked_caps_lock: false,
+            },
             state,
         );
         // Only the typed `t` is inserted at the cursor — no auto-space, no
@@ -577,7 +611,11 @@ mod tests {
         assert!(
             s.sql_completion.items.iter().any(|i| i.label == "title"),
             "t1 columns should be offered, got: {:?}",
-            s.sql_completion.items.iter().map(|i| i.label.clone()).collect::<Vec<_>>()
+            s.sql_completion
+                .items
+                .iter()
+                .map(|i| i.label.clone())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -601,10 +639,7 @@ mod tests {
         );
         // Simulate a refresh (as a cursor move or edit would trigger in
         // insert mode); in normal mode it must stay closed.
-        let (s, _i, _e, _d) = update(
-            EditorMessage::RefreshCompletion,
-            state,
-        );
+        let (s, _i, _e, _d) = update(EditorMessage::RefreshCompletion, state);
         assert!(
             !s.sql_completion.is_open(),
             "normal mode must not pop the completion window"
@@ -619,7 +654,10 @@ mod tests {
         state.editor.mode = edtui::EditorMode::Insert;
         state.editor.cursor = edtui::Index2::new(0, 2); // after `ab`
         let (s, _i, _e, _d) = update(
-            EditorMessage::KeyEvent { key: char_key('X'), tracked_caps_lock: false },
+            EditorMessage::KeyEvent {
+                key: char_key('X'),
+                tracked_caps_lock: false,
+            },
             state,
         );
         assert_eq!(
@@ -649,13 +687,22 @@ mod tests {
             }],
         );
         let (s, _i, _e, _d) = update(
-            EditorMessage::KeyEvent { key: char_key('t'), tracked_caps_lock: false },
+            EditorMessage::KeyEvent {
+                key: char_key('t'),
+                tracked_caps_lock: false,
+            },
             state,
         );
-        assert_eq!(crate::common::editor::editor_text(&s.editor), "select t from t1 t");
+        assert_eq!(
+            crate::common::editor::editor_text(&s.editor),
+            "select t from t1 t"
+        );
         // Now the popup is open and the cursor is after `t`. Type `i`.
         let (s, _i, _e, _d) = update(
-            EditorMessage::KeyEvent { key: char_key('i'), tracked_caps_lock: false },
+            EditorMessage::KeyEvent {
+                key: char_key('i'),
+                tracked_caps_lock: false,
+            },
             s,
         );
         assert_eq!(
@@ -672,10 +719,16 @@ mod tests {
         // updates immediately.
         let state = EditorState::with_sql("");
         let (s, _i, _e, dirty) = update(
-            EditorMessage::KeyEvent { key: char_key('i'), tracked_caps_lock: false },
+            EditorMessage::KeyEvent {
+                key: char_key('i'),
+                tracked_caps_lock: false,
+            },
             state,
         );
-        assert!(s.editor.mode == edtui::EditorMode::Insert, "mode should switch to insert");
+        assert!(
+            s.editor.mode == edtui::EditorMode::Insert,
+            "mode should switch to insert"
+        );
         assert!(dirty, "mode toggle must mark the view dirty for redraw");
     }
 
@@ -789,7 +842,10 @@ mod tests {
             state: KeyEventState::NONE,
         };
         let (_s, intents, _e, _d) = update(
-            EditorMessage::KeyEvent { key, tracked_caps_lock: false },
+            EditorMessage::KeyEvent {
+                key,
+                tracked_caps_lock: false,
+            },
             state.clone(),
         );
         assert!(
@@ -799,7 +855,9 @@ mod tests {
             "ctrl+r must raise a HistoryRecall intent, got: {intents:?}"
         );
         // The buffer must be untouched by the recall chord.
-        assert_eq!(editor::editor_text(&EditorState::with_sql("select 1").editor), "select 1");
+        assert_eq!(
+            editor::editor_text(&EditorState::with_sql("select 1").editor),
+            "select 1"
+        );
     }
 }
-

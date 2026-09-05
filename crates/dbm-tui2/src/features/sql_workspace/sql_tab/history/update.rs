@@ -58,7 +58,15 @@ pub fn update(
                 connection,
             );
             state.list = new_list;
-            reconcile_detail_after_cursor_change(&mut state.detail, &state.list, store, instance, connection, detail_text_width_after, detail_viewport);
+            reconcile_detail_after_cursor_change(
+                &mut state.detail,
+                &state.list,
+                store,
+                instance,
+                connection,
+                detail_text_width_after,
+                detail_viewport,
+            );
             list_dirty
         }
         HistoryMessage::SetCursor { index } => {
@@ -70,7 +78,15 @@ pub fn update(
                 connection,
             );
             state.list = new_list;
-            reconcile_detail_after_cursor_change(&mut state.detail, &state.list, store, instance, connection, detail_text_width_after, detail_viewport);
+            reconcile_detail_after_cursor_change(
+                &mut state.detail,
+                &state.list,
+                store,
+                instance,
+                connection,
+                detail_text_width_after,
+                detail_viewport,
+            );
             list_dirty
         }
         HistoryMessage::BeginSearch => {
@@ -82,7 +98,15 @@ pub fn update(
                 connection,
             );
             state.list = new_list;
-            reconcile_detail_after_cursor_change(&mut state.detail, &state.list, store, instance, connection, detail_text_width_after, detail_viewport);
+            reconcile_detail_after_cursor_change(
+                &mut state.detail,
+                &state.list,
+                store,
+                instance,
+                connection,
+                detail_text_width_after,
+                detail_viewport,
+            );
             list_dirty
         }
         HistoryMessage::SearchKey(key) => {
@@ -94,7 +118,15 @@ pub fn update(
                 connection,
             );
             state.list = new_list;
-            reconcile_detail_after_cursor_change(&mut state.detail, &state.list, store, instance, connection, detail_text_width_after, detail_viewport);
+            reconcile_detail_after_cursor_change(
+                &mut state.detail,
+                &state.list,
+                store,
+                instance,
+                connection,
+                detail_text_width_after,
+                detail_viewport,
+            );
             list_dirty
         }
         HistoryMessage::ScrollHScroll { delta } => {

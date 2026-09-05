@@ -6,20 +6,20 @@
 //! dbm, where the tab labels and the sub-pane content live inside one frame.
 //! `focused` colors the outer border so the shell focus is visible.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use crate::common::utils::text_width::wrapped_line_count;
 use crate::common::view::hints::{draw_pane_footer, instance_workspace_footer_text};
 use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
-use super::state::IwState;
 use super::connections::view as connections_view;
 use super::overview::view as overview_view;
+use super::state::IwState;
 
 /// The tab labels and their sub-panes, in render order. Shared by the renderer
 /// and the mouse hit-test so a click targets the same regions the tabs draw in.
@@ -147,17 +147,15 @@ pub fn render(
                 active_scrollbar,
             )
         }
-        crate::app_shell::nav::IwPane::Connections => {
-            connections_view::render(
-                frame,
-                theme,
-                chunks[1],
-                &state.connections,
-                state.overview.instance.as_ref(),
-                focused,
-                active_scrollbar,
-            )
-        }
+        crate::app_shell::nav::IwPane::Connections => connections_view::render(
+            frame,
+            theme,
+            chunks[1],
+            &state.connections,
+            state.overview.instance.as_ref(),
+            focused,
+            active_scrollbar,
+        ),
     }
     draw_pane_footer(frame, theme, chunks[2], &footer_text);
 }

@@ -326,7 +326,9 @@ fn detect_delete_context(before_cursor: &str) -> Option<DeleteContext> {
     let rest = cleaned[from_idx + " from ".len()..].trim_start();
     let table_end = scan_table_ref_end(rest);
     if table_end == 0 {
-        return Some(DeleteContext { after_target: false });
+        return Some(DeleteContext {
+            after_target: false,
+        });
     }
     let after_target = rest[table_end..].trim_start();
     let after_target_only = after_target.is_empty()

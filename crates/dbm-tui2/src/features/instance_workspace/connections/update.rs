@@ -2,10 +2,10 @@
 
 use dbm_store::NewInstanceConnection;
 
+use super::effect::ConnectionsEffect;
+use super::intent::ConnectionsIntent;
 use super::msg::ConnectionsMessage;
 use super::state::{ConnectionStatusKind, ConnectionsState, FormMode};
-use super::intent::ConnectionsIntent;
-use super::effect::ConnectionsEffect;
 
 /// Update the connections panel state. Pure by-value transition.
 ///
@@ -15,7 +15,12 @@ use super::effect::ConnectionsEffect;
 pub fn update(
     msg: ConnectionsMessage,
     mut state: ConnectionsState,
-) -> (ConnectionsState, Vec<ConnectionsIntent>, Vec<ConnectionsEffect>, bool) {
+) -> (
+    ConnectionsState,
+    Vec<ConnectionsIntent>,
+    Vec<ConnectionsEffect>,
+    bool,
+) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
     let dirty = match msg {
@@ -40,10 +45,7 @@ pub fn update(
             // old selection no longer exists (deleted) it clamps into the new
             // list.
             let list_changed = state.connections != connections;
-            let prev_name = state
-                .connections
-                .get(state.cursor)
-                .map(|c| c.name.clone());
+            let prev_name = state.connections.get(state.cursor).map(|c| c.name.clone());
             let old_cursor = state.cursor;
             state.connections = connections;
             let clamp = |c: usize| c.min(state.connections.len().saturating_sub(1));
@@ -363,9 +365,7 @@ pub fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::features::instance_workspace::connections::state::{
-        ConnectionForm, FormField,
-    };
+    use crate::features::instance_workspace::connections::state::{ConnectionForm, FormField};
 
     fn mk_conn(name: &str) -> dbm_store::InstanceConnection {
         dbm_store::InstanceConnection {
@@ -387,11 +387,7 @@ mod tests {
     #[test]
     fn jump_to_moves_cursor_and_unlocks_scroll() {
         let mut s = ConnectionsState::default();
-        s.connections = vec![
-            mk_conn("a"),
-            mk_conn("b"),
-            mk_conn("c"),
-        ];
+        s.connections = vec![mk_conn("a"), mk_conn("b"), mk_conn("c")];
         s.cursor = 0;
         s.scroll_locked = true; // a prior manual drag locked the anchor
         let (s, _i, _e, dirty) = update(
@@ -417,10 +413,7 @@ mod tests {
         assert!(dirty);
         // Same-row jump is a no-op.
         let s = ConnectionsState { cursor: 1, ..s };
-        let (s, _i, _e, dirty) = update(
-            ConnectionsMessage::JumpTo { row: 1 },
-            s,
-        );
+        let (s, _i, _e, dirty) = update(ConnectionsMessage::JumpTo { row: 1 }, s);
         assert_eq!(s.cursor, 1);
         assert!(!dirty);
     }
@@ -519,7 +512,10 @@ mod tests {
             },
             ConnectionsState::default(),
         );
-        assert_eq!(s.cursor, 0, "initial load keeps the cursor on the first row");
+        assert_eq!(
+            s.cursor, 0,
+            "initial load keeps the cursor on the first row"
+        );
         s.cursor = 1;
 
         // Testing "b" reloads the list; the cursor must stay on "b", not reset
@@ -607,12 +603,10 @@ mod tests {
             .iter()
             .any(|e| matches!(e, ConnectionsEffect::LoadConnections { instance_name } if instance_name == "inst")));
         // The shell is notified so the explorer tree for this instance refreshes.
-        assert!(i.iter().any(
-            |it| matches!(
-                it,
-                ConnectionsIntent::ConnectionsChanged { instance_name } if instance_name == "inst"
-            )
-        ));
+        assert!(i.iter().any(|it| matches!(
+            it,
+            ConnectionsIntent::ConnectionsChanged { instance_name } if instance_name == "inst"
+        )));
     }
 
     #[test]
@@ -646,14 +640,18 @@ mod tests {
             ..Default::default()
         };
         // Enter insert mode on Name, snapshotting "main".
-        let (mut s, _i, _e, dirty) = update(ConnectionsMessage::BeginFieldInsert, std::mem::take(&mut s));
+        let (mut s, _i, _e, dirty) =
+            update(ConnectionsMessage::BeginFieldInsert, std::mem::take(&mut s));
         assert!(dirty);
         assert_eq!(s.form.as_ref().unwrap().mode, FormMode::Insert);
         // Type into the field while in insert mode.
         let (mut s, _i, _e, _) = update(ConnectionsMessage::FormChar('2'), std::mem::take(&mut s));
         assert_eq!(s.form.as_ref().unwrap().name, "main2");
         // Cancel the field edit reverts to the snapshot.
-        let (s, _i, _e, dirty) = update(ConnectionsMessage::CancelFieldInsert, std::mem::take(&mut s));
+        let (s, _i, _e, dirty) = update(
+            ConnectionsMessage::CancelFieldInsert,
+            std::mem::take(&mut s),
+        );
         assert!(dirty);
         assert_eq!(s.form.as_ref().unwrap().mode, FormMode::Normal);
         assert_eq!(s.form.as_ref().unwrap().name, "main");
@@ -681,7 +679,11 @@ mod tests {
         );
         assert!(dirty);
         let f = s.form.expect("form stays open on a click");
-        assert_eq!(f.field, FormField::Database, "single click selects the clicked field");
+        assert_eq!(
+            f.field,
+            FormField::Database,
+            "single click selects the clicked field"
+        );
         assert_eq!(f.mode, FormMode::Normal, "single click keeps normal mode");
     }
 
@@ -706,7 +708,11 @@ mod tests {
         );
         assert!(dirty);
         let f = s.form.expect("form stays open on a double click");
-        assert_eq!(f.field, FormField::Password, "double click moves to the clicked field");
+        assert_eq!(
+            f.field,
+            FormField::Password,
+            "double click moves to the clicked field"
+        );
         assert_eq!(f.mode, FormMode::Insert, "double click enters insert mode");
     }
 
@@ -734,7 +740,11 @@ mod tests {
         assert!(dirty);
         let f = s.form.expect("form stays open");
         assert_eq!(f.field, FormField::Database);
-        assert_eq!(f.mode, FormMode::Normal, "moving fields commits the in-progress edit");
+        assert_eq!(
+            f.mode,
+            FormMode::Normal,
+            "moving fields commits the in-progress edit"
+        );
         assert_eq!(f.name, "a", "the committed edit keeps its typed value");
     }
 
@@ -761,7 +771,11 @@ mod tests {
         );
         assert!(dirty);
         let f = s.form.unwrap();
-        assert_eq!(f.mode, FormMode::Normal, "clicking the field being edited commits it");
+        assert_eq!(
+            f.mode,
+            FormMode::Normal,
+            "clicking the field being edited commits it"
+        );
     }
 
     #[test]
@@ -793,7 +807,10 @@ mod tests {
         let (s, _i, effects, dirty) = update(ConnectionsMessage::TestForm, std::mem::take(&mut s));
         // Starting the async test renders nothing new, so it must not mark the
         // round dirty (a redundant repaint while `t` is held).
-        assert!(!dirty, "starting a form test must not trigger a redundant repaint");
+        assert!(
+            !dirty,
+            "starting a form test must not trigger a redundant repaint"
+        );
         assert!(effects.iter().any(|e| matches!(
             e,
             ConnectionsEffect::TestFormConnection { instance_name, connection }
@@ -830,9 +847,13 @@ mod tests {
         };
         // A stray CommitForm in insert mode must not save (no effects) and must
         // keep the form open; Enter is meant to commit the field instead.
-        let (s, _i, effects, dirty) = update(ConnectionsMessage::CommitForm, std::mem::take(&mut s));
+        let (s, _i, effects, dirty) =
+            update(ConnectionsMessage::CommitForm, std::mem::take(&mut s));
         assert!(!dirty);
-        assert!(effects.is_empty(), "insert-mode Enter must not save the whole form");
+        assert!(
+            effects.is_empty(),
+            "insert-mode Enter must not save the whole form"
+        );
         assert!(s.form.is_some());
     }
 
@@ -856,7 +877,10 @@ mod tests {
             ..Default::default()
         };
         let (_s, _i, effects, dirty) = update(ConnectionsMessage::TestForm, std::mem::take(&mut s));
-        assert!(!dirty, "starting a form test must not trigger a redundant repaint");
+        assert!(
+            !dirty,
+            "starting a form test must not trigger a redundant repaint"
+        );
         assert!(
             effects.iter().any(|e| matches!(
                 e,
@@ -891,13 +915,14 @@ mod tests {
             }],
             ..Default::default()
         };
-        let (_s, _i, effects, dirty) = update(
-            ConnectionsMessage::TestSelected,
-            std::mem::take(&mut s),
-        );
+        let (_s, _i, effects, dirty) =
+            update(ConnectionsMessage::TestSelected, std::mem::take(&mut s));
         // Starting the async test renders nothing new, so it must not mark the
         // round dirty (a redundant repaint while `t` is held).
-        assert!(!dirty, "starting a list test must not trigger a redundant repaint");
+        assert!(
+            !dirty,
+            "starting a list test must not trigger a redundant repaint"
+        );
         assert!(effects.iter().any(|e| matches!(
             e,
             ConnectionsEffect::TestConnection { instance_name, connection_name }
@@ -921,7 +946,10 @@ mod tests {
         // The status and reloaded rows are rendered together by the `Loaded`
         // repaint, so `TestComplete` itself must not mark the round dirty (that
         // would repaint the whole unchanged list -> ~66% waste on each test).
-        assert!(!dirty, "TestComplete must not trigger a redundant list repaint");
+        assert!(
+            !dirty,
+            "TestComplete must not trigger a redundant list repaint"
+        );
         let status = s.status.as_deref().expect("status set");
         assert!(status.ends_with("Test OK"), "{status}");
         assert_eq!(s.status_kind, ConnectionStatusKind::Success);

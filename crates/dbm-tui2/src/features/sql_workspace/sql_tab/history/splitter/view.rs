@@ -5,10 +5,10 @@
 //! The zone width = list + detail + splitter (mirrors the original dbm's
 //! `history_zone_width`). Dragging B re-allocates detail vs list.
 
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 
-use crate::common::view::splitter::{draw, SplitOrientation};
+use crate::common::view::splitter::{SplitOrientation, draw};
 
 use super::state::clamp_detail_pane_width;
 use crate::features::sql_workspace::sql_tab::layout::SqlTabLayout;
@@ -57,12 +57,22 @@ pub fn history_detail_splitter(
     // The splitter sits at the right edge of the detail, inside the History
     // border (the border is 1 col wide, so the splitter is at
     // zone_x + 1 + detail_w), matching where the renderer draws it.
-    Some(Rect::new(zone_x + 1 + detail_w, layout.history.y, 1, layout.history.height))
+    Some(Rect::new(
+        zone_x + 1 + detail_w,
+        layout.history.y,
+        1,
+        layout.history.height,
+    ))
 }
 
 /// Compute the detail pane width for a drag of splitter B at `x`: the distance
 /// from the History zone's content left edge to the pointer.
-pub fn detail_width_for_x(area: Rect, layout: &SqlTabLayout, detail_pane_width: u16, x: u16) -> u16 {
+pub fn detail_width_for_x(
+    area: Rect,
+    layout: &SqlTabLayout,
+    detail_pane_width: u16,
+    x: u16,
+) -> u16 {
     let zone_x = history_zone_x(area, layout, detail_pane_width);
     x.saturating_sub(zone_x).saturating_sub(1)
 }

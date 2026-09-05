@@ -845,10 +845,7 @@ mod tests {
         let sql = "INSERT INTO users (id, na";
         let cursor = Cursor::new(0, sql.chars().count());
         let legacy = super::super::context::get_completion_context_heuristic(sql, cursor);
-        let model = build_semantic_model(
-            sql,
-            super::super::context::cursor_offset(sql, cursor),
-        );
+        let model = build_semantic_model(sql, super::super::context::cursor_offset(sql, cursor));
         let ctx = completion_context_from_semantic(&model, sql, cursor, legacy);
         assert!(matches!(ctx.intent, CompletionIntent::InsertColumn { .. }));
     }

@@ -33,14 +33,18 @@ pub enum DiscoverMessage {
     /// Scan progress update (streamed from the scan effect).
     ScanProgress { done: u32, total: u32 },
     /// The scan completed with the discovered instances.
-    ScanComplete { items: Vec<dbm_discovery::DiscoveredInstance> },
+    ScanComplete {
+        items: Vec<dbm_discovery::DiscoveredInstance>,
+    },
     /// The scan was cancelled before completing (no new results persisted).
     ScanCancelled,
     /// The scan failed.
     ScanError { error: String },
     /// Instances were registered. Carries the refreshed discovered list so the
     /// results pane can drop (or re-mark) the now-registered rows.
-    RegisterComplete { items: Vec<dbm_discovery::DiscoveredInstance> },
+    RegisterComplete {
+        items: Vec<dbm_discovery::DiscoveredInstance>,
+    },
     /// Registering failed.
     RegisterError { error: String },
     /// Forwarded engine selector message.

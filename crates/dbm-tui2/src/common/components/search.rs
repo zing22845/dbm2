@@ -74,7 +74,9 @@ pub enum PaneSearchInput {
     QueryChanged,
     OptionsChanged,
     /// Readline-style `CTRL+p` / `CTRL+n`: move the target-pane cursor without leaving input mode.
-    Navigate { forward: bool },
+    Navigate {
+        forward: bool,
+    },
 }
 
 /// Shared `Esc` ladder for every pane that uses [`PaneSearch`].
@@ -274,10 +276,7 @@ pub fn is_case_toggle_key(key: &KeyEvent) -> bool {
     }
     matches!(
         key.code,
-        KeyCode::Char('/')
-            | KeyCode::Char('_')
-            | KeyCode::Char('\x1f')
-            | KeyCode::Char('7')
+        KeyCode::Char('/') | KeyCode::Char('_') | KeyCode::Char('\x1f') | KeyCode::Char('7')
     )
 }
 
@@ -513,8 +512,8 @@ pub fn pane_search_title_line(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::style::Color;
     use crossterm::event::{KeyEventKind, KeyEventState};
+    use ratatui::style::Color;
 
     #[test]
     fn title_line_includes_slash_prefix_when_search_active() {
@@ -645,10 +644,7 @@ mod tests {
             state: KeyEventState::NONE,
         };
         search.query = "a".into();
-        assert_eq!(
-            search.handle_key(&bs, false),
-            PaneSearchInput::QueryChanged
-        );
+        assert_eq!(search.handle_key(&bs, false), PaneSearchInput::QueryChanged);
         assert!(search.query.is_empty());
         assert_eq!(search.handle_key(&bs, false), PaneSearchInput::Ignored);
         assert!(search.query.is_empty());
@@ -712,14 +708,26 @@ mod tests {
         assert_eq!(line.spans[0].style, other);
 
         // Keyword and the "Aa" case indicator use the current-match style.
-        let kw = line.spans.iter().find(|s| s.content.as_ref() == "sel").unwrap();
+        let kw = line
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref() == "sel")
+            .unwrap();
         assert_eq!(kw.style, current);
-        let aa = line.spans.iter().find(|s| s.content.as_ref() == "Aa").unwrap();
+        let aa = line
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref() == "Aa")
+            .unwrap();
         assert_eq!(aa.style, current);
 
         // The space between keyword and "Aa" is a neutral separator (no accent
         // background), excluded from the current-match emphasis.
-        let sep = line.spans.iter().find(|s| s.content.as_ref() == " ").unwrap();
+        let sep = line
+            .spans
+            .iter()
+            .find(|s| s.content.as_ref() == " ")
+            .unwrap();
         assert_ne!(sep.style, current);
         assert_eq!(sep.style.bg, None);
 

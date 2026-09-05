@@ -89,20 +89,32 @@ impl Palette {
     /// otherwise the regular border color. Views use this instead of hand-rolling
     /// the `if active … else …` so focus highlighting is defined in one place.
     pub fn parent_border(&self, active: bool) -> Style {
-        Style::default().fg(if active { self.border_active_parent } else { self.border })
+        Style::default().fg(if active {
+            self.border_active_parent
+        } else {
+            self.border
+        })
     }
 
     /// The border style for a *child* sub-pane within a parent pane: yellow when
     /// the pane is on the focus chain, otherwise the regular border color.
     pub fn child_border(&self, active: bool) -> Style {
-        Style::default().fg(if active { self.border_active_child } else { self.border })
+        Style::default().fg(if active {
+            self.border_active_child
+        } else {
+            self.border
+        })
     }
 
     /// The border style for a popup / overlay / picker dialog: cyan when focused,
     /// otherwise the regular border color. An open popup is its own focus, so
     /// call sites typically pass `true`.
     pub fn popup_border(&self, active: bool) -> Style {
-        Style::default().fg(if active { self.border_active_popup } else { self.border })
+        Style::default().fg(if active {
+            self.border_active_popup
+        } else {
+            self.border
+        })
     }
 
     /// Style of a (non-current) search match's text — the uniform accent used
@@ -190,10 +202,10 @@ pub fn default() -> Theme {
         name: "default",
         is_dark: true,
         dark: Palette {
-            fg: FG_RESET,                            // editor-aligned default
-            fg_dim: Color::Rgb(0x62, 0x64, 0x74),    // comment
-            bg: Color::Rgb(0x28, 0x2a, 0x36),        // background
-            surface: Color::Rgb(0x21, 0x23, 0x2e),   // current line
+            fg: FG_RESET,                          // editor-aligned default
+            fg_dim: Color::Rgb(0x62, 0x64, 0x74),  // comment
+            bg: Color::Rgb(0x28, 0x2a, 0x36),      // background
+            surface: Color::Rgb(0x21, 0x23, 0x2e), // current line
             accent: ACCENT_YELLOW,
             border: Color::Rgb(0x44, 0x47, 0x5a),
             border_active_parent: Color::Green,
@@ -206,15 +218,15 @@ pub fn default() -> Theme {
             selection_cell_bg: Color::Rgb(0xe4, 0xea, 0xf5),
             selection_text: Color::Rgb(0x34, 0x37, 0x40),
             selection_focus_text: Color::Rgb(0x1c, 0x48, 0x8c),
-            success: Color::Rgb(0x50, 0xfa, 0x7b),   // green
-            warning: Color::Rgb(0xf1, 0xfa, 0x8c),   // yellow
-            error: Color::Rgb(0xff, 0x55, 0x55),     // red
+            success: Color::Rgb(0x50, 0xfa, 0x7b), // green
+            warning: Color::Rgb(0xf1, 0xfa, 0x8c), // yellow
+            error: Color::Rgb(0xff, 0x55, 0x55),   // red
             modified_text: Color::Rgb(0xff, 0x8a, 0x8a), // readable red on dark bg
-            info: Color::Rgb(0x8b, 0xe9, 0xfd),      // cyan
+            info: Color::Rgb(0x8b, 0xe9, 0xfd),    // cyan
             muted: Color::Rgb(0x62, 0x64, 0x74),
         },
         light: Palette {
-            fg: FG_RESET,                            // editor-aligned default
+            fg: FG_RESET, // editor-aligned default
             fg_dim: Color::Rgb(0x62, 0x74, 0x8f),
             bg: Color::Rgb(0xfa, 0xf7, 0xf2),
             surface: Color::Rgb(0xf1, 0xe8, 0xe2),
@@ -280,7 +292,12 @@ mod tests {
                 theme.name
             );
             // active_fg must also be a real color, never Reset.
-            assert_ne!(p.active_fg, Color::Reset, "theme {:?} active_fg is Reset", theme.name);
+            assert_ne!(
+                p.active_fg,
+                Color::Reset,
+                "theme {:?} active_fg is Reset",
+                theme.name
+            );
         }
     }
 

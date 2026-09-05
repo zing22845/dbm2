@@ -91,7 +91,13 @@ impl InstancesState {
     pub fn visible_count(&self) -> usize {
         self.nodes
             .iter()
-            .map(|n| if n.expanded { 1 + n.connection_count() } else { 1 })
+            .map(|n| {
+                if n.expanded {
+                    1 + n.connection_count()
+                } else {
+                    1
+                }
+            })
             .sum()
     }
 
@@ -202,9 +208,7 @@ impl InstancesState {
             if i == instance_idx {
                 return match connection {
                     None => Some(row),
-                    Some(ci) if node.expanded && ci < node.connections.len() => {
-                        Some(row + 1 + ci)
-                    }
+                    Some(ci) if node.expanded && ci < node.connections.len() => Some(row + 1 + ci),
                     _ => None,
                 };
             }
@@ -221,7 +225,11 @@ impl InstancesState {
     /// instead of letting its row index drift. If the node is no longer visible
     /// (its parent was collapsed), the cursor clamps to the last row. Returns
     /// whether the cursor changed.
-    pub(crate) fn preserve_cursor(&mut self, instance_idx: usize, connection: Option<usize>) -> bool {
+    pub(crate) fn preserve_cursor(
+        &mut self,
+        instance_idx: usize,
+        connection: Option<usize>,
+    ) -> bool {
         if let Some(row) = self.visible_row_of(instance_idx, connection) {
             self.jump_to(row)
         } else {
@@ -267,8 +275,7 @@ impl InstancesState {
                     // marker, and a space.
                     let marker = if n.expanded { "▾" } else { "▸" };
                     w = w.max(
-                        (3
-                            + unicode_width::UnicodeWidthStr::width(marker)
+                        (3 + unicode_width::UnicodeWidthStr::width(marker)
                             + unicode_width::UnicodeWidthStr::width(inst.name.as_str()))
                         .try_into()
                         .unwrap_or(u16::MAX),
@@ -325,8 +332,7 @@ impl InstancesState {
     /// where a no-op horizontal scroll does not redraw).
     pub fn scroll_horizontal(&mut self, delta: i16, max: u16) -> bool {
         let before = self.h_scroll;
-        self.h_scroll = (self.h_scroll as i32 + i32::from(delta))
-            .clamp(0, i32::from(max)) as u16;
+        self.h_scroll = (self.h_scroll as i32 + i32::from(delta)).clamp(0, i32::from(max)) as u16;
         self.h_scroll != before
     }
 
@@ -366,7 +372,10 @@ impl InstancesState {
     /// Whether the active workspace is an instance (its instance workspace is
     /// shown) rather than a connection.
     pub fn active_is_instance(&self) -> bool {
-        matches!(self.active_workspace, Some(ActiveWorkspaceKind::Instance(_)))
+        matches!(
+            self.active_workspace,
+            Some(ActiveWorkspaceKind::Instance(_))
+        )
     }
 
     /// Make the instance at `instance_idx` the active workspace. Its node is
@@ -490,12 +499,14 @@ impl InstancesState {
         // tree reload (e.g. after closing discover, which re-fetches instances)
         // would permanently degrade a connection-active to its parent instance.
         let prev_connection_name = match prev_active {
-            Some(ActiveWorkspaceKind::Connection { instance_idx, conn_idx }) => {
-                self.nodes
-                    .get(instance_idx)
-                    .and_then(|n| n.connections.get(conn_idx))
-                    .map(|c| c.name.clone())
-            }
+            Some(ActiveWorkspaceKind::Connection {
+                instance_idx,
+                conn_idx,
+            }) => self
+                .nodes
+                .get(instance_idx)
+                .and_then(|n| n.connections.get(conn_idx))
+                .map(|c| c.name.clone()),
             _ => None,
         };
         self.nodes = instances
@@ -583,7 +594,10 @@ impl InstancesState {
 
     /// Display name of the instance at `idx`.
     pub fn instance_name(&self, idx: usize) -> String {
-        self.nodes.get(idx).map(|n| n.display_name()).unwrap_or_default()
+        self.nodes
+            .get(idx)
+            .map(|n| n.display_name())
+            .unwrap_or_default()
     }
 
     /// The `(instance_name, connection_name)` at the cursor, if it is a
@@ -663,7 +677,10 @@ mod tests {
 
         // Reloading keeps "a" expanded but drops its (stale) connections.
         s.set_instances(vec![inst("a"), inst("c")]);
-        assert!(s.nodes[0].expanded, "previously expanded instance stays expanded");
+        assert!(
+            s.nodes[0].expanded,
+            "previously expanded instance stays expanded"
+        );
         assert!(!s.nodes[0].loaded, "connections are re-lazily loaded");
         assert!(s.nodes[0].connections.is_empty());
         assert!(!s.nodes[1].expanded);
@@ -777,7 +794,10 @@ mod tests {
         s.nodes[0].connections = vec![conn("c1")];
         s.set_active_connection(0, 0);
         s.cursor = 0; // on the instance row
-        assert!(!s.collapse(), "active connection's parent must not collapse");
+        assert!(
+            !s.collapse(),
+            "active connection's parent must not collapse"
+        );
     }
 
     #[test]
@@ -879,7 +899,10 @@ mod tests {
         s.set_instances(vec![inst("a"), inst("b")]);
         s.nodes[0].expanded = true;
         s.nodes[0].loaded = false; // expanded but connections not loaded
-        assert!(s.toggle_expand_at(0), "expanded-unloaded click signals a change");
+        assert!(
+            s.toggle_expand_at(0),
+            "expanded-unloaded click signals a change"
+        );
         assert!(
             s.nodes[0].expanded,
             "expanded-unloaded arrow click keeps the node expanded (to load)"
@@ -893,7 +916,10 @@ mod tests {
         s.set_instances(vec![inst("a")]);
         s.nodes[0].loaded = true;
         s.set_active_instance(0); // forced expanded
-        assert!(!s.toggle_expand_at(0), "active instance cannot be collapsed");
+        assert!(
+            !s.toggle_expand_at(0),
+            "active instance cannot be collapsed"
+        );
         assert!(s.nodes[0].expanded);
     }
 
@@ -903,7 +929,10 @@ mod tests {
         s.set_instances(vec![inst("a"), inst("b")]);
         s.set_active_instance(1);
         assert!(s.remove_instance(1));
-        assert!(s.active_workspace.is_none(), "removing active instance clears it");
+        assert!(
+            s.active_workspace.is_none(),
+            "removing active instance clears it"
+        );
 
         // Removing a non-active instance keeps the marker.
         s.set_active_instance(0);

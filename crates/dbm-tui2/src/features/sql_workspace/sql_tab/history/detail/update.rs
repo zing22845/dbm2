@@ -82,10 +82,15 @@ pub fn reconcile_on_selection_change(
     viewport_lines: usize,
 ) {
     if search.has_filter()
-        && let Some(row) = detail_view::first_match_display_line(sql, &search.query, search.options, text_width_after)
+        && let Some(row) = detail_view::first_match_display_line(
+            sql,
+            &search.query,
+            search.options,
+            text_width_after,
+        )
     {
-        let max_scroll =
-            detail_view::detail_display_line_count_at(text_width_after, sql).saturating_sub(viewport_lines.max(1));
+        let max_scroll = detail_view::detail_display_line_count_at(text_width_after, sql)
+            .saturating_sub(viewport_lines.max(1));
         state.scroll = row.min(max_scroll);
         return;
     }

@@ -1,11 +1,11 @@
 //! Explorer feature update.
 
-use super::msg::ExplorerMessage;
-use super::state::{ExplorerPane, ExplorerState};
-use super::intent::ExplorerIntent;
 use super::effect::ExplorerEffect;
 use super::instances;
+use super::intent::ExplorerIntent;
+use super::msg::ExplorerMessage;
 use super::objects;
+use super::state::{ExplorerPane, ExplorerState};
 
 /// Update the explorer state. Pure by-value transition: pane navigation is
 /// handled here; child messages are forwarded to the matching sub-module
@@ -16,7 +16,12 @@ use super::objects;
 pub fn update(
     msg: ExplorerMessage,
     mut state: ExplorerState,
-) -> (ExplorerState, Vec<ExplorerIntent>, Vec<ExplorerEffect>, bool) {
+) -> (
+    ExplorerState,
+    Vec<ExplorerIntent>,
+    Vec<ExplorerEffect>,
+    bool,
+) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
     let dirty = match msg {
@@ -50,18 +55,18 @@ pub fn update(
                     intent,
                     instances::intent::InstancesIntent::OpenConnectionWorkspace { .. }
                 )
-            })
-                && let Some((instance, connection)) = state.instances.connection_at_cursor() {
-                    // Rebinding the tree resets its catalog; kick off the
-                    // database fetch so browsing starts loading immediately.
-                    state.objects.rebind(instance.clone(), connection.clone());
-                    effects.push(ExplorerEffect::Objects(
-                        objects::effect::ObjectsEffect::LoadDatabases {
-                            instance,
-                            connection,
-                        },
-                    ));
-                }
+            }) && let Some((instance, connection)) = state.instances.connection_at_cursor()
+            {
+                // Rebinding the tree resets its catalog; kick off the
+                // database fetch so browsing starts loading immediately.
+                state.objects.rebind(instance.clone(), connection.clone());
+                effects.push(ExplorerEffect::Objects(
+                    objects::effect::ObjectsEffect::LoadDatabases {
+                        instance,
+                        connection,
+                    },
+                ));
+            }
             intents.extend(i.into_iter().map(ExplorerIntent::Instances));
             effects.extend(e.into_iter().map(ExplorerEffect::Instances));
             d

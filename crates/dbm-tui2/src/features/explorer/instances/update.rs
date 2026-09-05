@@ -1,9 +1,9 @@
 //! Explorer instances feature update.
 
+use super::effect::InstancesEffect;
+use super::intent::InstancesIntent;
 use super::msg::InstancesMessage;
 use super::state::InstancesState;
-use super::intent::InstancesIntent;
-use super::effect::InstancesEffect;
 
 /// Update the instances (connection tree) state. Pure by-value transition.
 ///
@@ -13,7 +13,12 @@ use super::effect::InstancesEffect;
 pub fn update(
     msg: InstancesMessage,
     mut state: InstancesState,
-) -> (InstancesState, Vec<InstancesIntent>, Vec<InstancesEffect>, bool) {
+) -> (
+    InstancesState,
+    Vec<InstancesIntent>,
+    Vec<InstancesEffect>,
+    bool,
+) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
     let dirty = match msg {
@@ -32,9 +37,7 @@ pub fn update(
                 .iter()
                 .enumerate()
                 .filter(|(_, n)| n.expanded)
-                .filter_map(|(i, n)| {
-                    n.instance.as_ref().map(|inst| (i, inst.name.clone()))
-                })
+                .filter_map(|(i, n)| n.instance.as_ref().map(|inst| (i, inst.name.clone())))
                 .collect();
             for (instance_idx, instance_name) in expanded {
                 effects.push(InstancesEffect::LoadConnections {
@@ -44,7 +47,10 @@ pub fn update(
             }
             true
         }
-        InstancesMessage::ConnectionsLoaded { instance_idx, connections } => {
+        InstancesMessage::ConnectionsLoaded {
+            instance_idx,
+            connections,
+        } => {
             // Remember the cursor's node before the rows change (loading
             // connections adds rows above the cursor). Unless an active restore
             // repositions the cursor, it is re-resolved to stay on the same node.
@@ -60,10 +66,8 @@ pub fn update(
                 // belonging to a different instance stays pending for its load.
                 if let Some((inst_name, conn_name)) = state.restore_active_connection.take() {
                     let this_instance = node.instance.as_ref().is_some_and(|i| i.name == inst_name);
-                    if let Some(conn_idx) = node
-                        .connections
-                        .iter()
-                        .position(|c| c.name == conn_name)
+                    if let Some(conn_idx) =
+                        node.connections.iter().position(|c| c.name == conn_name)
                         && this_instance
                     {
                         state.set_active_connection(instance_idx, conn_idx);
@@ -83,9 +87,7 @@ pub fn update(
             // rows (e.g. the first instance's connections finishing a lazy load
             // shifts the active/cursor rows below it). The active restore already
             // placed the cursor, so skip it then.
-            if !active_restored
-                && let Some((ci, cconn)) = cursor_node
-            {
+            if !active_restored && let Some((ci, cconn)) = cursor_node {
                 state.preserve_cursor(ci, cconn);
             }
             true
@@ -180,7 +182,10 @@ pub fn update(
             let changed = state.toggle_expand_at(row);
             if changed
                 && inst_idx != usize::MAX
-                && state.nodes.get(inst_idx).is_some_and(|n| n.expanded && !n.loaded)
+                && state
+                    .nodes
+                    .get(inst_idx)
+                    .is_some_and(|n| n.expanded && !n.loaded)
             {
                 let instance_name = state.nodes[inst_idx]
                     .instance
@@ -194,7 +199,10 @@ pub fn update(
             }
             changed
         }
-        InstancesMessage::ScrollHorizontal { delta, term_width: _ } => {
+        InstancesMessage::ScrollHorizontal {
+            delta,
+            term_width: _,
+        } => {
             // Use the viewport-aware max cached by the renderer — this is the
             // same bound used by Paragraph::scroll + h_scrollbar thumb, so an
             // already-at-boundary press is a pure no-op.
@@ -326,10 +334,16 @@ mod tests {
         );
         assert_eq!(
             s.active_workspace,
-            Some(ActiveWorkspaceKind::Connection { instance_idx: 0, conn_idx: 0 }),
+            Some(ActiveWorkspaceKind::Connection {
+                instance_idx: 0,
+                conn_idx: 0
+            }),
             "loading connections must refine the active workspace to the connection"
         );
-        assert!(s.restore_active_connection.is_none(), "pending restore consumed");
+        assert!(
+            s.restore_active_connection.is_none(),
+            "pending restore consumed"
+        );
     }
 
     #[test]
@@ -366,7 +380,10 @@ mod tests {
             Some(ActiveWorkspaceKind::Instance(0)),
             "missing connection must fall back to the parent instance"
         );
-        assert!(s.restore_active_connection.is_none(), "pending restore consumed");
+        assert!(
+            s.restore_active_connection.is_none(),
+            "pending restore consumed"
+        );
     }
 
     #[test]
@@ -425,14 +442,23 @@ mod tests {
             s,
         );
         assert!(s.nodes[0].expanded, "A stays expanded after reload");
-        assert!(effects.iter().any(|e| matches!(
-            e,
-            InstancesEffect::LoadConnections { instance_idx: 0, .. }
-        )), "expanded instance must re-load connections after a reload");
+        assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                InstancesEffect::LoadConnections {
+                    instance_idx: 0,
+                    ..
+                }
+            )),
+            "expanded instance must re-load connections after a reload"
+        );
         // B (not expanded) must not reload.
         assert!(!effects.iter().any(|e| matches!(
             e,
-            InstancesEffect::LoadConnections { instance_idx: 1, .. }
+            InstancesEffect::LoadConnections {
+                instance_idx: 1,
+                ..
+            }
         )));
     }
 
@@ -446,7 +472,10 @@ mod tests {
         let (_s, _i, effects, dirty) = update(InstancesMessage::Expand, s);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
-            InstancesEffect::LoadConnections { instance_idx, instance_name } => {
+            InstancesEffect::LoadConnections {
+                instance_idx,
+                instance_name,
+            } => {
                 assert_eq!(*instance_idx, 0);
                 assert_eq!(instance_name, "a");
             }
@@ -480,14 +509,24 @@ mod tests {
         s.cached_h_max_scroll.set(22);
 
         // Scrolling at the left boundary is a no-op (dirty=false).
-        let (s2, _i, _e, dirty) =
-            update(InstancesMessage::ScrollHorizontal { delta: -1, term_width: 80 }, s);
+        let (s2, _i, _e, dirty) = update(
+            InstancesMessage::ScrollHorizontal {
+                delta: -1,
+                term_width: 80,
+            },
+            s,
+        );
         assert!(!dirty);
         assert_eq!(s2.h_scroll, 0);
 
         // Scrolling right moves the offset (content wider than viewport).
-        let (s3, _i, _e, dirty) =
-            update(InstancesMessage::ScrollHorizontal { delta: 3, term_width: 80 }, s2);
+        let (s3, _i, _e, dirty) = update(
+            InstancesMessage::ScrollHorizontal {
+                delta: 3,
+                term_width: 80,
+            },
+            s2,
+        );
         assert!(dirty);
         assert_eq!(s3.h_scroll, 3);
     }

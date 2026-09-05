@@ -27,25 +27,44 @@ pub enum ContextPickerAction {
 #[derive(Debug, Clone)]
 pub enum ContextPickerEffect {
     /// Load the databases list for a connection.
-    LoadDatabases { instance: String, connection: String },
+    LoadDatabases {
+        instance: String,
+        connection: String,
+    },
     /// Load the schemas list for a specific database.
-    LoadSchemas { instance: String, connection: String, database: String },
+    LoadSchemas {
+        instance: String,
+        connection: String,
+        database: String,
+    },
 }
 
 impl Effect for ContextPickerEffect {
     type Action = ContextPickerAction;
 
-    fn run(self, _emit: Emitter<Self::Action>, services: Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
+    fn run(
+        self,
+        _emit: Emitter<Self::Action>,
+        services: Arc<Services>,
+    ) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             match self {
-                ContextPickerEffect::LoadDatabases { instance, connection } => {
-                    match services.list_databases(&instance, &connection).await {
-                        Ok(items) => vec![ContextPickerAction::DatabasesLoaded { items }],
-                        Err(error) => vec![ContextPickerAction::DatabasesError { error }],
-                    }
-                }
-                ContextPickerEffect::LoadSchemas { instance, connection, database } => {
-                    match services.list_schemas(&instance, &connection, &database).await {
+                ContextPickerEffect::LoadDatabases {
+                    instance,
+                    connection,
+                } => match services.list_databases(&instance, &connection).await {
+                    Ok(items) => vec![ContextPickerAction::DatabasesLoaded { items }],
+                    Err(error) => vec![ContextPickerAction::DatabasesError { error }],
+                },
+                ContextPickerEffect::LoadSchemas {
+                    instance,
+                    connection,
+                    database,
+                } => {
+                    match services
+                        .list_schemas(&instance, &connection, &database)
+                        .await
+                    {
                         Ok(items) => vec![ContextPickerAction::SchemasLoaded { items }],
                         Err(error) => vec![ContextPickerAction::SchemasError { error }],
                     }

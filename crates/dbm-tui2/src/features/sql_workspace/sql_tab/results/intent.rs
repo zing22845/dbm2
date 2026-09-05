@@ -1,9 +1,9 @@
 //! Results feature intents.
 
-use crate::app_shell::intent::Intent;
-use super::msg::ResultsMsg;
 use super::detail::intent::DetailIntent;
 use super::list::intent::ListIntent;
+use super::msg::ResultsMsg;
+use crate::app_shell::intent::Intent;
 
 #[derive(Debug, Clone)]
 pub enum ResultsIntent {

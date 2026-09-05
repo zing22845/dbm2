@@ -1,8 +1,8 @@
 //! SQL workspace feature effects and actions.
 
+use super::sql_tab::effect::{SqlTabAction, SqlTabEffect};
 use crate::app_shell::effect::effect_trait::{BoxFuture, Effect, Emitter};
 use crate::common::service::services::Services;
-use super::sql_tab::effect::{SqlTabAction, SqlTabEffect};
 
 /// Actions produced by SQL workspace effects (from its child `sql_tab`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,7 +27,11 @@ pub enum SqlEffect {
 impl Effect for SqlEffect {
     type Action = SqlAction;
 
-    fn run(self, emit: Emitter<Self::Action>, services: std::sync::Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
+    fn run(
+        self,
+        emit: Emitter<Self::Action>,
+        services: std::sync::Arc<Services>,
+    ) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             match self {
                 SqlEffect::SqlTab(e) => {

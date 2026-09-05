@@ -268,13 +268,8 @@ impl Widget for EditorView<'_, '_> {
         let (offset_x, offset_y) = if wrap_lines {
             (
                 0,
-                view_state.update_viewport_vertical_wrap(
-                    width,
-                    height,
-                    cursor.row,
-                    cursor.col,
-                    lines,
-                ),
+                view_state
+                    .update_viewport_vertical_wrap(width, height, cursor.row, cursor.col, lines),
             )
         } else {
             let line = lines.get(RowIndex::new(cursor.row));

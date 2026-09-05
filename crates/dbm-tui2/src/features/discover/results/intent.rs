@@ -1,7 +1,7 @@
 //! Discovery results feature intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::ResultsMsg;
+use crate::app_shell::intent::Intent;
 
 #[derive(Debug, Clone)]
 pub enum ResultsIntent {}

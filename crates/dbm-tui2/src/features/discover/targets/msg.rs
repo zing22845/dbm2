@@ -39,7 +39,11 @@ pub enum TargetsMessage {
     Paste(String),
     /// Programmatically commit a cell value (used by the shell for validation
     /// feedback).
-    CommitCell { row: usize, col: TargetCol, value: String },
+    CommitCell {
+        row: usize,
+        col: TargetCol,
+        value: String,
+    },
     /// Select a specific row (mouse click on a row).
     SelectRow { row: usize },
     /// Select a specific cell (mouse click on a cell).

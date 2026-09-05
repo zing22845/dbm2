@@ -640,7 +640,9 @@ mod tests {
             )
             .unwrap();
 
-        let status = store.probe_and_upsert_instance_lifecycle("inst_lc").unwrap();
+        let status = store
+            .probe_and_upsert_instance_lifecycle("inst_lc")
+            .unwrap();
         assert_eq!(status, crate::LifecycleStatus::Ready);
         let inst = store.get_managed_instance_by_name("pg-lc").unwrap();
         assert_eq!(inst.lifecycle_status.as_deref(), Some("ready"));

@@ -1,7 +1,7 @@
 //! Engine selector feature intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::EngineMsg;
+use crate::app_shell::intent::Intent;
 
 #[derive(Debug, Clone)]
 pub enum EngineIntent {}

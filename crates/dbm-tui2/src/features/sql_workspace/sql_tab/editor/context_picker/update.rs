@@ -6,13 +6,13 @@
 
 use crate::common::components::search::PaneSearchInput;
 
+use super::effect::ContextPickerEffect;
+use super::intent::ContextPickerIntent;
 use super::msg::ContextPickerMessage;
 use super::state::{
     CachedList, ContextPickerState, PickerColumn, clamp_cursor, cursor_for_name, filter_indices,
     item_at_filtered,
 };
-use super::intent::ContextPickerIntent;
-use super::effect::ContextPickerEffect;
 
 /// Update the context picker state. Pure by-value transition.
 ///
@@ -21,14 +21,26 @@ use super::effect::ContextPickerEffect;
 pub fn update(
     msg: ContextPickerMessage,
     mut state: ContextPickerState,
-) -> (ContextPickerState, Vec<ContextPickerIntent>, Vec<ContextPickerEffect>, bool) {
+) -> (
+    ContextPickerState,
+    Vec<ContextPickerIntent>,
+    Vec<ContextPickerEffect>,
+    bool,
+) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
 
     if !state.open {
         // A picker that is closed only accepts the Open message (everything
         // else is a no-op, e.g. late async results for a closed picker).
-        if let ContextPickerMessage::Open { column, instance, connection, database, schema } = msg {
+        if let ContextPickerMessage::Open {
+            column,
+            instance,
+            connection,
+            database,
+            schema,
+        } = msg
+        {
             state = ContextPickerState::open(column, instance, connection, database, schema);
             effects.push(ContextPickerEffect::LoadDatabases {
                 instance: state.instance.clone(),
@@ -53,9 +65,7 @@ pub fn update(
             state.close();
             true
         }
-        ContextPickerMessage::MoveCursor { delta } => {
-            move_cursor(&mut state, delta, &mut effects)
-        }
+        ContextPickerMessage::MoveCursor { delta } => move_cursor(&mut state, delta, &mut effects),
         ContextPickerMessage::SetCursor { column, cursor } => {
             state.switch_column(column);
             match column {
@@ -254,7 +264,7 @@ fn selected_context(state: &ContextPickerState) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, KeyEventKind, KeyEventState};
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     fn char_key(c: char) -> KeyEvent {
         KeyEvent {

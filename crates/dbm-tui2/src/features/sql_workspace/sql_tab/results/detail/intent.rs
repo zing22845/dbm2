@@ -1,7 +1,7 @@
 //! Results detail sub-module intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::DetailMsg;
+use crate::app_shell::intent::Intent;
 
 #[derive(Debug, Clone)]
 pub enum DetailIntent {}
@@ -13,4 +13,3 @@ impl Intent for DetailIntent {
         match self {}
     }
 }
-

@@ -6,7 +6,7 @@
 //! on `edtui` or any feature — the editor integration turns the buffer into
 //! lines, calls `find_matches`, and applies the results.
 
-use crate::common::components::search::{find_match_starts, TextSearchOptions};
+use crate::common::components::search::{TextSearchOptions, find_match_starts};
 
 /// A single search match: which line and the inclusive char-column span.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +44,9 @@ mod tests {
     use super::*;
 
     fn opts(case_insensitive: bool) -> TextSearchOptions {
-        TextSearchOptions { ignore_case: case_insensitive }
+        TextSearchOptions {
+            ignore_case: case_insensitive,
+        }
     }
 
     #[test]

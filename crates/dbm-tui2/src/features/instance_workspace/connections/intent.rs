@@ -1,7 +1,7 @@
 //! Instance connections feature intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::ConnectionsMsg;
+use crate::app_shell::intent::Intent;
 
 /// Intents emitted by the connections panel.
 #[derive(Debug, Clone)]

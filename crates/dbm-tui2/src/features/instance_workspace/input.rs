@@ -30,7 +30,10 @@ pub enum IwInput {
     OpenUnregisterConfirm { instance: String },
     /// Open the "delete connection" confirm modal (the connections pane's `d`).
     /// The instance and selected connection names are filled in here.
-    OpenDeleteConfirm { instance: String, connection: String },
+    OpenDeleteConfirm {
+        instance: String,
+        connection: String,
+    },
 }
 
 /// Map a key to an instance-workspace action while the workspace is focused.
@@ -53,7 +56,6 @@ pub fn key_to_msg(key: KeyEvent, pane: IwPane, state: &IwState) -> Option<IwInpu
 /// Overview panel keys: move the cursor (j/k, ↑/↓), H-Scroll (←/→), refresh
 /// (`r`), and unregister (`u`) which requests a confirm modal.
 fn overview_key(key: KeyEvent, state: &IwState) -> Option<IwInput> {
-    
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => Some(overview(OverviewMessage::MoveCursor(-1))),
         KeyCode::Down | KeyCode::Char('j') => Some(overview(OverviewMessage::MoveCursor(1))),
@@ -162,9 +164,9 @@ fn iw_form_key(key: KeyEvent, state: &IwState) -> Option<IwInput> {
             // `dd` clears the current field and enters insert mode: the first
             // `d` arms a short window, a second `d` within it clears.
             KeyCode::Char('d') => {
-                let within = form.pending_d_at.is_some_and(|at| {
-                    at.elapsed() <= std::time::Duration::from_millis(300)
-                });
+                let within = form
+                    .pending_d_at
+                    .is_some_and(|at| at.elapsed() <= std::time::Duration::from_millis(300));
                 if within {
                     ConnectionsMessage::ClearFieldAndInsert
                 } else {
@@ -261,15 +263,15 @@ mod tests {
         let s = state_with(IwPane::Connections, "inst");
         assert!(matches!(
             key_to_msg(key(KeyCode::Char('j')), IwPane::Connections, &s),
-            Some(IwInput::Message(IwMessage::Connections(ConnectionsMsg::Message(
-                ConnectionsMessage::MoveDown
-            ))))
+            Some(IwInput::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::MoveDown)
+            )))
         ));
         assert!(matches!(
             key_to_msg(key(KeyCode::Char('k')), IwPane::Connections, &s),
-            Some(IwInput::Message(IwMessage::Connections(ConnectionsMsg::Message(
-                ConnectionsMessage::MoveUp
-            ))))
+            Some(IwInput::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::MoveUp)
+            )))
         ));
     }
 
@@ -278,15 +280,15 @@ mod tests {
         let s = state_with(IwPane::Connections, "inst");
         assert!(matches!(
             key_to_msg(key(KeyCode::Char('a')), IwPane::Connections, &s),
-            Some(IwInput::Message(IwMessage::Connections(ConnectionsMsg::Message(
-                ConnectionsMessage::BeginAdd
-            ))))
+            Some(IwInput::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::BeginAdd)
+            )))
         ));
         assert!(matches!(
             key_to_msg(key(KeyCode::Char('i')), IwPane::Connections, &s),
-            Some(IwInput::Message(IwMessage::Connections(ConnectionsMsg::Message(
-                ConnectionsMessage::BeginEdit
-            ))))
+            Some(IwInput::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::BeginEdit)
+            )))
         ));
     }
 
@@ -300,9 +302,9 @@ mod tests {
             Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
         assert!(matches!(
             key_to_msg(key(KeyCode::Char('t')), IwPane::Connections, &s),
-            Some(IwInput::Message(IwMessage::Connections(ConnectionsMsg::Message(
-                ConnectionsMessage::TestSelected
-            ))))
+            Some(IwInput::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::TestSelected)
+            )))
         ));
     }
 
@@ -347,9 +349,9 @@ mod tests {
         });
         assert!(matches!(
             key_to_msg(key(KeyCode::Char('x')), IwPane::Connections, &s),
-            Some(IwInput::Message(IwMessage::Connections(ConnectionsMsg::Message(
-                ConnectionsMessage::FormChar('x')
-            ))))
+            Some(IwInput::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::FormChar('x'))
+            )))
         ));
     }
 
@@ -365,17 +367,17 @@ mod tests {
         // First `d` arms the pending-d flag.
         assert!(matches!(
             key_to_msg(key(KeyCode::Char('d')), IwPane::Connections, &s),
-            Some(IwInput::Message(IwMessage::Connections(ConnectionsMsg::Message(
-                ConnectionsMessage::SetPendingD
-            ))))
+            Some(IwInput::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::SetPendingD)
+            )))
         ));
         // A second `d` within the window clears the field and enters insert.
         s.connections.form.as_mut().unwrap().pending_d_at = Some(std::time::Instant::now());
         assert!(matches!(
             key_to_msg(key(KeyCode::Char('d')), IwPane::Connections, &s),
-            Some(IwInput::Message(IwMessage::Connections(ConnectionsMsg::Message(
-                ConnectionsMessage::ClearFieldAndInsert
-            ))))
+            Some(IwInput::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::ClearFieldAndInsert)
+            )))
         ));
     }
 }

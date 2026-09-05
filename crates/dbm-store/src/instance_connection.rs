@@ -411,19 +411,13 @@ impl super::Store {
 
         let merged = NewInstanceConnection {
             name: new_name.clone(),
-            username: patch
-                .username
-                .unwrap_or_else(|| existing.username.clone()),
-            database: patch
-                .database
-                .unwrap_or_else(|| existing.database.clone()),
+            username: patch.username.unwrap_or_else(|| existing.username.clone()),
+            database: patch.database.unwrap_or_else(|| existing.database.clone()),
             password: match &patch.password {
                 None => self.load_instance_connection_password(&existing.id)?,
                 Some(inner) => inner.clone(),
             },
-            ssl_mode: patch
-                .ssl_mode
-                .or_else(|| Some(existing.ssl_mode.clone())),
+            ssl_mode: patch.ssl_mode.or_else(|| Some(existing.ssl_mode.clone())),
             env_label: patch.env_label.or(existing.env_label.clone()),
         };
 
@@ -435,9 +429,7 @@ impl super::Store {
         }
 
         let (nonce, enc) = encrypt_password(merged.password.as_deref())?;
-        let ssl_mode = merged
-            .ssl_mode
-            .unwrap_or_else(|| existing.ssl_mode.clone());
+        let ssl_mode = merged.ssl_mode.unwrap_or_else(|| existing.ssl_mode.clone());
 
         let affected = self.sqlite().execute(
             "UPDATE instance_connections
@@ -630,9 +622,7 @@ where
             .build()
             .map_err(|err| err.to_string())?;
 
-        rt.block_on(async {
-            ping_fn(&url).await
-        })
+        rt.block_on(async { ping_fn(&url).await })
     })
     .join()
     .map_err(|_| "connection precheck thread panicked".to_string())?
@@ -804,18 +794,28 @@ mod tests {
 
         // A successful test records test_succeeded_at, not test_failed_at, and
         // must not touch updated_at (a test is not an edit).
-        store.record_connection_test_result("pg", "main", true).unwrap();
+        store
+            .record_connection_test_result("pg", "main", true)
+            .unwrap();
         let conns = store.list_instance_connections("pg").unwrap();
         assert!(conns[0].test_succeeded_at.is_some());
         assert!(conns[0].test_failed_at.is_none());
-        assert_eq!(conns[0].updated_at, "2000-01-01 00:00:00", "test must not update updated_at");
+        assert_eq!(
+            conns[0].updated_at, "2000-01-01 00:00:00",
+            "test must not update updated_at"
+        );
 
         // A later failed test records test_failed_at, still not updated_at.
-        store.record_connection_test_result("pg", "main", false).unwrap();
+        store
+            .record_connection_test_result("pg", "main", false)
+            .unwrap();
         let conns = store.list_instance_connections("pg").unwrap();
         assert!(conns[0].test_failed_at.is_some());
         assert!(conns[0].test_succeeded_at.is_some());
-        assert_eq!(conns[0].updated_at, "2000-01-01 00:00:00", "test must not update updated_at");
+        assert_eq!(
+            conns[0].updated_at, "2000-01-01 00:00:00",
+            "test must not update updated_at"
+        );
     }
 
     #[test]

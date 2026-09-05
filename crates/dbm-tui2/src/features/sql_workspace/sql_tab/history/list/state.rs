@@ -34,7 +34,10 @@ impl ListState {
         instance: &str,
         connection: &str,
     ) -> Vec<usize> {
-        super::super::store::history_visible_indices(store.entries(instance, connection), &self.search)
+        super::super::store::history_visible_indices(
+            store.entries(instance, connection),
+            &self.search,
+        )
     }
 
     /// The currently selected history entry, if any.
@@ -54,12 +57,7 @@ impl ListState {
     /// The real, viewport-aware max is computed in the renderer as
     /// `line_width - content_w`; the update layer returns `line_width` which
     /// is always ≥ the view's maximum, and the renderer clamps further.
-    pub fn max_h_scroll(
-        &self,
-        store: &SqlHistoryStore,
-        instance: &str,
-        connection: &str,
-    ) -> usize {
+    pub fn max_h_scroll(&self, store: &SqlHistoryStore, instance: &str, connection: &str) -> usize {
         let visible = self.visible_indices(store, instance, connection);
         let entries = store.entries(instance, connection);
         visible

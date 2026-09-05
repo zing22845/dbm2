@@ -8,15 +8,15 @@ use crate::common::utils::cursor::Cursor;
 
 use super::provider::ColumnInfo;
 
-use super::msg::SqlCompletionMessage;
-use super::state::SqlCompletionState;
-use super::intent::SqlCompletionIntent;
-use super::effect::SqlCompletionEffect;
 use super::context::{
     CompletionIntent, get_completion_context, should_auto_open, should_offer_completion_explicit,
 };
+use super::effect::SqlCompletionEffect;
 use super::engine::SqlEngine;
+use super::intent::SqlCompletionIntent;
+use super::msg::SqlCompletionMessage;
 use super::provider::{CompletionInput, build_completion_items};
+use super::state::SqlCompletionState;
 
 /// Update the SQL completion state. Pure by-value transition.
 ///
@@ -25,7 +25,12 @@ use super::provider::{CompletionInput, build_completion_items};
 pub fn update(
     msg: SqlCompletionMessage,
     mut state: SqlCompletionState,
-) -> (SqlCompletionState, Vec<SqlCompletionIntent>, Vec<SqlCompletionEffect>, bool) {
+) -> (
+    SqlCompletionState,
+    Vec<SqlCompletionIntent>,
+    Vec<SqlCompletionEffect>,
+    bool,
+) {
     let mut intents = Vec::new();
     let effects = Vec::new();
 
@@ -134,12 +139,14 @@ fn refresh(
     // OFF, a non-explicit refresh closes the popup (no hint at all), matching
     // the original dbm's `table_completion_allowed` → `build_completion_state_inner`.
     // Only an explicit Shift+Tab request forces keyword completion here.
-    if matches!(context.intent, CompletionIntent::Table { .. }) && !complete_table_names
-        && !explicit {
-            state.close();
-            return;
-        }
-        // explicit: fall through to keyword completion (provider handles it).
+    if matches!(context.intent, CompletionIntent::Table { .. })
+        && !complete_table_names
+        && !explicit
+    {
+        state.close();
+        return;
+    }
+    // explicit: fall through to keyword completion (provider handles it).
 
     let referenced = extract_referenced_before(sql, cursor);
     let items = build_completion_items(
@@ -167,10 +174,7 @@ fn refresh(
 
 /// Tables referenced before the cursor, used for alias snippets and qualifier
 /// resolution.
-fn extract_referenced_before(
-    sql: &str,
-    cursor: Cursor,
-) -> Vec<super::context::TableRef> {
+fn extract_referenced_before(sql: &str, cursor: Cursor) -> Vec<super::context::TableRef> {
     let offset = super::context::cursor_offset(sql, cursor);
     super::context::extract_referenced_tables(&sql[..offset])
 }
@@ -274,7 +278,9 @@ mod tests {
             "table-intent slot with TblCmp off must not open a popup"
         );
         assert!(
-            !s.items.iter().any(|i| i.label == "users" || i.label == "orders"),
+            !s.items
+                .iter()
+                .any(|i| i.label == "users" || i.label == "orders"),
             "table names must not be offered with TblCmp off"
         );
     }
@@ -295,7 +301,10 @@ mod tests {
             },
             SqlCompletionState::default(),
         );
-        assert!(s.is_open(), "explicit refresh on empty buffer must open the popup");
+        assert!(
+            s.is_open(),
+            "explicit refresh on empty buffer must open the popup"
+        );
     }
 
     #[test]
@@ -394,7 +403,10 @@ mod tests {
             },
             SqlCompletionState::default(),
         );
-        assert!(s.is_open(), "popup should open at `select ` in a column list");
+        assert!(
+            s.is_open(),
+            "popup should open at `select ` in a column list"
+        );
         assert!(
             s.items.iter().any(|i| i.label == "title"),
             "t1 columns should be offered, got: {:?}",

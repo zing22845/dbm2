@@ -16,9 +16,15 @@ use super::state::QueryResultData;
 pub enum ResultsMessage {
     // ---- Direct variants (for external callers) ----
     /// Set the latest query result.
-    SetResult { result: QueryResultData, paginated: bool },
+    SetResult {
+        result: QueryResultData,
+        paginated: bool,
+    },
     /// The editability of the current result was resolved.
-    EditabilityReady { target: Option<EditTarget>, blocked: Option<String> },
+    EditabilityReady {
+        target: Option<EditTarget>,
+        blocked: Option<String>,
+    },
     /// Clear the current result.
     ClearResult,
     /// A query failed.
@@ -161,7 +167,9 @@ impl ResultsMessage {
             ResultsMessage::SetRowLimit { limit } => ListMessage::SetRowLimit { limit },
             ResultsMessage::SetPage { page } => ListMessage::SetPage { page },
             ResultsMessage::Commit => ListMessage::Commit,
-            ResultsMessage::SyncViewport { rows, width } => ListMessage::SyncViewport { rows, width },
+            ResultsMessage::SyncViewport { rows, width } => {
+                ListMessage::SyncViewport { rows, width }
+            }
             ResultsMessage::SetVScroll { position } => ListMessage::SetVScroll { position },
             ResultsMessage::SetHScroll { position } => ListMessage::SetHScroll { position },
             ResultsMessage::ScrollHScroll { delta } => ListMessage::ScrollHScroll { delta },

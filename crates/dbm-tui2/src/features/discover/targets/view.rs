@@ -1,9 +1,9 @@
 //! Discovery targets editor feature rendering.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders};
-use ratatui::Frame;
 
 use crate::common::view::pane_scrollbar::{
     ActiveScrollbar, PaneScrollLayout, RowHeights, draw_vertical_pane_scrollbar, pane_anchor,
@@ -25,10 +25,7 @@ pub struct TargetsLayoutInfo {
 /// hit-test helper. Keeps the footer height, body area, and everything that
 /// depends on them in one place so all three paths agree on which rows are
 /// visible (same pattern as the history/results "effective_layout" helpers).
-pub fn compute_targets_body_and_footer(
-    area: Rect,
-    state: &TargetsState,
-) -> Option<(Rect, u16)> {
+pub fn compute_targets_body_and_footer(area: Rect, state: &TargetsState) -> Option<(Rect, u16)> {
     use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::discover_targets_footer_text;
 
@@ -38,11 +35,8 @@ pub fn compute_targets_body_and_footer(
         return None;
     }
 
-    let footer_text = discover_targets_footer_text(
-        state.editing,
-        state.has_loopback(),
-        state.status.as_deref(),
-    );
+    let footer_text =
+        discover_targets_footer_text(state.editing, state.has_loopback(), state.status.as_deref());
     let footer_h = if footer_text.is_empty() {
         0
     } else {
@@ -86,10 +80,7 @@ pub struct TargetsViewport {
 /// cursor anchoring — all in one place. When `scroll_locked` is set
 /// (scrollbar drag / manual SetVScroll) the anchor is skipped so the
 /// manual scroll position is honoured until the next cursor move.
-pub fn compute_targets_viewport(
-    area: Rect,
-    state: &TargetsState,
-) -> Option<TargetsViewport> {
+pub fn compute_targets_viewport(area: Rect, state: &TargetsState) -> Option<TargetsViewport> {
     let total = state.targets.len();
     if total == 0 {
         return None;
@@ -168,7 +159,8 @@ pub fn render(
     let p = theme.palette();
     let focused = focus == crate::app_shell::nav::DiscoverPane::Targets;
 
-    let footer_text = discover_targets_footer_text(state.editing, state.has_loopback(), state.status.as_deref());
+    let footer_text =
+        discover_targets_footer_text(state.editing, state.has_loopback(), state.status.as_deref());
 
     let block = Block::default()
         .title(" targets ")
@@ -212,25 +204,46 @@ pub fn render(
                 let host_focused = row_sel && state.col == TargetCol::Host;
                 let ports_focused = row_sel && state.col == TargetCol::Ports;
                 ratatui::widgets::Row::new(vec![
-                    ratatui::widgets::Cell::from((idx + 1).to_string())
-                        .style(if row_sel { row_style(theme) } else { Style::default().fg(p.muted) }),
+                    ratatui::widgets::Cell::from((idx + 1).to_string()).style(if row_sel {
+                        row_style(theme)
+                    } else {
+                        Style::default().fg(p.muted)
+                    }),
                     ratatui::widgets::Cell::from(format_cell(
-                        if host_focused && state.editing { &state.edit_buf } else { &row.host },
+                        if host_focused && state.editing {
+                            &state.edit_buf
+                        } else {
+                            &row.host
+                        },
                         host_focused,
                         state.editing,
                     ))
-                    .style(cell_style(theme, row_sel, host_focused, state.editing)),
+                    .style(cell_style(
+                        theme,
+                        row_sel,
+                        host_focused,
+                        state.editing,
+                    )),
                     ratatui::widgets::Cell::from(format_cell(
-                        if ports_focused && state.editing { &state.edit_buf } else { &row.ports_spec },
+                        if ports_focused && state.editing {
+                            &state.edit_buf
+                        } else {
+                            &row.ports_spec
+                        },
                         ports_focused,
                         state.editing,
                     ))
-                    .style(cell_style(theme, row_sel, ports_focused, state.editing)),
+                    .style(cell_style(
+                        theme,
+                        row_sel,
+                        ports_focused,
+                        state.editing,
+                    )),
                 ])
             });
         let table = ratatui::widgets::Table::new(rows, TARGETS_COLUMNS)
-        .header(header)
-        .column_spacing(1);
+            .header(header)
+            .column_spacing(1);
         frame.render_widget(table, content);
 
         if let Some(bar) = layout.v_scrollbar {
@@ -274,7 +287,9 @@ pub fn render(
                 let prefix = &state.edit_buf[..state.edit_cursor.min(state.edit_buf.len())];
                 let caret_offset = unicode_width::UnicodeWidthStr::width(prefix) as u16;
                 let x = cell_x.saturating_add(caret_offset);
-                let y = content.y.saturating_add(1 /* header */ + row_in_content as u16);
+                let y = content
+                    .y
+                    .saturating_add(1 /* header */ + row_in_content as u16);
                 caret = Some(crate::common::editor::EditorHardwareCursor {
                     position: ratatui::layout::Position::new(x, y),
                     style: crate::common::editor::hardware_cursor_style(edtui::EditorMode::Insert),
@@ -295,9 +310,7 @@ pub fn render(
 /// Style for the focused/selected target row (the unified selection background).
 fn row_style(theme: &Theme) -> Style {
     let p = theme.palette();
-    Style::default()
-        .fg(p.selection_text)
-        .bg(p.selection_bg)
+    Style::default().fg(p.selection_text).bg(p.selection_bg)
 }
 
 /// Style for a host/ports cell: editing cells get a distinct edit background,
@@ -306,7 +319,10 @@ fn cell_style(theme: &Theme, row_sel: bool, cell_focused: bool, editing: bool) -
     let p = theme.palette();
     if editing && cell_focused {
         // Inline edit: a distinct background so the live buffer stands out.
-        Style::default().fg(p.accent).bg(p.surface).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(p.accent)
+            .bg(p.surface)
+            .add_modifier(Modifier::BOLD)
     } else if cell_focused {
         // The active cell gets a stronger background so it stands out from
         // the selected row's other fields (which share selection_bg).
@@ -403,11 +419,8 @@ mod tests {
         // Compute the content area the same way hit_test does
         let block = Block::default().borders(Borders::ALL);
         let inner = block.inner(area);
-        let footer_text = crate::common::view::hints::discover_targets_footer_text(
-            false,
-            false,
-            None,
-        );
+        let footer_text =
+            crate::common::view::hints::discover_targets_footer_text(false, false, None);
         let footer_h = if footer_text.is_empty() {
             0
         } else {
@@ -432,7 +445,10 @@ mod tests {
         let click_y = content.y + 1;
         let click_x = content.x + 2;
         let result = hit_test(area, &state, click_x, click_y);
-        assert!(result.is_some(), "click at ({click_x},{click_y}) should be inside content, area={area:?}, content={content:?}");
+        assert!(
+            result.is_some(),
+            "click at ({click_x},{click_y}) should be inside content, area={area:?}, content={content:?}"
+        );
         let (row, _col) = result.unwrap();
         assert_eq!(row, 0, "first data row should be row 0");
     }
@@ -485,7 +501,10 @@ mod tests {
             .split(content);
         let click_x = cols[1].x + 1; // Inside Host column
         let result = hit_test(area, &state, click_x, click_y);
-        assert!(result.is_some(), "click at ({click_x},{click_y}) should be inside content");
+        assert!(
+            result.is_some(),
+            "click at ({click_x},{click_y}) should be inside content"
+        );
         let (_row, col) = result.unwrap();
         assert!(col.is_some(), "should detect column");
     }
@@ -529,7 +548,10 @@ mod tests {
             .split(content);
         let click_x = cols[2].x + 1; // Inside Ports column
         let result = hit_test(area, &state, click_x, click_y);
-        assert!(result.is_some(), "click at ({click_x},{click_y}) should be inside content");
+        assert!(
+            result.is_some(),
+            "click at ({click_x},{click_y}) should be inside content"
+        );
         let (_row, col) = result.unwrap();
         assert!(col.is_some(), "should detect column");
     }
@@ -586,7 +608,10 @@ mod tests {
         let click_y = content.y + 1;
         let click_x = content.x + 2;
         let result = hit_test(area, &state, click_x, click_y);
-        assert!(result.is_some(), "click at ({click_x},{click_y}) should be inside content, content={content:?}");
+        assert!(
+            result.is_some(),
+            "click at ({click_x},{click_y}) should be inside content, content={content:?}"
+        );
         let (row, _col) = result.unwrap();
         assert!(row < state.targets.len());
         // With 10 rows and limited viewport, scrolling may occur; row should be valid

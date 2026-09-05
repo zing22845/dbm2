@@ -146,9 +146,7 @@ impl ResultsState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dbm_discovery::{
-        Confidence, DiscoveredInstance, DiscoverySource, InstanceRunStatus,
-    };
+    use dbm_discovery::{Confidence, DiscoveredInstance, DiscoverySource, InstanceRunStatus};
 
     fn instance(id: &str, registered: bool) -> DiscoveredInstance {
         DiscoveredInstance {

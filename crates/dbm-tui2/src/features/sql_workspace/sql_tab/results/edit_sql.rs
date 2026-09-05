@@ -31,9 +31,7 @@ fn qualified_table(target: &EditTarget) -> String {
 }
 
 fn column_index(columns: &[String], name: &str) -> Option<usize> {
-    columns
-        .iter()
-        .position(|c| c.eq_ignore_ascii_case(name))
+    columns.iter().position(|c| c.eq_ignore_ascii_case(name))
 }
 
 fn old_value_predicate(column: &str, value: &str) -> String {
@@ -52,7 +50,10 @@ fn full_row_where(target: &EditTarget, snapshot: &[String]) -> Result<String, St
     for pk in &target.primary_keys {
         let idx = column_index(&target.columns, pk)
             .ok_or_else(|| format!("primary key `{pk}` missing from result columns"))?;
-        if snapshot.get(idx).is_some_and(|v| v.eq_ignore_ascii_case("NULL")) {
+        if snapshot
+            .get(idx)
+            .is_some_and(|v| v.eq_ignore_ascii_case("NULL"))
+        {
             return Err(format!("primary key `{pk}` is NULL"));
         }
     }
@@ -200,6 +201,8 @@ mod tests {
     fn statement_requires_one_row_classifies_update_delete() {
         assert!(statement_requires_one_row("UPDATE users SET x = 1"));
         assert!(statement_requires_one_row("DELETE FROM users"));
-        assert!(!statement_requires_one_row("INSERT INTO users (a) VALUES (1)"));
+        assert!(!statement_requires_one_row(
+            "INSERT INTO users (a) VALUES (1)"
+        ));
     }
 }

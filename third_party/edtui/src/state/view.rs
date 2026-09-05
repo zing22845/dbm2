@@ -1,9 +1,4 @@
-use crate::{
-    helper::char_width,
-    view::line_wrapper::LineWrapper,
-    view::LineNumbers,
-    Lines,
-};
+use crate::{helper::char_width, view::line_wrapper::LineWrapper, view::LineNumbers, Lines};
 use ratatui_core::layout::{Position, Rect};
 
 /// Represents the (x, y) offset of the editor's viewport.
@@ -218,9 +213,7 @@ pub(crate) fn visual_row_count_for_line(line: &[char], width: usize, tab_width: 
     if width == 0 {
         return 1;
     }
-    LineWrapper::wrap_line(line, width, tab_width)
-        .len()
-        .max(1)
+    LineWrapper::wrap_line(line, width, tab_width).len().max(1)
 }
 
 /// Total visual rows in the buffer when wrapping at `width`.

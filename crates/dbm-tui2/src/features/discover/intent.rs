@@ -1,10 +1,10 @@
 //! Discover feature intents.
 
-use crate::app_shell::intent::Intent;
-use super::msg::DiscoverMsg;
 use super::engine::intent::EngineIntent;
+use super::msg::DiscoverMsg;
 use super::results::intent::ResultsIntent;
 use super::targets::intent::TargetsIntent;
+use crate::app_shell::intent::Intent;
 
 /// Intents emitted by the discover feature. Child intents are wrapped so they
 /// can be lifted into the global router via `DiscoverMsg`.

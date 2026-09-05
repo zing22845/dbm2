@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 
 use dbm_core::{
-    ApplicationError, ColumnMeta, ConnectOpts, ConnectionPool, DatabaseDriver, DbmError, Engine, QueryResult,
-    SchemaIntrospector, TableInfo,
+    ApplicationError, ColumnMeta, ConnectOpts, ConnectionPool, DatabaseDriver, DbmError, Engine,
+    QueryResult, SchemaIntrospector, TableInfo,
 };
 
 use crate::pool::PostgresPool;
@@ -26,7 +26,10 @@ impl DatabaseDriver for PostgresDriver {
         "PostgreSQL"
     }
 
-    async fn connect(&self, opts: &ConnectOpts) -> std::result::Result<ConnectionPool, ApplicationError> {
+    async fn connect(
+        &self,
+        opts: &ConnectOpts,
+    ) -> std::result::Result<ConnectionPool, ApplicationError> {
         let inner = PostgresPool::new(opts).map_err(ApplicationError::from)?;
         Ok(ConnectionPool::new(Engine::Postgres, inner))
     }
@@ -36,7 +39,11 @@ impl DatabaseDriver for PostgresDriver {
         pg_pool.ping().await.map_err(ApplicationError::from)
     }
 
-    async fn execute_query(&self, pool: &ConnectionPool, sql: &str) -> std::result::Result<QueryResult, ApplicationError> {
+    async fn execute_query(
+        &self,
+        pool: &ConnectionPool,
+        sql: &str,
+    ) -> std::result::Result<QueryResult, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
         pg_pool.execute(sql).await.map_err(ApplicationError::from)
     }
@@ -48,7 +55,10 @@ impl DatabaseDriver for PostgresDriver {
         sql: &str,
     ) -> std::result::Result<QueryResult, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.execute_in_schema(schema, sql).await.map_err(ApplicationError::from)
+        pg_pool
+            .execute_in_schema(schema, sql)
+            .await
+            .map_err(ApplicationError::from)
     }
 
     async fn execute_paginated(
@@ -87,7 +97,10 @@ impl DatabaseDriver for PostgresDriver {
         sql: &str,
     ) -> std::result::Result<Option<u64>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.count_in_schema(schema, sql).await.map_err(ApplicationError::from)
+        pg_pool
+            .count_in_schema(schema, sql)
+            .await
+            .map_err(ApplicationError::from)
     }
 
     async fn set_search_path(
@@ -96,7 +109,10 @@ impl DatabaseDriver for PostgresDriver {
         schema: &str,
     ) -> std::result::Result<(), ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.set_search_path(schema).await.map_err(ApplicationError::from)
+        pg_pool
+            .set_search_path(schema)
+            .await
+            .map_err(ApplicationError::from)
     }
 
     async fn run_in_transaction<F>(
@@ -120,12 +136,21 @@ impl DatabaseDriver for PostgresDriver {
 
 #[async_trait]
 impl SchemaIntrospector for PostgresDriver {
-    async fn list_databases(&self, pool: &ConnectionPool) -> std::result::Result<Vec<String>, ApplicationError> {
+    async fn list_databases(
+        &self,
+        pool: &ConnectionPool,
+    ) -> std::result::Result<Vec<String>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.list_databases().await.map_err(ApplicationError::from)
+        pg_pool
+            .list_databases()
+            .await
+            .map_err(ApplicationError::from)
     }
 
-    async fn list_schemas(&self, pool: &ConnectionPool) -> std::result::Result<Vec<String>, ApplicationError> {
+    async fn list_schemas(
+        &self,
+        pool: &ConnectionPool,
+    ) -> std::result::Result<Vec<String>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
         pg_pool.list_schemas().await.map_err(ApplicationError::from)
     }
@@ -136,7 +161,10 @@ impl SchemaIntrospector for PostgresDriver {
         schema: &str,
     ) -> std::result::Result<Vec<String>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.list_tables(schema).await.map_err(ApplicationError::from)
+        pg_pool
+            .list_tables(schema)
+            .await
+            .map_err(ApplicationError::from)
     }
 
     async fn list_views(
@@ -145,7 +173,10 @@ impl SchemaIntrospector for PostgresDriver {
         schema: &str,
     ) -> std::result::Result<Vec<String>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.list_views(schema).await.map_err(ApplicationError::from)
+        pg_pool
+            .list_views(schema)
+            .await
+            .map_err(ApplicationError::from)
     }
 
     async fn list_matviews(
@@ -154,7 +185,10 @@ impl SchemaIntrospector for PostgresDriver {
         schema: &str,
     ) -> std::result::Result<Vec<String>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.list_matviews(schema).await.map_err(ApplicationError::from)
+        pg_pool
+            .list_matviews(schema)
+            .await
+            .map_err(ApplicationError::from)
     }
 
     async fn list_procedures(
@@ -163,7 +197,10 @@ impl SchemaIntrospector for PostgresDriver {
         schema: &str,
     ) -> std::result::Result<Vec<String>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.list_procedures(schema).await.map_err(ApplicationError::from)
+        pg_pool
+            .list_procedures(schema)
+            .await
+            .map_err(ApplicationError::from)
     }
 
     async fn list_functions(
@@ -172,7 +209,10 @@ impl SchemaIntrospector for PostgresDriver {
         schema: &str,
     ) -> std::result::Result<Vec<String>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.list_functions(schema).await.map_err(ApplicationError::from)
+        pg_pool
+            .list_functions(schema)
+            .await
+            .map_err(ApplicationError::from)
     }
 
     async fn list_sequences(
@@ -181,12 +221,21 @@ impl SchemaIntrospector for PostgresDriver {
         schema: &str,
     ) -> std::result::Result<Vec<String>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.list_sequences(schema).await.map_err(ApplicationError::from)
+        pg_pool
+            .list_sequences(schema)
+            .await
+            .map_err(ApplicationError::from)
     }
 
-    async fn list_extensions(&self, pool: &ConnectionPool) -> std::result::Result<Vec<String>, ApplicationError> {
+    async fn list_extensions(
+        &self,
+        pool: &ConnectionPool,
+    ) -> std::result::Result<Vec<String>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.list_extensions().await.map_err(ApplicationError::from)
+        pg_pool
+            .list_extensions()
+            .await
+            .map_err(ApplicationError::from)
     }
 
     async fn list_columns(
@@ -196,7 +245,10 @@ impl SchemaIntrospector for PostgresDriver {
         table: &str,
     ) -> std::result::Result<Vec<ColumnMeta>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.list_columns(schema, table).await.map_err(ApplicationError::from)
+        pg_pool
+            .list_columns(schema, table)
+            .await
+            .map_err(ApplicationError::from)
     }
 
     async fn list_primary_keys(
@@ -206,7 +258,10 @@ impl SchemaIntrospector for PostgresDriver {
         table: &str,
     ) -> std::result::Result<Vec<String>, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        pg_pool.list_primary_keys(schema, table).await.map_err(ApplicationError::from)
+        pg_pool
+            .list_primary_keys(schema, table)
+            .await
+            .map_err(ApplicationError::from)
     }
 
     async fn get_table_info(
@@ -216,8 +271,14 @@ impl SchemaIntrospector for PostgresDriver {
         table: &str,
     ) -> std::result::Result<TableInfo, ApplicationError> {
         let pg_pool = self.downcast_pool(pool);
-        let columns = pg_pool.list_columns(schema, table).await.map_err(ApplicationError::from)?;
-        let primary_key = pg_pool.list_primary_keys(schema, table).await.map_err(ApplicationError::from)?;
+        let columns = pg_pool
+            .list_columns(schema, table)
+            .await
+            .map_err(ApplicationError::from)?;
+        let primary_key = pg_pool
+            .list_primary_keys(schema, table)
+            .await
+            .map_err(ApplicationError::from)?;
         Ok(TableInfo {
             columns,
             primary_key,

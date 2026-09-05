@@ -25,7 +25,11 @@ pub struct SqlCompletionState {
 
 impl SqlCompletionState {
     /// Open the popup with the given items and replace range.
-    pub fn open_with(items: Vec<CompletionItem>, replace_start: Cursor, replace_end: Cursor) -> Self {
+    pub fn open_with(
+        items: Vec<CompletionItem>,
+        replace_start: Cursor,
+        replace_end: Cursor,
+    ) -> Self {
         SqlCompletionState {
             open: !items.is_empty(),
             items,

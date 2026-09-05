@@ -1,9 +1,9 @@
 //! Performance monitor feature update.
 
+use super::effect::PerfEffect;
+use super::intent::PerfIntent;
 use super::msg::PerfMessage;
 use super::state::PerfState;
-use super::intent::PerfIntent;
-use super::effect::PerfEffect;
 
 pub fn update(
     _msg: PerfMessage,

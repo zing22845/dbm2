@@ -1,18 +1,18 @@
 //! Discover feature update.
 
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use dbm_discovery::{DiscoveryConfig, DiscoveryTarget};
 use dbm_discovery::parse_port_spec;
+use dbm_discovery::{DiscoveryConfig, DiscoveryTarget};
 
-use super::msg::DiscoverMessage;
-use super::state::DiscoverState;
-use super::intent::DiscoverIntent;
 use super::effect::DiscoverEffect;
 use super::engine;
+use super::intent::DiscoverIntent;
+use super::msg::DiscoverMessage;
 use super::results;
+use super::state::DiscoverState;
 use super::targets;
 
 /// Update the discover state. Pure by-value transition: close-confirmation and
@@ -26,7 +26,12 @@ use super::targets;
 pub fn update(
     msg: DiscoverMessage,
     mut state: DiscoverState,
-) -> (DiscoverState, Vec<DiscoverIntent>, Vec<DiscoverEffect>, bool) {
+) -> (
+    DiscoverState,
+    Vec<DiscoverIntent>,
+    Vec<DiscoverEffect>,
+    bool,
+) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
     let dirty = match msg {
@@ -111,9 +116,7 @@ pub fn update(
                     force,
                 });
             } else {
-                tracing::warn!(
-                    "RegisterSelected: no selected instances, no effect emitted"
-                );
+                tracing::warn!("RegisterSelected: no selected instances, no effect emitted");
             }
             false
         }
@@ -279,14 +282,15 @@ mod tests {
         // Select the first and third rows (cursor 0 and 2).
         state.results.selected = vec![0, 2];
 
-        let (_state, _intents, effects, _dirty) = update(
-            DiscoverMessage::RegisterSelected { force: true },
-            state,
-        );
+        let (_state, _intents, effects, _dirty) =
+            update(DiscoverMessage::RegisterSelected { force: true }, state);
 
         assert_eq!(effects.len(), 1);
         match &effects[0] {
-            DiscoverEffect::RegisterInstances { discovery_ids, force } => {
+            DiscoverEffect::RegisterInstances {
+                discovery_ids,
+                force,
+            } => {
                 assert_eq!(discovery_ids, &["dsc-1".to_string(), "dsc-3".to_string()]);
                 assert!(*force);
             }
@@ -300,10 +304,8 @@ mod tests {
         state.results.items = vec![sample_instance("dsc-1")];
         state.results.selected = Vec::new();
 
-        let (_state, _intents, effects, _dirty) = update(
-            DiscoverMessage::RegisterSelected { force: false },
-            state,
-        );
+        let (_state, _intents, effects, _dirty) =
+            update(DiscoverMessage::RegisterSelected { force: false }, state);
 
         assert!(effects.is_empty(), "no selection must not emit an effect");
     }
@@ -311,11 +313,16 @@ mod tests {
     #[test]
     fn start_scan_emits_scan_effect() {
         let state = DiscoverState::opened();
-        let (_state, _intents, effects, _dirty) =
-            update(DiscoverMessage::StartScan, state);
+        let (_state, _intents, effects, _dirty) = update(DiscoverMessage::StartScan, state);
         assert_eq!(effects.len(), 1);
         assert!(
-            matches!(&effects[0], DiscoverEffect::StartScan { config: _, cancel: _ }),
+            matches!(
+                &effects[0],
+                DiscoverEffect::StartScan {
+                    config: _,
+                    cancel: _
+                }
+            ),
             "expected StartScan effect, got {:?}",
             effects[0]
         );
@@ -324,8 +331,7 @@ mod tests {
     #[test]
     fn start_scan_marks_scanning_and_stores_cancel_flag() {
         let state = DiscoverState::opened();
-        let (state, _intents, _effects, dirty) =
-            update(DiscoverMessage::StartScan, state);
+        let (state, _intents, _effects, dirty) = update(DiscoverMessage::StartScan, state);
         assert!(dirty);
         assert!(state.scanning);
         assert!(!state.scan_cancel.load(std::sync::atomic::Ordering::Relaxed));
@@ -335,10 +341,8 @@ mod tests {
     fn cancel_scan_emits_cancel_effect_and_flags_cancelling() {
         // First start a scan so `scanning` is true and a cancel flag exists.
         let state = DiscoverState::opened();
-        let (state, _intents, _effects, _dirty) =
-            update(DiscoverMessage::StartScan, state);
-        let (state, intents, effects, dirty) =
-            update(DiscoverMessage::CancelScan, state);
+        let (state, _intents, _effects, _dirty) = update(DiscoverMessage::StartScan, state);
+        let (state, intents, effects, dirty) = update(DiscoverMessage::CancelScan, state);
 
         assert!(dirty);
         assert!(state.cancelling);
@@ -358,8 +362,7 @@ mod tests {
     #[test]
     fn cancel_scan_when_idle_emits_nothing() {
         let state = DiscoverState::opened();
-        let (state, _intents, effects, dirty) =
-            update(DiscoverMessage::CancelScan, state);
+        let (state, _intents, effects, dirty) = update(DiscoverMessage::CancelScan, state);
         assert!(!dirty);
         assert!(effects.is_empty());
         assert!(!state.cancelling);
@@ -369,8 +372,7 @@ mod tests {
     fn scan_progress_updates_only_while_scanning() {
         // `StartScan` drives `scanning`; progress refines the numbers.
         let state = DiscoverState::opened();
-        let (state, _intents, _effects, _dirty) =
-            update(DiscoverMessage::StartScan, state);
+        let (state, _intents, _effects, _dirty) = update(DiscoverMessage::StartScan, state);
         let (state, _intents, _effects, _dirty) =
             update(DiscoverMessage::ScanProgress { done: 1, total: 2 }, state);
         assert!(state.scanning);
@@ -393,8 +395,13 @@ mod tests {
         assert!(!state.scanning);
         assert!(state.register_message.is_some());
 
-        let (state, _intents, _effects, dirty) =
-            update(DiscoverMessage::ScanProgress { done: 11, total: 11 }, state);
+        let (state, _intents, _effects, dirty) = update(
+            DiscoverMessage::ScanProgress {
+                done: 11,
+                total: 11,
+            },
+            state,
+        );
         assert!(!dirty);
         assert!(!state.scanning);
         assert_eq!(state.scan_progress, None);
@@ -413,14 +420,16 @@ mod tests {
         );
         assert!(dirty);
         assert!(!state.scanning);
-        assert_eq!(state.register_message.as_deref(), Some("scan complete · 2 instance(s)"));
+        assert_eq!(
+            state.register_message.as_deref(),
+            Some("scan complete · 2 instance(s)")
+        );
     }
 
     #[test]
     fn cancelled_updates_status_flags() {
         let state = DiscoverState::opened();
-        let (state, _intents, _effects, dirty) =
-            update(DiscoverMessage::ScanCancelled, state);
+        let (state, _intents, _effects, dirty) = update(DiscoverMessage::ScanCancelled, state);
         assert!(dirty);
         assert!(!state.scanning);
         assert!(state.scan_cancelled);
@@ -532,7 +541,9 @@ mod tests {
     fn register_error_records_message_and_is_dirty() {
         let state = DiscoverState::opened();
         let (state, _intents, _effects, dirty) = update(
-            DiscoverMessage::RegisterError { error: "boom".into() },
+            DiscoverMessage::RegisterError {
+                error: "boom".into(),
+            },
             state,
         );
         assert_eq!(

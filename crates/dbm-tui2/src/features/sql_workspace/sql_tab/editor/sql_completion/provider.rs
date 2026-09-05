@@ -207,7 +207,7 @@ pub fn build_completion_items(
             );
             if let Some(table_ref) = table_ctx
                 && matches!(context.intent, CompletionIntent::InsertColumn { .. })
-                    && !input.columns.is_empty()
+                && !input.columns.is_empty()
             {
                 items.extend(build_table_star_items(
                     &context.prefix,
@@ -796,11 +796,11 @@ mod tests {
             sql,
             cursor_idx,
         );
-        let col = items
-            .iter()
-            .find(|i| i.label == "id")
-            .expect("column item");
-        assert_eq!(col.insert_text, "t.id", "completed column must keep the alias prefix");
+        let col = items.iter().find(|i| i.label == "id").expect("column item");
+        assert_eq!(
+            col.insert_text, "t.id",
+            "completed column must keep the alias prefix"
+        );
     }
 
     #[test]

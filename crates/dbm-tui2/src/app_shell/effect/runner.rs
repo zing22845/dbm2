@@ -26,7 +26,10 @@ where
     /// Create a new runner. Effects are executed on a background task set and
     /// their resulting actions are forwarded to `action_tx`. `services` is the
     /// shared infrastructure bundle injected into every effect as it runs.
-    pub fn new(action_tx: mpsc::UnboundedSender<A>, services: Arc<Services>) -> (Self, EffectHandle<A>) {
+    pub fn new(
+        action_tx: mpsc::UnboundedSender<A>,
+        services: Arc<Services>,
+    ) -> (Self, EffectHandle<A>) {
         let (eff_tx, eff_rx) = mpsc::unbounded_channel::<Box<dyn ErasedEffect<A>>>();
         let runner = EffectRunner { tx: eff_tx };
         let handle = EffectHandle {

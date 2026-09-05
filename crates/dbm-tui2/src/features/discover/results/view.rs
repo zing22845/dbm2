@@ -1,10 +1,10 @@
 //! Discovery results feature rendering.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use crate::common::view::pane_scrollbar::{
     ActiveScrollbar, PaneScrollLayout, RowHeights, draw_vertical_pane_scrollbar, pane_anchor,
@@ -180,7 +180,8 @@ pub fn render(
                 if let Some(body) = body {
                     let footer_h = inner.height.saturating_sub(body.height);
                     if footer_h > 0 {
-                        let footer_area = Rect::new(inner.x, inner.y + body.height, inner.width, footer_h);
+                        let footer_area =
+                            Rect::new(inner.x, inner.y + body.height, inner.width, footer_h);
                         draw_pane_footer(frame, theme, footer_area, &footer_text);
                     }
                 }
@@ -205,7 +206,8 @@ pub fn render(
     for (vis, &idx) in visible.iter().enumerate().skip(start).take(viewport) {
         let item = &state.items[idx];
         let row_focused = vis == state.cursor;
-        let checked = result_selection_glyph(item.already_registered, state.selected.contains(&idx));
+        let checked =
+            result_selection_glyph(item.already_registered, state.selected.contains(&idx));
         let style = if row_focused {
             Style::default()
                 .fg(p.selection_text)

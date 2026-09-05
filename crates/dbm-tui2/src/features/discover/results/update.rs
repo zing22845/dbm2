@@ -1,9 +1,9 @@
 //! Discovery results feature update.
 
+use super::effect::ResultsEffect;
+use super::intent::ResultsIntent;
 use super::msg::ResultsMessage;
 use super::state::ResultsState;
-use super::intent::ResultsIntent;
-use super::effect::ResultsEffect;
 
 /// Update the results list state. Pure by-value transition.
 ///

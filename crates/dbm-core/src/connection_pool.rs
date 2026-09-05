@@ -90,21 +90,16 @@ impl<T> ConnectionPoolManager<T> {
     {
         let snapshot: Vec<(PoolKey, Arc<T>)> = {
             let pools = self.pools.lock().await;
-            pools
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
+            pools.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
         };
 
         let dead_keys: Vec<PoolKey> = snapshot
             .into_iter()
-            .filter_map(|(key, pool)| {
-                if !check_fn(&pool) {
-                    Some(key)
-                } else {
-                    None
-                }
-            })
+            .filter_map(
+                |(key, pool)| {
+                    if !check_fn(&pool) { Some(key) } else { None }
+                },
+            )
             .collect();
 
         if !dead_keys.is_empty() {
@@ -159,7 +154,9 @@ mod tests {
         let key = PoolKey::new("inst1", "conn1");
 
         let pool1 = manager
-            .get_or_create(key.clone(), || async { Ok::<String, ()>("pool-data".to_string()) })
+            .get_or_create(key.clone(), || async {
+                Ok::<String, ()>("pool-data".to_string())
+            })
             .await
             .unwrap();
         let pool2 = manager
@@ -243,7 +240,9 @@ mod tests {
         let key = PoolKey::new("inst1", "conn1");
 
         let _pool = manager
-            .get_or_create(key.clone(), || async { Ok::<String, ()>("data".to_string()) })
+            .get_or_create(key.clone(), || async {
+                Ok::<String, ()>("data".to_string())
+            })
             .await
             .unwrap();
 

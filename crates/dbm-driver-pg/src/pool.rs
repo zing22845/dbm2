@@ -111,10 +111,7 @@ impl PostgresPool {
 
     pub async fn set_search_path(&self, schema: &str) -> Result<()> {
         let client = self.get().await?;
-        let sql = format!(
-            "SET search_path TO {}, public",
-            quote_ident(schema)
-        );
+        let sql = format!("SET search_path TO {}, public", quote_ident(schema));
         client
             .batch_execute(&sql)
             .await
@@ -250,7 +247,11 @@ impl PostgresPool {
         Ok(rows.iter().map(|row| row.get::<_, String>(0)).collect())
     }
 
-    pub async fn list_columns(&self, schema: &str, table: &str) -> Result<Vec<dbm_core::ColumnMeta>> {
+    pub async fn list_columns(
+        &self,
+        schema: &str,
+        table: &str,
+    ) -> Result<Vec<dbm_core::ColumnMeta>> {
         let client = self.get().await?;
         let rows = client
             .query(
@@ -312,10 +313,7 @@ impl PostgresPool {
             .transaction()
             .await
             .map_err(|e| crate::dbm_error_from_postgres(&e))?;
-        let set_path = format!(
-            "SET LOCAL search_path TO {}, public",
-            quote_ident(schema)
-        );
+        let set_path = format!("SET LOCAL search_path TO {}, public", quote_ident(schema));
         txn.batch_execute(&set_path)
             .await
             .map_err(|e| crate::dbm_error_from_postgres(&e))?;

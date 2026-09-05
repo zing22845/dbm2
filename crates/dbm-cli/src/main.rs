@@ -6,8 +6,8 @@ use dbm_core::{ConnectOpts, ConnectionPool, DatabaseDriver, Engine, SchemaIntros
 use dbm_discovery::{DiscoveryTarget, validate_host};
 use dbm_driver_pg::PostgresDriver;
 use dbm_store::{
-    DiscoveredInstance, DiscoveryConfig, ManagedInstance, NewInstanceConnection,
-    RegisterOptions, RunDiscoveryOptions, SessionResolveOptions, Store, UpdateInstanceConnection,
+    DiscoveredInstance, DiscoveryConfig, ManagedInstance, NewInstanceConnection, RegisterOptions,
+    RunDiscoveryOptions, SessionResolveOptions, Store, UpdateInstanceConnection,
     format_connection_precheck, format_precheck_report, init_data_dir, parse_port_spec,
     resolve_sql_session,
 };
@@ -399,7 +399,8 @@ fn build_discovery_config(
         config.targets = target
             .into_iter()
             .map(|raw| {
-                let (host, ports) = dbm_discovery::split_host_ports(&raw).map_err(anyhow::Error::msg)?;
+                let (host, ports) =
+                    dbm_discovery::split_host_ports(&raw).map_err(anyhow::Error::msg)?;
                 Ok(DiscoveryTarget {
                     host: validate_host(host).map_err(anyhow::Error::msg)?,
                     ports: parse_port_spec(ports).map_err(anyhow::Error::msg)?,
@@ -511,11 +512,7 @@ fn cmd_instance_connection(
             let inst = store.get_managed_instance_by_name(&instance)?;
             for c in conns {
                 let pwd = if c.has_password { "pwd" } else { "no-pwd" };
-                println!(
-                    "  {:<12} {} [{pwd}]",
-                    c.name,
-                    c.display_target(&inst)
-                );
+                println!("  {:<12} {} [{pwd}]", c.name, c.display_target(&inst));
             }
         }
         InstanceConnectionCommands::Test {
@@ -672,11 +669,7 @@ fn print_managed(item: &ManagedInstance, store: &Store) -> anyhow::Result<()> {
         println!("                 connections: (none — add with `dbm instance connection add`)");
     } else {
         for c in conns {
-            println!(
-                "                   {} → {}",
-                c.name,
-                c.display_target(item)
-            );
+            println!("                   {} → {}", c.name, c.display_target(item));
         }
     }
     Ok(())

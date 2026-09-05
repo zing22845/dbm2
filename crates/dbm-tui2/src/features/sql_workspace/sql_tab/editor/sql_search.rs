@@ -120,7 +120,11 @@ impl EditorSqlSearch {
             .iter()
             .enumerate()
             .map(|(idx, m)| {
-                let style: Style = if idx == self.match_index { current } else { other };
+                let style: Style = if idx == self.match_index {
+                    current
+                } else {
+                    other
+                };
                 edtui::Highlight::new(
                     edtui::Index2::new(m.row, m.col_start),
                     edtui::Index2::new(m.row, m.col_end.saturating_sub(1)),
@@ -144,7 +148,11 @@ impl EditorSqlSearch {
             .iter()
             .enumerate()
             .map(|(idx, m)| {
-                let style: Style = if idx == self.match_index { current } else { other };
+                let style: Style = if idx == self.match_index {
+                    current
+                } else {
+                    other
+                };
                 edtui::Highlight::new(
                     edtui::Index2::new(m.row, m.col_start),
                     edtui::Index2::new(m.row, m.col_end.saturating_sub(1)),
@@ -178,9 +186,7 @@ pub fn handle_sql_pane_search_key(
     // The case toggle (`Ctrl+/`) keeps working while a filter is applied
     // (input ended via Enter): the query is still shown, so re-run the match
     // with the new case setting instead of letting the key reach the buffer.
-    if search.search.is_visible()
-        && crate::common::components::search::is_case_toggle_key(&key)
-    {
+    if search.search.is_visible() && crate::common::components::search::is_case_toggle_key(&key) {
         return search.handle_search_input(editor, key);
     }
 

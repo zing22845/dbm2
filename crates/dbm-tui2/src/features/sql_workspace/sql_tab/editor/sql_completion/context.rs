@@ -108,7 +108,8 @@ pub(crate) fn get_completion_context_heuristic(sql: &str, cursor: Cursor) -> Com
         };
     }
 
-    let exclusive_table = is_table_completion_context(before, &referenced) || is_after_table_trigger(before);
+    let exclusive_table =
+        is_table_completion_context(before, &referenced) || is_after_table_trigger(before);
     if exclusive_table || is_after_table_trigger(before) {
         let schema = if qualifier_parts.len() == 1 {
             Some(qualifier_parts[0].clone())
@@ -270,7 +271,15 @@ fn ends_with_clause_whitespace(before: &str) -> bool {
             .map(|w| w.to_ascii_lowercase())
             .as_deref(),
         Some(
-            "where" | "on" | "and" | "or" | "having" | "using" | "group" | "order" | "by"
+            "where"
+                | "on"
+                | "and"
+                | "or"
+                | "having"
+                | "using"
+                | "group"
+                | "order"
+                | "by"
                 | "qualify"
         )
     )
@@ -1056,10 +1065,7 @@ mod tests {
             "select * from users;",
             "select * from users,",
         ] {
-            assert!(
-                !should_auto_open(sql, cursor_at(sql)),
-                "{sql}"
-            );
+            assert!(!should_auto_open(sql, cursor_at(sql)), "{sql}");
         }
     }
 

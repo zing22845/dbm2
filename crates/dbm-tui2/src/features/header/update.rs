@@ -1,9 +1,9 @@
 //! Header feature update.
 
-use super::msg::HeaderMessage;
-use super::state::{HeaderState, HEADER_BUTTONS};
-use super::intent::HeaderIntent;
 use super::effect::HeaderEffect;
+use super::intent::HeaderIntent;
+use super::msg::HeaderMessage;
+use super::state::{HEADER_BUTTONS, HeaderState};
 
 /// Update the header state. Pure by-value transition.
 ///
@@ -30,7 +30,9 @@ pub fn update(
             state.button != before
         }
         HeaderMessage::Activate => {
-            intents.push(HeaderIntent::Activate { index: state.button });
+            intents.push(HeaderIntent::Activate {
+                index: state.button,
+            });
             false
         }
     };

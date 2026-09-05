@@ -5,11 +5,11 @@
 //! to the active connection are rendered. Clickable rects are returned so the
 //! shell can route mouse clicks to a tab.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::common::view::theme::Theme;
 
@@ -42,7 +42,12 @@ pub fn tab_rects(area: Rect, tabs: &[TabSession], visible_indices: &[usize]) -> 
         };
         let width = tab_title(session).chars().count() as u16 + 2; // " title "
         rects.push(TabRect {
-            rect: Rect { x, y: area.y, width, height: area.height },
+            rect: Rect {
+                x,
+                y: area.y,
+                width,
+                height: area.height,
+            },
             tab_index: visible_idx,
         });
         x = x.saturating_add(width);
@@ -52,7 +57,13 @@ pub fn tab_rects(area: Rect, tabs: &[TabSession], visible_indices: &[usize]) -> 
 
 /// Hit-test a click at `(x, y)` against the rendered tab bar. Returns the
 /// visible-tab offset of the clicked tab, if any.
-pub fn tab_at(area: Rect, tabs: &[TabSession], visible_indices: &[usize], x: u16, y: u16) -> Option<usize> {
+pub fn tab_at(
+    area: Rect,
+    tabs: &[TabSession],
+    visible_indices: &[usize],
+    x: u16,
+    y: u16,
+) -> Option<usize> {
     if y != area.y {
         return None;
     }

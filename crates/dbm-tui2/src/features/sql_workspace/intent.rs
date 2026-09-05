@@ -1,8 +1,8 @@
 //! SQL workspace feature intents.
 
-use crate::app_shell::intent::Intent;
 use super::msg::SqlMsg;
 use super::sql_tab::intent::SqlTabIntent;
+use crate::app_shell::intent::Intent;
 
 /// Intents emitted by the SQL workspace feature. Child intents are wrapped
 /// so they can be lifted into the global router via `SqlMsg`.

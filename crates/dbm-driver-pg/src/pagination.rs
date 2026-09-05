@@ -79,7 +79,9 @@ fn top_level_tokens(sql: &str) -> Vec<String> {
             i += 2;
             while i < sql.len() {
                 let current = sql[i..].chars().next().unwrap_or('\0');
-                let following = sql.get(i + current.len_utf8()..).and_then(|s| s.chars().next());
+                let following = sql
+                    .get(i + current.len_utf8()..)
+                    .and_then(|s| s.chars().next());
                 i += current.len_utf8();
                 if current == '*' && following == Some('/') {
                     i += 1;

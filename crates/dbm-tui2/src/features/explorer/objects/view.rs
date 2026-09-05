@@ -1,10 +1,10 @@
 //! Explorer objects (object tree) feature rendering.
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use crate::common::view::hints::{draw_pane_footer, footer_height, objects_pane_footer_text};
 use crate::common::view::pane_scrollbar::{
@@ -52,10 +52,7 @@ fn compute_objects_body(area: Rect, _state: &ObjectsState) -> Option<Rect> {
 /// Compute the objects tree viewport. One source of truth for render, row_at,
 /// toggle_at, and v_scrollbar_hit. Applies discover-style cursor anchoring
 /// (skipped when `scroll_locked`).
-pub fn compute_objects_viewport(
-    area: Rect,
-    state: &ObjectsState,
-) -> Option<ObjectsViewport> {
+pub fn compute_objects_viewport(area: Rect, state: &ObjectsState) -> Option<ObjectsViewport> {
     let total = state.rows.len();
     if total == 0 {
         return None;
@@ -169,7 +166,11 @@ pub fn toggle_at(area: Rect, state: &ObjectsState, x: u16, y: u16) -> Option<usi
     // offset here, unlike the instances pane (which does emit a leading space).
     // Horizontal scroll only moves the selected row, so subtract it only when
     // the clicked row IS the cursor row.
-    let row_h_scroll = if row == state.cursor { state.h_scroll } else { 0 };
+    let row_h_scroll = if row == state.cursor {
+        state.h_scroll
+    } else {
+        0
+    };
     let marker_col = ov
         .content
         .x
@@ -192,7 +193,8 @@ pub fn render(
     let p = theme.palette();
 
     let hint = objects_pane_footer_text();
-    let footer_h = footer_height(&hint, area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
+    let footer_h =
+        footer_height(&hint, area.width.saturating_sub(2)).min(area.height.saturating_sub(2));
     let block = Block::default()
         .title(" [O] Objects ")
         .borders(Borders::ALL)
@@ -211,7 +213,9 @@ pub fn render(
             if footer_h > 0 {
                 let footer_area = Rect::new(
                     inner.x,
-                    inner.y.saturating_add(inner.height.saturating_sub(footer_h)),
+                    inner
+                        .y
+                        .saturating_add(inner.height.saturating_sub(footer_h)),
                     inner.width,
                     footer_h,
                 );
@@ -254,12 +258,13 @@ pub fn render(
         // Active rows reserve 1 cell for the trailing ● marker (tight against
         // the right border); inactive rows use the full width.
         let dot = "●";
-        let text_max = if row.active { viewport_w.saturating_sub(1) } else { viewport_w };
-        let display_text = crate::common::utils::text_width::truncate_from(
-            &full_text,
-            row_h_scroll,
-            text_max,
-        );
+        let text_max = if row.active {
+            viewport_w.saturating_sub(1)
+        } else {
+            viewport_w
+        };
+        let display_text =
+            crate::common::utils::text_width::truncate_from(&full_text, row_h_scroll, text_max);
         if row.active && viewport_w >= 2 {
             let text_w = crate::common::utils::text_width::width(&display_text);
             let padding = text_max.saturating_sub(text_w);

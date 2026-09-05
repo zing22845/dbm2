@@ -43,7 +43,11 @@ where
     }
 }
 
-pub async fn execute_in_schema_on_client<C>(client: &mut C, schema: &str, sql: &str) -> Result<QueryResult>
+pub async fn execute_in_schema_on_client<C>(
+    client: &mut C,
+    schema: &str,
+    sql: &str,
+) -> Result<QueryResult>
 where
     C: GenericClient,
 {
@@ -57,10 +61,7 @@ where
         .await
         .map_err(|e| crate::dbm_error_from_postgres(&e))?;
 
-    let set_path = format!(
-        "SET LOCAL search_path TO {}, public",
-        quote_ident(schema)
-    );
+    let set_path = format!("SET LOCAL search_path TO {}, public", quote_ident(schema));
     txn.batch_execute(&set_path)
         .await
         .map_err(|e| crate::dbm_error_from_postgres(&e))?;
@@ -115,10 +116,7 @@ where
         .await
         .map_err(|e| crate::dbm_error_from_postgres(&e))?;
 
-    let set_path = format!(
-        "SET LOCAL search_path TO {}, public",
-        quote_ident(schema)
-    );
+    let set_path = format!("SET LOCAL search_path TO {}, public", quote_ident(schema));
     txn.batch_execute(&set_path)
         .await
         .map_err(|e| crate::dbm_error_from_postgres(&e))?;
@@ -158,12 +156,15 @@ pub async fn has_paginated_rows_in_schema_on_client<C>(
 where
     C: GenericClient,
 {
-    let result =
-        execute_paginated_in_schema_on_client(client, schema, sql, 1, offset).await?;
+    let result = execute_paginated_in_schema_on_client(client, schema, sql, 1, offset).await?;
     Ok(!result.rows.is_empty())
 }
 
-pub async fn count_in_schema_on_client<C>(client: &mut C, schema: &str, sql: &str) -> Result<Option<u64>>
+pub async fn count_in_schema_on_client<C>(
+    client: &mut C,
+    schema: &str,
+    sql: &str,
+) -> Result<Option<u64>>
 where
     C: GenericClient,
 {
@@ -180,10 +181,7 @@ where
         .await
         .map_err(|e| crate::dbm_error_from_postgres(&e))?;
 
-    let set_path = format!(
-        "SET LOCAL search_path TO {}, public",
-        quote_ident(schema)
-    );
+    let set_path = format!("SET LOCAL search_path TO {}, public", quote_ident(schema));
     txn.batch_execute(&set_path)
         .await
         .map_err(|e| crate::dbm_error_from_postgres(&e))?;

@@ -10,7 +10,9 @@ pub enum ConnectionsMessage {
     /// Re-load the connections for the current instance (after a mutation).
     Reload,
     /// The store returned the connections.
-    Loaded { connections: Vec<dbm_store::InstanceConnection> },
+    Loaded {
+        connections: Vec<dbm_store::InstanceConnection>,
+    },
     /// Move the connection cursor up.
     MoveUp,
     /// Move the connection cursor down.
@@ -27,7 +29,10 @@ pub enum ConnectionsMessage {
     /// Commit the open form (add or edit).
     CommitForm,
     /// Delete a specific connection (dispatched from the delete-confirm modal).
-    DeleteConnection { instance_name: String, connection_name: String },
+    DeleteConnection {
+        instance_name: String,
+        connection_name: String,
+    },
     /// A save succeeded: close the form and reload the list.
     Saved,
     /// A save failed with `error`: keep the form open and show it on the footer.

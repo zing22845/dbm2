@@ -1,10 +1,10 @@
 //! Instance connections feature rendering.
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Row, Table};
-use ratatui::Frame;
 
 use crate::common::view::pane_scrollbar::{
     ActiveScrollbar, PaneScrollLayout, RowHeights, draw_vertical_pane_scrollbar, pane_anchor,
@@ -175,7 +175,15 @@ fn measure_connections_col_widths(
     const MIN_W: u16 = 4;
     let w = crate::common::utils::text_width::width;
 
-    let headers = ["Name", "Target", "SSL", "Password", "Updated", "Test OK", "Test Fail"];
+    let headers = [
+        "Name",
+        "Target",
+        "SSL",
+        "Password",
+        "Updated",
+        "Test OK",
+        "Test Fail",
+    ];
     let mut widths = [0u16; 7];
     for (i, h) in headers.iter().enumerate() {
         widths[i] = widths[i].max(w(h) as u16);
@@ -187,8 +195,16 @@ fn measure_connections_col_widths(
         widths[2] = widths[2].max(w(&conn.ssl_mode) as u16);
         widths[3] = widths[3].max(if conn.has_password { 3 } else { 5 });
         widths[4] = widths[4].max(w(&conn.updated_at) as u16);
-        widths[5] = widths[5].max(conn.test_succeeded_at.as_deref().map_or(1, |ts| 2 + w(ts) as u16));
-        widths[6] = widths[6].max(conn.test_failed_at.as_deref().map_or(1, |ts| 2 + w(ts) as u16));
+        widths[5] = widths[5].max(
+            conn.test_succeeded_at
+                .as_deref()
+                .map_or(1, |ts| 2 + w(ts) as u16),
+        );
+        widths[6] = widths[6].max(
+            conn.test_failed_at
+                .as_deref()
+                .map_or(1, |ts| 2 + w(ts) as u16),
+        );
     }
     for cw in widths.iter_mut() {
         *cw = (*cw).min(CAP).saturating_add(ELLIPSIS_RESERVE).max(MIN_W);
@@ -239,8 +255,7 @@ fn render_connections_list(
             };
             let name_body = trunc(&conn.name, 0, col_widths[0] as usize);
             let password = if conn.has_password { "set" } else { "empty" };
-            let target = instance
-                .map_or_else(|| "?".to_string(), |inst| conn.display_target(inst));
+            let target = instance.map_or_else(|| "?".to_string(), |inst| conn.display_target(inst));
             let target = trunc(&target, 0, col_widths[1] as usize);
             let ssl = trunc(&conn.ssl_mode, 0, col_widths[2] as usize);
             let updated = trunc(&conn.updated_at, 0, col_widths[4] as usize);
@@ -404,7 +419,10 @@ fn render_form(
     // The colon separator stays neutrally styled so an unsaved, modified value
     // stands out only by its own color (the value), not by a colored colon.
     let value_span = |f: FormField, value: &str| -> Vec<Span<'static>> {
-        vec![Span::raw(":  "), Span::styled(value.to_string(), value_style(f))]
+        vec![
+            Span::raw(":  "),
+            Span::styled(value.to_string(), value_style(f)),
+        ]
     };
     let field_value = |f: FormField, value: &str| -> String {
         if form.field == f && form.mode == FormMode::Insert {
@@ -430,10 +448,26 @@ fn render_form(
             Line::from(spans)
         };
         vec![
-            line("name", FormField::Name, &field_value(FormField::Name, &form.name)),
-            line("user", FormField::Username, &field_value(FormField::Username, &form.username)),
-            line("database", FormField::Database, &field_value(FormField::Database, &form.database)),
-            line("password", FormField::Password, &field_value(FormField::Password, &password_display)),
+            line(
+                "name",
+                FormField::Name,
+                &field_value(FormField::Name, &form.name),
+            ),
+            line(
+                "user",
+                FormField::Username,
+                &field_value(FormField::Username, &form.username),
+            ),
+            line(
+                "database",
+                FormField::Database,
+                &field_value(FormField::Database, &form.database),
+            ),
+            line(
+                "password",
+                FormField::Password,
+                &field_value(FormField::Password, &password_display),
+            ),
         ]
     };
     let footer_text = match form.mode {
@@ -451,10 +485,10 @@ fn render_form(
         FORM_HEIGHT_PCT,
         state,
         |f, t, popup, s| {
+            use super::state::ConnectionStatusKind;
+            use crate::common::utils::text_width::wrapped_line_count;
             use ratatui::layout::{Constraint, Layout};
             use ratatui::widgets::{Block, Borders, Paragraph};
-            use crate::common::utils::text_width::wrapped_line_count;
-            use super::state::ConnectionStatusKind;
             let pp = t.palette();
             let block = Block::default()
                 .title(title.clone())
@@ -465,9 +499,10 @@ fn render_form(
             let hint_h = wrapped_line_count(&footer_text, inner.width.max(1))
                 .max(1)
                 .min(inner.height.saturating_sub(2).max(1));
-            let status_h = s.status.as_deref().map_or(0, |st| {
-                wrapped_line_count(st, inner.width.max(1)).max(1)
-            });
+            let status_h = s
+                .status
+                .as_deref()
+                .map_or(0, |st| wrapped_line_count(st, inner.width.max(1)).max(1));
             let mut constraints = vec![Constraint::Min(1), Constraint::Length(hint_h)];
             if status_h > 0 {
                 constraints.push(Constraint::Length(status_h));
@@ -567,7 +602,10 @@ mod tests {
         s.scroll = 0;
         s.scroll_locked = false;
         let cv = compute_connections_viewport(area, &s).expect("some viewport");
-        assert_eq!(cv.start, 11, "anchor: cursor=15 with viewport=5 -> start=15-5+1");
+        assert_eq!(
+            cv.start, 11,
+            "anchor: cursor=15 with viewport=5 -> start=15-5+1"
+        );
     }
 
     #[test]
@@ -579,7 +617,10 @@ mod tests {
         s.scroll = 10; // manual drag scrolled to row 10
         s.scroll_locked = true;
         let cv = compute_connections_viewport(area, &s).expect("some viewport");
-        assert_eq!(cv.start, 10, "scroll_locked keeps manual scroll even if cursor is elsewhere");
+        assert_eq!(
+            cv.start, 10,
+            "scroll_locked keeps manual scroll even if cursor is elsewhere"
+        );
     }
 
     #[test]
@@ -598,10 +639,7 @@ mod tests {
         let popup = form_popup_rect(area);
         // Fields begin one row below the popup's top border, top-aligned.
         let top = popup.y.saturating_add(1);
-        assert_eq!(
-            form_field_at(area, popup.x + 1, top),
-            Some(FormField::Name)
-        );
+        assert_eq!(form_field_at(area, popup.x + 1, top), Some(FormField::Name));
         assert_eq!(
             form_field_at(area, popup.x + 1, top + 1),
             Some(FormField::Username)
@@ -620,6 +658,9 @@ mod tests {
         assert_eq!(form_field_at(area, popup.x + 1, top + 4), None);
         // Clicks outside the popup (off its left edge / above it) are None.
         assert_eq!(form_field_at(area, popup.x.saturating_sub(1), top), None);
-        assert_eq!(form_field_at(area, popup.x + 1, popup.y.saturating_sub(1)), None);
+        assert_eq!(
+            form_field_at(area, popup.x + 1, popup.y.saturating_sub(1)),
+            None
+        );
     }
 }

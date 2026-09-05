@@ -9,7 +9,9 @@ use crate::common::service::services::Services;
 #[derive(Debug, Clone)]
 pub enum OverviewAction {
     /// The store returned the instance. Boxed to keep the enum small.
-    Loaded { instance: Box<dbm_store::ManagedInstance> },
+    Loaded {
+        instance: Box<dbm_store::ManagedInstance>,
+    },
     /// Loading failed.
     Error { error: String },
 }
@@ -24,7 +26,11 @@ pub enum OverviewEffect {
 impl Effect for OverviewEffect {
     type Action = OverviewAction;
 
-    fn run(self, _emit: Emitter<Self::Action>, services: Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
+    fn run(
+        self,
+        _emit: Emitter<Self::Action>,
+        services: Arc<Services>,
+    ) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             let store = services.store.clone();
             match self {
@@ -38,10 +44,16 @@ impl Effect for OverviewEffect {
                     .await;
                     match result {
                         Ok(Ok(instance)) => {
-                            vec![OverviewAction::Loaded { instance: Box::new(instance) }]
+                            vec![OverviewAction::Loaded {
+                                instance: Box::new(instance),
+                            }]
                         }
-                        Ok(Err(e)) => vec![OverviewAction::Error { error: e.to_string() }],
-                        Err(e) => vec![OverviewAction::Error { error: e.to_string() }],
+                        Ok(Err(e)) => vec![OverviewAction::Error {
+                            error: e.to_string(),
+                        }],
+                        Err(e) => vec![OverviewAction::Error {
+                            error: e.to_string(),
+                        }],
                     }
                 }
             }

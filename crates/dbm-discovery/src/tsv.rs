@@ -14,8 +14,8 @@ pub fn parse_targets_tsv(input: &str) -> Result<Vec<(String, String)>, String> {
             ));
         }
 
-        let (host, ports) = split_target_line(line)
-            .map_err(|error| format!("line {line_number}: {error}"))?;
+        let (host, ports) =
+            split_target_line(line).map_err(|error| format!("line {line_number}: {error}"))?;
 
         let host = validate_host(host).map_err(|error| format!("line {line_number}: {error}"))?;
         parse_port_spec(ports).map_err(|error| format!("line {line_number}: {error}"))?;
@@ -41,8 +41,7 @@ pub fn parse_targets_lines_lenient(input: &str) -> Vec<Result<(String, String), 
             .and_then(|(host, ports)| {
                 let host =
                     validate_host(host).map_err(|error| format!("line {line_number}: {error}"))?;
-                parse_port_spec(ports)
-                    .map_err(|error| format!("line {line_number}: {error}"))?;
+                parse_port_spec(ports).map_err(|error| format!("line {line_number}: {error}"))?;
                 Ok((host, ports.trim().to_string()))
             });
         rows.push(row);
@@ -155,7 +154,10 @@ mod tests {
         );
         assert_eq!(rows.len(), 4);
         // Valid TSV row.
-        assert_eq!(rows[0].as_ref().unwrap(), &("db.example.com".to_string(), "5432".to_string()));
+        assert_eq!(
+            rows[0].as_ref().unwrap(),
+            &("db.example.com".to_string(), "5432".to_string())
+        );
         // Invalid host -> that line alone fails.
         assert!(rows[1].is_err());
         assert!(rows[1].as_ref().unwrap_err().contains("line 2"));
@@ -163,7 +165,10 @@ mod tests {
         assert!(rows[2].is_err());
         assert!(rows[2].as_ref().unwrap_err().contains("line 3"));
         // Valid bracketed IPv6 row.
-        assert_eq!(rows[3].as_ref().unwrap(), &("::1".to_string(), "5440".to_string()));
+        assert_eq!(
+            rows[3].as_ref().unwrap(),
+            &("::1".to_string(), "5440".to_string())
+        );
     }
 
     #[test]

@@ -76,7 +76,8 @@ impl Services {
     /// `Services` abstraction rather than touching the concrete driver (DIP).
     pub fn connection_test_ping(
         &self,
-    ) -> impl FnOnce(&str) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>> + Send + use<> {
+    ) -> impl FnOnce(&str) -> Pin<Box<dyn Future<Output = Result<String, String>> + Send>> + Send + use<>
+    {
         let driver: Arc<PostgresDriver> = Arc::clone(&self.driver);
         move |url| {
             // Own the URL before the async block so the returned future is
@@ -97,7 +98,11 @@ impl Services {
     }
 
     /// List the databases of a connection.
-    pub async fn list_databases(&self, instance: &str, connection: &str) -> Result<Vec<String>, String> {
+    pub async fn list_databases(
+        &self,
+        instance: &str,
+        connection: &str,
+    ) -> Result<Vec<String>, String> {
         let url = self.connection_url(instance, connection, None).await?;
         let pool = self
             .driver
@@ -117,7 +122,9 @@ impl Services {
         connection: &str,
         database: &str,
     ) -> Result<Vec<String>, String> {
-        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let url = self
+            .connection_url(instance, connection, Some(database))
+            .await?;
         let pool = self
             .driver
             .connect(&ConnectOpts::new(url))
@@ -237,8 +244,13 @@ impl Services {
         connection: &str,
         database: Option<&str>,
         schema: &str,
-    ) -> Result<(Vec<String>, std::collections::HashMap<String, Vec<dbm_core::ColumnMeta>>), String>
-    {
+    ) -> Result<
+        (
+            Vec<String>,
+            std::collections::HashMap<String, Vec<dbm_core::ColumnMeta>>,
+        ),
+        String,
+    > {
         let url = self.connection_url(instance, connection, database).await?;
         let pool = self
             .driver
@@ -269,7 +281,9 @@ impl Services {
         connection: &str,
         database: &str,
     ) -> Result<Vec<String>, String> {
-        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let url = self
+            .connection_url(instance, connection, Some(database))
+            .await?;
         let pool = self
             .driver
             .connect(&ConnectOpts::new(url))
@@ -289,7 +303,9 @@ impl Services {
         database: &str,
         schema: &str,
     ) -> Result<Vec<String>, String> {
-        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let url = self
+            .connection_url(instance, connection, Some(database))
+            .await?;
         let pool = self
             .driver
             .connect(&ConnectOpts::new(url))
@@ -309,7 +325,9 @@ impl Services {
         database: &str,
         schema: &str,
     ) -> Result<Vec<String>, String> {
-        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let url = self
+            .connection_url(instance, connection, Some(database))
+            .await?;
         let pool = self
             .driver
             .connect(&ConnectOpts::new(url))
@@ -329,7 +347,9 @@ impl Services {
         database: &str,
         schema: &str,
     ) -> Result<Vec<String>, String> {
-        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let url = self
+            .connection_url(instance, connection, Some(database))
+            .await?;
         let pool = self
             .driver
             .connect(&ConnectOpts::new(url))
@@ -349,7 +369,9 @@ impl Services {
         database: &str,
         schema: &str,
     ) -> Result<Vec<String>, String> {
-        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let url = self
+            .connection_url(instance, connection, Some(database))
+            .await?;
         let pool = self
             .driver
             .connect(&ConnectOpts::new(url))
@@ -369,7 +391,9 @@ impl Services {
         database: &str,
         schema: &str,
     ) -> Result<Vec<String>, String> {
-        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let url = self
+            .connection_url(instance, connection, Some(database))
+            .await?;
         let pool = self
             .driver
             .connect(&ConnectOpts::new(url))
@@ -389,7 +413,9 @@ impl Services {
         database: &str,
         schema: &str,
     ) -> Result<Vec<String>, String> {
-        let url = self.connection_url(instance, connection, Some(database)).await?;
+        let url = self
+            .connection_url(instance, connection, Some(database))
+            .await?;
         let pool = self
             .driver
             .connect(&ConnectOpts::new(url))
@@ -429,7 +455,10 @@ impl Services {
             .run_in_transaction(&pool, schema, statements, move |index, affected| {
                 if stmt_kinds.get(index).copied().unwrap_or(false) && affected != 1 {
                     return Err(dbm_core::ApplicationError::Database {
-                        message: format!("conflict: statement {} affected {affected} row(s)", index + 1),
+                        message: format!(
+                            "conflict: statement {} affected {affected} row(s)",
+                            index + 1
+                        ),
                         severity: dbm_core::ErrorSeverity::Error,
                     });
                 }

@@ -85,10 +85,24 @@ pub struct ObjectsCatalog {
 /// A node in the object tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObjectsNode {
-    Database { name: String },
-    Schema { database: String, name: String },
-    Group { database: String, schema: Option<String>, kind: ObjectKind },
-    Object { database: String, schema: Option<String>, kind: ObjectKind, name: String },
+    Database {
+        name: String,
+    },
+    Schema {
+        database: String,
+        name: String,
+    },
+    Group {
+        database: String,
+        schema: Option<String>,
+        kind: ObjectKind,
+    },
+    Object {
+        database: String,
+        schema: Option<String>,
+        kind: ObjectKind,
+        name: String,
+    },
 }
 
 /// A flattened, displayable row in the object tree.
@@ -187,13 +201,15 @@ impl ObjectsState {
         active_schema: Option<&str>,
     ) -> bool {
         if let Some(db) = active_db
-            && key == Self::expand_key_database(db) {
-                return true;
-            }
+            && key == Self::expand_key_database(db)
+        {
+            return true;
+        }
         if let (Some(db), Some(schema)) = (active_db, active_schema)
-            && key == Self::expand_key_schema(db, schema) {
-                return true;
-            }
+            && key == Self::expand_key_schema(db, schema)
+        {
+            return true;
+        }
         false
     }
 
@@ -299,9 +315,11 @@ impl ObjectsState {
         match node {
             ObjectsNode::Database { name } => Self::expand_key_database(name),
             ObjectsNode::Schema { database, name } => Self::expand_key_schema(database, name),
-            ObjectsNode::Group { database, schema, kind } => {
-                Self::expand_key_group(database, schema.as_deref(), *kind)
-            }
+            ObjectsNode::Group {
+                database,
+                schema,
+                kind,
+            } => Self::expand_key_group(database, schema.as_deref(), *kind),
             ObjectsNode::Object { .. } => String::new(),
         }
     }
@@ -316,14 +334,18 @@ impl ObjectsState {
     pub fn selected_target(&self) -> Option<ObjectsTarget> {
         let row = self.rows.get(self.cursor)?;
         match &row.node {
-            ObjectsNode::Object { database, schema, name, kind, .. } => {
-                Some(ObjectsTarget {
-                    database: database.clone(),
-                    schema: schema.clone(),
-                    name: name.clone(),
-                    kind: *kind,
-                })
-            }
+            ObjectsNode::Object {
+                database,
+                schema,
+                name,
+                kind,
+                ..
+            } => Some(ObjectsTarget {
+                database: database.clone(),
+                schema: schema.clone(),
+                name: name.clone(),
+                kind: *kind,
+            }),
             _ => None,
         }
     }
@@ -520,8 +542,7 @@ impl ObjectsState {
     /// redundant repaint (matching the original dbm).
     pub fn scroll_horizontal(&mut self, delta: i16, max: u16) -> bool {
         let before = self.h_scroll;
-        self.h_scroll = (self.h_scroll as i32 + i32::from(delta))
-            .clamp(0, i32::from(max)) as u16;
+        self.h_scroll = (self.h_scroll as i32 + i32::from(delta)).clamp(0, i32::from(max)) as u16;
         self.h_scroll != before
     }
 
@@ -624,9 +645,9 @@ pub fn build_rows(
             for database in databases {
                 let db_key = ObjectsState::expand_key_database(database);
                 // The active database is forced expanded even if not in the set.
-                let db_expanded = ObjectsState::active_path_forces_expanded(
-                    &db_key, active_db, active_schema,
-                ) || expanded.contains(&db_key);
+                let db_expanded =
+                    ObjectsState::active_path_forces_expanded(&db_key, active_db, active_schema)
+                        || expanded.contains(&db_key);
                 rows.push(ObjectsRow {
                     depth: 0,
                     expanded: db_expanded,
@@ -659,12 +680,13 @@ pub fn build_rows(
                         for schema in schemas {
                             let schema_key = ObjectsState::expand_key_schema(database, schema);
                             // The active schema is forced expanded and highlighted.
-                            let schema_active =
-                                active_db == Some(database.as_str())
-                                    && active_schema == Some(schema.as_str());
+                            let schema_active = active_db == Some(database.as_str())
+                                && active_schema == Some(schema.as_str());
                             let schema_expanded = schema_active
                                 || ObjectsState::active_path_forces_expanded(
-                                    &schema_key, active_db, active_schema,
+                                    &schema_key,
+                                    active_db,
+                                    active_schema,
                                 )
                                 || expanded.contains(&schema_key);
                             rows.push(ObjectsRow {
@@ -731,7 +753,9 @@ fn push_group_rows(
             let Some(schema) = schema else {
                 return;
             };
-            catalog.objects.get(&(database.to_string(), schema.to_string(), other))
+            catalog
+                .objects
+                .get(&(database.to_string(), schema.to_string(), other))
         }
     };
     let label = match list {
@@ -793,7 +817,10 @@ mod tests {
         let c = catalog_with(&["public", "other"]);
         // Empty expansion set; active path db/public is forced open.
         let rows = build_rows(&c, &HashSet::new(), Some("db"), Some("public"));
-        let schema_rows: Vec<&ObjectsRow> = rows.iter().filter(|r| matches!(r.node, ObjectsNode::Schema { .. })).collect();
+        let schema_rows: Vec<&ObjectsRow> = rows
+            .iter()
+            .filter(|r| matches!(r.node, ObjectsNode::Schema { .. }))
+            .collect();
         assert_eq!(schema_rows.len(), 2);
         let public = schema_rows.iter().find(|r| r.label == "public").unwrap();
         assert!(public.active, "public must be the active schema");
@@ -821,10 +848,7 @@ mod tests {
         s.cursor = 0; // toggle db
         assert!(s.toggle_expand().is_some(), "collapses db");
         assert_eq!(s.rows.len(), 1, "only the collapsed db row remains");
-        assert_eq!(
-            s.rows[0].node,
-            ObjectsNode::Database { name: "db".into() }
-        );
+        assert_eq!(s.rows[0].node, ObjectsNode::Database { name: "db".into() });
         assert_eq!(s.cursor, 0, "cursor clamps to the collapsed node");
     }
 
@@ -837,7 +861,10 @@ mod tests {
             Some("public"),
         ));
         assert!(ObjectsState::collapse_blocked_by_active(
-            &ObjectsNode::Schema { database: "db".into(), name: "public".into() },
+            &ObjectsNode::Schema {
+                database: "db".into(),
+                name: "public".into()
+            },
             Some("db"),
             Some("public"),
         ));
@@ -857,8 +884,22 @@ mod tests {
     fn jump_to_moves_and_clamps_cursor() {
         let mut s = ObjectsState::default();
         s.rows = vec![
-            ObjectsRow { depth: 0, expanded: false, expandable: true, active: false, node: ObjectsNode::Database { name: "a".into() }, label: "a".into() },
-            ObjectsRow { depth: 0, expanded: false, expandable: true, active: false, node: ObjectsNode::Database { name: "b".into() }, label: "b".into() },
+            ObjectsRow {
+                depth: 0,
+                expanded: false,
+                expandable: true,
+                active: false,
+                node: ObjectsNode::Database { name: "a".into() },
+                label: "a".into(),
+            },
+            ObjectsRow {
+                depth: 0,
+                expanded: false,
+                expandable: true,
+                active: false,
+                node: ObjectsNode::Database { name: "b".into() },
+                label: "b".into(),
+            },
         ];
         s.jump_to(1);
         assert_eq!(s.cursor, 1);
@@ -907,11 +948,20 @@ mod tests {
         let mut s = ObjectsState::default();
         assert!(s.defer_active(Some("db".into()), Some("public".into())));
         assert_eq!(s.active_db.as_deref(), Some("db"));
-        assert_eq!(s.active_schema, None, "schema is deferred until schemas load");
-        assert_eq!(s.pending_active_schema, Some(("db".to_string(), "public".to_string())));
+        assert_eq!(
+            s.active_schema, None,
+            "schema is deferred until schemas load"
+        );
+        assert_eq!(
+            s.pending_active_schema,
+            Some(("db".to_string(), "public".to_string()))
+        );
 
         // Schemas arrive and contain the deferred schema: it is now marked.
-        s.catalog.schemas.insert("db".into(), CatalogList::Ready(vec!["public".into(), "other".into()]));
+        s.catalog.schemas.insert(
+            "db".into(),
+            CatalogList::Ready(vec!["public".into(), "other".into()]),
+        );
         s.resolve_pending_active_schema();
         assert_eq!(s.active_schema.as_deref(), Some("public"));
         assert_eq!(s.pending_active_schema, None);
@@ -919,9 +969,14 @@ mod tests {
         // A schema that no longer exists degrades to no active schema.
         let mut s2 = ObjectsState::default();
         assert!(s2.defer_active(Some("db".into()), Some("gone".into())));
-        s2.catalog.schemas.insert("db".into(), CatalogList::Ready(vec!["public".into()]));
+        s2.catalog
+            .schemas
+            .insert("db".into(), CatalogList::Ready(vec!["public".into()]));
         s2.resolve_pending_active_schema();
         assert_eq!(s2.active_db.as_deref(), Some("db"));
-        assert_eq!(s2.active_schema, None, "absent schema degrades to no active schema");
+        assert_eq!(
+            s2.active_schema, None,
+            "absent schema degrades to no active schema"
+        );
     }
 }

@@ -1,19 +1,16 @@
 //! Instance workspace feature update.
 
-use super::msg::IwMessage;
-use super::state::IwState;
-use super::intent::IwIntent;
-use super::effect::IwEffect;
 use super::connections;
+use super::effect::IwEffect;
+use super::intent::IwIntent;
+use super::msg::IwMessage;
 use super::overview;
+use super::state::IwState;
 
 /// Update the instance workspace state. Pure by-value transition: opening an
 /// instance triggers the overview + connections loads; child messages are
 /// forwarded to the matching sub-module (moved out, updated, moved back).
-pub fn update(
-    msg: IwMessage,
-    mut state: IwState,
-) -> (IwState, Vec<IwIntent>, Vec<IwEffect>, bool) {
+pub fn update(msg: IwMessage, mut state: IwState) -> (IwState, Vec<IwIntent>, Vec<IwEffect>, bool) {
     let mut intents = Vec::new();
     let mut effects = Vec::new();
     let dirty = match msg {
@@ -80,8 +77,7 @@ pub fn update(
             // not leak into the connections state), so set them after the
             // overview state is taken back from the Reload.
             state.overview.status = Some("Refreshed".into());
-            state.overview.refresh_cooldown_until =
-                Some(Instant::now() + Duration::from_secs(1));
+            state.overview.refresh_cooldown_until = Some(Instant::now() + Duration::from_secs(1));
             effects.extend(oe.into_iter().map(IwEffect::Overview));
             let (cn, _ci, ce, _cd) = connections::update::update(
                 connections::msg::ConnectionsMessage::Reload,
@@ -121,7 +117,9 @@ mod tests {
     fn unregister_instance_emits_effect() {
         let state = IwState::default();
         let (_s, _i, effects, dirty) = update(
-            IwMessage::UnregisterInstance { instance: "inst-a".into() },
+            IwMessage::UnregisterInstance {
+                instance: "inst-a".into(),
+            },
             state,
         );
         assert_eq!(effects.len(), 1);
@@ -139,10 +137,15 @@ mod tests {
         let mut state = IwState::default();
         state.instance_name = "inst-a".to_string();
         let (s, _i, _e, dirty) = update(
-            IwMessage::Unregistered { instance: "inst-a".into() },
+            IwMessage::Unregistered {
+                instance: "inst-a".into(),
+            },
             state,
         );
-        assert!(s.instance_name.is_empty(), "workspace reset after unregister");
+        assert!(
+            s.instance_name.is_empty(),
+            "workspace reset after unregister"
+        );
         assert!(dirty);
     }
 
@@ -159,22 +162,29 @@ mod tests {
         // Status set on the overview pane footer (not shared), cooldown armed,
         // and a refresh repaint.
         assert_eq!(s.overview.status.as_deref(), Some("Refreshed"));
-        assert_eq!(s.connections.status, None, "connections status stays independent");
+        assert_eq!(
+            s.connections.status, None,
+            "connections status stays independent"
+        );
         assert!(s.overview.refresh_cooldown_until.is_some());
         assert!(dirty);
         // Effects: lifecycle probe + overview reload + connections reload.
-        assert!(effects
-            .iter()
-            .any(|e| matches!(e, IwEffect::Refresh { instance_name } if instance_name == "inst-a")));
+        assert!(effects.iter().any(
+            |e| matches!(e, IwEffect::Refresh { instance_name } if instance_name == "inst-a")
+        ));
         assert!(effects.iter().any(|e| matches!(e, IwEffect::Overview(_))));
-        assert!(effects
-            .iter()
-            .any(|e| matches!(e, IwEffect::Connections(_))));
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, IwEffect::Connections(_)))
+        );
     }
 
     #[test]
     fn opening_another_instance_closes_open_form() {
-        use crate::features::instance_workspace::connections::msg::{ConnectionsMessage, ConnectionsMsg};
+        use crate::features::instance_workspace::connections::msg::{
+            ConnectionsMessage, ConnectionsMsg,
+        };
 
         // A form is open for the current instance ...
         let mut state = IwState::default();
@@ -219,7 +229,10 @@ mod tests {
             },
             state,
         );
-        assert!(first_dirty, "first refresh shows \"Refreshed\" and repaints");
+        assert!(
+            first_dirty,
+            "first refresh shows \"Refreshed\" and repaints"
+        );
         let (_, _i, _e, second_dirty) = update(
             IwMessage::Refresh {
                 instance_name: "inst-a".into(),

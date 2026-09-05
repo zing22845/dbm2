@@ -12,7 +12,11 @@ pub enum ShellEffect {}
 impl Effect for ShellEffect {
     type Action = ShellAction;
 
-    fn run(self, _emit: crate::app_shell::effect::effect_trait::Emitter<Self::Action>, _services: std::sync::Arc<crate::common::service::services::Services>) -> BoxFuture<Vec<Self::Action>> {
+    fn run(
+        self,
+        _emit: crate::app_shell::effect::effect_trait::Emitter<Self::Action>,
+        _services: std::sync::Arc<crate::common::service::services::Services>,
+    ) -> BoxFuture<Vec<Self::Action>> {
         // The enum is uninhabited, so this can never be called; the trait
         // still requires an implementation, so return an empty list.
         Box::pin(async { vec![] })

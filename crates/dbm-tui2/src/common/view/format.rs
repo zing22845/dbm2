@@ -493,34 +493,19 @@ mod tests {
     #[test]
     fn results_cell_at_point_skips_gutter() {
         let widths = [10u16, 10];
-        let cell = results_cell_at_point(
-            0,
-            RESULTS_HEADER_HEIGHT,
-            2,
-            2,
-            0,
-            0,
-            &widths,
-            1,
-        );
+        let cell = results_cell_at_point(0, RESULTS_HEADER_HEIGHT, 2, 2, 0, 0, &widths, 1);
         assert_eq!(cell, Some((0, 0)));
-        let cell = results_cell_at_point(
-            1 + 5,
-            RESULTS_HEADER_HEIGHT,
-            2,
-            2,
-            0,
-            0,
-            &widths,
-            1,
-        );
+        let cell = results_cell_at_point(1 + 5, RESULTS_HEADER_HEIGHT, 2, 2, 0, 0, &widths, 1);
         assert_eq!(cell, Some((0, 0)));
     }
 
     #[test]
     fn results_plain_text_affected_rows_when_no_columns() {
         let rows: Vec<Vec<String>> = Vec::new();
-        assert_eq!(results_plain_text(&[] as &[String], &rows, Some(3)), "3 row(s) affected");
+        assert_eq!(
+            results_plain_text(&[] as &[String], &rows, Some(3)),
+            "3 row(s) affected"
+        );
         assert_eq!(results_plain_text(&[] as &[String], &rows, None), "Done");
     }
 }

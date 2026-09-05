@@ -4,11 +4,11 @@
 //! and coordinates cross-feature concerns (e.g. loading a cell value into the
 //! detail draft when entering edit).
 
-use super::msg::{ResultsMessage};
-use super::list::msg::ListMsg;
-use super::state::ResultsState;
-use super::intent::ResultsIntent;
 use super::effect::ResultsEffect;
+use super::intent::ResultsIntent;
+use super::list::msg::ListMsg;
+use super::msg::ResultsMessage;
+use super::state::ResultsState;
 
 pub fn update(
     msg: ResultsMessage,
@@ -27,8 +27,7 @@ pub fn update(
         ResultsMessage::Detail(detail_msg) => {
             let super::detail::msg::DetailMsg::Message(inner) = detail_msg;
             let detail_state = std::mem::take(&mut state.detail);
-            let (s, i, e, d) =
-                super::detail::update::update(inner, detail_state);
+            let (s, i, e, d) = super::detail::update::update(inner, detail_state);
             state.detail = s;
             intents.extend(i.into_iter().map(ResultsIntent::Detail));
             effects.extend(e.into_iter().map(ResultsEffect::Detail));
@@ -36,10 +35,11 @@ pub fn update(
         }
         ResultsMessage::SetDetailDraft { text } => {
             let draft_msg = super::detail::msg::DetailMessage::SetDraft { text: text.clone() };
-            let (ds, _di, _de, _dd) =
-                super::detail::update::update(draft_msg, state.detail);
+            let (ds, _di, _de, _dd) = super::detail::update::update(draft_msg, state.detail);
             state.detail = ds;
-            state.list.apply_cell_value(state.list.row, state.list.col, text);
+            state
+                .list
+                .apply_cell_value(state.list.row, state.list.col, text);
             (state, intents, effects, true)
         }
         ResultsMessage::ToggleDetail => {
@@ -79,7 +79,10 @@ fn route_to_list(
     let is_rollback = matches!(msg, ListMessage::Rollback);
     let is_enter_edit = matches!(msg, ListMessage::EnterEdit);
     let is_exit_edit = matches!(msg, ListMessage::ExitEdit);
-    let is_move = matches!(msg, ListMessage::MoveSelection { .. } | ListMessage::SetSelection { .. });
+    let is_move = matches!(
+        msg,
+        ListMessage::MoveSelection { .. } | ListMessage::SetSelection { .. }
+    );
     let resets_detail_scroll = matches!(
         msg,
         ListMessage::SetResult { .. }
@@ -94,9 +97,7 @@ fn route_to_list(
     state.list = s;
     effects.extend(e);
 
-    if is_enter_edit
-        && let Some(value) = state.list.selected_cell()
-    {
+    if is_enter_edit && let Some(value) = state.list.selected_cell() {
         let detail_state = std::mem::take(&mut state.detail);
         let (ds, _di, _de, _dd) = super::detail::update::update(
             super::detail::msg::DetailMessage::LoadCell { value },
@@ -131,7 +132,8 @@ fn route_to_list(
     if is_move || resets_detail_scroll {
         state.detail.scroll = 0;
     }
-    if is_move && state.detail_open
+    if is_move
+        && state.detail_open
         && let Some(value) = state.list.selected_cell()
     {
         let detail_state = std::mem::take(&mut state.detail);
@@ -164,7 +166,8 @@ mod tests {
         }
     }
 
-    fn sample_result_multirow() -> crate::features::sql_workspace::sql_tab::results::state::QueryResultData {
+    fn sample_result_multirow()
+    -> crate::features::sql_workspace::sql_tab::results::state::QueryResultData {
         crate::features::sql_workspace::sql_tab::results::state::QueryResultData {
             columns: vec![ColumnInfo {
                 name: "id".into(),
@@ -219,12 +222,14 @@ mod tests {
         state.list.result = Some(sample_result());
         state.list.row = 0;
         state.list.col = 0;
-        state.list.edit_target = Some(crate::features::sql_workspace::sql_tab::results::edit_sql::EditTarget {
-            schema: "public".into(),
-            table: "t".into(),
-            primary_keys: vec!["id".into()],
-            columns: vec!["id".into()],
-        });
+        state.list.edit_target = Some(
+            crate::features::sql_workspace::sql_tab::results::edit_sql::EditTarget {
+                schema: "public".into(),
+                table: "t".into(),
+                primary_keys: vec!["id".into()],
+                columns: vec!["id".into()],
+            },
+        );
         state.list.enter_edit();
         let (s, _i, _e, dirty) = update(msg, state);
         assert_eq!(s.list.selected_cell().as_deref(), Some("new_value"));

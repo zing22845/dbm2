@@ -43,7 +43,11 @@ pub enum ExplorerEffect {
 impl Effect for ExplorerEffect {
     type Action = ExplorerAction;
 
-    fn run(self, emit: Emitter<Self::Action>, services: Arc<Services>) -> BoxFuture<Vec<Self::Action>> {
+    fn run(
+        self,
+        emit: Emitter<Self::Action>,
+        services: Arc<Services>,
+    ) -> BoxFuture<Vec<Self::Action>> {
         Box::pin(async move {
             match self {
                 ExplorerEffect::Instances(e) => {

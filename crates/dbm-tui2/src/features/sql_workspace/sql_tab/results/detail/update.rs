@@ -1,10 +1,10 @@
 //! Results detail sub-module update.
 
+use super::super::detail_edit::detail_draft_dirty;
+use super::effect::DetailEffect;
+use super::intent::DetailIntent;
 use super::msg::DetailMessage;
 use super::state::DetailState;
-use super::intent::DetailIntent;
-use super::effect::DetailEffect;
-use super::super::detail_edit::detail_draft_dirty;
 
 pub fn update(
     msg: DetailMessage,

@@ -3,10 +3,10 @@
 //!
 //! Upstream: <https://github.com/ratatui/ratatui/issues/2526>
 
+use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Clear, Widget};
-use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
 /// Like [`Clear`], but also shrinks a wide glyph at `area.x - 1` and blanks an

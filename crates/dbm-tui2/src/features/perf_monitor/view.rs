@@ -4,10 +4,10 @@
 //! smoothed FPS and waste (redundant-redraw) percentage, right-aligned, in the
 //! original dbm's `"x.x fps · x% waste"` format.
 
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::Frame;
 
 use crate::common::view::theme::Theme;
 
@@ -37,7 +37,10 @@ pub fn render(frame: &mut Frame, theme: &Theme, area: Rect, state: &PerfState) {
         Color::Green
     };
     let line = Line::from(vec![
-        Span::styled(format!(" {:.1}fps", state.fps), Style::default().fg(p.muted)),
+        Span::styled(
+            format!(" {:.1}fps", state.fps),
+            Style::default().fg(p.muted),
+        ),
         Span::raw(" · "),
         Span::styled(
             format!("{:.0}% waste", waste),

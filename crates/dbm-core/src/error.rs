@@ -78,19 +78,13 @@ pub enum ApplicationError {
     PermissionDenied(String),
 
     #[error("timeout after {duration_ms}ms: {operation}")]
-    Timeout {
-        operation: String,
-        duration_ms: u64,
-    },
+    Timeout { operation: String, duration_ms: u64 },
 
     #[error("store error: {0}")]
     Store(String),
 
     #[error("driver error [{engine}]: {message}")]
-    Driver {
-        engine: String,
-        message: String,
-    },
+    Driver { engine: String, message: String },
 
     #[error("not found: {0}")]
     NotFound(String),
@@ -126,8 +120,12 @@ impl ApplicationError {
     pub fn severity(&self) -> ErrorSeverity {
         match self {
             Self::Database { severity, .. } => *severity,
-            Self::InvalidUrl(_) | Self::ConnectionFailed(_) | Self::QueryFailed(_)
-            | Self::PermissionDenied(_) | Self::Timeout { .. } | Self::Internal(_)
+            Self::InvalidUrl(_)
+            | Self::ConnectionFailed(_)
+            | Self::QueryFailed(_)
+            | Self::PermissionDenied(_)
+            | Self::Timeout { .. }
+            | Self::Internal(_)
             | Self::Driver { .. } => ErrorSeverity::Error,
             Self::Store(_) | Self::NotFound(_) | Self::AlreadyExists(_) | Self::Other(_) => {
                 ErrorSeverity::Error
@@ -156,9 +154,10 @@ impl From<ApplicationError> for DbmError {
             ApplicationError::ConnectionFailed(msg) => DbmError::Other(msg),
             ApplicationError::QueryFailed(msg) => DbmError::Other(msg),
             ApplicationError::PermissionDenied(msg) => DbmError::Other(msg),
-            ApplicationError::Timeout { operation, duration_ms } => {
-                DbmError::Other(format!("timeout after {duration_ms}ms: {operation}"))
-            }
+            ApplicationError::Timeout {
+                operation,
+                duration_ms,
+            } => DbmError::Other(format!("timeout after {duration_ms}ms: {operation}")),
             ApplicationError::Store(msg) => DbmError::Other(msg),
             ApplicationError::Driver { engine, message } => {
                 DbmError::Other(format!("[{engine}] {message}"))
