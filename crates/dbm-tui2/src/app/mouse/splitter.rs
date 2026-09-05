@@ -37,12 +37,6 @@ pub(crate) enum SplitterDrag {
     ),
 }
 
-/// The app body layout (explorer + vertical splitter + workspace), computed once
-/// from the same `app_body_layout` the render uses. This is the single geometry
-/// source for app-level mouse hit-testing, so every region it derives (explorer,
-/// workspace) agrees with the rendered splitter (no hard-coded 20% drift when
-/// the Explorer is resized).
-
 /// Resolve which splitter a press at `(x, y)` starts a drag on.
 ///
 /// Covers the splitters hit-tested **after** the click has re-mapped focus —
@@ -123,10 +117,6 @@ pub(crate) fn resolve_splitter_drag(
 
     None
 }
-
-/// Compute the Instance Workspace's **body** rect (active sub-pane content,
-/// inside the tab bar and parent footer), or `None` when IW is not shown.
-/// Mirrors `instance_workspace/view.rs`'s area splitting logic.
 
 #[cfg(test)]
 mod tests {

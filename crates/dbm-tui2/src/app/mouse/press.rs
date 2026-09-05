@@ -292,7 +292,136 @@ pub(crate) fn handle_down(
         let result = process_message_round(effect_runner, action_rx, msg, state);
         *dirty |= result.dirty;
     }
+    press_explorer_content(
+        mouse,
+        point,
+        size,
+        body_top,
+        body_h,
+        explorer_w,
+        is_double_click,
+        state,
+        effect_runner,
+        action_rx,
+        dirty,
+    )?;
+    press_sql(
+        mouse,
+        size,
+        is_double_click,
+        target_pane,
+        state,
+        effect_runner,
+        action_rx,
+        dirty,
+    )?;
+    press_discover(
+        mouse,
+        point,
+        size,
+        body_top,
+        body_h,
+        is_double_click,
+        state,
+        effect_runner,
+        action_rx,
+        dirty,
+        splitter_drag,
+    )?;
+    press_explorer_scrollbars(
+        mouse,
+        point,
+        size,
+        body_top,
+        body_h,
+        state,
+        effect_runner,
+        action_rx,
+        dirty,
+    )?;
+    press_iw(
+        mouse,
+        point,
+        size,
+        is_double_click,
+        state,
+        effect_runner,
+        action_rx,
+        dirty,
+    )?;
+    // Left-click on the header `Discover` button activates
+    // it, in addition to moving focus to the header.
+    let header_area = Rect::new(0, 0, size.width, 3);
+    let button_rect = crate::features::header::view::discover_button_rect(header_area);
+    let clicked = button_rect.is_some_and(|r| r.contains(point));
+    tracing::debug!(clicked, "header button click resolved");
+    if clicked {
+        // Clicking the header button is an explicit user
+        // intent: move focus to the Header pane (via the
+        // shell message), then dispatch Activate. Both go
+        // through `update` so every state change flows
+        // through the single state-transition channel.
+        let result = process_message_round(
+            effect_runner,
+            action_rx,
+            AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged { pane: Pane::Header }),
+            state,
+        );
+        *dirty |= result.dirty;
+        let result = process_message_round(
+            effect_runner,
+            action_rx,
+            AppMsg::Header(HeaderMsg::Message(HeaderMessage::Activate)),
+            state,
+        );
+        *dirty |= result.dirty;
+        tracing::debug!("dispatching HeaderMessage::Activate");
+    }
 
+    // Resolve the press to the *single* splitter being
+    // dragged (see `resolve_splitter_drag`). The
+    // discover splitter is resolved earlier — before the
+    // click re-maps focus — and already holds the slot
+    // when it hit, which is why this is skipped then.
+    if splitter_drag.is_none()
+        && let Some(target) = resolve_splitter_drag(state, size, point.x, point.y)
+    {
+        *splitter_drag = Some(target);
+        use crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter;
+        let sh = &mut state.splitter_hover;
+        match target {
+            SplitterDrag::App => sh.app_splitter_drag = true,
+            SplitterDrag::Explorer => sh.explorer_splitter_drag = true,
+            SplitterDrag::Discover => sh.discover_splitter_drag = true,
+            SplitterDrag::Sql(_, SqlSplitter::EditorResults) => sh.sql_editor_results_drag = true,
+            SplitterDrag::Sql(_, SqlSplitter::EditorHistory) => sh.sql_editor_history_drag = true,
+            SplitterDrag::Sql(_, SqlSplitter::HistoryDetail) => sh.sql_history_detail_drag = true,
+            SplitterDrag::Sql(_, SqlSplitter::ResultsDetail) => sh.sql_results_detail_drag = true,
+        }
+        tracing::debug!(?target, "splitter drag started");
+    }
+    Ok(())
+}
+
+/// Explorer content clicks: a single click moves the cursor to the
+/// clicked tree row, a double click activates the node. Scrollbar-track
+/// clicks are excluded so they start a drag instead.
+// Takes the shared press plumbing; a context struct is a possible
+// follow-up if the list keeps growing.
+#[allow(clippy::too_many_arguments)]
+fn press_explorer_content(
+    mouse: &MouseEvent,
+    point: Position,
+    size: Size,
+    body_top: u16,
+    body_h: u16,
+    explorer_w: u16,
+    is_double_click: bool,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    dirty: &mut bool,
+) -> anyhow::Result<()> {
     // A single click inside the explorer's instances or
     // objects tree moves the selection (cursor) to the
     // clicked row — UNLESS the click lands on a v_scrollbar
@@ -387,7 +516,24 @@ pub(crate) fn handle_down(
         let result = process_message_round(effect_runner, action_rx, select, state);
         *dirty |= result.dirty;
     }
+    Ok(())
+}
 
+/// SQL workspace clicks: route to a sub-pane, activate the clicked tab,
+/// or start a scrollbar / column-resize drag.
+// Takes the shared press plumbing; a context struct is a possible
+// follow-up if the list keeps growing.
+#[allow(clippy::too_many_arguments)]
+fn press_sql(
+    mouse: &MouseEvent,
+    size: Size,
+    is_double_click: bool,
+    target_pane: Option<Pane>,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    dirty: &mut bool,
+) -> anyhow::Result<()> {
     // A click inside the SQL workspace also routes to a
     // sub-pane (editor/history/results) or activates the
     // clicked tab, mirroring the mouse support of the
@@ -491,7 +637,27 @@ pub(crate) fn handle_down(
             *dirty |= result.dirty;
         }
     }
+    Ok(())
+}
 
+/// Discover popup clicks: switch sub-panes, select targets rows/cells and
+/// results rows, and start their scrollbar drags.
+// Takes the shared press plumbing; a context struct is a possible
+// follow-up if the list keeps growing.
+#[allow(clippy::too_many_arguments)]
+fn press_discover(
+    mouse: &MouseEvent,
+    point: Position,
+    size: Size,
+    body_top: u16,
+    body_h: u16,
+    is_double_click: bool,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    dirty: &mut bool,
+    splitter_drag: &mut Option<SplitterDrag>,
+) -> anyhow::Result<()> {
     // Inside the discover popup: map the click's row to a
     // discover child pane and switch focus to it. This is
     // suppressed while the close-confirmation dialog is
@@ -679,7 +845,25 @@ pub(crate) fn handle_down(
             *dirty |= r2.dirty;
         }
     }
+    Ok(())
+}
 
+/// Explorer objects/instances scrollbar drags (hit-tested before the
+/// generic row jump so a track click starts a drag instead).
+// Takes the shared press plumbing; a context struct is a possible
+// follow-up if the list keeps growing.
+#[allow(clippy::too_many_arguments)]
+fn press_explorer_scrollbars(
+    mouse: &MouseEvent,
+    point: Position,
+    size: Size,
+    body_top: u16,
+    body_h: u16,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    dirty: &mut bool,
+) -> anyhow::Result<()> {
     // Explorer objects v_scrollbar hit-test — runs BEFORE
     // the generic explorer_row_click_msgs jump so a
     // scrollbar click starts a drag instead of moving
@@ -826,7 +1010,24 @@ pub(crate) fn handle_down(
             *dirty |= result.dirty;
         }
     }
+    Ok(())
+}
 
+/// Instance-workspace clicks: connections list / edit form and overview
+/// rows, plus their scrollbar drags.
+// Takes the shared press plumbing; a context struct is a possible
+// follow-up if the list keeps growing.
+#[allow(clippy::too_many_arguments)]
+fn press_iw(
+    mouse: &MouseEvent,
+    point: Position,
+    size: Size,
+    is_double_click: bool,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    dirty: &mut bool,
+) -> anyhow::Result<()> {
     // IW connections v_scrollbar hit-test.
     if let Some(body) = iw_body_area_for_hit(size, state)
         && body.contains(point)
@@ -967,58 +1168,6 @@ pub(crate) fn handle_down(
             let result = process_message_round(effect_runner, action_rx, msg, state);
             *dirty |= result.dirty;
         }
-    }
-
-    // Left-click on the header `Discover` button activates
-    // it, in addition to moving focus to the header.
-    let header_area = Rect::new(0, 0, size.width, 3);
-    let button_rect = crate::features::header::view::discover_button_rect(header_area);
-    let clicked = button_rect.is_some_and(|r| r.contains(point));
-    tracing::debug!(clicked, "header button click resolved");
-    if clicked {
-        // Clicking the header button is an explicit user
-        // intent: move focus to the Header pane (via the
-        // shell message), then dispatch Activate. Both go
-        // through `update` so every state change flows
-        // through the single state-transition channel.
-        let result = process_message_round(
-            effect_runner,
-            action_rx,
-            AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged { pane: Pane::Header }),
-            state,
-        );
-        *dirty |= result.dirty;
-        let result = process_message_round(
-            effect_runner,
-            action_rx,
-            AppMsg::Header(HeaderMsg::Message(HeaderMessage::Activate)),
-            state,
-        );
-        *dirty |= result.dirty;
-        tracing::debug!("dispatching HeaderMessage::Activate");
-    }
-
-    // Resolve the press to the *single* splitter being
-    // dragged (see `resolve_splitter_drag`). The
-    // discover splitter is resolved earlier — before the
-    // click re-maps focus — and already holds the slot
-    // when it hit, which is why this is skipped then.
-    if splitter_drag.is_none()
-        && let Some(target) = resolve_splitter_drag(state, size, point.x, point.y)
-    {
-        *splitter_drag = Some(target);
-        use crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter;
-        let sh = &mut state.splitter_hover;
-        match target {
-            SplitterDrag::App => sh.app_splitter_drag = true,
-            SplitterDrag::Explorer => sh.explorer_splitter_drag = true,
-            SplitterDrag::Discover => sh.discover_splitter_drag = true,
-            SplitterDrag::Sql(_, SqlSplitter::EditorResults) => sh.sql_editor_results_drag = true,
-            SplitterDrag::Sql(_, SqlSplitter::EditorHistory) => sh.sql_editor_history_drag = true,
-            SplitterDrag::Sql(_, SqlSplitter::HistoryDetail) => sh.sql_history_detail_drag = true,
-            SplitterDrag::Sql(_, SqlSplitter::ResultsDetail) => sh.sql_results_detail_drag = true,
-        }
-        tracing::debug!(?target, "splitter drag started");
     }
     Ok(())
 }
