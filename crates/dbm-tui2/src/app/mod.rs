@@ -2,6 +2,8 @@
 //! central update dispatcher and the run loop.
 
 pub mod action;
+pub mod click;
+pub mod geometry;
 pub mod input;
 pub mod loop_mod;
 pub mod mouse;

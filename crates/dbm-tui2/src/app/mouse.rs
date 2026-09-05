@@ -31,6 +31,14 @@ use crate::features::global_footer::view as footer_view;
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 use crate::features::perf_monitor::backend::CountingBackend;
 
+use super::click::{
+    discover_subpane_for_click, explorer_child_areas, explorer_click_hits_row,
+    explorer_pane_for_click, explorer_row_click_msgs, is_explorer_toggle_click, sql_click_msgs,
+};
+use super::geometry::{
+    SplitterDrag, app_body_geometry, app_explorer_rect, iw_body_area_for_hit,
+    resolve_splitter_drag, sql_picker_area_for_hit, sql_tab_area_for_hit, workspace_rect_for_hit,
+};
 use super::loop_mod::process_message_round;
 
 /// The terminal the run loop drives: a cell-change counting backend wrapping
@@ -40,6 +48,14 @@ type AppTerminal = Terminal<CountingBackend<CrosstermBackend<std::io::Stdout>>>;
 /// Trackpad wheel debounce window: a macOS trackpad emits a burst of ticks per
 /// physical gesture, so ticks closer together than this collapse into one.
 const WHEEL_DEBOUNCE_MS: u128 = 15;
+
+/// Columns scrolled per horizontal wheel tick.
+///
+/// Horizontal content is typically far wider than it is tall, so reusing the
+/// vertical wheel's one-cell-per-tick granularity would make a wide table
+/// impractical to traverse. Three columns per tick keeps a gesture useful while
+/// staying fine-grained enough to land on a column.
+const WHEEL_H_STEP: i32 = 3;
 
 /// End every in-progress held-button drag at once: the active scrollbar, all
 /// splitter drag flags, and the results column-resize drag.
@@ -59,29 +75,6 @@ pub(crate) fn clear_active_drags(state: &mut AppState) {
     state.splitter_hover.results_col_resize_drag = None;
 }
 
-/// The splitter a mouse press resolved to, i.e. the one being drag-resized.
-///
-/// A single `Option` (rather than one flag per splitter) makes a drag mutually
-/// exclusive **by construction**: `Down` arms at most one target, and `Drag`
-/// dispatches on that target alone, so a drag can never resize a second split.
-///
-/// Each variant also fixes the axis its drag reads — a vertical splitter owns a
-/// width (reads `x`), a horizontal one owns a height (reads `y`) — so dragging
-/// a splitter cannot move the other dimension either.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SplitterDrag {
-    /// App-level Explorer / workspace splitter (vertical: width, reads `x`).
-    App,
-    /// Explorer instances / objects splitter (horizontal: height, reads `y`).
-    Explorer,
-    /// Discover targets / results splitter (horizontal: height, reads `y`).
-    Discover,
-    /// A SQL-tab splitter inside the given tab (axis depends on the variant).
-    Sql(
-        usize,
-        crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter,
-    ),
-}
 /// Transient mouse-gesture state, owned by the run loop.
 ///
 /// These values describe *the gesture in progress*, not the application: which
@@ -232,69 +225,23 @@ pub(crate) fn handle_mouse_event(
                     Pane::Discover(crate::app_shell::nav::DiscoverPane::Targets)
                 ) && !state.discover.close_confirm =>
             {
-                // Wheel debounce: collapse macOS trackpad burst events
-                // so each physical tick maps to one MoveUp/Down.
-                // Shift+wheel is the platform convention for
-                // horizontal scrolling; some terminals instead
-                // report the gesture natively as ScrollLeft/Right.
-                let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
-                let now = std::time::Instant::now();
-                if let Some((t, d, h)) = last_wheel
-                    && d == dir
-                    && h == horizontal
-                    && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                if handle_wheel_discover_targets(
+                    &mouse,
+                    terminal,
+                    state,
+                    effect_runner,
+                    action_rx,
+                    point,
+                    &mut dirty,
+                    &mut last_wheel,
+                    &mut idle_iterations,
+                )? == WheelOutcome::Debounced
                 {
-                    idle_iterations = 0;
                     skip_iteration = true;
                     break 'mouse;
                 }
-                last_wheel = Some((now, dir, horizontal));
-
-                let size = terminal.size()?;
-                let footer_h = footer_view::footer_height(&state.footer, size.width);
-                let body_top = 3u16;
-                let body_h = size
-                    .height
-                    .saturating_sub(body_top)
-                    .saturating_sub(footer_h);
-                if let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
-                    && let discover_popup =
-                        crate::common::view::modal::popup_rect(workspace, 75, 75)
-                    && let body = crate::features::discover::view::discover_body_area(
-                        discover_popup,
-                        &state.discover,
-                    )
-                    && !body.is_empty()
-                    && let layout = crate::features::discover::splitter::view::discover_body_layout(
-                        body,
-                        state.discover.splitter.targets_height,
-                    )
-                    && layout.targets.contains(point)
-                {
-                    use crate::features::discover::targets::msg::{TargetsMessage, TargetsMsg};
-                    // No horizontal scroll in this pane, so a
-                    // shift-wheel falls through to the vertical axis.
-                    let msg = match mouse.kind {
-                        MouseEventKind::ScrollUp => {
-                            AppMsg::Discover(crate::features::discover::msg::DiscoverMsg::Message(
-                                crate::features::discover::msg::DiscoverMessage::Targets(
-                                    TargetsMsg::Message(TargetsMessage::MoveUp),
-                                ),
-                            ))
-                        }
-                        MouseEventKind::ScrollDown => {
-                            AppMsg::Discover(crate::features::discover::msg::DiscoverMsg::Message(
-                                crate::features::discover::msg::DiscoverMessage::Targets(
-                                    TargetsMsg::Message(TargetsMessage::MoveDown),
-                                ),
-                            ))
-                        }
-                        _ => unreachable!(),
-                    };
-                    let result = process_message_round(effect_runner, action_rx, msg, state);
-                    dirty |= result.dirty;
-                }
             }
+
             // Scroll wheel: route to the discover results pane
             // when focus is on Results and mouse is inside it.
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
@@ -303,68 +250,22 @@ pub(crate) fn handle_mouse_event(
                     Pane::Discover(crate::app_shell::nav::DiscoverPane::Results)
                 ) && !state.discover.close_confirm =>
             {
-                // Shift+wheel is the platform convention for
-                // horizontal scrolling; some terminals instead
-                // report the gesture natively as ScrollLeft/Right.
-                let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
-                let now = std::time::Instant::now();
-                if let Some((t, d, h)) = last_wheel
-                    && d == dir
-                    && h == horizontal
-                    && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                if handle_wheel_discover_results(
+                    &mouse,
+                    terminal,
+                    state,
+                    effect_runner,
+                    action_rx,
+                    &mut dirty,
+                    &mut last_wheel,
+                    &mut idle_iterations,
+                )? == WheelOutcome::Debounced
                 {
-                    idle_iterations = 0;
                     skip_iteration = true;
                     break 'mouse;
                 }
-                last_wheel = Some((now, dir, horizontal));
-
-                let size = terminal.size()?;
-                let footer_h = footer_view::footer_height(&state.footer, size.width);
-                let body_top = 3u16;
-                let body_h = size
-                    .height
-                    .saturating_sub(body_top)
-                    .saturating_sub(footer_h);
-                let point = ratatui::layout::Position::new(mouse.column, mouse.row);
-                if let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
-                    && let discover_popup =
-                        crate::common::view::modal::popup_rect(workspace, 75, 75)
-                    && let body = crate::features::discover::view::discover_body_area(
-                        discover_popup,
-                        &state.discover,
-                    )
-                    && !body.is_empty()
-                    && let layout = crate::features::discover::splitter::view::discover_body_layout(
-                        body,
-                        state.discover.splitter.targets_height,
-                    )
-                    && layout.results.contains(point)
-                {
-                    use crate::features::discover::results::msg::{ResultsMessage, ResultsMsg};
-                    // No horizontal scroll in this pane, so a
-                    // shift-wheel falls through to the vertical axis.
-                    let msg = match mouse.kind {
-                        MouseEventKind::ScrollUp => {
-                            AppMsg::Discover(crate::features::discover::msg::DiscoverMsg::Message(
-                                crate::features::discover::msg::DiscoverMessage::Results(
-                                    ResultsMsg::Message(ResultsMessage::MoveUp),
-                                ),
-                            ))
-                        }
-                        MouseEventKind::ScrollDown => {
-                            AppMsg::Discover(crate::features::discover::msg::DiscoverMsg::Message(
-                                crate::features::discover::msg::DiscoverMessage::Results(
-                                    ResultsMsg::Message(ResultsMessage::MoveDown),
-                                ),
-                            ))
-                        }
-                        _ => unreachable!(),
-                    };
-                    let result = process_message_round(effect_runner, action_rx, msg, state);
-                    dirty |= result.dirty;
-                }
             }
+
             // Scroll wheel: route to explorer objects pane when
             // focus is on Explorer Objects and mouse is inside it.
             MouseEventKind::ScrollUp
@@ -376,59 +277,22 @@ pub(crate) fn handle_mouse_event(
                     Pane::Explorer(crate::app_shell::nav::ExplorerPane::Objects)
                 ) =>
             {
-                // Shift+wheel is the platform convention for
-                // horizontal scrolling; some terminals instead
-                // report the gesture natively as ScrollLeft/Right.
-                let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
-                let now = std::time::Instant::now();
-                if let Some((t, d, h)) = last_wheel
-                    && d == dir
-                    && h == horizontal
-                    && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                if handle_wheel_explorer_objects(
+                    &mouse,
+                    terminal,
+                    state,
+                    effect_runner,
+                    action_rx,
+                    &mut dirty,
+                    &mut last_wheel,
+                    &mut idle_iterations,
+                )? == WheelOutcome::Debounced
                 {
-                    idle_iterations = 0;
                     skip_iteration = true;
                     break 'mouse;
                 }
-                last_wheel = Some((now, dir, horizontal));
-
-                let size = terminal.size()?;
-                let footer_h = footer_view::footer_height(&state.footer, size.width);
-                let body_top = 3u16;
-                let body_h = size
-                    .height
-                    .saturating_sub(body_top)
-                    .saturating_sub(footer_h);
-                let point = ratatui::layout::Position::new(mouse.column, mouse.row);
-                if let Some(explorer) = app_explorer_rect(size, body_top, body_h, state)
-                    && let (_inst_area, objs_area) =
-                        explorer_child_areas(explorer, state.explorer.splitter.instances_height)
-                    && objs_area.contains(point)
-                {
-                    use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
-                    use crate::features::explorer::objects::msg::{ObjectsMessage, ObjectsMsg};
-                    // Shift+wheel scrolls the tree sideways; a bare
-                    // wheel keeps moving the cursor up/down.
-                    let msg = if horizontal {
-                        AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
-                            ObjectsMsg::Message(ObjectsMessage::ScrollHorizontal {
-                                delta: (dir * WHEEL_H_STEP) as i16,
-                                term_width: size.width,
-                            }),
-                        )))
-                    } else if dir < 0 {
-                        AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
-                            ObjectsMsg::Message(ObjectsMessage::MoveUp),
-                        )))
-                    } else {
-                        AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
-                            ObjectsMsg::Message(ObjectsMessage::MoveDown),
-                        )))
-                    };
-                    let result = process_message_round(effect_runner, action_rx, msg, state);
-                    dirty |= result.dirty;
-                }
             }
+
             // Scroll wheel: route to explorer instances pane when
             // focus is on Explorer Instances and mouse is inside it.
             MouseEventKind::ScrollUp
@@ -440,61 +304,22 @@ pub(crate) fn handle_mouse_event(
                     Pane::Explorer(crate::app_shell::nav::ExplorerPane::Instances)
                 ) =>
             {
-                // Shift+wheel is the platform convention for
-                // horizontal scrolling; some terminals instead
-                // report the gesture natively as ScrollLeft/Right.
-                let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
-                let now = std::time::Instant::now();
-                if let Some((t, d, h)) = last_wheel
-                    && d == dir
-                    && h == horizontal
-                    && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                if handle_wheel_explorer_instances(
+                    &mouse,
+                    terminal,
+                    state,
+                    effect_runner,
+                    action_rx,
+                    &mut dirty,
+                    &mut last_wheel,
+                    &mut idle_iterations,
+                )? == WheelOutcome::Debounced
                 {
-                    idle_iterations = 0;
                     skip_iteration = true;
                     break 'mouse;
                 }
-                last_wheel = Some((now, dir, horizontal));
-
-                let size = terminal.size()?;
-                let footer_h = footer_view::footer_height(&state.footer, size.width);
-                let body_top = 3u16;
-                let body_h = size
-                    .height
-                    .saturating_sub(body_top)
-                    .saturating_sub(footer_h);
-                let point = ratatui::layout::Position::new(mouse.column, mouse.row);
-                if let Some(explorer) = app_explorer_rect(size, body_top, body_h, state)
-                    && let (inst_area, _objs_area) =
-                        explorer_child_areas(explorer, state.explorer.splitter.instances_height)
-                    && inst_area.contains(point)
-                {
-                    use crate::features::explorer::instances::msg::{
-                        InstancesMessage, InstancesMsg,
-                    };
-                    use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
-                    // Shift+wheel scrolls the tree sideways; a bare
-                    // wheel keeps moving the cursor up/down.
-                    let msg = if horizontal {
-                        AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
-                            InstancesMsg::Message(InstancesMessage::ScrollHorizontal {
-                                delta: (dir * WHEEL_H_STEP) as i16,
-                                term_width: size.width,
-                            }),
-                        )))
-                    } else if dir < 0 {
-                        AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
-                            InstancesMsg::Message(InstancesMessage::MoveUp),
-                        )))
-                    } else {
-                        AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
-                            InstancesMsg::Message(InstancesMessage::MoveDown),
-                        )))
-                    };
-                    let result = process_message_round(effect_runner, action_rx, msg, state);
-                    dirty |= result.dirty;
-                }
             }
+
             // Scroll wheel: route to IW connections when focus is on
             // InstanceWorkspace Connections AND mouse is inside IW body.
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
@@ -503,50 +328,22 @@ pub(crate) fn handle_mouse_event(
                     Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::Connections)
                 ) =>
             {
-                // Shift+wheel is the platform convention for
-                // horizontal scrolling; some terminals instead
-                // report the gesture natively as ScrollLeft/Right.
-                let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
-                let now = std::time::Instant::now();
-                if let Some((t, d, h)) = last_wheel
-                    && d == dir
-                    && h == horizontal
-                    && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                if handle_wheel_iw_connections(
+                    &mouse,
+                    terminal,
+                    state,
+                    effect_runner,
+                    action_rx,
+                    &mut dirty,
+                    &mut last_wheel,
+                    &mut idle_iterations,
+                )? == WheelOutcome::Debounced
                 {
-                    idle_iterations = 0;
                     skip_iteration = true;
                     break 'mouse;
                 }
-                last_wheel = Some((now, dir, horizontal));
-
-                let size = terminal.size()?;
-                if let Some(body) = iw_body_area_for_hit(size, state)
-                    && let point = ratatui::layout::Position::new(mouse.column, mouse.row)
-                    && body.contains(point)
-                {
-                    use crate::features::instance_workspace::connections::msg::{
-                        ConnectionsMessage, ConnectionsMsg,
-                    };
-                    use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
-                    // No horizontal scroll in this pane, so a
-                    // shift-wheel falls through to the vertical axis.
-                    let msg = match mouse.kind {
-                        MouseEventKind::ScrollUp => {
-                            AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
-                                ConnectionsMsg::Message(ConnectionsMessage::MoveUp),
-                            )))
-                        }
-                        MouseEventKind::ScrollDown => {
-                            AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
-                                ConnectionsMsg::Message(ConnectionsMessage::MoveDown),
-                            )))
-                        }
-                        _ => unreachable!(),
-                    };
-                    let result = process_message_round(effect_runner, action_rx, msg, state);
-                    dirty |= result.dirty;
-                }
             }
+
             // Scroll wheel: route to IW overview when focus is on
             // InstanceWorkspace Overview AND mouse is inside IW body.
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
@@ -555,40 +352,22 @@ pub(crate) fn handle_mouse_event(
                     Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::Overview)
                 ) =>
             {
-                // Shift+wheel is the platform convention for
-                // horizontal scrolling; some terminals instead
-                // report the gesture natively as ScrollLeft/Right.
-                let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
-                let now = std::time::Instant::now();
-                if let Some((t, d, h)) = last_wheel
-                    && d == dir
-                    && h == horizontal
-                    && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                if handle_wheel_iw_overview(
+                    &mouse,
+                    terminal,
+                    state,
+                    effect_runner,
+                    action_rx,
+                    &mut dirty,
+                    &mut last_wheel,
+                    &mut idle_iterations,
+                )? == WheelOutcome::Debounced
                 {
-                    idle_iterations = 0;
                     skip_iteration = true;
                     break 'mouse;
                 }
-                last_wheel = Some((now, dir, horizontal));
-
-                let size = terminal.size()?;
-                if let Some(body) = iw_body_area_for_hit(size, state)
-                    && let point = ratatui::layout::Position::new(mouse.column, mouse.row)
-                    && body.contains(point)
-                {
-                    use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
-                    use crate::features::instance_workspace::overview::msg::{
-                        OverviewMessage, OverviewMsg,
-                    };
-                    // No horizontal scroll in this pane, so a
-                    // shift-wheel falls through to the vertical axis.
-                    let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Overview(
-                        OverviewMsg::Message(OverviewMessage::MoveCursor(dir)),
-                    )));
-                    let result = process_message_round(effect_runner, action_rx, msg, state);
-                    dirty |= result.dirty;
-                }
             }
+
             // Scroll wheel: route to the history list when the
             // mouse is inside it, matching discover targets'
             // focus+position gating. Moving the cursor pushes the
@@ -601,153 +380,23 @@ pub(crate) fn handle_mouse_event(
             | MouseEventKind::ScrollRight
                 if matches!(state.focus, Pane::SQLWorkspace) =>
             {
-                // Wheel debounce — same as discover targets above.
-                // Shift+wheel is the platform convention for
-                // horizontal scrolling; some terminals instead
-                // report the gesture natively as ScrollLeft/Right.
-                let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
-                let now = std::time::Instant::now();
-                if let Some((t, d, h)) = last_wheel
-                    && d == dir
-                    && h == horizontal
-                    && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+                if handle_wheel_sql(
+                    &mouse,
+                    terminal,
+                    state,
+                    effect_runner,
+                    action_rx,
+                    point,
+                    &mut dirty,
+                    &mut last_wheel,
+                    &mut idle_iterations,
+                )? == WheelOutcome::Debounced
                 {
-                    idle_iterations = 0;
                     skip_iteration = true;
                     break 'mouse;
                 }
-                last_wheel = Some((now, dir, horizontal));
-
-                if let Some(size) = terminal.size().ok()
-                    && let Some(tab_area) = sql_tab_area_for_hit(size, state)
-                    && let Some(tab_idx) = state.sql.sql_tab.active_tab
-                    && let Some(tab) = state.sql.sql_tab.tabs.get(tab_idx)
-                {
-                    use crate::features::sql_workspace::sql_tab::layout::sql_tab_layout;
-                    let layout = sql_tab_layout(
-                        tab_area,
-                        tab.splitter.editor_top_height,
-                        tab.splitter.history_pane_width,
-                    );
-                    // Route wheel to the editor body first (top-left
-                    // zone), then to history (right/bottom zone).
-                    // The two panes do not overlap.
-                    if layout.editor.contains(point) {
-                        use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
-                        use crate::features::sql_workspace::sql_tab::editor::msg::{
-                            EditorMessage, EditorMsg,
-                        };
-                        use crate::features::sql_workspace::sql_tab::msg::{
-                            SqlTabMessage, SqlTabMsg,
-                        };
-                        // Shift+wheel scrolls the editor sideways;
-                        // a bare wheel keeps scrolling by lines.
-                        let delta: i32 = if horizontal {
-                            dir * WHEEL_H_STEP
-                        } else {
-                            dir * 3
-                        };
-                        let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
-                            SqlTabMsg::Message(SqlTabMessage::Editor {
-                                tab_id: tab_idx,
-                                msg: EditorMsg::Message(if horizontal {
-                                    EditorMessage::ScrollH { delta }
-                                } else {
-                                    EditorMessage::ScrollV { delta }
-                                }),
-                            }),
-                        )));
-                        let result = process_message_round(effect_runner, action_rx, msg, state);
-                        dirty |= result.dirty;
-                    } else {
-                        // When detail is visible the History zone extends
-                        // leftward into the editor. For wheel routing we
-                        // compute the full zone rect (detail + list +
-                        // splitter) so wheel works anywhere inside it.
-                        use crate::features::sql_workspace::sql_tab::session::session_view_key;
-                        let (instance, connection) = session_view_key(&tab.session);
-                        let detail_visible = crate::features::sql_workspace::sql_tab::history::detail_visible(
-                                        tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History,
-                                        &tab.history.list,
-                                        &state.sql.sql_tab.history_store,
-                                        &instance,
-                                        &connection,
-                                    );
-                        let zone_rect = if detail_visible {
-                            use crate::features::sql_workspace::sql_tab::history::splitter::view::{history_zone_x, history_zone_width};
-                            let zone_x = history_zone_x(
-                                tab_area,
-                                &layout,
-                                tab.history.splitter.detail_pane_width,
-                            );
-                            let zone_w =
-                                history_zone_width(&layout, tab.history.splitter.detail_pane_width);
-                            ratatui::layout::Rect::new(
-                                zone_x,
-                                layout.history.y,
-                                zone_w,
-                                layout.history.height,
-                            )
-                        } else {
-                            layout.history
-                        };
-                        if zone_rect.contains(point) {
-                            use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
-                            use crate::features::sql_workspace::sql_tab::history::msg::{
-                                HistoryMessage, HistoryMsg,
-                            };
-                            use crate::features::sql_workspace::sql_tab::msg::{
-                                SqlTabMessage, SqlTabMsg,
-                            };
-                            // Shift+wheel scrolls the history rows
-                            // sideways; a bare wheel moves the cursor.
-                            let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
-                                SqlTabMsg::Message(SqlTabMessage::History {
-                                    tab_id: tab_idx,
-                                    msg: HistoryMsg::Message(if horizontal {
-                                        HistoryMessage::ScrollHScroll {
-                                            delta: dir * WHEEL_H_STEP,
-                                        }
-                                    } else {
-                                        HistoryMessage::MoveCursor { delta: dir }
-                                    }),
-                                }),
-                            )));
-                            let result =
-                                process_message_round(effect_runner, action_rx, msg, state);
-                            dirty |= result.dirty;
-                        } else if layout.results.contains(point) {
-                            // Scroll wheel on the results pane: move
-                            // the cell selection up/down. The view
-                            // auto-adjusts v_scroll to keep cursor visible.
-                            use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
-                            use crate::features::sql_workspace::sql_tab::msg::{
-                                SqlTabMessage, SqlTabMsg,
-                            };
-                            use crate::features::sql_workspace::sql_tab::results::msg::{
-                                ResultsMessage, ResultsMsg,
-                            };
-                            // Shift+wheel scrolls the grid sideways;
-                            // a bare wheel moves the cell selection.
-                            let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
-                                SqlTabMsg::Message(SqlTabMessage::Results {
-                                    tab_id: tab_idx,
-                                    msg: ResultsMsg::Message(if horizontal {
-                                        ResultsMessage::ScrollHScroll {
-                                            delta: dir * WHEEL_H_STEP,
-                                        }
-                                    } else {
-                                        ResultsMessage::MoveSelection { dr: dir, dc: 0 }
-                                    }),
-                                }),
-                            )));
-                            let result =
-                                process_message_round(effect_runner, action_rx, msg, state);
-                            dirty |= result.dirty;
-                        }
-                    }
-                }
             }
+
             _ => {
                 tracing::trace!(
                     is_left_down = matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)),
@@ -2257,300 +1906,6 @@ fn handle_moved(
     Ok(())
 }
 
-/// The app body layout (explorer + vertical splitter + workspace), computed once
-/// from the same `app_body_layout` the render uses. This is the single geometry
-/// source for app-level mouse hit-testing, so every region it derives (explorer,
-/// workspace) agrees with the rendered splitter (no hard-coded 20% drift when
-/// the Explorer is resized).
-pub(crate) fn app_body_geometry(
-    size: ratatui::layout::Size,
-    body_top: u16,
-    body_h: u16,
-    state: &AppState,
-) -> Option<crate::features::app_splitter::view::AppBodyLayout> {
-    let body_area = Rect::new(0, body_top, size.width, body_h);
-    let layout = crate::features::app_splitter::view::app_body_layout(
-        body_area,
-        state.splitter.explorer_pane_width,
-    );
-    (layout.workspace.width > 0 && layout.explorer.width > 0).then_some(layout)
-}
-
-/// The workspace region of the app body (right of the Explorer / workspace
-/// splitter). Returns `None` when the body is too small to lay out both panes.
-pub(crate) fn workspace_rect_for_hit(
-    size: ratatui::layout::Size,
-    body_top: u16,
-    body_h: u16,
-    state: &AppState,
-) -> Option<ratatui::layout::Rect> {
-    app_body_geometry(size, body_top, body_h, state).map(|g| g.workspace)
-}
-
-/// The Explorer column rect (the left pane of the app body splitter).
-pub(crate) fn app_explorer_rect(
-    size: ratatui::layout::Size,
-    body_top: u16,
-    body_h: u16,
-    state: &AppState,
-) -> Option<ratatui::layout::Rect> {
-    app_body_geometry(size, body_top, body_h, state).map(|g| g.explorer)
-}
-
-/// Compute the SQL tab region (tab bar + child panes) for mouse hit-testing,
-/// mirroring `sql_workspace/view.rs` (workspace inner minus its tab footer).
-/// Returns `None` when the SQL workspace is not the region being shown.
-pub(crate) fn sql_tab_area_for_hit(
-    size: ratatui::layout::Size,
-    state: &AppState,
-) -> Option<ratatui::layout::Rect> {
-    if state.modal.is_some()
-        || matches!(state.focus, Pane::Discover(_))
-        || state.instance_workspace_open()
-        || state.sql.sql_tab.tabs.is_empty()
-    {
-        return None;
-    }
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
-    let body_top = 3u16;
-    let body_h = size
-        .height
-        .saturating_sub(body_top)
-        .saturating_sub(footer_h);
-    if body_h < 3 {
-        return None;
-    }
-    let workspace = workspace_rect_for_hit(size, body_top, body_h, state)?;
-    // Outer " SQL Workspace " border (1 col/row).
-    let inner = Rect::new(
-        workspace.x.saturating_add(1),
-        workspace.y.saturating_add(1),
-        workspace.width.saturating_sub(2),
-        workspace.height.saturating_sub(2),
-    );
-    // Workspace-level tab footer at the bottom of the inner region.
-    let footer_h = crate::common::view::hints::footer_height(
-        &crate::common::view::hints::sql_workspace_footer_text(),
-        inner.width,
-    );
-    Some(Rect::new(
-        inner.x,
-        inner.y,
-        inner.width,
-        inner.height.saturating_sub(footer_h),
-    ))
-}
-
-/// Resolve which splitter a press at `(x, y)` starts a drag on.
-///
-/// Covers the splitters hit-tested **after** the click has re-mapped focus —
-/// the app-level Explorer/workspace one, the Explorer instances/objects one and
-/// the SQL-tab ones. (The discover splitter is resolved earlier, while focus is
-/// still the pre-click one, so it is deliberately not part of this function.)
-///
-/// Candidates are checked in a fixed priority order and the first hit wins, so
-/// a press arms **at most one** splitter: a single drag can never resize two
-/// splits, and each target later reads only the axis it owns. Every candidate
-/// is gated on actually being rendered, so a drag cannot start on a splitter
-/// the user cannot see.
-pub(crate) fn resolve_splitter_drag(
-    state: &AppState,
-    size: ratatui::layout::Size,
-    x: u16,
-    y: u16,
-) -> Option<SplitterDrag> {
-    let body_top = 3u16;
-    let body_h = size
-        .height
-        .saturating_sub(body_top)
-        .saturating_sub(footer_view::footer_height(&state.footer, size.width));
-    if body_h < 3 {
-        return None;
-    }
-
-    // The app-level Explorer / workspace splitter is draggable from any focus
-    // pane: it separates two peer top-level panes rather than the panes of one
-    // feature.
-    {
-        let body_area = Rect::new(0, body_top, size.width, body_h);
-        let layout = crate::features::app_splitter::view::app_body_layout(
-            body_area,
-            state.splitter.explorer_pane_width,
-        );
-        if crate::features::app_splitter::view::splitter_at(&layout, x, y) {
-            return Some(SplitterDrag::App);
-        }
-    }
-
-    // The Explorer instances / objects splitter: only while the Explorer owns
-    // focus, since the split lives inside the Explorer pane.
-    if matches!(state.focus, Pane::Explorer(_))
-        && let Some(explorer) = app_explorer_rect(size, body_top, body_h, state)
-        && explorer.height >= 3
-    {
-        let inner = Rect::new(
-            explorer.x.saturating_add(1),
-            explorer.y.saturating_add(1),
-            explorer.width.saturating_sub(2),
-            explorer.height.saturating_sub(2),
-        );
-        let layout = crate::features::explorer::splitter::view::explorer_body_layout(
-            inner,
-            state.explorer.splitter.instances_height,
-        );
-        if crate::features::explorer::splitter::view::splitter_at(&layout, x, y) {
-            return Some(SplitterDrag::Explorer);
-        }
-    }
-
-    // The SQL-tab splitters: only while the SQL workspace owns focus. The
-    // feature resolves the point to a splitter; the shell only supplies the
-    // area and the coordinates.
-    if state.focus == Pane::SQLWorkspace
-        && let Some(tab_area) = sql_tab_area_for_hit(size, state)
-        && let Some((tab_id, splitter)) =
-            crate::features::sql_workspace::sql_tab::splitter::view::sql_tab_splitter_at(
-                &state.sql.sql_tab,
-                tab_area,
-                x,
-                y,
-            )
-    {
-        return Some(SplitterDrag::Sql(tab_id, splitter));
-    }
-
-    None
-}
-
-/// Compute the Instance Workspace's **body** rect (active sub-pane content,
-/// inside the tab bar and parent footer), or `None` when IW is not shown.
-/// Mirrors `instance_workspace/view.rs`'s area splitting logic.
-pub(crate) fn iw_body_area_for_hit(
-    size: ratatui::layout::Size,
-    state: &AppState,
-) -> Option<ratatui::layout::Rect> {
-    if !state.explorer.instances.active_is_instance()
-        || state.modal.is_some()
-        || matches!(state.focus, Pane::Discover(_))
-    {
-        return None;
-    }
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
-    let body_top = 3u16;
-    let body_h = size
-        .height
-        .saturating_sub(body_top)
-        .saturating_sub(footer_h);
-    if body_h < 5 {
-        return None;
-    }
-    let workspace = workspace_rect_for_hit(size, body_top, body_h, state)?;
-    // IW outer Block (1 col/row border).
-    let inner = ratatui::layout::Rect::new(
-        workspace.x.saturating_add(1),
-        workspace.y.saturating_add(1),
-        workspace.width.saturating_sub(2),
-        workspace.height.saturating_sub(2),
-    );
-    if inner.width == 0 || inner.height < 3 {
-        return None;
-    }
-    // Footer height matches instance_workspace/view.rs's wrapped-line-count
-    // calculation for IW's pane footer + overview status (overview status only
-    // when the active tab is Overview).
-    let mut footer_text = crate::common::view::hints::instance_workspace_footer_text(state.iw.pane);
-    if matches!(state.iw.pane, crate::app_shell::nav::IwPane::Overview)
-        && let Some(status) = state.iw.overview.status.as_deref()
-        && !status.is_empty()
-    {
-        footer_text.push('\n');
-        footer_text.push_str(status);
-    }
-    use crate::common::utils::text_width::wrapped_line_count;
-    let footer_h = wrapped_line_count(&footer_text, inner.width)
-        .max(1)
-        .min(inner.height.saturating_sub(2).max(1));
-    // Split: tab bar (1) + body + footer.
-    let chunks = ratatui::layout::Layout::default()
-        .direction(ratatui::layout::Direction::Vertical)
-        .constraints([
-            ratatui::layout::Constraint::Length(1),
-            ratatui::layout::Constraint::Min(0),
-            ratatui::layout::Constraint::Length(footer_h),
-        ])
-        .split(inner);
-    Some(chunks[1])
-}
-
-/// Compute the context picker overlay rect (in the active tab's editor) for
-/// mouse hit-testing, or `None` when the picker is closed / not shown.
-pub(crate) fn sql_picker_area_for_hit(
-    size: ratatui::layout::Size,
-    state: &AppState,
-) -> Option<ratatui::layout::Rect> {
-    if state.modal.is_some()
-        || matches!(state.focus, Pane::Discover(_))
-        || state.instance_workspace_open()
-        || state.sql.sql_tab.tabs.is_empty()
-    {
-        return None;
-    }
-    let tab = state.sql.sql_tab.active_tab()?;
-    if !tab.editor.context_picker.open {
-        return None;
-    }
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
-    let body_top = 3u16;
-    let body_h = size
-        .height
-        .saturating_sub(body_top)
-        .saturating_sub(footer_h);
-    if body_h < 3 {
-        return None;
-    }
-    let workspace = workspace_rect_for_hit(size, body_top, body_h, state)?;
-    // Outer " SQL Workspace " border (1 col/row).
-    let inner = Rect::new(
-        workspace.x.saturating_add(1),
-        workspace.y.saturating_add(1),
-        workspace.width.saturating_sub(2),
-        workspace.height.saturating_sub(2),
-    );
-    let footer_h = crate::common::view::hints::footer_height(
-        &crate::common::view::hints::sql_workspace_footer_text(),
-        inner.width,
-    );
-    let sql_tab_area = Rect::new(
-        inner.x,
-        inner.y,
-        inner.width,
-        inner.height.saturating_sub(footer_h),
-    );
-    if sql_tab_area.height < 1 {
-        return None;
-    }
-    // The SQL tab's body sits below its 1-row tab bar.
-    let sql_body = Rect::new(
-        sql_tab_area.x,
-        sql_tab_area.y.saturating_add(1),
-        sql_tab_area.width,
-        sql_tab_area.height.saturating_sub(1),
-    );
-    let layout = crate::features::sql_workspace::sql_tab::layout::sql_tab_layout(
-        sql_body,
-        tab.splitter.editor_top_height,
-        tab.splitter.history_pane_width,
-    );
-    crate::features::sql_workspace::sql_tab::editor::view::context_picker_area(layout.editor, true)
-}
-/// Columns scrolled per horizontal wheel tick.
-///
-/// Horizontal content is typically far wider than it is tall, so reusing the
-/// vertical wheel's one-cell-per-tick granularity would make a wide table
-/// impractical to traverse. Three columns per tick keeps a gesture useful
-/// while staying fine-grained enough to land on a column.
-const WHEEL_H_STEP: i32 = 3;
-
 /// Resolve a wheel tick into `(horizontal, delta)`.
 ///
 /// `delta` is `-1`/`+1` per physical tick; callers scale it to the step size
@@ -2561,6 +1916,536 @@ const WHEEL_H_STEP: i32 = 3;
 /// terminals instead report the gesture natively as `ScrollLeft`/`ScrollRight`
 /// with no modifier at all, which is horizontal either way — hence the two
 /// spellings of "scroll sideways" both map to `horizontal == true`.
+/// Result of a wheel handler: whether the tick was swallowed by the trackpad
+/// debounce, in which case the run loop skips the rest of its iteration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WheelOutcome {
+    /// The tick was applied to the focused pane.
+    Handled,
+    /// The tick was a duplicate from a trackpad burst: ignore it and skip the
+    /// rest of the loop iteration (no repaint).
+    Debounced,
+}
+
+/// Wheel over the discover targets editor: vertical paging.
+#[allow(clippy::too_many_arguments)]
+fn handle_wheel_discover_targets(
+    mouse: &MouseEvent,
+    terminal: &mut AppTerminal,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    point: Position,
+    dirty: &mut bool,
+    last_wheel: &mut Option<(Instant, i32, bool)>,
+    idle_iterations: &mut u32,
+) -> anyhow::Result<WheelOutcome> {
+    // Wheel debounce: collapse macOS trackpad burst events
+    // so each physical tick maps to one MoveUp/Down.
+    // Shift+wheel is the platform convention for
+    // horizontal scrolling; some terminals instead
+    // report the gesture natively as ScrollLeft/Right.
+    let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
+    let now = std::time::Instant::now();
+    if let Some((t, d, h)) = *last_wheel
+        && d == dir
+        && h == horizontal
+        && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+    {
+        *idle_iterations = 0;
+        return Ok(WheelOutcome::Debounced);
+    }
+    *last_wheel = Some((now, dir, horizontal));
+
+    let size = terminal.size()?;
+    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let body_top = 3u16;
+    let body_h = size
+        .height
+        .saturating_sub(body_top)
+        .saturating_sub(footer_h);
+    if let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
+        && let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75)
+        && let body =
+            crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
+        && !body.is_empty()
+        && let layout = crate::features::discover::splitter::view::discover_body_layout(
+            body,
+            state.discover.splitter.targets_height,
+        )
+        && layout.targets.contains(point)
+    {
+        use crate::features::discover::targets::msg::{TargetsMessage, TargetsMsg};
+        // No horizontal scroll in this pane, so a
+        // shift-wheel falls through to the vertical axis.
+        let msg = match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                AppMsg::Discover(crate::features::discover::msg::DiscoverMsg::Message(
+                    crate::features::discover::msg::DiscoverMessage::Targets(TargetsMsg::Message(
+                        TargetsMessage::MoveUp,
+                    )),
+                ))
+            }
+            MouseEventKind::ScrollDown => {
+                AppMsg::Discover(crate::features::discover::msg::DiscoverMsg::Message(
+                    crate::features::discover::msg::DiscoverMessage::Targets(TargetsMsg::Message(
+                        TargetsMessage::MoveDown,
+                    )),
+                ))
+            }
+            _ => unreachable!(),
+        };
+        let result = process_message_round(effect_runner, action_rx, msg, state);
+        *dirty |= result.dirty;
+    }
+    Ok(WheelOutcome::Handled)
+}
+
+/// Wheel over the discover results list: horizontal paging.
+#[allow(clippy::too_many_arguments)]
+fn handle_wheel_discover_results(
+    mouse: &MouseEvent,
+    terminal: &mut AppTerminal,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    dirty: &mut bool,
+    last_wheel: &mut Option<(Instant, i32, bool)>,
+    idle_iterations: &mut u32,
+) -> anyhow::Result<WheelOutcome> {
+    // Shift+wheel is the platform convention for
+    // horizontal scrolling; some terminals instead
+    // report the gesture natively as ScrollLeft/Right.
+    let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
+    let now = std::time::Instant::now();
+    if let Some((t, d, h)) = *last_wheel
+        && d == dir
+        && h == horizontal
+        && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+    {
+        *idle_iterations = 0;
+        return Ok(WheelOutcome::Debounced);
+    }
+    *last_wheel = Some((now, dir, horizontal));
+
+    let size = terminal.size()?;
+    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let body_top = 3u16;
+    let body_h = size
+        .height
+        .saturating_sub(body_top)
+        .saturating_sub(footer_h);
+    let point = ratatui::layout::Position::new(mouse.column, mouse.row);
+    if let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
+        && let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75)
+        && let body =
+            crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
+        && !body.is_empty()
+        && let layout = crate::features::discover::splitter::view::discover_body_layout(
+            body,
+            state.discover.splitter.targets_height,
+        )
+        && layout.results.contains(point)
+    {
+        use crate::features::discover::results::msg::{ResultsMessage, ResultsMsg};
+        // No horizontal scroll in this pane, so a
+        // shift-wheel falls through to the vertical axis.
+        let msg = match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                AppMsg::Discover(crate::features::discover::msg::DiscoverMsg::Message(
+                    crate::features::discover::msg::DiscoverMessage::Results(ResultsMsg::Message(
+                        ResultsMessage::MoveUp,
+                    )),
+                ))
+            }
+            MouseEventKind::ScrollDown => {
+                AppMsg::Discover(crate::features::discover::msg::DiscoverMsg::Message(
+                    crate::features::discover::msg::DiscoverMessage::Results(ResultsMsg::Message(
+                        ResultsMessage::MoveDown,
+                    )),
+                ))
+            }
+            _ => unreachable!(),
+        };
+        let result = process_message_round(effect_runner, action_rx, msg, state);
+        *dirty |= result.dirty;
+    }
+    Ok(WheelOutcome::Handled)
+}
+
+/// Wheel over the Explorer objects tree.
+#[allow(clippy::too_many_arguments)]
+fn handle_wheel_explorer_objects(
+    mouse: &MouseEvent,
+    terminal: &mut AppTerminal,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    dirty: &mut bool,
+    last_wheel: &mut Option<(Instant, i32, bool)>,
+    idle_iterations: &mut u32,
+) -> anyhow::Result<WheelOutcome> {
+    // Shift+wheel is the platform convention for
+    // horizontal scrolling; some terminals instead
+    // report the gesture natively as ScrollLeft/Right.
+    let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
+    let now = std::time::Instant::now();
+    if let Some((t, d, h)) = *last_wheel
+        && d == dir
+        && h == horizontal
+        && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+    {
+        *idle_iterations = 0;
+        return Ok(WheelOutcome::Debounced);
+    }
+    *last_wheel = Some((now, dir, horizontal));
+
+    let size = terminal.size()?;
+    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let body_top = 3u16;
+    let body_h = size
+        .height
+        .saturating_sub(body_top)
+        .saturating_sub(footer_h);
+    let point = ratatui::layout::Position::new(mouse.column, mouse.row);
+    if let Some(explorer) = app_explorer_rect(size, body_top, body_h, state)
+        && let (_inst_area, objs_area) =
+            explorer_child_areas(explorer, state.explorer.splitter.instances_height)
+        && objs_area.contains(point)
+    {
+        use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+        use crate::features::explorer::objects::msg::{ObjectsMessage, ObjectsMsg};
+        // Shift+wheel scrolls the tree sideways; a bare
+        // wheel keeps moving the cursor up/down.
+        let msg = if horizontal {
+            AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
+                ObjectsMsg::Message(ObjectsMessage::ScrollHorizontal {
+                    delta: (dir * WHEEL_H_STEP) as i16,
+                    term_width: size.width,
+                }),
+            )))
+        } else if dir < 0 {
+            AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
+                ObjectsMsg::Message(ObjectsMessage::MoveUp),
+            )))
+        } else {
+            AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
+                ObjectsMsg::Message(ObjectsMessage::MoveDown),
+            )))
+        };
+        let result = process_message_round(effect_runner, action_rx, msg, state);
+        *dirty |= result.dirty;
+    }
+    Ok(WheelOutcome::Handled)
+}
+
+/// Wheel over the Explorer instances tree.
+#[allow(clippy::too_many_arguments)]
+fn handle_wheel_explorer_instances(
+    mouse: &MouseEvent,
+    terminal: &mut AppTerminal,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    dirty: &mut bool,
+    last_wheel: &mut Option<(Instant, i32, bool)>,
+    idle_iterations: &mut u32,
+) -> anyhow::Result<WheelOutcome> {
+    // Shift+wheel is the platform convention for
+    // horizontal scrolling; some terminals instead
+    // report the gesture natively as ScrollLeft/Right.
+    let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
+    let now = std::time::Instant::now();
+    if let Some((t, d, h)) = *last_wheel
+        && d == dir
+        && h == horizontal
+        && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+    {
+        *idle_iterations = 0;
+        return Ok(WheelOutcome::Debounced);
+    }
+    *last_wheel = Some((now, dir, horizontal));
+
+    let size = terminal.size()?;
+    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let body_top = 3u16;
+    let body_h = size
+        .height
+        .saturating_sub(body_top)
+        .saturating_sub(footer_h);
+    let point = ratatui::layout::Position::new(mouse.column, mouse.row);
+    if let Some(explorer) = app_explorer_rect(size, body_top, body_h, state)
+        && let (inst_area, _objs_area) =
+            explorer_child_areas(explorer, state.explorer.splitter.instances_height)
+        && inst_area.contains(point)
+    {
+        use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
+        use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
+        // Shift+wheel scrolls the tree sideways; a bare
+        // wheel keeps moving the cursor up/down.
+        let msg = if horizontal {
+            AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                InstancesMsg::Message(InstancesMessage::ScrollHorizontal {
+                    delta: (dir * WHEEL_H_STEP) as i16,
+                    term_width: size.width,
+                }),
+            )))
+        } else if dir < 0 {
+            AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                InstancesMsg::Message(InstancesMessage::MoveUp),
+            )))
+        } else {
+            AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                InstancesMsg::Message(InstancesMessage::MoveDown),
+            )))
+        };
+        let result = process_message_round(effect_runner, action_rx, msg, state);
+        *dirty |= result.dirty;
+    }
+    Ok(WheelOutcome::Handled)
+}
+
+/// Wheel over the Instance Workspace connections pane.
+#[allow(clippy::too_many_arguments)]
+fn handle_wheel_iw_connections(
+    mouse: &MouseEvent,
+    terminal: &mut AppTerminal,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    dirty: &mut bool,
+    last_wheel: &mut Option<(Instant, i32, bool)>,
+    idle_iterations: &mut u32,
+) -> anyhow::Result<WheelOutcome> {
+    // Shift+wheel is the platform convention for
+    // horizontal scrolling; some terminals instead
+    // report the gesture natively as ScrollLeft/Right.
+    let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
+    let now = std::time::Instant::now();
+    if let Some((t, d, h)) = *last_wheel
+        && d == dir
+        && h == horizontal
+        && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+    {
+        *idle_iterations = 0;
+        return Ok(WheelOutcome::Debounced);
+    }
+    *last_wheel = Some((now, dir, horizontal));
+
+    let size = terminal.size()?;
+    if let Some(body) = iw_body_area_for_hit(size, state)
+        && let point = ratatui::layout::Position::new(mouse.column, mouse.row)
+        && body.contains(point)
+    {
+        use crate::features::instance_workspace::connections::msg::{
+            ConnectionsMessage, ConnectionsMsg,
+        };
+        use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+        // No horizontal scroll in this pane, so a
+        // shift-wheel falls through to the vertical axis.
+        let msg = match mouse.kind {
+            MouseEventKind::ScrollUp => AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::MoveUp),
+            ))),
+            MouseEventKind::ScrollDown => AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::MoveDown),
+            ))),
+            _ => unreachable!(),
+        };
+        let result = process_message_round(effect_runner, action_rx, msg, state);
+        *dirty |= result.dirty;
+    }
+    Ok(WheelOutcome::Handled)
+}
+
+/// Wheel over the Instance Workspace overview pane.
+#[allow(clippy::too_many_arguments)]
+fn handle_wheel_iw_overview(
+    mouse: &MouseEvent,
+    terminal: &mut AppTerminal,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    dirty: &mut bool,
+    last_wheel: &mut Option<(Instant, i32, bool)>,
+    idle_iterations: &mut u32,
+) -> anyhow::Result<WheelOutcome> {
+    // Shift+wheel is the platform convention for
+    // horizontal scrolling; some terminals instead
+    // report the gesture natively as ScrollLeft/Right.
+    let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
+    let now = std::time::Instant::now();
+    if let Some((t, d, h)) = *last_wheel
+        && d == dir
+        && h == horizontal
+        && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+    {
+        *idle_iterations = 0;
+        return Ok(WheelOutcome::Debounced);
+    }
+    *last_wheel = Some((now, dir, horizontal));
+
+    let size = terminal.size()?;
+    if let Some(body) = iw_body_area_for_hit(size, state)
+        && let point = ratatui::layout::Position::new(mouse.column, mouse.row)
+        && body.contains(point)
+    {
+        use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+        use crate::features::instance_workspace::overview::msg::{OverviewMessage, OverviewMsg};
+        // No horizontal scroll in this pane, so a
+        // shift-wheel falls through to the vertical axis.
+        let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Overview(OverviewMsg::Message(
+            OverviewMessage::MoveCursor(dir),
+        ))));
+        let result = process_message_round(effect_runner, action_rx, msg, state);
+        *dirty |= result.dirty;
+    }
+    Ok(WheelOutcome::Handled)
+}
+
+/// Wheel inside the SQL workspace: routes to the focused sub-pane.
+#[allow(clippy::too_many_arguments)]
+fn handle_wheel_sql(
+    mouse: &MouseEvent,
+    terminal: &mut AppTerminal,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    point: Position,
+    dirty: &mut bool,
+    last_wheel: &mut Option<(Instant, i32, bool)>,
+    idle_iterations: &mut u32,
+) -> anyhow::Result<WheelOutcome> {
+    // Wheel debounce — same as discover targets above.
+    // Shift+wheel is the platform convention for
+    // horizontal scrolling; some terminals instead
+    // report the gesture natively as ScrollLeft/Right.
+    let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
+    let now = std::time::Instant::now();
+    if let Some((t, d, h)) = *last_wheel
+        && d == dir
+        && h == horizontal
+        && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
+    {
+        *idle_iterations = 0;
+        return Ok(WheelOutcome::Debounced);
+    }
+    *last_wheel = Some((now, dir, horizontal));
+
+    if let Some(size) = terminal.size().ok()
+        && let Some(tab_area) = sql_tab_area_for_hit(size, state)
+        && let Some(tab_idx) = state.sql.sql_tab.active_tab
+        && let Some(tab) = state.sql.sql_tab.tabs.get(tab_idx)
+    {
+        use crate::features::sql_workspace::sql_tab::layout::sql_tab_layout;
+        let layout = sql_tab_layout(
+            tab_area,
+            tab.splitter.editor_top_height,
+            tab.splitter.history_pane_width,
+        );
+        // Route wheel to the editor body first (top-left
+        // zone), then to history (right/bottom zone).
+        // The two panes do not overlap.
+        if layout.editor.contains(point) {
+            use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+            use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
+            use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+            // Shift+wheel scrolls the editor sideways;
+            // a bare wheel keeps scrolling by lines.
+            let delta: i32 = if horizontal {
+                dir * WHEEL_H_STEP
+            } else {
+                dir * 3
+            };
+            let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Editor {
+                    tab_id: tab_idx,
+                    msg: EditorMsg::Message(if horizontal {
+                        EditorMessage::ScrollH { delta }
+                    } else {
+                        EditorMessage::ScrollV { delta }
+                    }),
+                },
+            ))));
+            let result = process_message_round(effect_runner, action_rx, msg, state);
+            *dirty |= result.dirty;
+        } else {
+            // When detail is visible the History zone extends
+            // leftward into the editor. For wheel routing we
+            // compute the full zone rect (detail + list +
+            // splitter) so wheel works anywhere inside it.
+            use crate::features::sql_workspace::sql_tab::session::session_view_key;
+            let (instance, connection) = session_view_key(&tab.session);
+            let detail_visible = crate::features::sql_workspace::sql_tab::history::detail_visible(
+                tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History,
+                &tab.history.list,
+                &state.sql.sql_tab.history_store,
+                &instance,
+                &connection,
+            );
+            let zone_rect = if detail_visible {
+                use crate::features::sql_workspace::sql_tab::history::splitter::view::{
+                    history_zone_width, history_zone_x,
+                };
+                let zone_x =
+                    history_zone_x(tab_area, &layout, tab.history.splitter.detail_pane_width);
+                let zone_w = history_zone_width(&layout, tab.history.splitter.detail_pane_width);
+                ratatui::layout::Rect::new(zone_x, layout.history.y, zone_w, layout.history.height)
+            } else {
+                layout.history
+            };
+            if zone_rect.contains(point) {
+                use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+                use crate::features::sql_workspace::sql_tab::history::msg::{
+                    HistoryMessage, HistoryMsg,
+                };
+                use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+                // Shift+wheel scrolls the history rows
+                // sideways; a bare wheel moves the cursor.
+                let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::History {
+                        tab_id: tab_idx,
+                        msg: HistoryMsg::Message(if horizontal {
+                            HistoryMessage::ScrollHScroll {
+                                delta: dir * WHEEL_H_STEP,
+                            }
+                        } else {
+                            HistoryMessage::MoveCursor { delta: dir }
+                        }),
+                    },
+                ))));
+                let result = process_message_round(effect_runner, action_rx, msg, state);
+                *dirty |= result.dirty;
+            } else if layout.results.contains(point) {
+                // Scroll wheel on the results pane: move
+                // the cell selection up/down. The view
+                // auto-adjusts v_scroll to keep cursor visible.
+                use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+                use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+                use crate::features::sql_workspace::sql_tab::results::msg::{
+                    ResultsMessage, ResultsMsg,
+                };
+                // Shift+wheel scrolls the grid sideways;
+                // a bare wheel moves the cell selection.
+                let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        tab_id: tab_idx,
+                        msg: ResultsMsg::Message(if horizontal {
+                            ResultsMessage::ScrollHScroll {
+                                delta: dir * WHEEL_H_STEP,
+                            }
+                        } else {
+                            ResultsMessage::MoveSelection { dr: dir, dc: 0 }
+                        }),
+                    },
+                ))));
+                let result = process_message_round(effect_runner, action_rx, msg, state);
+                *dirty |= result.dirty;
+            }
+        }
+    }
+    Ok(WheelOutcome::Handled)
+}
 pub(crate) fn wheel_axis(
     kind: crossterm::event::MouseEventKind,
     modifiers: crossterm::event::KeyModifiers,
@@ -2576,220 +2461,6 @@ pub(crate) fn wheel_axis(
     };
     let horizontal = !vertical || modifiers.contains(crossterm::event::KeyModifiers::SHIFT);
     (horizontal, delta)
-}
-
-/// Compute the two explorer child tree areas (instances top / objects bottom)
-/// from the explorer's outer rect, mirroring `explorer/view.rs` (the stored
-/// instances height + 1-row splitter, inside the outer border).
-pub(crate) fn explorer_child_areas(
-    explorer: ratatui::layout::Rect,
-    instances_height: u16,
-) -> (ratatui::layout::Rect, ratatui::layout::Rect) {
-    // Mirror the explorer render exactly: the two child panes are laid out with
-    // the shared `explorer_body_layout` inside the outer border. Computing them
-    // the same way here guarantees the click hit-testing uses the same
-    // child-pane rectangles the render draws, so a click on a row maps to the
-    // same row (no off-by-one drift).
-    let inner = Rect::new(
-        explorer.x.saturating_add(1),
-        explorer.y.saturating_add(1),
-        explorer.width.saturating_sub(2),
-        explorer.height.saturating_sub(2),
-    );
-    let panes =
-        crate::features::explorer::splitter::view::explorer_body_layout(inner, instances_height);
-    (panes.instances, panes.objects)
-}
-
-/// Build the explorer messages for a single click on a visible tree row.
-/// Whether the click at `(x, y)` landed on an expand/collapse marker in the
-/// explorer's instances/objects tree. Used to suppress the double-click "open"
-/// (Select) action on a marker click: clicking the arrow, single or double,
-/// must only expand/collapse.
-pub(crate) fn is_explorer_toggle_click(
-    explorer_w: u16,
-    body_top: u16,
-    body_h: u16,
-    x: u16,
-    y: u16,
-    state: &AppState,
-) -> bool {
-    if x >= explorer_w {
-        return false;
-    }
-    let explorer = Rect::new(0, body_top, explorer_w, body_h);
-    let (instances_area, objects_area) =
-        explorer_child_areas(explorer, state.explorer.splitter.instances_height);
-    match explorer_pane_for_click(
-        y,
-        body_top,
-        body_h,
-        state.explorer.splitter.instances_height,
-    ) {
-        crate::app_shell::nav::ExplorerPane::Instances => {
-            crate::features::explorer::instances::view::toggle_at(
-                instances_area,
-                &state.explorer.instances,
-                x,
-                y,
-            )
-            .is_some()
-        }
-        crate::app_shell::nav::ExplorerPane::Objects => {
-            crate::features::explorer::objects::view::toggle_at(
-                objects_area,
-                &state.explorer.objects,
-                x,
-                y,
-            )
-            .is_some()
-        }
-    }
-}
-
-/// Whether the click at `(x, y)` lands on a visible node row in the explorer's
-/// instances/objects tree (as opposed to a blank area, a border, or the footer).
-/// Used to suppress the double-click "open" (Select) action on blank space:
-/// double-clicking a blank region must do nothing, not act on the cursor's node.
-pub(crate) fn explorer_click_hits_row(
-    explorer_w: u16,
-    body_top: u16,
-    body_h: u16,
-    y: u16,
-    state: &AppState,
-) -> bool {
-    if y < body_top {
-        return false;
-    }
-    let explorer = Rect::new(0, body_top, explorer_w, body_h);
-    let (instances_area, objects_area) =
-        explorer_child_areas(explorer, state.explorer.splitter.instances_height);
-    match explorer_pane_for_click(
-        y,
-        body_top,
-        body_h,
-        state.explorer.splitter.instances_height,
-    ) {
-        crate::app_shell::nav::ExplorerPane::Instances => {
-            crate::features::explorer::instances::view::row_at(
-                instances_area,
-                &state.explorer.instances,
-                y,
-            )
-            .is_some()
-        }
-        crate::app_shell::nav::ExplorerPane::Objects => {
-            crate::features::explorer::objects::view::row_at(
-                objects_area,
-                &state.explorer.objects,
-                y,
-            )
-            .is_some()
-        }
-    }
-}
-
-/// Clicking the expand/collapse marker toggles that node's expansion without
-/// moving the selection; clicking elsewhere just moves the selection. Returns
-/// `None` for clicks on borders/titles/footers.
-pub(crate) fn explorer_row_click_msgs(
-    size: ratatui::layout::Size,
-    body_top: u16,
-    body_h: u16,
-    x: u16,
-    y: u16,
-    state: &AppState,
-) -> Option<Vec<AppMsg>> {
-    use crate::features::explorer::instances::msg::InstancesMessage;
-    use crate::features::explorer::objects::msg::ObjectsMessage;
-    // Use the live Explorer column width so a click inside the (resizable)
-    // Explorer is mapped with the same geometry the render draws.
-    let explorer = app_explorer_rect(size, body_top, body_h, state)?;
-    if x < explorer.x || x >= explorer.right() {
-        return None;
-    }
-    let (instances_area, objects_area) =
-        explorer_child_areas(explorer, state.explorer.splitter.instances_height);
-    let pane = explorer_pane_for_click(
-        y,
-        body_top,
-        body_h,
-        state.explorer.splitter.instances_height,
-    );
-    match pane {
-        crate::app_shell::nav::ExplorerPane::Instances => {
-            let inst = &state.explorer.instances;
-            let row = crate::features::explorer::instances::view::row_at(instances_area, inst, y)?;
-            let jump = instances_msg(InstancesMessage::JumpTo { row });
-            // Clicking the expand/collapse marker on an instance row toggles its
-            // expansion (not Select, which would open the workspace). Need the
-            // row's instance index and current state.
-            if crate::features::explorer::instances::view::toggle_at(instances_area, inst, x, y)
-                .is_some()
-            {
-                // Clicking the expand/collapse marker toggles that instance's
-                // expansion without moving the cursor (no `jump`).
-                return Some(vec![instances_msg(InstancesMessage::ToggleExpandAt {
-                    row,
-                })]);
-            }
-            Some(vec![jump])
-        }
-        crate::app_shell::nav::ExplorerPane::Objects => {
-            let objs = &state.explorer.objects;
-            let row = crate::features::explorer::objects::view::row_at(objects_area, objs, y)?;
-            let jump = objects_msg(ObjectsMessage::JumpTo { row });
-            // Clicking the expand/collapse marker toggles that database/group's
-            // expansion without moving the cursor (no `jump`).
-            if crate::features::explorer::objects::view::toggle_at(objects_area, objs, x, y)
-                .is_some()
-            {
-                return Some(vec![objects_msg(ObjectsMessage::ToggleExpandAt { row })]);
-            }
-            Some(vec![jump])
-        }
-    }
-}
-
-pub(crate) fn instances_msg(
-    m: crate::features::explorer::instances::msg::InstancesMessage,
-) -> AppMsg {
-    AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
-        crate::features::explorer::msg::ExplorerMessage::Instances(
-            crate::features::explorer::instances::msg::InstancesMsg::Message(m),
-        ),
-    ))
-}
-
-pub(crate) fn objects_msg(m: crate::features::explorer::objects::msg::ObjectsMessage) -> AppMsg {
-    AppMsg::Explorer(crate::features::explorer::msg::ExplorerMsg::Message(
-        crate::features::explorer::msg::ExplorerMessage::Objects(
-            crate::features::explorer::objects::msg::ObjectsMsg::Message(m),
-        ),
-    ))
-}
-
-/// Map a click row inside the explorer column to an explorer child sub-pane
-/// (instances on top / objects on the bottom), mirroring the explorer view's
-/// vertical layout and Ctrl+j/k. The row is relative to the explorer's outer
-/// border (top row) and body height, matching the layout in `explorer/view.rs`.
-pub(crate) fn explorer_pane_for_click(
-    row: u16,
-    body_top: u16,
-    body_h: u16,
-    instances_height: u16,
-) -> crate::app_shell::nav::ExplorerPane {
-    use crate::app_shell::nav::ExplorerPane;
-    // Use the same `Layout` as the render and `explorer_child_areas` so the
-    // instances/objects boundary matches exactly (no `height/2` vs `Layout`
-    // rounding drift).
-    let explorer = Rect::new(0, body_top, 1, body_h);
-    let (instances, _objects) = explorer_child_areas(explorer, instances_height);
-    if row <= instances.y.saturating_add(instances.height) {
-        ExplorerPane::Instances
-    } else {
-        ExplorerPane::Objects
-    }
 }
 
 /// Refresh each horizontal splitter's last-laid-out track so keyboard `+`/`-`
@@ -3003,518 +2674,9 @@ pub(crate) fn update_splitter_hover(
     before != state.splitter_hover
 }
 
-/// Map a click inside the discover popup to a discover child sub-pane
-/// (engine / targets / results), mirroring the discover view's vertical layout
-/// and Ctrl+j/k. Uses the same live workspace/popup/engine geometry as the
-/// render, so a click maps to the same pane that is drawn. Returns `None` for
-/// clicks outside the popup.
-pub(crate) fn discover_subpane_for_click(
-    col: u16,
-    row: u16,
-    workspace: Rect,
-    state: &crate::features::discover::state::DiscoverState,
-) -> Option<crate::app_shell::nav::DiscoverPane> {
-    use crate::app_shell::nav::DiscoverPane;
-    let popup = crate::common::view::modal::popup_rect(workspace, 75, 75);
-    if col < popup.x || col >= popup.right() {
-        return None;
-    }
-    let body = crate::features::discover::view::discover_body_area(popup, state);
-    // The engine selector occupies the rows between the popup top and the body.
-    if row >= popup.y && row < body.y {
-        return Some(DiscoverPane::Engine);
-    }
-    if row < body.y || row >= body.bottom() {
-        return None;
-    }
-    // Split the body at the same boundary the splitter renders at (the current
-    // targets height, clamped to the live track), so clicking agrees with the
-    // rendered splitter.
-    let layout = crate::features::discover::splitter::view::discover_body_layout(
-        body,
-        state.splitter.targets_height,
-    );
-    if row < layout.targets.bottom() {
-        Some(DiscoverPane::Targets)
-    } else {
-        Some(DiscoverPane::Results)
-    }
-}
-
-/// Build the workspace messages for a SQL click action. A double-click on a
-/// picker row yields both a cursor jump and an apply, so a `Vec` is returned.
-pub(crate) fn sql_click_msgs(
-    sql: &crate::features::sql_workspace::sql_tab::state::SqlTabState,
-    action: crate::features::sql_workspace::sql_tab::view::SqlClickAction,
-) -> Vec<AppMsg> {
-    use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
-    use crate::features::sql_workspace::sql_tab::editor::context_picker::msg::{
-        ContextPickerMessage, ContextPickerMsg,
-    };
-    use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
-    use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
-    use crate::features::sql_workspace::sql_tab::view::SqlClickAction;
-
-    let tab_id = |active: Option<usize>| active.and_then(|i| sql.tabs.get(i)).map(|t| t.session.id);
-    let editor_msg = |tab_id: usize, m: EditorMessage| {
-        AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-            SqlTabMessage::Editor {
-                tab_id,
-                msg: EditorMsg::Message(m),
-            },
-        ))))
-    };
-    let picker = |tab_id: usize, m: ContextPickerMessage| {
-        editor_msg(
-            tab_id,
-            EditorMessage::ContextPicker(ContextPickerMsg::Message(m)),
-        )
-    };
-    let close = |tab_id: usize| picker(tab_id, ContextPickerMessage::Close);
-
-    match action {
-        SqlClickAction::FocusSubPane(focus) => {
-            vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
-                SqlTabMsg::Message(SqlTabMessage::Focus(focus)),
-            )))]
-        }
-        SqlClickAction::ActivateTab(visible_idx) => vec![AppMsg::Sql(SqlMsg::Message(
-            SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Tab(visible_idx))),
-        ))],
-        SqlClickAction::CloseContextPicker => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            vec![close(tab_id)]
-        }
-        SqlClickAction::OpenContextPicker(column) => {
-            let Some(tab) = sql.active_tab() else {
-                return Vec::new();
-            };
-            let tab_id = tab.session.id;
-            vec![picker(
-                tab_id,
-                ContextPickerMessage::Open {
-                    column,
-                    instance: tab.session.instance.clone().unwrap_or_default(),
-                    connection: tab.session.connection.clone().unwrap_or_default(),
-                    database: tab.session.database.clone().unwrap_or_default(),
-                    schema: tab.session.schema.clone().unwrap_or_default(),
-                },
-            )]
-        }
-        SqlClickAction::ContextPickerHit {
-            column,
-            cursor,
-            double,
-        } => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            let mut msgs = vec![picker(
-                tab_id,
-                ContextPickerMessage::SetCursor { column, cursor },
-            )];
-            if double {
-                msgs.push(picker(tab_id, ContextPickerMessage::Apply));
-            }
-            msgs
-        }
-        SqlClickAction::ContextPickerColumn(column) => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            vec![picker(tab_id, ContextPickerMessage::MoveColumn(column))]
-        }
-        SqlClickAction::HistoryApply => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            use crate::features::sql_workspace::sql_tab::history::msg::{
-                HistoryMessage, HistoryMsg,
-            };
-            vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
-                SqlTabMsg::Message(SqlTabMessage::History {
-                    tab_id,
-                    msg: HistoryMsg::Message(HistoryMessage::Apply),
-                }),
-            )))]
-        }
-        SqlClickAction::HistoryRowClicked { index } => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            use crate::features::sql_workspace::sql_tab::history::msg::{
-                HistoryMessage, HistoryMsg,
-            };
-            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-            let mut msgs = vec![
-                // Switch focus to History pane first (no-op if already focused).
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Focus(SqlFocus::History),
-                )))),
-            ];
-            msgs.push(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
-                SqlTabMsg::Message(SqlTabMessage::History {
-                    tab_id,
-                    msg: HistoryMsg::Message(HistoryMessage::SetCursor { index }),
-                }),
-            ))));
-            msgs
-        }
-        SqlClickAction::HistoryHScrollbar {
-            track_x,
-            x,
-            max_scroll,
-            viewport_width,
-        } => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            use crate::features::sql_workspace::sql_tab::history::msg::{
-                HistoryMessage, HistoryMsg,
-            };
-            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-            let _rel_x = x.saturating_sub(track_x);
-            let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(
-                x,
-                track_x,
-                viewport_width,
-                max_scroll,
-            );
-            vec![
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Focus(SqlFocus::History),
-                )))),
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::History {
-                        tab_id,
-                        msg: HistoryMsg::Message(HistoryMessage::SetHScroll { position }),
-                    },
-                )))),
-            ]
-        }
-        SqlClickAction::HistoryVScrollbar {
-            track_y,
-            y,
-            max_scroll,
-            viewport_height,
-        } => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            use crate::features::sql_workspace::sql_tab::history::msg::{
-                HistoryMessage, HistoryMsg,
-            };
-            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-            let _rel_y = y.saturating_sub(track_y);
-            let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(
-                y,
-                track_y,
-                viewport_height,
-                max_scroll,
-            );
-            vec![
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Focus(SqlFocus::History),
-                )))),
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::History {
-                        tab_id,
-                        msg: HistoryMsg::Message(HistoryMessage::SetVScroll { position: start }),
-                    },
-                )))),
-            ]
-        }
-        SqlClickAction::ResultsCellClicked { row, col } => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            use crate::features::sql_workspace::sql_tab::results::msg::{
-                ResultsMessage, ResultsMsg,
-            };
-            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-            vec![
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Focus(SqlFocus::Results),
-                )))),
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Results {
-                        tab_id,
-                        msg: ResultsMsg::Message(ResultsMessage::SetSelection { row, col }),
-                    },
-                )))),
-            ]
-        }
-        SqlClickAction::ResultsOpenDetail => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            use crate::features::sql_workspace::sql_tab::results::msg::{
-                ResultsMessage, ResultsMsg,
-            };
-            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-            vec![
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Focus(SqlFocus::Results),
-                )))),
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Results {
-                        tab_id,
-                        msg: ResultsMsg::Message(ResultsMessage::ToggleDetail),
-                    },
-                )))),
-            ]
-        }
-        SqlClickAction::ResultsHScrollbar {
-            track_x,
-            x,
-            max_scroll,
-            viewport_width,
-        } => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            use crate::features::sql_workspace::sql_tab::results::msg::{
-                ResultsMessage, ResultsMsg,
-            };
-            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-            let _rel_x = x.saturating_sub(track_x);
-            let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(
-                x,
-                track_x,
-                viewport_width,
-                max_scroll,
-            );
-            vec![
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Focus(SqlFocus::Results),
-                )))),
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Results {
-                        tab_id,
-                        msg: ResultsMsg::Message(ResultsMessage::SetHScroll { position }),
-                    },
-                )))),
-            ]
-        }
-        SqlClickAction::ResultsVScrollbar {
-            track_y,
-            y,
-            max_scroll,
-            viewport_height,
-        } => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            use crate::features::sql_workspace::sql_tab::results::msg::{
-                ResultsMessage, ResultsMsg,
-            };
-            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-            let _rel_y = y.saturating_sub(track_y);
-            let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(
-                y,
-                track_y,
-                viewport_height,
-                max_scroll,
-            );
-            vec![
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Focus(SqlFocus::Results),
-                )))),
-                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Results {
-                        tab_id,
-                        msg: ResultsMsg::Message(ResultsMessage::SetVScroll { position: start }),
-                    },
-                )))),
-            ]
-        }
-        SqlClickAction::ToggleTableCompletion => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
-                SqlTabMsg::Message(SqlTabMessage::ToggleTableCompletion { tab_id }),
-            )))]
-        }
-        // A column-width resize drag is handled entirely by the shell's mouse
-        // Down/Drag/Up handlers (geometry is computed there); no feature
-        // message is dispatched for the initiating click itself.
-        SqlClickAction::ResultsColResize { .. } => Vec::new(),
-        SqlClickAction::EditorVScrollbar {
-            track_y,
-            y,
-            max_scroll,
-            viewport_height,
-        } => {
-            let Some(tab_id) = tab_id(sql.active_tab) else {
-                return Vec::new();
-            };
-            use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
-            let _rel_y = y.saturating_sub(track_y);
-            let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(
-                y,
-                track_y,
-                viewport_height,
-                max_scroll,
-            );
-            vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
-                SqlTabMsg::Message(SqlTabMessage::Editor {
-                    tab_id,
-                    msg: EditorMsg::Message(EditorMessage::SetVScroll { position: start }),
-                }),
-            )))]
-        }
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The app body geometry (top row, height) that mouse hit-testing is
-    /// computed against, for a given terminal size.
-    fn test_body(state: &AppState, size: ratatui::layout::Size) -> (u16, u16) {
-        let body_top = 3u16;
-        let body_h = size
-            .height
-            .saturating_sub(body_top)
-            .saturating_sub(footer_view::footer_height(&state.footer, size.width));
-        (body_top, body_h)
-    }
-
-    /// The rect of the Explorer instances/objects horizontal splitter.
-    fn test_explorer_splitter_rect(
-        state: &AppState,
-        size: ratatui::layout::Size,
-        body_top: u16,
-        body_h: u16,
-    ) -> Rect {
-        let explorer = app_explorer_rect(size, body_top, body_h, state).expect("explorer rect");
-        let inner = Rect::new(
-            explorer.x.saturating_add(1),
-            explorer.y.saturating_add(1),
-            explorer.width.saturating_sub(2),
-            explorer.height.saturating_sub(2),
-        );
-        crate::features::explorer::splitter::view::explorer_body_layout(
-            inner,
-            state.explorer.splitter.instances_height,
-        )
-        .splitter
-    }
-
-    /// One press arms **at most one** splitter. Regression guard: the drag
-    /// targets used to be four independent booleans that were never reset on
-    /// `Up`, so a drag of one splitter also resized every split dragged earlier
-    /// (a vertical move changing a height, a horizontal move changing a width).
-    #[test]
-    fn resolve_splitter_drag_arms_exactly_one_target() {
-        use crate::features::explorer::state::ExplorerPane;
-
-        let mut state = AppState::default();
-        state.term_width = 120;
-        state.term_height = 40;
-        // The Explorer owns focus, so its instances/objects splitter is
-        // eligible — the app-level splitter must still win on its own column.
-        state.focus = Pane::Explorer(ExplorerPane::Instances);
-        let size = ratatui::layout::Size::new(120, 40);
-        let (body_top, body_h) = test_body(&state, size);
-        let layout = crate::features::app_splitter::view::app_body_layout(
-            Rect::new(0, body_top, size.width, body_h),
-            state.splitter.explorer_pane_width,
-        );
-
-        // On the app-level vertical splitter: only the app splitter arms.
-        assert_eq!(
-            resolve_splitter_drag(&state, size, layout.v_splitter.x, layout.v_splitter.y + 5),
-            Some(SplitterDrag::App)
-        );
-
-        // On the Explorer's horizontal splitter: only that one arms.
-        let ex = test_explorer_splitter_rect(&state, size, body_top, body_h);
-        assert_eq!(
-            resolve_splitter_drag(&state, size, ex.x + 3, ex.y),
-            Some(SplitterDrag::Explorer)
-        );
-
-        // Inside a pane (on no splitter at all): nothing arms.
-        assert_eq!(resolve_splitter_drag(&state, size, 2, body_top + 1), None);
-    }
-
-    /// Every row of the app-level vertical splitter resolves to `App` —
-    /// including the row the Explorer's horizontal splitter occupies. The two
-    /// own different axes, so a vertical drag must never reach a height split.
-    #[test]
-    fn vertical_splitter_rows_never_resolve_to_a_height_split() {
-        use crate::features::explorer::state::ExplorerPane;
-
-        let mut state = AppState::default();
-        state.term_width = 120;
-        state.term_height = 40;
-        state.focus = Pane::Explorer(ExplorerPane::Instances);
-        let size = ratatui::layout::Size::new(120, 40);
-        let (body_top, body_h) = test_body(&state, size);
-        let layout = crate::features::app_splitter::view::app_body_layout(
-            Rect::new(0, body_top, size.width, body_h),
-            state.splitter.explorer_pane_width,
-        );
-        for dy in 0..layout.v_splitter.height {
-            assert_eq!(
-                resolve_splitter_drag(&state, size, layout.v_splitter.x, layout.v_splitter.y + dy),
-                Some(SplitterDrag::App),
-                "row {dy} of the vertical splitter must not resolve to another split"
-            );
-        }
-    }
-
-    /// With the SQL workspace focused, a press on the editor/history splitter
-    /// arms that splitter alone — not the app-level one — so a drag there cannot
-    /// resize the Explorer width (the reported "horizontal drag moves the
-    /// Explorer" symptom).
-    #[test]
-    fn sql_tab_splitter_arms_without_the_app_splitter() {
-        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
-
-        let mut state = AppState::default();
-        state.term_width = 120;
-        state.term_height = 40;
-        state.focus = Pane::SQLWorkspace;
-        state.sql.sql_tab.open_connection_tab(
-            "inst".into(),
-            "c1".into(),
-            "id1".into(),
-            None,
-            None,
-            None,
-        );
-        state.sql.sql_tab.tabs[0].focus = SqlFocus::Editor;
-        let size = ratatui::layout::Size::new(120, 40);
-        let tab_area = sql_tab_area_for_hit(size, &state).expect("sql tab area");
-        let body = Rect::new(
-            tab_area.x,
-            tab_area.y.saturating_add(1),
-            tab_area.width,
-            tab_area.height.saturating_sub(1),
-        );
-        let tab = &state.sql.sql_tab.tabs[0];
-        let layout = crate::features::sql_workspace::sql_tab::layout::sql_tab_layout(
-            body,
-            tab.splitter.editor_top_height,
-            tab.splitter.history_pane_width,
-        );
-
-        let got = resolve_splitter_drag(&state, size, layout.v_splitter.x, layout.v_splitter.y + 1);
-        assert!(
-            matches!(got, Some(SplitterDrag::Sql(_, _))),
-            "a press on the SQL editor/history splitter must arm it, got {got:?}"
-        );
-        assert_ne!(
-            got,
-            Some(SplitterDrag::App),
-            "the app-level width splitter must not arm alongside it"
-        );
-    }
 
     #[test]
     fn wheel_axis_maps_shift_and_native_horizontal_ticks() {
@@ -3556,339 +2718,5 @@ mod tests {
             wheel_axis(MouseEventKind::ScrollDown, KeyModifiers::CONTROL),
             (false, 1)
         );
-    }
-
-    #[test]
-    fn explorer_child_areas_stack_trees() {
-        let explorer = Rect::new(0, 3, 40, 21);
-        let (instances, objects) = explorer_child_areas(explorer, 9);
-        // Outer border: inner is (1,4,38,19); instances height 9 (in the
-        // [20%,80%] range of the 19-row track).
-        assert_eq!(instances, Rect::new(1, 4, 38, 9));
-        // Objects start after the 1-row splitter.
-        assert_eq!(objects.y, instances.y + instances.height + 1);
-        assert_eq!(objects.width, 38);
-    }
-
-    #[test]
-    fn explorer_click_maps_rows_to_instances_objects() {
-        use crate::app_shell::nav::ExplorerPane;
-        // body_top=3, body_h=20. The boundary derives from the same `Layout` the
-        // render uses, so it is exact (no `height/2` vs `Layout` rounding drift).
-        let (instances, _objects) = explorer_child_areas(Rect::new(0, 3, 1, 20), 9);
-        let boundary = instances.y.saturating_add(instances.height);
-        assert_eq!(
-            explorer_pane_for_click(5, 3, 20, 9),
-            ExplorerPane::Instances
-        );
-        assert_eq!(
-            explorer_pane_for_click(boundary, 3, 20, 9),
-            ExplorerPane::Instances
-        );
-        assert_eq!(
-            explorer_pane_for_click(boundary.saturating_add(1), 3, 20, 9),
-            ExplorerPane::Objects
-        );
-        assert_eq!(explorer_pane_for_click(21, 3, 20, 9), ExplorerPane::Objects);
-    }
-
-    #[test]
-    fn explorer_marker_click_toggles_without_moving_the_cursor() {
-        use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
-        use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
-
-        // One instance row (cursor on it) so the marker click hits an instance.
-        let mut state = AppState::default();
-        state
-            .explorer
-            .instances
-            .set_instances(vec![dbm_store::ManagedInstance {
-                id: "a".into(),
-                fingerprint: "a".into(),
-                name: "a".into(),
-                engine: dbm_core::Engine::Postgres,
-                host: "h".into(),
-                port: 1,
-                socket_path: None,
-                data_dir: None,
-                env_label: None,
-                registered_at: "now".into(),
-                version_full: None,
-                version_short: None,
-                version_checked_at: None,
-                lifecycle_status: None,
-                lifecycle_checked_at: None,
-                lifecycle_detail: None,
-            }]);
-        state.explorer.instances.cursor = 0;
-
-        // Layout: size 100x50, body_top=3, explorer_w=20.
-        // explorer_child_areas(Rect(0,3,20,50)) -> instances_area = Rect(1,4,...).
-        // Instance marker is the 2nd body char: x = instances_area.x+2 = 3.
-        // Row 0 is the first body row: y = instances_area.y+1 = 5.
-        let msgs =
-            explorer_row_click_msgs(ratatui::layout::Size::new(100, 50), 3, 50, 3, 5, &state)
-                .expect("marker click maps to a row");
-        let has_toggle = msgs.iter().any(|m| {
-            matches!(
-                m,
-                AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
-                    InstancesMsg::Message(InstancesMessage::ToggleExpandAt { row: 0 })
-                )))
-            )
-        });
-        assert!(has_toggle, "marker click toggles expansion: {msgs:?}");
-        let has_jump = msgs.iter().any(|m| {
-            matches!(
-                m,
-                AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
-                    InstancesMsg::Message(InstancesMessage::JumpTo { .. })
-                )))
-            )
-        });
-        assert!(!has_jump, "marker click must not move the cursor: {msgs:?}");
-    }
-
-    #[test]
-    fn is_explorer_toggle_click_detects_the_marker_column() {
-        // Same layout as the marker test: size 100x50, explorer_w=20, body_top=3,
-        // instances_area = Rect(1,4,...). Instance marker = x=3, row0 y=5.
-        let mut state = AppState::default();
-        state
-            .explorer
-            .instances
-            .set_instances(vec![dbm_store::ManagedInstance {
-                id: "a".into(),
-                fingerprint: "a".into(),
-                name: "a".into(),
-                engine: dbm_core::Engine::Postgres,
-                host: "h".into(),
-                port: 1,
-                socket_path: None,
-                data_dir: None,
-                env_label: None,
-                registered_at: "now".into(),
-                version_full: None,
-                version_short: None,
-                version_checked_at: None,
-                lifecycle_status: None,
-                lifecycle_checked_at: None,
-                lifecycle_detail: None,
-            }]);
-        // Marker column (x=3) counts as a toggle click.
-        assert!(is_explorer_toggle_click(20, 3, 50, 3, 5, &state));
-        // The label/text column (x=8) does not.
-        assert!(!is_explorer_toggle_click(20, 3, 50, 8, 5, &state));
-        // Outside the explorer is never a toggle click.
-        assert!(!is_explorer_toggle_click(20, 3, 50, 25, 5, &state));
-    }
-
-    #[test]
-    fn explorer_click_hits_row_distinguishes_nodes_from_blank() {
-        // One instance row (row 0) at y=5 (body_top=3, explorer_w=20).
-        let mut state = AppState::default();
-        state
-            .explorer
-            .instances
-            .set_instances(vec![dbm_store::ManagedInstance {
-                id: "a".into(),
-                fingerprint: "a".into(),
-                name: "a".into(),
-                engine: dbm_core::Engine::Postgres,
-                host: "h".into(),
-                port: 1,
-                socket_path: None,
-                data_dir: None,
-                env_label: None,
-                registered_at: "now".into(),
-                version_full: None,
-                version_short: None,
-                version_checked_at: None,
-                lifecycle_status: None,
-                lifecycle_checked_at: None,
-                lifecycle_detail: None,
-            }]);
-        // y=5 is row 0 (A): a real node row.
-        assert!(explorer_click_hits_row(20, 3, 50, 5, &state));
-        // Blank area below the only node (y=6+) is not a node row.
-        assert!(!explorer_click_hits_row(20, 3, 50, 8, &state));
-        // The explorer border/title row (y=3) is not a node row.
-        assert!(!explorer_click_hits_row(20, 3, 50, 3, &state));
-    }
-
-    #[test]
-    fn instances_arrow_click_targets_the_collapsed_node_not_the_active_one() {
-        use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
-        use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
-        // The user's repro: after restart, instance A is collapsed-unloaded and
-        // the active workspace is on instance B. A click on A's arrow must
-        // toggle A (row 0), not drift to B (row 1).
-        let mut state = AppState::default();
-        state.explorer.instances.set_instances(vec![
-            dbm_store::ManagedInstance {
-                id: "a".into(),
-                fingerprint: "a".into(),
-                name: "a".into(),
-                engine: dbm_core::Engine::Postgres,
-                host: "h".into(),
-                port: 1,
-                socket_path: None,
-                data_dir: None,
-                env_label: None,
-                registered_at: "now".into(),
-                version_full: None,
-                version_short: None,
-                version_checked_at: None,
-                lifecycle_status: None,
-                lifecycle_checked_at: None,
-                lifecycle_detail: None,
-            },
-            dbm_store::ManagedInstance {
-                id: "b".into(),
-                fingerprint: "b".into(),
-                name: "b".into(),
-                engine: dbm_core::Engine::Postgres,
-                host: "h".into(),
-                port: 1,
-                socket_path: None,
-                data_dir: None,
-                env_label: None,
-                registered_at: "now".into(),
-                version_full: None,
-                version_short: None,
-                version_checked_at: None,
-                lifecycle_status: None,
-                lifecycle_checked_at: None,
-                lifecycle_detail: None,
-            },
-        ]);
-        state.explorer.instances.nodes[0].expanded = false; // A collapsed
-        state.explorer.instances.set_active_instance(1); // active on B
-        state.explorer.instances.cursor = 0; // cursor on A
-        // Layout: size 100x50, body_top=3, body_h=45, explorer_w=20.
-        // instances_area.y=4 -> first row (A) at y=5; marker x=3.
-        let msgs =
-            explorer_row_click_msgs(ratatui::layout::Size::new(100, 50), 3, 45, 3, 5, &state)
-                .expect("click on A's arrow maps to a row");
-        assert!(
-            msgs.iter().any(|m| matches!(
-                m,
-                AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
-                    InstancesMsg::Message(InstancesMessage::ToggleExpandAt { row: 0 })
-                )))
-            )),
-            "expected ToggleExpandAt row 0 (A), got {msgs:?}"
-        );
-    }
-
-    #[test]
-    fn instances_arrow_renders_at_the_row_click_math_expects() {
-        use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
-        use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
-        use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
-        // Render the real explorer at the same geometry the click handler uses,
-        // then confirm the rendered first instance row is at the y that maps to
-        // row 0. This catches any render/row_at drift for the restart scenario
-        // (A collapsed-unloaded, active B).
-        let mut state = AppState::default();
-        state
-            .explorer
-            .instances
-            .set_instances(vec![dbm_store::ManagedInstance {
-                id: "a".into(),
-                fingerprint: "a".into(),
-                name: "a".into(),
-                engine: dbm_core::Engine::Postgres,
-                host: "h".into(),
-                port: 1,
-                socket_path: None,
-                data_dir: None,
-                env_label: None,
-                registered_at: "now".into(),
-                version_full: None,
-                version_short: None,
-                version_checked_at: None,
-                lifecycle_status: None,
-                lifecycle_checked_at: None,
-                lifecycle_detail: None,
-            }]);
-        state.explorer.instances.nodes[0].expanded = false;
-        state.explorer.instances.set_active_instance(0);
-        state.explorer.instances.cursor = 0;
-        let theme = crate::common::view::theme::default();
-        let mut terminal = Terminal::new(TestBackend::new(100, 50)).unwrap();
-        terminal
-            .draw(|frame| {
-                let theme = theme.clone();
-                // Explorer area: Rect(0, 3, 20, 45) matches body_top=3, body_h=45.
-                crate::features::explorer::view::render(
-                    frame,
-                    &theme,
-                    ratatui::layout::Rect::new(0, 3, 20, 45),
-                    &state.explorer,
-                    true,
-                    false,
-                    false,
-                    None,
-                );
-            })
-            .unwrap();
-        // Find the y of the first instance row (contains "a" in the instances
-        // column, not the "Explorer" title).
-        let buf = terminal.backend().buffer();
-        let mut first_y = None;
-        for y in 0..50 {
-            let mut line = String::new();
-            for x in 0..20 {
-                line.push_str(buf[(x, y)].symbol());
-            }
-            if line.contains("a") && !line.contains("Explorer") && !line.contains("Instances") {
-                first_y = Some(y);
-                break;
-            }
-        }
-        let y = first_y.expect("first instance row rendered");
-        // The click handler maps this rendered y (with marker x=3) to row 0.
-        let msgs =
-            explorer_row_click_msgs(ratatui::layout::Size::new(100, 50), 3, 45, 3, y, &state)
-                .expect("click on rendered arrow maps to a row");
-        assert!(
-            msgs.iter().any(|m| matches!(
-                m,
-                AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
-                    InstancesMsg::Message(InstancesMessage::ToggleExpandAt { row: 0 })
-                )))
-            )),
-            "rendered row {y} must map to ToggleExpandAt row 0, got {msgs:?}"
-        );
-    }
-
-    #[test]
-    fn discover_click_maps_rows_to_subpanes() {
-        use crate::app_shell::nav::DiscoverPane;
-        // Fixed layout: width 100, explorer 20 -> workspace (20,3,80,50).
-        // popup = 75% centered = (30,9,60,37); inner (31,10,58,35).
-        // Engine height 3 -> body starts at y=13; footer is 1 row (the discover
-        // hint line is always present) -> body spans [13,44).
-        // Default targets_height 10 -> targets [13,23), results [23,44).
-        let workspace = Rect::new(20, 3, 80, 50);
-        let state = crate::features::discover::state::DiscoverState::default();
-        let click = |col: u16, row: u16| discover_subpane_for_click(col, row, workspace, &state);
-        // Engine: rows [popup.y, body.y) = [9, 13).
-        assert_eq!(click(40, 11), Some(DiscoverPane::Engine));
-        assert_eq!(click(40, 12), Some(DiscoverPane::Engine));
-        // Targets: rows [13, 23).
-        assert_eq!(click(40, 15), Some(DiscoverPane::Targets));
-        assert_eq!(click(40, 22), Some(DiscoverPane::Targets));
-        // Results: rows [23, 44).
-        assert_eq!(click(40, 24), Some(DiscoverPane::Results));
-        assert_eq!(click(40, 43), Some(DiscoverPane::Results));
-        // Outside the popup: header row, explorer column, or beyond the popup
-        // yields None.
-        assert_eq!(click(10, 11), None); // explorer column
-        assert_eq!(click(40, 1), None); // header row
-        assert_eq!(click(99, 11), None); // beyond popup right edge
-        assert_eq!(click(40, 44), None); // beyond body bottom edge (footer)
     }
 }
