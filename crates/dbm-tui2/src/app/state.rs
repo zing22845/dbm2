@@ -36,9 +36,23 @@ pub struct AppState {
     /// workspace region (right).
     pub splitter: crate::features::app_splitter::state::AppSplitterState,
 
-    /// Splitter hover highlight state — which splitter the mouse cursor is
-    /// currently over. Updated on every `MouseMove` event; renders passively
-    /// read these booleans to decide which style the splitter line uses.
+    // --- Transient pointer-gesture UI state (input-layer owned) ---
+    //
+    // The next two fields are view-relevant gesture state: the pointer handlers
+    // in `app::mouse` write them directly and the renders read them to paint
+    // the hover highlight and the in-progress scrollbar/splitter drag.
+    //
+    // They are deliberately **not** routed through `update` (architectural
+    // ruling, see the TEA audit): like `mouse::state::MouseInteraction` they
+    // are transient pointer feedback, not application state — no feature logic
+    // branches on them and nothing is persisted from them. They stay on
+    // `AppState` precisely because the *view* must see them, whereas
+    // `MouseInteraction` (the armed splitter-drag target, double-click timing,
+    // wheel debounce, spin watchdog) sits outside `AppState` because the view
+    // never does. So: gesture bookkeeping -> `MouseInteraction`; gesture
+    // feedback the next frame paints -> these two fields.
+    /// Splitter hover / drag highlight state — which splitter the mouse cursor
+    /// is over, and which splitter line is currently being dragged.
     pub splitter_hover: SplitterHoverState,
 
     /// The scrollbar currently being dragged, if any — plus the track geometry
@@ -59,8 +73,13 @@ pub struct AppState {
     pub perf: PerfState,
 }
 
-/// Which splitter regions the mouse cursor currently hovers over.
-/// Each field maps to one splitter line drawn on screen.
+/// Which splitter regions the mouse cursor currently hovers over, plus the
+/// splitter line being drag-resized. Each field maps to one splitter drawn on
+/// screen.
+///
+/// Transient pointer-gesture feedback, written directly by the `app::mouse`
+/// handlers and read by the renders (see the note on `AppState`); it is not
+/// routed through `update` and is never persisted.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct SplitterHoverState {
     // --- Hover booleans (set by MouseMove hit-testing) ---
@@ -168,9 +187,15 @@ pub enum ModalKind {
     /// Choose a rows-per-page limit for the current result.
     ResultsRowLimitPicker { current: usize, limits: Vec<usize> },
     /// Type a specific page number to jump to.
-    ResultsPageInput { current_page: usize, total_pages: Option<usize> },
+    ResultsPageInput {
+        current_page: usize,
+        total_pages: Option<usize>,
+    },
     /// Confirm deleting a stored connection.
-    DeleteConnectionConfirm { instance: String, connection: String },
+    DeleteConnectionConfirm {
+        instance: String,
+        connection: String,
+    },
     /// Confirm unregistering an instance.
     UnregisterInstanceConfirm { instance: String },
     /// Preview the edit-batch statements before committing.

@@ -5,6 +5,13 @@
 //! detection), the last wheel tick (trackpad debounce) and the event-loop spin
 //! watchdog. They must survive across events, but they are not application
 //! state — a TEA `update` never sees them — so they stay out of `AppState`.
+//!
+//! Only the gesture bookkeeping lives here. The *view-relevant* feedback of the
+//! same gesture (the splitter hover highlight and the dragged scrollbar) is
+//! painted by the renders, so those fields live on `AppState`
+//! (`splitter_hover`, `scrollbar_drag`) where the view can read them; they are
+//! written by the same input handlers and enjoy the same "transient, not routed
+//! through `update`" status.
 
 use std::time::Instant;
 
