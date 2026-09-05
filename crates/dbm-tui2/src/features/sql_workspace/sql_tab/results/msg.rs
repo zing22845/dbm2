@@ -75,6 +75,9 @@ pub enum ResultsMessage {
     SetVScroll { position: usize },
     /// Set horizontal scroll offset (from scrollbar drag).
     SetHScroll { position: usize },
+    /// Scroll horizontally by `delta` columns (shift+wheel), relative to the
+    /// current offset. Clamped to the same bound as `SetHScroll`.
+    ScrollHScroll { delta: i32 },
     /// Adjust the selected column's width by `delta` columns (clamped) —
     /// the `,` / `.` column-width shortcuts.
     AdjustColWidth { delta: i16 },
@@ -161,6 +164,7 @@ impl ResultsMessage {
             ResultsMessage::SyncViewport { rows, width } => ListMessage::SyncViewport { rows, width },
             ResultsMessage::SetVScroll { position } => ListMessage::SetVScroll { position },
             ResultsMessage::SetHScroll { position } => ListMessage::SetHScroll { position },
+            ResultsMessage::ScrollHScroll { delta } => ListMessage::ScrollHScroll { delta },
             ResultsMessage::AdjustColWidth { delta } => ListMessage::AdjustColWidth { delta },
             ResultsMessage::AdjustColWidthTo { col, width } => {
                 ListMessage::AdjustColWidthTo { col, width }

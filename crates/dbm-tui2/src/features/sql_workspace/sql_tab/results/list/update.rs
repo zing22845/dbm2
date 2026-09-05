@@ -246,12 +246,22 @@ pub fn update(
         }
         ListMessage::SetHScroll { position } => {
             let before = state.h_scroll.get();
-            let table_w = crate::common::view::format::results_table_width(&state.col_widths) as usize;
-            let vp = state.viewport_width.get() as usize;
-            let max = table_w.saturating_sub(vp);
+            let max = max_h_scroll(&state);
             state.scroll_locked.set(true);
             state.h_scroll.set(position.min(max));
             state.h_scroll.get() != before
+        }
+        ListMessage::ScrollHScroll { delta } => {
+            let before = state.h_scroll.get();
+            let max = max_h_scroll(&state);
+            state.scroll_locked.set(true);
+            let next = if delta >= 0 {
+                before.saturating_add(delta as usize).min(max)
+            } else {
+                before.saturating_sub(delta.unsigned_abs() as usize)
+            };
+            state.h_scroll.set(next);
+            next != before
         }
         ListMessage::AdjustColWidth { delta } => {
             use crate::common::view::format::{MAX_RESULTS_COL_WIDTH, MIN_RESULTS_COL_WIDTH};
@@ -277,6 +287,17 @@ pub fn update(
         }
     };
     (state, effects, dirty)
+}
+
+/// Maximum horizontal scroll offset for the current column widths and viewport.
+///
+/// Shared by the absolute (`SetHScroll`) and relative (`ScrollHScroll`) handlers
+/// so both clamp against the same bound — the wheel cannot scroll past the
+/// point where the last column's right edge meets the viewport's right edge.
+fn max_h_scroll(state: &ListState) -> usize {
+    let table_w = crate::common::view::format::results_table_width(&state.col_widths) as usize;
+    let vp = state.viewport_width.get() as usize;
+    table_w.saturating_sub(vp)
 }
 
 /// Re-run the last query with the current page/row-limit.
@@ -395,6 +416,43 @@ mod tests {
         );
         assert!(state.result.is_some());
         assert!(!state.selected, "a fresh result must be deselected");
+    }
+
+    #[test]
+    fn scroll_h_scroll_moves_relative_and_clamps() {
+        // A table wider than its viewport is what makes horizontal wheeling
+        // meaningful: the wheel carries a relative delta and the feature layer
+        // owns clamping, so the loop layer never needs to know the bound.
+        let mut state = ListState::default();
+        state.set_result(sample_result());
+        state.col_widths = vec![60];
+        state.viewport_width.set(20);
+        state.h_scroll.set(0);
+
+        let (s, _e, dirty) = update(ListMessage::ScrollHScroll { delta: 5 }, state);
+        state = s;
+        assert!(dirty);
+        assert_eq!(state.h_scroll.get(), 5);
+
+        // Scrolling back by the same amount returns to the origin.
+        let (s, _e, dirty) = update(ListMessage::ScrollHScroll { delta: -5 }, state);
+        state = s;
+        assert!(dirty);
+        assert_eq!(state.h_scroll.get(), 0);
+
+        // Already at the left edge: another left tick changes nothing, so it
+        // must not mark the pane dirty (no repaint for a no-op gesture).
+        let (s, _e, dirty) = update(ListMessage::ScrollHScroll { delta: -5 }, state);
+        state = s;
+        assert!(!dirty);
+        assert_eq!(state.h_scroll.get(), 0);
+
+        // Overshooting right clamps at the content edge instead of scrolling
+        // into blank space, and takes the anchor lock like a scrollbar drag.
+        let (s, _e, _dirty) = update(ListMessage::ScrollHScroll { delta: 10_000 }, state);
+        state = s;
+        assert_eq!(state.h_scroll.get(), max_h_scroll(&state));
+        assert!(state.scroll_locked.get());
     }
 
     #[test]

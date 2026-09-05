@@ -188,7 +188,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // burst — subsequent same-direction events within the window are dropped.
     // This gives the user one line per wheel tick, matching discover targets
     // and every other app on the platform.
-    let mut last_wheel: Option<(std::time::Instant, i32)> = None;
+    // `(time, direction, horizontal)`: the axis is part of the key so that
+    // switching between vertical and horizontal wheeling (e.g. releasing
+    // shift) is not swallowed by the debounce window, while a trackpad burst
+    // on a single axis still collapses to one step.
+    let mut last_wheel: Option<(std::time::Instant, i32, bool)> = None;
     const WHEEL_DEBOUNCE_MS: u128 = 15;
     // Watchdog: if the select loop ever spins (e.g. a select branch becomes
     // immediately ready), the loop would burn 100% CPU and freeze keyboard
@@ -2032,19 +2036,20 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         {
                             // Wheel debounce: collapse macOS trackpad burst events
                             // so each physical tick maps to one MoveUp/Down.
-                            let dir: i32 = match mouse.kind {
-                                MouseEventKind::ScrollUp => -1,
-                                _ => 1,
-                            };
+                            // Shift+wheel is the platform convention for
+                            // horizontal scrolling; some terminals instead
+                            // report the gesture natively as ScrollLeft/Right.
+                            let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
                             let now = std::time::Instant::now();
-                            if let Some((t, d)) = last_wheel
+                            if let Some((t, d, h)) = last_wheel
                                 && d == dir
+                                && h == horizontal
                                 && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
                             {
                                 idle_iterations = 0;
                                 continue;
                             }
-                            last_wheel = Some((now, dir));
+                            last_wheel = Some((now, dir, horizontal));
 
                             let size = terminal.size()?;
                             let footer_h =
@@ -2070,6 +2075,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 use crate::features::discover::targets::msg::{
                                     TargetsMessage, TargetsMsg,
                                 };
+                                // No horizontal scroll in this pane, so a
+                                // shift-wheel falls through to the vertical axis.
                                 let msg = match mouse.kind {
                                     MouseEventKind::ScrollUp => AppMsg::Discover(
                                         crate::features::discover::msg::DiscoverMsg::Message(
@@ -2102,19 +2109,20 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             if matches!(state.focus, Pane::Discover(crate::app_shell::nav::DiscoverPane::Results))
                                 && !state.discover.close_confirm =>
                         {
-                            let dir: i32 = match mouse.kind {
-                                MouseEventKind::ScrollUp => -1,
-                                _ => 1,
-                            };
+                            // Shift+wheel is the platform convention for
+                            // horizontal scrolling; some terminals instead
+                            // report the gesture natively as ScrollLeft/Right.
+                            let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
                             let now = std::time::Instant::now();
-                            if let Some((t, d)) = last_wheel
+                            if let Some((t, d, h)) = last_wheel
                                 && d == dir
+                                && h == horizontal
                                 && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
                             {
                                 idle_iterations = 0;
                                 continue;
                             }
-                            last_wheel = Some((now, dir));
+                            last_wheel = Some((now, dir, horizontal));
 
                             let size = terminal.size()?;
                             let footer_h =
@@ -2141,6 +2149,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 use crate::features::discover::results::msg::{
                                     ResultsMessage, ResultsMsg,
                                 };
+                                // No horizontal scroll in this pane, so a
+                                // shift-wheel falls through to the vertical axis.
                                 let msg = match mouse.kind {
                                     MouseEventKind::ScrollUp => AppMsg::Discover(
                                         crate::features::discover::msg::DiscoverMsg::Message(
@@ -2169,22 +2179,26 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         }
                         // Scroll wheel: route to explorer objects pane when
                         // focus is on Explorer Objects and mouse is inside it.
-                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                        MouseEventKind::ScrollUp
+                            | MouseEventKind::ScrollDown
+                            | MouseEventKind::ScrollLeft
+                            | MouseEventKind::ScrollRight
                             if matches!(state.focus, Pane::Explorer(crate::app_shell::nav::ExplorerPane::Objects)) =>
                         {
-                            let dir: i32 = match mouse.kind {
-                                MouseEventKind::ScrollUp => -1,
-                                _ => 1,
-                            };
+                            // Shift+wheel is the platform convention for
+                            // horizontal scrolling; some terminals instead
+                            // report the gesture natively as ScrollLeft/Right.
+                            let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
                             let now = std::time::Instant::now();
-                            if let Some((t, d)) = last_wheel
+                            if let Some((t, d, h)) = last_wheel
                                 && d == dir
+                                && h == horizontal
                                 && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
                             {
                                 idle_iterations = 0;
                                 continue;
                             }
-                            last_wheel = Some((now, dir));
+                            last_wheel = Some((now, dir, horizontal));
 
                             let size = terminal.size()?;
                             let footer_h =
@@ -2207,18 +2221,23 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 use crate::features::explorer::msg::{
                                     ExplorerMessage, ExplorerMsg,
                                 };
-                                let msg = match mouse.kind {
-                                    MouseEventKind::ScrollUp => AppMsg::Explorer(
-                                        ExplorerMsg::Message(ExplorerMessage::Objects(
-                                            ObjectsMsg::Message(ObjectsMessage::MoveUp),
-                                        )),
-                                    ),
-                                    MouseEventKind::ScrollDown => AppMsg::Explorer(
-                                        ExplorerMsg::Message(ExplorerMessage::Objects(
-                                            ObjectsMsg::Message(ObjectsMessage::MoveDown),
-                                        )),
-                                    ),
-                                    _ => unreachable!(),
+                                // Shift+wheel scrolls the tree sideways; a bare
+                                // wheel keeps moving the cursor up/down.
+                                let msg = if horizontal {
+                                    AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
+                                        ObjectsMsg::Message(ObjectsMessage::ScrollHorizontal {
+                                            delta: (dir * WHEEL_H_STEP) as i16,
+                                            term_width: size.width,
+                                        }),
+                                    )))
+                                } else if dir < 0 {
+                                    AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
+                                        ObjectsMsg::Message(ObjectsMessage::MoveUp),
+                                    )))
+                                } else {
+                                    AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
+                                        ObjectsMsg::Message(ObjectsMessage::MoveDown),
+                                    )))
                                 };
                                 let result = process_message_round(
                                     &effect_runner,
@@ -2231,22 +2250,26 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         }
                         // Scroll wheel: route to explorer instances pane when
                         // focus is on Explorer Instances and mouse is inside it.
-                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                        MouseEventKind::ScrollUp
+                            | MouseEventKind::ScrollDown
+                            | MouseEventKind::ScrollLeft
+                            | MouseEventKind::ScrollRight
                             if matches!(state.focus, Pane::Explorer(crate::app_shell::nav::ExplorerPane::Instances)) =>
                         {
-                            let dir: i32 = match mouse.kind {
-                                MouseEventKind::ScrollUp => -1,
-                                _ => 1,
-                            };
+                            // Shift+wheel is the platform convention for
+                            // horizontal scrolling; some terminals instead
+                            // report the gesture natively as ScrollLeft/Right.
+                            let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
                             let now = std::time::Instant::now();
-                            if let Some((t, d)) = last_wheel
+                            if let Some((t, d, h)) = last_wheel
                                 && d == dir
+                                && h == horizontal
                                 && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
                             {
                                 idle_iterations = 0;
                                 continue;
                             }
-                            last_wheel = Some((now, dir));
+                            last_wheel = Some((now, dir, horizontal));
 
                             let size = terminal.size()?;
                             let footer_h =
@@ -2269,18 +2292,23 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 use crate::features::explorer::msg::{
                                     ExplorerMessage, ExplorerMsg,
                                 };
-                                let msg = match mouse.kind {
-                                    MouseEventKind::ScrollUp => AppMsg::Explorer(
-                                        ExplorerMsg::Message(ExplorerMessage::Instances(
-                                            InstancesMsg::Message(InstancesMessage::MoveUp),
-                                        )),
-                                    ),
-                                    MouseEventKind::ScrollDown => AppMsg::Explorer(
-                                        ExplorerMsg::Message(ExplorerMessage::Instances(
-                                            InstancesMsg::Message(InstancesMessage::MoveDown),
-                                        )),
-                                    ),
-                                    _ => unreachable!(),
+                                // Shift+wheel scrolls the tree sideways; a bare
+                                // wheel keeps moving the cursor up/down.
+                                let msg = if horizontal {
+                                    AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                                        InstancesMsg::Message(InstancesMessage::ScrollHorizontal {
+                                            delta: (dir * WHEEL_H_STEP) as i16,
+                                            term_width: size.width,
+                                        }),
+                                    )))
+                                } else if dir < 0 {
+                                    AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                                        InstancesMsg::Message(InstancesMessage::MoveUp),
+                                    )))
+                                } else {
+                                    AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
+                                        InstancesMsg::Message(InstancesMessage::MoveDown),
+                                    )))
                                 };
                                 let result = process_message_round(
                                     &effect_runner,
@@ -2296,19 +2324,20 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
                             if matches!(state.focus, Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::Connections)) =>
                         {
-                            let dir: i32 = match mouse.kind {
-                                MouseEventKind::ScrollUp => -1,
-                                _ => 1,
-                            };
+                            // Shift+wheel is the platform convention for
+                            // horizontal scrolling; some terminals instead
+                            // report the gesture natively as ScrollLeft/Right.
+                            let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
                             let now = std::time::Instant::now();
-                            if let Some((t, d)) = last_wheel
+                            if let Some((t, d, h)) = last_wheel
                                 && d == dir
+                                && h == horizontal
                                 && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
                             {
                                 idle_iterations = 0;
                                 continue;
                             }
-                            last_wheel = Some((now, dir));
+                            last_wheel = Some((now, dir, horizontal));
 
                             let size = terminal.size()?;
                             if let Some(body) = iw_body_area_for_hit(size, &state)
@@ -2319,6 +2348,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     ConnectionsMessage, ConnectionsMsg,
                                 };
                                 use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+                                // No horizontal scroll in this pane, so a
+                                // shift-wheel falls through to the vertical axis.
                                 let msg = match mouse.kind {
                                     MouseEventKind::ScrollUp => AppMsg::Iw(IwMsg::Message(IwMessage::Connections(
                                         ConnectionsMsg::Message(ConnectionsMessage::MoveUp),
@@ -2342,19 +2373,20 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
                             if matches!(state.focus, Pane::InstanceWorkspace(crate::app_shell::nav::IwPane::Overview)) =>
                         {
-                            let dir: i32 = match mouse.kind {
-                                MouseEventKind::ScrollUp => -1,
-                                _ => 1,
-                            };
+                            // Shift+wheel is the platform convention for
+                            // horizontal scrolling; some terminals instead
+                            // report the gesture natively as ScrollLeft/Right.
+                            let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
                             let now = std::time::Instant::now();
-                            if let Some((t, d)) = last_wheel
+                            if let Some((t, d, h)) = last_wheel
                                 && d == dir
+                                && h == horizontal
                                 && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
                             {
                                 idle_iterations = 0;
                                 continue;
                             }
-                            last_wheel = Some((now, dir));
+                            last_wheel = Some((now, dir, horizontal));
 
                             let size = terminal.size()?;
                             if let Some(body) = iw_body_area_for_hit(size, &state)
@@ -2365,6 +2397,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     OverviewMessage, OverviewMsg,
                                 };
                                 use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
+                                // No horizontal scroll in this pane, so a
+                                // shift-wheel falls through to the vertical axis.
                                 let msg = AppMsg::Iw(IwMsg::Message(IwMessage::Overview(
                                     OverviewMsg::Message(OverviewMessage::MoveCursor(dir)),
                                 )));
@@ -2383,23 +2417,27 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         // viewport in discover-style mode (cursor at top of
                         // viewport → can scroll up; cursor at bottom → can
                         // scroll down).
-                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                        MouseEventKind::ScrollUp
+                            | MouseEventKind::ScrollDown
+                            | MouseEventKind::ScrollLeft
+                            | MouseEventKind::ScrollRight
                             if matches!(state.focus, Pane::SQLWorkspace) =>
                         {
                             // Wheel debounce — same as discover targets above.
-                            let dir: i32 = match mouse.kind {
-                                MouseEventKind::ScrollUp => -1,
-                                _ => 1,
-                            };
+                            // Shift+wheel is the platform convention for
+                            // horizontal scrolling; some terminals instead
+                            // report the gesture natively as ScrollLeft/Right.
+                            let (horizontal, dir) = wheel_axis(mouse.kind, mouse.modifiers);
                             let now = std::time::Instant::now();
-                            if let Some((t, d)) = last_wheel
+                            if let Some((t, d, h)) = last_wheel
                                 && d == dir
+                                && h == horizontal
                                 && now.duration_since(t).as_millis() < WHEEL_DEBOUNCE_MS
                             {
                                 idle_iterations = 0;
                                 continue;
                             }
-                            last_wheel = Some((now, dir));
+                            last_wheel = Some((now, dir, horizontal));
 
                             if let Some(size) = terminal.size().ok()
                                 && let Some(tab_area) = sql_tab_area_for_hit(size, &state)
@@ -2419,15 +2457,17 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
                                     use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
-                                    let delta: i32 = match mouse.kind {
-                                        MouseEventKind::ScrollUp => -3,
-                                        MouseEventKind::ScrollDown => 3,
-                                        _ => unreachable!(),
-                                    };
+                                    // Shift+wheel scrolls the editor sideways;
+                                    // a bare wheel keeps scrolling by lines.
+                                    let delta: i32 = if horizontal { dir * WHEEL_H_STEP } else { dir * 3 };
                                     let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                                         SqlTabMessage::Editor {
                                             tab_id: tab_idx,
-                                            msg: EditorMsg::Message(EditorMessage::ScrollV { delta }),
+                                            msg: EditorMsg::Message(if horizontal {
+                                                EditorMessage::ScrollH { delta }
+                                            } else {
+                                                EditorMessage::ScrollV { delta }
+                                            }),
                                         },
                                     ))));
                                     let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
@@ -2458,15 +2498,16 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                         use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
                                         use crate::features::sql_workspace::sql_tab::history::msg::{HistoryMessage, HistoryMsg};
-                                        let delta: i32 = match mouse.kind {
-                                            MouseEventKind::ScrollUp => -1,
-                                            MouseEventKind::ScrollDown => 1,
-                                            _ => unreachable!(),
-                                        };
+                                        // Shift+wheel scrolls the history rows
+                                        // sideways; a bare wheel moves the cursor.
                                         let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                                             SqlTabMessage::History {
                                                 tab_id: tab_idx,
-                                                msg: HistoryMsg::Message(HistoryMessage::MoveCursor { delta }),
+                                                msg: HistoryMsg::Message(if horizontal {
+                                                    HistoryMessage::ScrollHScroll { delta: dir * WHEEL_H_STEP }
+                                                } else {
+                                                    HistoryMessage::MoveCursor { delta: dir }
+                                                }),
                                             },
                                         ))));
                                         let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
@@ -2478,15 +2519,16 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                         use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
                                         use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
-                                        let delta: i32 = match mouse.kind {
-                                            MouseEventKind::ScrollUp => -1,
-                                            MouseEventKind::ScrollDown => 1,
-                                            _ => unreachable!(),
-                                        };
+                                        // Shift+wheel scrolls the grid sideways;
+                                        // a bare wheel moves the cell selection.
                                         let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                                             SqlTabMessage::Results {
                                                 tab_id: tab_idx,
-                                                msg: ResultsMsg::Message(ResultsMessage::MoveSelection { dr: delta, dc: 0 }),
+                                                msg: ResultsMsg::Message(if horizontal {
+                                                    ResultsMessage::ScrollHScroll { delta: dir * WHEEL_H_STEP }
+                                                } else {
+                                                    ResultsMessage::MoveSelection { dr: dir, dc: 0 }
+                                                }),
                                             },
                                         ))));
                                         let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
@@ -3129,6 +3171,41 @@ fn iw_action_to_msg(action: crate::features::instance_workspace::effect::IwActio
 /// Compute the two explorer child tree areas (instances top / objects bottom)
 /// from the explorer's outer rect, mirroring `explorer/view.rs` (the stored
 /// instances height + 1-row splitter, inside the outer border).
+/// Columns scrolled per horizontal wheel tick.
+///
+/// Horizontal content is typically far wider than it is tall, so reusing the
+/// vertical wheel's one-cell-per-tick granularity would make a wide table
+/// impractical to traverse. Three columns per tick keeps a gesture useful
+/// while staying fine-grained enough to land on a column.
+const WHEEL_H_STEP: i32 = 3;
+
+/// Resolve a wheel tick into `(horizontal, delta)`.
+///
+/// `delta` is `-1`/`+1` per physical tick; callers scale it to the step size
+/// their pane wants.
+///
+/// Shift+wheel is the platform-wide convention for horizontal scrolling, so a
+/// *vertical* tick carrying SHIFT is reinterpreted on the horizontal axis. Some
+/// terminals instead report the gesture natively as `ScrollLeft`/`ScrollRight`
+/// with no modifier at all, which is horizontal either way — hence the two
+/// spellings of "scroll sideways" both map to `horizontal == true`.
+fn wheel_axis(
+    kind: crossterm::event::MouseEventKind,
+    modifiers: crossterm::event::KeyModifiers,
+) -> (bool, i32) {
+    let (vertical, delta) = match kind {
+        crossterm::event::MouseEventKind::ScrollUp => (true, -1),
+        crossterm::event::MouseEventKind::ScrollDown => (true, 1),
+        crossterm::event::MouseEventKind::ScrollLeft => (false, -1),
+        crossterm::event::MouseEventKind::ScrollRight => (false, 1),
+        // Not a wheel tick — every caller's match guard admits only the four
+        // kinds above, so this is unreachable in practice.
+        _ => (true, 0),
+    };
+    let horizontal = !vertical || modifiers.contains(crossterm::event::KeyModifiers::SHIFT);
+    (horizontal, delta)
+}
+
 fn explorer_child_areas(
     explorer: ratatui::layout::Rect,
     instances_height: u16,
@@ -3969,6 +4046,27 @@ mod tests {
     use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
     use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
     use crate::features::sql_workspace::sql_tab::results::state::QueryResultData;
+
+    #[test]
+    fn wheel_axis_maps_shift_and_native_horizontal_ticks() {
+        use crossterm::event::{KeyModifiers, MouseEventKind};
+
+        // A bare vertical wheel stays on the vertical axis.
+        assert_eq!(wheel_axis(MouseEventKind::ScrollUp, KeyModifiers::NONE), (false, -1));
+        assert_eq!(wheel_axis(MouseEventKind::ScrollDown, KeyModifiers::NONE), (false, 1));
+
+        // Shift reinterprets a vertical tick as horizontal.
+        assert_eq!(wheel_axis(MouseEventKind::ScrollUp, KeyModifiers::SHIFT), (true, -1));
+        assert_eq!(wheel_axis(MouseEventKind::ScrollDown, KeyModifiers::SHIFT), (true, 1));
+
+        // Terminals that report the gesture natively are horizontal regardless
+        // of modifiers.
+        assert_eq!(wheel_axis(MouseEventKind::ScrollLeft, KeyModifiers::NONE), (true, -1));
+        assert_eq!(wheel_axis(MouseEventKind::ScrollRight, KeyModifiers::NONE), (true, 1));
+
+        // Other modifiers must not hijack the axis.
+        assert_eq!(wheel_axis(MouseEventKind::ScrollDown, KeyModifiers::CONTROL), (false, 1));
+    }
 
     #[test]
     fn explorer_child_areas_stack_trees() {
