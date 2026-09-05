@@ -17,7 +17,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// Discover key bindings, dispatched by the close-confirm flag and the active
 /// discover child pane.
-pub(crate) fn discover_key(
+pub(super) fn discover_key(
     key: KeyEvent,
     sub: DiscoverPane,
     state: &DiscoverState,

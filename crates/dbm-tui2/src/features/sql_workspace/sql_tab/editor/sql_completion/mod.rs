@@ -12,6 +12,7 @@ pub mod context;
 pub mod effect;
 pub mod engine;
 pub mod ident;
+pub mod input;
 pub mod intent;
 pub mod keywords;
 pub mod match_score;

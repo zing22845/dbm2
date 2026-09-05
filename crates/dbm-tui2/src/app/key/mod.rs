@@ -8,14 +8,13 @@
 //! its focus ([`nav`], [`header`], [`explorer`], [`discover`], [`iw`],
 //! [`sql`], or the modal overlay [`modal`]).
 
-pub(crate) mod discover;
-pub(crate) mod dispatch;
-pub(crate) mod explorer;
-pub(crate) mod header;
-pub(crate) mod iw;
-pub(crate) mod modal;
-pub(crate) mod nav;
-pub(crate) mod sql;
+mod discover;
+mod dispatch;
+mod explorer;
+mod header;
+mod iw;
+mod modal;
+mod nav;
+mod sql;
 
 pub use dispatch::{key_to_msg, paste_to_msg};
-pub use modal::confirm_yes_msg;

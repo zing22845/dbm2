@@ -17,7 +17,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 /// Nudge the Explorer pane width with `[` (shrink) / `]` (grow), matching the
 /// splitter convention that the left-side pane (Explorer) is grown by `]`.
 /// Returns `None` when the key is not a bare `[` / `]`.
-pub(crate) fn explorer_width_nudge(key: KeyEvent, state: &AppState) -> Option<AppMsg> {
+pub(super) fn explorer_width_nudge(key: KeyEvent, state: &AppState) -> Option<AppMsg> {
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         return None;
     }
@@ -46,7 +46,7 @@ pub(crate) fn explorer_width_nudge(key: KeyEvent, state: &AppState) -> Option<Ap
 /// instance workspace when an instance is open, otherwise the SQL workspace —
 /// otherwise the focus (SQLWorkspace) no longer matches what is on screen, and
 /// Ctrl+nav inside the instance workspace stops working.
-pub(crate) fn switch_pane_by_dir(
+pub(super) fn switch_pane_by_dir(
     dir: crate::app_shell::nav::PaneDir,
     focus: Pane,
     instance_open: bool,
@@ -96,7 +96,7 @@ pub(crate) fn switch_pane_by_dir(
 /// Matching the original dbm, these fire only for an *uppercase* letter (Shift
 /// or Caps Lock) with no Ctrl/Alt/Meta, and are suppressed while typing in the
 /// SQL editor (insert mode) so `S`/`H`/`R` do not interrupt a query mid-edit.
-pub(crate) fn pane_jump_from_key(key: KeyEvent, state: &AppState) -> Option<AppMsg> {
+pub(super) fn pane_jump_from_key(key: KeyEvent, state: &AppState) -> Option<AppMsg> {
     use crate::common::utils::shortcuts::{
         caps_lock_active, effective_ascii_letter, pane_jump_modifiers_ok,
     };
@@ -152,7 +152,7 @@ pub(crate) fn pane_jump_from_key(key: KeyEvent, state: &AppState) -> Option<AppM
 }
 
 /// Build a `SqlTabMessage::Focus` app message for the given workspace sub-pane.
-pub(crate) fn focus_subpane(focus: SqlFocus) -> AppMsg {
+pub(super) fn focus_subpane(focus: SqlFocus) -> AppMsg {
     AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
         SqlTabMessage::Focus(focus),
     ))))
@@ -174,7 +174,7 @@ fn focus_explorer(sub: crate::app_shell::nav::ExplorerPane) -> AppMsg {
 ///
 /// Returns `None` when the move would leave the workspace (e.g. editor → left,
 /// which goes to the explorer; results/history → up/left boundaries).
-pub(crate) fn switch_subpane(
+pub(super) fn switch_subpane(
     dir: crate::app_shell::nav::PaneDir,
     sql: &SqlState,
 ) -> Option<AppMsg> {

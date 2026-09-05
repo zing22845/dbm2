@@ -1,5 +1,5 @@
-//! Instance-workspace key bindings: Tab pane cycling and forwarding into
-//! the feature's `input`, plus the confirm-unregister/delete helpers.
+//! Instance-workspace key bindings: Tab pane cycling and forwarding into the
+//! feature's own `input` layer.
 //!
 //! Part of the split keyboard layer; the entry points are
 //! re-exported from the parent [`super`] module.
@@ -9,7 +9,6 @@ use crate::app::state::ModalKind;
 use crate::app_shell::msg::ShellMsg;
 use crate::app_shell::nav::IwPane;
 use crate::app_shell::pane::Pane;
-use crate::features::instance_workspace::connections::msg::{ConnectionsMessage, ConnectionsMsg};
 use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
 use crate::features::instance_workspace::state::IwState;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -20,7 +19,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 /// `input::key_to_msg`; this shell keeps only the `Tab` pane navigation and the
 /// pure conversion of the returned action into an `AppMsg` (opening a confirm
 /// modal when the feature requests one).
-pub(crate) fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
+pub(super) fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppMsg> {
     // `Tab` cycles the instance-workspace sub-panes (overview <-> connections),
     // mirroring the explorer's Tab behavior. This is shell-level focus, so it
     // is handled here rather than in the feature.
@@ -49,25 +48,6 @@ pub(crate) fn iw_key(key: KeyEvent, sub: IwPane, state: &IwState) -> Option<AppM
 
 fn iw(msg: IwMessage) -> AppMsg {
     AppMsg::Iw(IwMsg::Message(msg))
-}
-
-/// Confirm-unregister helper: the shell closes the modal and dispatches the
-/// unregister to the instance workspace. The shell closes the modal when it
-/// sees the `UnregisterInstance` message.
-pub(crate) fn close_and_unregister(instance: String) -> AppMsg {
-    iw(IwMessage::UnregisterInstance { instance })
-}
-
-/// Confirm-delete-connection helper: dispatch the delete to the connections
-/// panel. The shell closes the modal when it sees the `DeleteConnection`
-/// message (matching the unregister confirm flow).
-pub(crate) fn confirm_delete_connection(instance: String, connection: String) -> AppMsg {
-    iw(IwMessage::Connections(ConnectionsMsg::Message(
-        ConnectionsMessage::DeleteConnection {
-            instance_name: instance,
-            connection_name: connection,
-        },
-    )))
 }
 
 #[cfg(test)]

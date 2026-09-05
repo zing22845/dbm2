@@ -2,6 +2,7 @@
 //! central update dispatcher and the run loop.
 
 pub mod action;
+pub mod confirm;
 pub mod geometry;
 pub mod key;
 pub mod loop_mod;

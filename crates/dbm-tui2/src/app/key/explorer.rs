@@ -15,7 +15,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 /// `Tab` (and Ctrl+Up/Down via the shell) moves between the instances and
 /// objects panes; that flows through a shell `FocusChanged` so the shell focus
 /// and the explorer feature's sub-pane stay in sync.
-pub(crate) fn explorer_key(key: KeyEvent, sub: ExplorerPane, term_width: u16) -> Option<AppMsg> {
+pub(super) fn explorer_key(key: KeyEvent, sub: ExplorerPane, term_width: u16) -> Option<AppMsg> {
     // `Tab` toggles between the instances and objects panes.
     if key.code == KeyCode::Tab {
         let next = match sub {

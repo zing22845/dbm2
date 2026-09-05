@@ -25,7 +25,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 /// SQL workspace key bindings, routed to the active tab's editor and its
 /// overlays (context picker / completion popup).
-pub(crate) fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
+pub(super) fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     let tab = state.sql_tab.active_tab()?;
     let tab_id = tab.session.id;
     let editor = &tab.editor;
@@ -69,7 +69,7 @@ pub(crate) fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     if tab.focus == SqlFocus::Editor
         && editor.sql_completion.is_open()
         && let Some(msg) =
-            crate::features::sql_workspace::sql_tab::editor::sql_completion::view::key_to_msg(key)
+            crate::features::sql_workspace::sql_tab::editor::sql_completion::input::key_to_msg(key)
     {
         return Some(sql_editor(
             EditorMessage::SqlCompletion(SqlCompletionMsg::Message(msg)),
@@ -245,7 +245,7 @@ pub(crate) fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
 }
 
 /// Build a `SqlTabMessage::Results` targeting the given tab.
-pub(crate) fn sql_results(msg: SqlResultsMessage, tab_id: usize) -> AppMsg {
+pub(super) fn sql_results(msg: SqlResultsMessage, tab_id: usize) -> AppMsg {
     AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
         SqlTabMessage::Results {
             tab_id,

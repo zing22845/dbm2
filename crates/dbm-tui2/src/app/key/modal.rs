@@ -4,8 +4,8 @@
 //! Part of the split keyboard layer; the entry points are
 //! re-exported from the parent [`super`] module.
 
-use super::iw::{close_and_unregister, confirm_delete_connection};
 use super::sql::sql_results;
+use crate::app::confirm::confirm_yes_msg;
 use crate::app::msg::AppMsg;
 use crate::app::state::{AppState, ModalKind};
 use crossterm::event::{KeyCode, KeyEvent};
@@ -14,7 +14,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 /// `on_yes`), `n`/`N` cancels (running `on_no`), anything else is unhandled.
 /// Both the app-level confirm modals and the discover close-confirmation route
 /// their keys through this so the confirm shortcut is defined in one place.
-pub(crate) fn confirm_yes_no_key(
+pub(super) fn confirm_yes_no_key(
     key: KeyEvent,
     on_yes: impl FnOnce() -> Option<AppMsg>,
     on_no: impl FnOnce() -> Option<AppMsg>,
@@ -26,46 +26,11 @@ pub(crate) fn confirm_yes_no_key(
     }
 }
 
-/// The action dispatched when a confirm modal's `Yes`/`y` is triggered (by key
-/// or by clicking the Yes button). The shell closes the modal itself when it
-/// sees the dispatched message (e.g. `DeleteConnection` / `UnregisterInstance`),
-/// or the action runner does (e.g. a `Commit`). `None` for non-confirm modals.
-pub fn confirm_yes_msg(modal: &ModalKind, state: &AppState) -> Option<AppMsg> {
-    use crate::features::sql_workspace::sql_tab::results::msg::ResultsMessage as R;
-    match modal {
-        ModalKind::ResultsEditCommitPreview { .. } => {
-            // Confirm the commit: dispatch Commit to the active tab's results
-            // (the modal closes when the commit completes, via `CommitResult`).
-            state
-                .sql
-                .sql_tab
-                .active_tab()
-                .map(|t| t.session.id)
-                .map(|id| sql_results(R::Commit, id))
-        }
-        // Confirm deleting a connection: dispatch the delete to the connections
-        // panel (the shell closes the modal when it sees DeleteConnection).
-        ModalKind::DeleteConnectionConfirm {
-            instance,
-            connection,
-        } => Some(confirm_delete_connection(
-            instance.clone(),
-            connection.clone(),
-        )),
-        // Confirm unregistering the current instance: dispatch the unregister
-        // (the shell closes the modal when it sees UnregisterInstance).
-        ModalKind::UnregisterInstanceConfirm { instance } => {
-            Some(close_and_unregister(instance.clone()))
-        }
-        _ => None,
-    }
-}
-
 /// Keys for the data-carrying popups (row-limit picker / page input / confirm
 /// / commit preview). `Esc` closes; `n`/`N` cancels a confirm; `y`/`Y`/`Enter`
 /// confirms and dispatches the owning feature's action (e.g. the commit preview
 /// issues a `Commit`). All changes flow through `update` messages.
-pub(crate) fn modal_key(key: KeyEvent, modal: &ModalKind, state: &AppState) -> Option<AppMsg> {
+pub(super) fn modal_key(key: KeyEvent, modal: &ModalKind, state: &AppState) -> Option<AppMsg> {
     use crate::features::sql_workspace::sql_tab::results::msg::ResultsMessage as R;
     use ModalKind;
     let close = || AppMsg::CloseModal;
