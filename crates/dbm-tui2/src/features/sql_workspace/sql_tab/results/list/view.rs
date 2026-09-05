@@ -15,8 +15,8 @@ use crate::common::view::action_bar::{
     RESULTS_ACTION_BAR_HEIGHT, ResultsToolbarModel, action_bar_width, draw_action_bar,
 };
 use crate::common::view::format::{
-    RESULTS_HEADER_HEIGHT, RESULTS_ROW_CONTENT_HEIGHT, RESULTS_ROW_HEIGHT,
-    column_type_label, results_col_text_view,
+    RESULTS_HEADER_HEIGHT, RESULTS_ROW_CONTENT_HEIGHT, RESULTS_ROW_HEIGHT, column_type_label,
+    results_col_text_view,
 };
 use crate::common::view::hints::{draw_pane_footer, footer_height};
 use crate::common::view::theme::Theme;
@@ -368,6 +368,23 @@ fn render_table(
     // Row separator style (subtle grid line).
     let grid_style = Style::default().fg(p.muted);
 
+    // Root-cause invariant for the whole table body: every visible cell must be
+    // written by the current frame, or it retains the previous frame's content.
+    // Headers and rows are painted per-column/per-cell as Paragraphs, so the
+    // 1-char strip a highlighted column vacates when `h_scroll` shifts — or a
+    // row vacates when its selection is cleared while scrolled — would otherwise keep
+    // its selection background as a smear. Clearing the entire body region over
+    // the content width up front guarantees these cells default to the pane
+    // background each frame. The selected-row block and column texts then paint
+    // on top, so a transition to unselected/cleared can never leave residue.
+    let body_height = (RESULTS_HEADER_HEIGHT
+        + (visible_data_rows as u16).saturating_mul(RESULTS_ROW_HEIGHT))
+        .min(table_area.height);
+    frame.render_widget(
+        ratatui::widgets::Clear,
+        Rect::new(table_area.x, table_area.y, content_width, body_height),
+    );
+
     // ---- HEADER (3 lines) ----
     // Line 0: column names (bold)
     // Line 1: type labels (green)
@@ -409,13 +426,13 @@ fn render_table(
             Rect::new(col_x, table_area.y, tv.text_w, 1),
         );
 
-        // Type label: dark grey on selection bg for hierarchy, green otherwise.
+        // Type label: always green on the normal background. It stays in its
+        // semantic color rather than taking the selection background — the
+        // column *name* is the single visual channel that marks the selected
+        // column, so hovering/resizing the header never over-loads a second
+        // highlighted row.
         let type_label = column_type_label(meta);
-        let type_style = if col == state_col && state_selected {
-            Style::default().fg(p.selection_text).bg(p.selection_bg).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-        };
+        let type_style = Style::default().fg(Color::Green).add_modifier(Modifier::BOLD);
         let type_text = crate::common::view::format::truncate_cell_display_from(
             &type_label,
             tv.table_text_skip,
@@ -448,6 +465,27 @@ fn render_table(
                 frame
                     .buffer_mut()
                     .set_string(border_x, y, "│", border_style);
+            }
+        }
+    }
+
+    // Force every header cell to be (re)emitted on each frame. Ratatui stores the
+    // trailing column of a wide (CJK) glyph as a blank "hole" whose style is Reset;
+    // when a highlighted header scrolls by a single column, that hole compares equal
+    // to the previous frame's hole and the diff skips it — but the terminal has
+    // physically painted the glyph's right half there, so a 1-cell background smear
+    // lingers on the drag trail. Marking the header cells `AlwaysUpdate` re-paints
+    // them every frame (wide heads are still emitted with their trailing skipped,
+    // so glyphs are never corrupted), which clears residue while remaining O(header).
+    {
+        use ratatui::buffer::CellDiffOption;
+        let hdr_w = content_width.min(table_area.width);
+        let hdr_h = RESULTS_HEADER_HEIGHT.min(table_area.height);
+        for y in table_area.y..table_area.y + hdr_h {
+            for x in table_area.x..table_area.x + hdr_w {
+                if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
+                    cell.set_diff_option(CellDiffOption::AlwaysUpdate);
+                }
             }
         }
     }
@@ -928,4 +966,82 @@ pub fn col_width_from_drag_x(
     let rel_x = x.saturating_sub(content_area.x) as usize + h_scroll;
     let start = crate::common::view::format::col_x_start(col, &state.col_widths);
     rel_x.saturating_sub(start) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
+    use ratatui::Terminal;
+    use crate::common::view::theme;
+    use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+    use crate::features::sql_workspace::sql_tab::results::state::QueryResultData;
+
+    fn sample_result() -> QueryResultData {
+        QueryResultData {
+            columns: (0..6)
+                .map(|i| ColumnInfo {
+                    name: format!("field{i}name"),
+                    type_name: "int4".into(),
+                    type_display: "int4".into(),
+                    comment: None,
+                })
+                .collect(),
+            rows: vec![vec![
+                "0".into(),
+                "1".into(),
+                "2".into(),
+                "3".into(),
+                "4".into(),
+                "5".into(),
+            ]],
+            rows_affected: None,
+            total_rows: Some(1),
+        }
+    }
+
+    fn make_state(h_scroll: usize, col: usize) -> super::ListState {
+        let mut s = super::ListState::new();
+        s.result = Some(sample_result());
+        // Force horizontal overflow: six 40-wide columns in a narrow viewport.
+        s.col_widths = vec![40; 6];
+        s.row = 0;
+        s.col = col;
+        s.selected = true;
+        s.scroll_locked.set(true); // keep the manually-set h_scroll
+        s.h_scroll.set(h_scroll);
+        s
+    }
+
+    /// Reproduce the header-highlight smear: drawing an earlier h_scroll frame
+    /// then a shifted one on the SAME terminal must leave no residue — of any
+    /// glyph or color — beyond what a fresh single render of the shifted frame
+    /// shows.
+    #[test]
+    fn horizontal_scroll_leaves_no_header_selection_residue() {
+        let area = Rect::new(0, 0, 30, 10);
+        let (from, to, col) = (0usize, 45usize, 2usize);
+
+        // Baseline: a fresh terminal rendered directly at the destination h_scroll.
+        let mut fresh = Terminal::new(TestBackend::new(30, 10)).unwrap();
+        fresh
+            .draw(|f| super::render(f, &theme::default(), area, &make_state(to, col), true, false, None))
+            .unwrap();
+        let fresh_buf = fresh.backend().buffer().clone();
+
+        // Cumulative: step through intermediate h_scroll values on the SAME
+        // terminal (mirroring a real drag), ending at the destination.
+        let mut cumul = Terminal::new(TestBackend::new(30, 10)).unwrap();
+        for h in (from..=to).step_by(3) {
+            cumul
+                .draw(|f| super::render(f, &theme::default(), area, &make_state(h, col), true, false, None))
+                .unwrap();
+        }
+
+        assert_eq!(
+            cumul.backend().buffer().content,
+            fresh_buf.content,
+            "stale screen content (glyph or color) left after h_scroll moves the highlight"
+        );
+    }
 }

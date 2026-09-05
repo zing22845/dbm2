@@ -73,10 +73,7 @@ pub fn render(
         iw_view::render(frame, &state.theme, workspace, &state.iw, workspace_focused);
         (None, None)
     } else {
-        tracing::debug!("render: begin sql_view");
-        let r = sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused, &state.splitter_hover);
-        tracing::debug!("render: sql_view done");
-        r
+        sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused, &state.splitter_hover)
     };
     // The bottom row holds the global footer on the left and the performance
     // readout on the right.

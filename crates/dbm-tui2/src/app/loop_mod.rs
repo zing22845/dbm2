@@ -243,7 +243,6 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             let targets_layout = std::cell::RefCell::new(None);
             let history_v_scroll_out = std::cell::RefCell::new(None);
             let results_scroll_out = std::cell::RefCell::new(None);
-            tracing::debug!("render: begin terminal.draw");
             terminal.draw(|frame| {
                 let (c, t, h, r) = render(frame, &state);
                 *editor_cursor.borrow_mut() = c;
@@ -251,7 +250,6 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                 *history_v_scroll_out.borrow_mut() = h;
                 *results_scroll_out.borrow_mut() = r;
             })?;
-            tracing::debug!("render: terminal.draw done");
             let cursor = editor_cursor.into_inner();
             let cursor_pos = cursor.as_ref().map(|c| c.position);
             crate::common::editor::apply_hardware_cursor(cursor)?;
@@ -1789,7 +1787,6 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // Results list h_scrollbar drag: convert mouse x
                             // inside the track to a horizontal scroll position.
                             if let Some((track_x, viewport_width, max_scroll)) = results_h_scrollbar_drag {
-                                let _rel_x = point.x.saturating_sub(track_x);
                                 let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.x, track_x, viewport_width, max_scroll);
                                 if let Some(active_tab) = state.sql.sql_tab.active_tab {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
