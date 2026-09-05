@@ -9,6 +9,7 @@
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
+use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::state::{ExplorerPane, ExplorerState};
@@ -29,6 +30,7 @@ pub fn render(
     focused: bool,
     splitter_hover: bool,
     splitter_drag: bool,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) {
     let p = theme.palette();
 
@@ -52,7 +54,21 @@ pub fn render(
 
     let instances_focused = focused && state.pane == ExplorerPane::Instances;
     let objects_focused = focused && state.pane == ExplorerPane::Objects;
-    instances_view::render(frame, theme, panes.instances, &state.instances, instances_focused);
+    instances_view::render(
+        frame,
+        theme,
+        panes.instances,
+        &state.instances,
+        instances_focused,
+        active_scrollbar,
+    );
     splitter_view::render(frame, &panes, splitter_hover, splitter_drag);
-    objects_view::render(frame, theme, panes.objects, &state.objects, objects_focused);
+    objects_view::render(
+        frame,
+        theme,
+        panes.objects,
+        &state.objects,
+        objects_focused,
+        active_scrollbar,
+    );
 }

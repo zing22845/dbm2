@@ -41,6 +41,14 @@ pub struct AppState {
     /// read these booleans to decide which style the splitter line uses.
     pub splitter_hover: SplitterHoverState,
 
+    /// The scrollbar currently being dragged, if any — plus the track geometry
+    /// captured when the press started.
+    ///
+    /// One value rather than one flag per bar: only a single drag can be active
+    /// at a time, and every render reads it to highlight the dragged bar (thumb
+    /// in the accent color) while the press is held, matching the original dbm.
+    pub scrollbar_drag: Option<crate::common::view::pane_scrollbar::ScrollbarDrag>,
+
     // --- Feature states ---
     pub header: HeaderState,
     pub explorer: ExplorerState,
@@ -191,6 +199,7 @@ impl Default for AppState {
             term_height: 0,
             splitter: crate::features::app_splitter::state::AppSplitterState::default(),
             splitter_hover: SplitterHoverState::default(),
+            scrollbar_drag: None,
             theme: crate::common::view::theme::default(),
             header: HeaderState::default(),
             explorer: ExplorerState::default(),

@@ -15,22 +15,108 @@ use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
 use super::theme::Palette;
 
 /// Which pane scrollbar is being dragged (single active drag — not per-pane bools).
+///
+/// The `H`/`V` suffix names the axis the scrollbar scrolls along, which
+/// [`ActiveScrollbar::axis`] reports so the drag handler can map the pointer to
+/// an offset without a per-variant branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveScrollbar {
+    /// Explorer instances tree, vertical.
     TreeV,
+    /// Explorer instances tree, horizontal.
     TreeH,
+    /// Explorer objects tree, vertical.
     ObjectsV,
+    /// Explorer objects tree, horizontal.
     ObjectsH,
+    /// SQL results grid, vertical.
     ResultsV,
+    /// SQL results grid, horizontal.
     ResultsH,
+    /// SQL results detail sub-pane, vertical.
     ResultsDetailV,
+    /// SQL history list, vertical.
     HistoryV,
+    /// SQL history list, horizontal.
     HistoryH,
+    /// SQL history detail sub-pane, vertical.
     HistoryDetailV,
+    /// SQL editor body, vertical.
     SqlV,
+    /// Instance workspace overview, vertical.
     OverviewV,
+    /// Instance workspace overview, horizontal.
     OverviewH,
+    /// Discover targets list, vertical.
     DiscoverTargetsV,
+    /// Discover results list, vertical.
+    DiscoverResultsV,
+    /// Instance workspace connections list, vertical.
+    ConnectionsV,
+}
+
+/// The axis a scrollbar scrolls along.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollAxis {
+    Horizontal,
+    Vertical,
+}
+
+impl ActiveScrollbar {
+    /// The axis this scrollbar scrolls along.
+    pub fn axis(self) -> ScrollAxis {
+        match self {
+            Self::TreeH
+            | Self::ObjectsH
+            | Self::ResultsH
+            | Self::HistoryH
+            | Self::OverviewH => ScrollAxis::Horizontal,
+            Self::TreeV
+            | Self::ObjectsV
+            | Self::ResultsV
+            | Self::ResultsDetailV
+            | Self::HistoryV
+            | Self::HistoryDetailV
+            | Self::SqlV
+            | Self::OverviewV
+            | Self::DiscoverTargetsV
+            | Self::DiscoverResultsV
+            | Self::ConnectionsV => ScrollAxis::Vertical,
+        }
+    }
+}
+
+/// A scrollbar drag in progress: which one, plus the track geometry captured
+/// at press time.
+///
+/// Held as a single value in `AppState` rather than one `Option` per scrollbar,
+/// because only one drag can be active at a time and every render needs to know
+/// *which* one so it can highlight that bar. The geometry is captured on Down
+/// because the pointer routinely leaves the track mid-drag while the pointer →
+/// offset mapping has to stay continuous.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScrollbarDrag {
+    /// Which scrollbar is being dragged.
+    pub which: ActiveScrollbar,
+    /// Track start along the scroll axis (x for horizontal, y for vertical).
+    pub track_start: u16,
+    /// Track length in pixels along the scroll axis.
+    pub viewport_len: usize,
+    /// Maximum scroll offset this scrollbar can reach.
+    pub max_scroll: usize,
+}
+
+impl ScrollbarDrag {
+    /// Map the current pointer position to a scroll offset, reading whichever
+    /// coordinate matches this drag's axis (`x` for a horizontal bar, `y` for a
+    /// vertical one). `scroll_offset_from_track` already clamps to `max_scroll`.
+    pub fn offset_for_pointer(&self, x: u16, y: u16) -> usize {
+        let pointer = match self.which.axis() {
+            ScrollAxis::Horizontal => x,
+            ScrollAxis::Vertical => y,
+        };
+        scroll_offset_from_track(pointer, self.track_start, self.viewport_len, self.max_scroll)
+    }
 }
 
 /// Track/thumb styles for a scrollbar, derived from the semantic palette.

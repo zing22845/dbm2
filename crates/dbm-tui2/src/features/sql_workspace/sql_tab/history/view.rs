@@ -15,6 +15,7 @@ use ratatui::Frame;
 
 use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
 use crate::common::view::hints::{draw_pane_footer, footer_height, history_list_footer_text};
+use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::detail::view::draw_history_detail;
@@ -40,6 +41,7 @@ pub fn render(
     detail_w: u16,
     splitter_hover: bool,
     splitter_drag: bool,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) -> Option<usize> {
     let search_active = state.list.search.text_input_active();
     let list_footer = history_list_footer_text(search_active, state.list.search.has_filter(), true);
@@ -149,6 +151,7 @@ pub fn render(
 
     let v_scroll_out = list_view::render(
         frame, theme, list_area, &state.list, entries, &visible, cursor, focused,
+        active_scrollbar,
     );
 
     // The list footer hints (inside the shared border).

@@ -7,7 +7,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::common::view::pane_scrollbar::{
-    PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
+    ActiveScrollbar, PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
 
@@ -149,6 +149,7 @@ pub fn render(
     state: &ResultsState,
     focus: crate::app_shell::nav::DiscoverPane,
     layout_out: &std::cell::RefCell<Option<usize>>,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) {
     use crate::common::view::hints::{discover_results_footer_text, draw_pane_footer};
     let p = theme.palette();
@@ -237,7 +238,7 @@ pub fn render(
             viewport,
             rv.max_scroll,
             p,
-            false,
+            matches!(active_scrollbar, Some(ActiveScrollbar::DiscoverResultsV)),
         );
     }
 

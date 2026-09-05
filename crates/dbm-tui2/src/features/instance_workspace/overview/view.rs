@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use crate::common::utils::text_width::wrapped_line_count;
 use crate::common::view::pane_scrollbar::{
-    PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
+    ActiveScrollbar, PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
 use dbm_store::ManagedInstance;
@@ -213,6 +213,7 @@ pub fn render(
     state: &OverviewState,
     conn_count: usize,
     _focused: bool,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) {
     let p = theme.palette();
 
@@ -267,7 +268,7 @@ pub fn render(
             ov.viewport,
             ov.max_scroll,
             p,
-            false,
+            matches!(active_scrollbar, Some(ActiveScrollbar::OverviewV)),
         );
     }
 }
@@ -353,7 +354,7 @@ mod tests {
             ..Default::default()
         };
         terminal
-            .draw(|f| render(f, &theme, area, &s1, 0, true))
+            .draw(|f| render(f, &theme, area, &s1, 0, true, None))
             .unwrap();
         let buf1 = terminal.backend().buffer().clone();
 
@@ -363,7 +364,7 @@ mod tests {
             ..Default::default()
         };
         terminal
-            .draw(|f| render(f, &theme, area, &s2, 0, true))
+            .draw(|f| render(f, &theme, area, &s2, 0, true, None))
             .unwrap();
         let buf2 = terminal.backend().buffer().clone();
 
@@ -392,7 +393,7 @@ mod tests {
             ..Default::default()
         };
         terminal
-            .draw(|f| render(f, &theme, area, &state, 0, true))
+            .draw(|f| render(f, &theme, area, &state, 0, true, None))
             .unwrap();
         let buf = terminal.backend().buffer().clone();
 

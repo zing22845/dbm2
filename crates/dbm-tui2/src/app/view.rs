@@ -59,7 +59,8 @@ pub fn render(
     let workspace_focused = matches!(state.focus, Pane::SQLWorkspace)
         || matches!(state.focus, Pane::InstanceWorkspace(_));
     header_view::render(frame, &state.theme, chunks[0], &state.header, header_focused);
-    explorer_view::render(frame, &state.theme, body.explorer, &state.explorer, explorer_focused, state.splitter_hover.explorer_splitter, state.splitter_hover.explorer_splitter_drag);
+    let active_scrollbar = state.scrollbar_drag.map(|d| d.which);
+    explorer_view::render(frame, &state.theme, body.explorer, &state.explorer, explorer_focused, state.splitter_hover.explorer_splitter, state.splitter_hover.explorer_splitter_drag, active_scrollbar);
     // Draw the resizable Explorer / workspace splitter strip.
     splitter_view::render(frame, &body, state.splitter_hover.app_splitter, state.splitter_hover.app_splitter_drag);
     // The workspace region shows whichever workspace is active, driven by the
@@ -70,10 +71,10 @@ pub fn render(
     // still show the SQL workspace (its empty-state hint) — the "connection
     // zone" the original dbm keeps visible after the last tab closes.
     let (editor_cursor, history_v_scroll) = if state.explorer.instances.active_is_instance() {
-        iw_view::render(frame, &state.theme, workspace, &state.iw, workspace_focused);
+        iw_view::render(frame, &state.theme, workspace, &state.iw, workspace_focused, active_scrollbar);
         (None, None)
     } else {
-        sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused, &state.splitter_hover)
+        sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused, &state.splitter_hover, active_scrollbar)
     };
     // The bottom row holds the global footer on the left and the performance
     // readout on the right.
@@ -95,7 +96,7 @@ pub fn render(
             75,
             &state.discover,
             |f, t, a, s| {
-                let c = discover_view::render(f, t, a, s, sub, state.splitter_hover.discover_splitter, state.splitter_hover.discover_splitter_drag, &targets_layout_ref, &results_layout_ref);
+                let c = discover_view::render(f, t, a, s, sub, state.splitter_hover.discover_splitter, state.splitter_hover.discover_splitter_drag, &targets_layout_ref, &results_layout_ref, active_scrollbar);
                 *discover_caret_ref.borrow_mut() = c;
             },
         );

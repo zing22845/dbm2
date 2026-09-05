@@ -12,6 +12,7 @@ use ratatui::Frame;
 
 use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
 use crate::common::view::hints::{draw_pane_footer, results_pane_footer_text};
+use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::detail::view as detail_view;
@@ -32,6 +33,7 @@ pub fn render(
     splitter_hover: bool,
     splitter_drag: bool,
     col_resize: Option<usize>,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -86,7 +88,15 @@ pub fn render(
         &sql_status,
     );
 
-    list_view::render(frame, theme, layout.list, &state.list, focused, col_resize);
+    list_view::render(
+        frame,
+        theme,
+        layout.list,
+        &state.list,
+        focused,
+        col_resize,
+        active_scrollbar,
+    );
 
     if let Some(rect) = layout.splitter {
         splitter_view::render(frame, rect, splitter_hover, splitter_drag);

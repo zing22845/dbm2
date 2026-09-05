@@ -11,6 +11,7 @@ use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
 use crate::common::view::hints::{draw_footer, footer_height, sql_workspace_footer_text};
+use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::state::SqlState;
@@ -41,6 +42,7 @@ pub fn render(
     state: &SqlState,
     focused: bool,
     splitter_hover: &SplitterHoverState,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) -> (Option<crate::common::editor::EditorHardwareCursor>, Option<usize>) {
     let p = theme.palette();
     let outer = Block::default()
@@ -80,6 +82,7 @@ pub fn render(
             splitter_hover.results_detail,
             splitter_hover.sql_results_detail_drag,
             results_col_resize,
+            active_scrollbar,
         );
         draw_footer(frame, theme, chunks[1], &hint);
         (cursor, v_scroll)
@@ -101,6 +104,7 @@ pub fn render(
             splitter_hover.results_detail,
             splitter_hover.sql_results_detail_drag,
             None,
+            active_scrollbar,
         )
     }
 }

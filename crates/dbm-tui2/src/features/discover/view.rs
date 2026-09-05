@@ -4,6 +4,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
+use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::state::DiscoverState;
@@ -28,6 +29,7 @@ pub fn render(
     splitter_drag: bool,
     targets_layout_out: &std::cell::RefCell<Option<targets_view::TargetsLayoutInfo>>,
     results_layout_out: &std::cell::RefCell<Option<usize>>,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     use crate::common::utils::text_width::wrapped_line_count;
     use crate::common::view::hints::{discover_engine_footer_text, discover_footer_text, draw_pane_footer};
@@ -82,9 +84,25 @@ pub fn render(
     // `splitter` child feature (targets height in rows).
     let body = super::splitter::view::discover_body_layout(chunks[1], state.splitter.targets_height);
 
-    let caret = targets_view::render(frame, theme, body.targets, &state.targets, focus, targets_layout_out);
+    let caret = targets_view::render(
+        frame,
+        theme,
+        body.targets,
+        &state.targets,
+        focus,
+        targets_layout_out,
+        active_scrollbar,
+    );
     splitter_view::render(frame, &body, splitter_hover, splitter_drag);
-    results_view::render(frame, theme, body.results, &state.results, focus, results_layout_out);
+    results_view::render(
+        frame,
+        theme,
+        body.results,
+        &state.results,
+        focus,
+        results_layout_out,
+        active_scrollbar,
+    );
 
     // Discover dialog footer: rendered directly (no separator dashes), so the
     // style matches every other footer.

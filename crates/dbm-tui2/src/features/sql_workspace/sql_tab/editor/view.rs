@@ -12,7 +12,7 @@ use crate::common::components::search::{pane_search_bottom_title_line, pane_sear
 use crate::common::editor;
 use crate::common::view::hints::{draw_pane_footer, footer_height, sql_pane_footer_text};
 use crate::common::view::pane_scrollbar::{
-    draw_vertical_pane_scrollbar, pane_scroll_layout,
+    ActiveScrollbar, draw_vertical_pane_scrollbar, pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
 
@@ -215,6 +215,7 @@ pub fn render(
     complete_table_names: bool,
     database: Option<&str>,
     schema: Option<&str>,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     let p = theme.palette();
 
@@ -338,7 +339,7 @@ pub fn render(
             content_area.height.max(1) as usize,
             max_scroll,
             p,
-            false, // TODO: pass dragging state when editor scrollbar drag is wired
+            matches!(active_scrollbar, Some(ActiveScrollbar::SqlV)),
         );
     }
     // Anchor the completion popup to the editor cursor (its screen position) so
@@ -443,6 +444,7 @@ mod tests {
                         &editor,
                         false,
                         true,
+                        None,
                         None,
                         None,
                     );

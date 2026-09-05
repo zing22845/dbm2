@@ -19,7 +19,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::common::components::line_numbers;
 use crate::common::view::pane_scrollbar::{
-    PaneScrollLayout, draw_horizontal_pane_scrollbar, draw_vertical_pane_scrollbar,
+    ActiveScrollbar, PaneScrollLayout, draw_horizontal_pane_scrollbar, draw_vertical_pane_scrollbar,
     pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
@@ -126,6 +126,7 @@ pub fn render(
     visible: &[usize],
     cursor: usize,
     _focused: bool,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) -> Option<usize> {
     let p = theme.palette();
     if visible.is_empty() {
@@ -235,7 +236,7 @@ pub fn render(
             viewport,
             max_scroll,
             p,
-            false,
+            matches!(active_scrollbar, Some(ActiveScrollbar::HistoryV)),
         );
     }
 
@@ -249,7 +250,7 @@ pub fn render(
             content.width as usize,
             max_h,
             p,
-            false,
+            matches!(active_scrollbar, Some(ActiveScrollbar::HistoryH)),
         );
     }
 

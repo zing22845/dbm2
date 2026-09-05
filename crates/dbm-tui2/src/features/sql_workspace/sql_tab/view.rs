@@ -6,6 +6,7 @@ use ratatui::text::Span;
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
+use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::layout::sql_tab_layout;
@@ -853,6 +854,7 @@ pub fn render(
     results_detail_hover: bool,
     results_detail_drag: bool,
     results_col_resize: Option<usize>,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) -> (Option<crate::common::editor::EditorHardwareCursor>, Option<usize>) {
     // No tab open for the active connection: show an empty-state hint and no
     // tab bar, mirroring the original dbm's `workspace_empty_hint` (no phantom
@@ -899,7 +901,17 @@ pub fn render(
     let layout = sql_tab_layout(body_area, tab.splitter.editor_top_height, tab.splitter.history_pane_width);
     if layout.editor.width == 0 {
         // Area too small to split: show a single results pane.
-        results_view::render(frame, theme, body_area, &tab.results, results_focused, results_detail_hover, results_detail_drag, results_col_resize);
+        results_view::render(
+            frame,
+            theme,
+            body_area,
+            &tab.results,
+            results_focused,
+            results_detail_hover,
+            results_detail_drag,
+            results_col_resize,
+            active_scrollbar,
+        );
         return (None, None);
     }
 
@@ -1001,6 +1013,7 @@ pub fn render(
             tab.complete_table_names,
             db,
             schema,
+            active_scrollbar,
         )
     } else {
         editor_view::render(
@@ -1012,6 +1025,7 @@ pub fn render(
             tab.complete_table_names,
             db,
             schema,
+            active_scrollbar,
         );
         None
     };
@@ -1033,6 +1047,7 @@ pub fn render(
             tab.history.splitter.detail_pane_width,
             detail_hover,
             detail_drag,
+            active_scrollbar,
         )
     } else {
         history_view::render(
@@ -1048,10 +1063,21 @@ pub fn render(
             tab.history.splitter.detail_pane_width,
             detail_hover,
             detail_drag,
+            active_scrollbar,
         )
     };
 
-    results_view::render(frame, theme, layout.results, &tab.results, results_focused, results_detail_hover, results_detail_drag, results_col_resize);
+    results_view::render(
+        frame,
+        theme,
+        layout.results,
+        &tab.results,
+        results_focused,
+        results_detail_hover,
+        results_detail_drag,
+        results_col_resize,
+        active_scrollbar,
+    );
 
     // Draw the two draggable splitter strips. The editor/history splitter is
     // drawn at the (possibly shifted) editor right edge so it never lands
@@ -1318,7 +1344,7 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
             terminal
                 .draw(|frame| {
-                    let _ = render(frame, &theme, area, &state, true, false, true, false, false, false, false, false, false, None);
+                    let _ = render(frame, &theme, area, &state, true, false, true, false, false, false, false, false, false, None, None);
                 })
                 .unwrap();
             let buf = terminal.backend().buffer();
@@ -1352,7 +1378,7 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
             terminal
                 .draw(|frame| {
-                    let _ = render(frame, &theme, area, &state, true, true, false, false, false, false, false, false, false, None);
+                    let _ = render(frame, &theme, area, &state, true, true, false, false, false, false, false, false, false, None, None);
                 })
                 .unwrap();
             let buf = terminal.backend().buffer();
@@ -1422,7 +1448,7 @@ mod tests {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     terminal
                         .draw(|frame| {
-                            let _ = render(frame, &theme, area, &state, true, false, false, false, false, false, false, false, false, None);
+                            let _ = render(frame, &theme, area, &state, true, false, false, false, false, false, false, false, false, None, None);
                         })
                         .unwrap();
                 }));
@@ -1492,7 +1518,7 @@ mod tests {
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             terminal
                 .draw(|frame| {
-                    let _ = render(frame, &theme, area, &state, true, false, false, false, false, false, false, false, false, None);
+                    let _ = render(frame, &theme, area, &state, true, false, false, false, false, false, false, false, false, None, None);
                 })
                 .unwrap();
         }));

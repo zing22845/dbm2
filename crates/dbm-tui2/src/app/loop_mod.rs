@@ -45,6 +45,24 @@ const MAX_MESSAGES_PER_ROUND: usize = 100;
 
 /// Run the application. Sets up the terminal, the channels and the event
 /// loop, then tears the terminal down on exit.
+/// End every in-progress held-button drag at once: the active scrollbar, all
+/// splitter drag flags, and the results column-resize drag.
+///
+/// Called from the three places a drag is known to be over:
+/// - a real `MouseEventKind::Up`,
+/// - a `FocusLost` (the button was released *outside* the window, so no `Up`
+///   was ever delivered — otherwise the highlight would stay stuck),
+/// - a fresh `Down` that proves the previous release was missed.
+///
+/// Centralizing the clear keeps it in one place instead of three duplicated
+/// blocks (and mirrors the original dbm, which clears scrollbar/splitter/
+/// column-resize together in its single `Up` arm).
+fn clear_active_drags(state: &mut AppState) {
+    state.scrollbar_drag = None;
+    state.splitter_hover.set_dragging_flags([false; 7]);
+    state.splitter_hover.results_col_resize_drag = None;
+}
+
 pub async fn run_event_loop() -> anyhow::Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -52,6 +70,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         stdout,
         crossterm::terminal::EnterAlternateScreen,
         crossterm::event::EnableMouseCapture,
+        crossterm::event::EnableFocusChange,
         crossterm::event::EnableBracketedPaste
     )?;
     // Restore the terminal even on an early `?` return or a panic so raw mode /
@@ -151,22 +170,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // meaningful while the explorer owns focus).
     let mut explorer_split_drag = false;
 
-    // Whether the history list horizontal scrollbar is being dragged.
-    // Stores the scrollbar geometry so we can convert drag coordinates to
-    // scroll positions without re-computing the layout each frame.
-    let mut history_h_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut history_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut editor_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut results_h_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut results_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut discover_targets_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut discover_results_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut explorer_objects_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut explorer_instances_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut explorer_objects_h_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut explorer_instances_h_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut iw_connections_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
-    let mut iw_overview_v_scrollbar_drag: Option<(u16, usize, usize)> = None;
+    // Which scrollbar (if any) is being dragged lives in `state.scrollbar_drag`
+    // rather than in a local per-bar `Option`. Only one drag can be active at a
+    // time, and the renders need to read it to highlight the dragged bar, so it
+    // belongs with the rest of the shell-level interaction state.
+    use crate::common::view::pane_scrollbar::{ActiveScrollbar, ScrollbarDrag};
 
     // The position+time of the most recent left-button press, used to detect a
     // double click (a second press at the same cell within a short window). This
@@ -359,6 +367,23 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         "mouse event received"
                     );
                     let point = Position::new(mouse.column, mouse.row);
+                    // A fresh mouse-button press while a drag is still recorded
+                    // means the previous `Up` was missed (e.g. released outside
+                    // the window without the terminal losing focus). Drop the
+                    // stale drag so its highlight cannot stay stuck across the
+                    // next redraw. A second `Down` can never be legitimate while a
+                    // drag is active — crossterm never delivers one without an
+                    // intervening `Up`.
+                    if matches!(mouse.kind, MouseEventKind::Down(_))
+                        && (state.scrollbar_drag.is_some()
+                            || state.splitter_hover.results_col_resize_drag.is_some()
+                            || state.splitter_hover.dragging_flags().iter().any(|&f| f))
+                    {
+                        state.scrollbar_drag = None;
+                        state.splitter_hover.set_dragging_flags([false; 7]);
+                        state.splitter_hover.results_col_resize_drag = None;
+                        needs_redraw = true;
+                    }
                     // Aggregated across the dispatched messages below: the round
                     // repaints only if one of them changed rendered state.
                     let mut dirty = false;
@@ -780,7 +805,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         viewport_width,
                                     } = action
                                     {
-                                        history_h_scrollbar_drag = Some((track_x, viewport_width, max_scroll));
+                                        state.scrollbar_drag = Some(ScrollbarDrag {
+                                            which: ActiveScrollbar::HistoryH,
+                                            track_start: track_x,
+                                            viewport_len: viewport_width,
+                                            max_scroll,
+                                        });
                                     }
                                     // If the click was on the v_scrollbar, start dragging.
                                     if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::HistoryVScrollbar {
@@ -790,7 +820,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         viewport_height,
                                     } = action
                                     {
-                                        history_v_scrollbar_drag = Some((track_y, viewport_height, max_scroll));
+                                        state.scrollbar_drag = Some(ScrollbarDrag {
+                                            which: ActiveScrollbar::HistoryV,
+                                            track_start: track_y,
+                                            viewport_len: viewport_height,
+                                            max_scroll,
+                                        });
                                     }
                                     // If the click was on the editor body's v_scrollbar, start dragging.
                                     if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::EditorVScrollbar {
@@ -800,7 +835,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         viewport_height,
                                     } = action
                                     {
-                                        editor_v_scrollbar_drag = Some((track_y, viewport_height, max_scroll));
+                                        state.scrollbar_drag = Some(ScrollbarDrag {
+                                            which: ActiveScrollbar::SqlV,
+                                            track_start: track_y,
+                                            viewport_len: viewport_height,
+                                            max_scroll,
+                                        });
                                     }
                                     // If the click was on the results list h_scrollbar, start dragging.
                                     if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::ResultsHScrollbar {
@@ -810,7 +850,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         viewport_width,
                                     } = action
                                     {
-                                        results_h_scrollbar_drag = Some((track_x, viewport_width, max_scroll));
+                                        state.scrollbar_drag = Some(ScrollbarDrag {
+                                            which: ActiveScrollbar::ResultsH,
+                                            track_start: track_x,
+                                            viewport_len: viewport_width,
+                                            max_scroll,
+                                        });
                                     }
                                     // If the click was on the results list v_scrollbar, start dragging.
                                     if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::ResultsVScrollbar {
@@ -820,7 +865,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         viewport_height,
                                     } = action
                                     {
-                                        results_v_scrollbar_drag = Some((track_y, viewport_height, max_scroll));
+                                        state.scrollbar_drag = Some(ScrollbarDrag {
+                                            which: ActiveScrollbar::ResultsV,
+                                            track_start: track_y,
+                                            viewport_len: viewport_height,
+                                            max_scroll,
+                                        });
                                     }
                                     // A single click on a results column header
                                     // splitter begins a column-width resize drag.
@@ -911,8 +961,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.column,
                                     mouse.row,
                                 ) {
-                                    discover_targets_v_scrollbar_drag =
-                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    state.scrollbar_drag = Some(ScrollbarDrag {
+                                        which: ActiveScrollbar::DiscoverTargetsV,
+                                        track_start: si.track_start,
+                                        viewport_len: si.track_len,
+                                        max_scroll: si.max_scroll,
+                                    });
                                     let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
                                         si.track_start,
@@ -1019,8 +1073,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.column,
                                     mouse.row,
                                 ) {
-                                    discover_results_v_scrollbar_drag =
-                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    state.scrollbar_drag = Some(ScrollbarDrag {
+                                        which: ActiveScrollbar::DiscoverResultsV,
+                                        track_start: si.track_start,
+                                        viewport_len: si.track_len,
+                                        max_scroll: si.max_scroll,
+                                    });
                                     let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
                                         si.track_start,
@@ -1101,8 +1159,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.column,
                                     mouse.row,
                                 ) {
-                                    explorer_objects_v_scrollbar_drag =
-                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    state.scrollbar_drag = Some(ScrollbarDrag {
+                                        which: ActiveScrollbar::ObjectsV,
+                                        track_start: si.track_start,
+                                        viewport_len: si.track_len,
+                                        max_scroll: si.max_scroll,
+                                    });
                                     let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
                                         si.track_start,
@@ -1146,8 +1208,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.column,
                                     mouse.row,
                                 ) {
-                                    explorer_instances_v_scrollbar_drag =
-                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    state.scrollbar_drag = Some(ScrollbarDrag {
+                                        which: ActiveScrollbar::TreeV,
+                                        track_start: si.track_start,
+                                        viewport_len: si.track_len,
+                                        max_scroll: si.max_scroll,
+                                    });
                                     let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
                                         si.track_start,
@@ -1189,8 +1255,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.column,
                                     mouse.row,
                                 ) {
-                                    explorer_objects_h_scrollbar_drag =
-                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    state.scrollbar_drag = Some(ScrollbarDrag {
+                                        which: ActiveScrollbar::ObjectsH,
+                                        track_start: si.track_start,
+                                        viewport_len: si.track_len,
+                                        max_scroll: si.max_scroll,
+                                    });
                                     let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.column,
                                         si.track_start,
@@ -1232,8 +1302,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.column,
                                     mouse.row,
                                 ) {
-                                    explorer_instances_h_scrollbar_drag =
-                                        Some((si.track_start, si.track_len, si.max_scroll));
+                                    state.scrollbar_drag = Some(ScrollbarDrag {
+                                        which: ActiveScrollbar::TreeH,
+                                        track_start: si.track_start,
+                                        viewport_len: si.track_len,
+                                        max_scroll: si.max_scroll,
+                                    });
                                     let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.column,
                                         si.track_start,
@@ -1273,11 +1347,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     mouse.column,
                                     mouse.row,
                                 ) {
-                                    iw_connections_v_scrollbar_drag = Some((
-                                        si.track_start,
-                                        si.track_len,
-                                        si.max_scroll,
-                                    ));
+                                    state.scrollbar_drag = Some(ScrollbarDrag {
+                                        which: ActiveScrollbar::ConnectionsV,
+                                        track_start: si.track_start,
+                                        viewport_len: si.track_len,
+                                        max_scroll: si.max_scroll,
+                                    });
                                     let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
                                         si.track_start,
@@ -1397,11 +1472,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                 if let Some(si) =
                                     view::v_scrollbar_hit(body, &state.iw.overview, 0, mouse.column, mouse.row)
                                 {
-                                    iw_overview_v_scrollbar_drag = Some((
-                                        si.track_start,
-                                        si.track_len,
-                                        si.max_scroll,
-                                    ));
+                                    state.scrollbar_drag = Some(ScrollbarDrag {
+                                        which: ActiveScrollbar::OverviewV,
+                                        track_start: si.track_start,
+                                        viewport_len: si.track_len,
+                                        max_scroll: si.max_scroll,
+                                    });
                                     let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
                                         mouse.row,
                                         si.track_start,
@@ -1724,9 +1800,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             // History list h_scrollbar drag: convert the current
                             // absolute mouse x to a position inside the track
                             // using the track geometry captured at Down time.
-                            if let Some((track_x, viewport_width, max_scroll)) = history_h_scrollbar_drag {
-                                let _rel_x = point.x.saturating_sub(track_x);
-                                let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.x, track_x, viewport_width, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::HistoryH
+                            {
+                                let position = drag.offset_for_pointer(point.x, point.y);
                                 if let Some(active_tab) = state.sql.sql_tab.active_tab {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
@@ -1740,15 +1817,16 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                                     dirty |= result.dirty;
                                 } else {
-                                    history_h_scrollbar_drag = None;
+                                    state.scrollbar_drag = None;
                                 }
                             }
 
                             // History list v_scrollbar drag: scrollbar position
                             // IS the viewport start. Send SetVScroll directly.
-                            if let Some((track_y, viewport_height, max_scroll)) = history_v_scrollbar_drag {
-                                let _rel_y = point.y.saturating_sub(track_y);
-                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::HistoryV
+                            {
+                                let start = drag.offset_for_pointer(point.x, point.y);
                                 if let Some(active_tab) = state.sql.sql_tab.active_tab {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
@@ -1762,15 +1840,16 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                                     dirty |= result.dirty;
                                 } else {
-                                    history_v_scrollbar_drag = None;
+                                    state.scrollbar_drag = None;
                                 }
                             }
 
                             // Editor body v_scrollbar drag: same linear mapping as
                             // history — scrollbar thumb position IS the viewport start.
-                            if let Some((track_y, viewport_height, max_scroll)) = editor_v_scrollbar_drag {
-                                let _rel_y = point.y.saturating_sub(track_y);
-                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::SqlV
+                            {
+                                let start = drag.offset_for_pointer(point.x, point.y);
                                 if let Some(active_tab) = state.sql.sql_tab.active_tab {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
@@ -1784,14 +1863,16 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                                     dirty |= result.dirty;
                                 } else {
-                                    editor_v_scrollbar_drag = None;
+                                    state.scrollbar_drag = None;
                                 }
                             }
 
                             // Results list h_scrollbar drag: convert mouse x
                             // inside the track to a horizontal scroll position.
-                            if let Some((track_x, viewport_width, max_scroll)) = results_h_scrollbar_drag {
-                                let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.x, track_x, viewport_width, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::ResultsH
+                            {
+                                let position = drag.offset_for_pointer(point.x, point.y);
                                 if let Some(active_tab) = state.sql.sql_tab.active_tab {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
@@ -1805,15 +1886,16 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                                     dirty |= result.dirty;
                                 } else {
-                                    results_h_scrollbar_drag = None;
+                                    state.scrollbar_drag = None;
                                 }
                             }
 
                             // Results list v_scrollbar drag: scrollbar position
                             // IS the viewport start. Send SetVScroll directly.
-                            if let Some((track_y, viewport_height, max_scroll)) = results_v_scrollbar_drag {
-                                let _rel_y = point.y.saturating_sub(track_y);
-                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::ResultsV
+                            {
+                                let start = drag.offset_for_pointer(point.x, point.y);
                                 if let Some(active_tab) = state.sql.sql_tab.active_tab {
                                     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                                     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
@@ -1827,7 +1909,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                     let result = process_message_round(&effect_runner, &mut action_rx, msg, &mut state);
                                     dirty |= result.dirty;
                                 } else {
-                                    results_v_scrollbar_drag = None;
+                                    state.scrollbar_drag = None;
                                 }
                             }
 
@@ -1865,9 +1947,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
 
                             // Discover targets v_scrollbar drag: same linear
                             // mapping as history/results.
-                            if let Some((track_y, viewport_height, max_scroll)) = discover_targets_v_scrollbar_drag {
-                                let _rel_y = point.y.saturating_sub(track_y);
-                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::DiscoverTargetsV
+                            {
+                                let start = drag.offset_for_pointer(point.x, point.y);
                                 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
                                 use crate::features::discover::targets::msg::{TargetsMessage, TargetsMsg};
                                 let msg = AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Targets(
@@ -1878,9 +1961,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
 
                             // Discover results v_scrollbar drag: same pattern.
-                            if let Some((track_y, viewport_height, max_scroll)) = discover_results_v_scrollbar_drag {
-                                let _rel_y = point.y.saturating_sub(track_y);
-                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::DiscoverResultsV
+                            {
+                                let start = drag.offset_for_pointer(point.x, point.y);
                                 use crate::features::discover::msg::{DiscoverMessage, DiscoverMsg};
                                 use crate::features::discover::results::msg::{ResultsMessage, ResultsMsg};
                                 let msg = AppMsg::Discover(DiscoverMsg::Message(DiscoverMessage::Results(
@@ -1891,9 +1975,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
 
                             // Explorer objects v_scrollbar drag.
-                            if let Some((track_y, viewport_height, max_scroll)) = explorer_objects_v_scrollbar_drag {
-                                let _rel_y = point.y.saturating_sub(track_y);
-                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::ObjectsV
+                            {
+                                let start = drag.offset_for_pointer(point.x, point.y);
                                 use crate::features::explorer::objects::msg::{ObjectsMessage, ObjectsMsg};
                                 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
                                 let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
@@ -1904,9 +1989,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
 
                             // Explorer instances v_scrollbar drag.
-                            if let Some((track_y, viewport_height, max_scroll)) = explorer_instances_v_scrollbar_drag {
-                                let _rel_y = point.y.saturating_sub(track_y);
-                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::TreeV
+                            {
+                                let start = drag.offset_for_pointer(point.x, point.y);
                                 use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
                                 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
                                 let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
@@ -1917,9 +2003,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
 
                             // Explorer objects h_scrollbar drag.
-                            if let Some((track_x, viewport_width, max_scroll)) = explorer_objects_h_scrollbar_drag {
-                                let _rel_x = point.x.saturating_sub(track_x);
-                                let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.x, track_x, viewport_width, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::ObjectsH
+                            {
+                                let position = drag.offset_for_pointer(point.x, point.y);
                                 use crate::features::explorer::objects::msg::{ObjectsMessage, ObjectsMsg};
                                 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
                                 let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Objects(
@@ -1930,9 +2017,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
 
                             // Explorer instances h_scrollbar drag.
-                            if let Some((track_x, viewport_width, max_scroll)) = explorer_instances_h_scrollbar_drag {
-                                let _rel_x = point.x.saturating_sub(track_x);
-                                let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.x, track_x, viewport_width, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::TreeH
+                            {
+                                let position = drag.offset_for_pointer(point.x, point.y);
                                 use crate::features::explorer::instances::msg::{InstancesMessage, InstancesMsg};
                                 use crate::features::explorer::msg::{ExplorerMessage, ExplorerMsg};
                                 let msg = AppMsg::Explorer(ExplorerMsg::Message(ExplorerMessage::Instances(
@@ -1943,9 +2031,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
 
                             // IW connections v_scrollbar drag.
-                            if let Some((track_y, viewport_height, max_scroll)) = iw_connections_v_scrollbar_drag {
-                                let _rel_y = point.y.saturating_sub(track_y);
-                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::ConnectionsV
+                            {
+                                let start = drag.offset_for_pointer(point.x, point.y);
                                 use crate::features::instance_workspace::connections::msg::{
                                     ConnectionsMessage, ConnectionsMsg,
                                 };
@@ -1958,9 +2047,10 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
 
                             // IW overview v_scrollbar drag.
-                            if let Some((track_y, viewport_height, max_scroll)) = iw_overview_v_scrollbar_drag {
-                                let _rel_y = point.y.saturating_sub(track_y);
-                                let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(point.y, track_y, viewport_height, max_scroll);
+                            if let Some(drag) = state.scrollbar_drag
+                                && drag.which == ActiveScrollbar::OverviewV
+                            {
+                                let start = drag.offset_for_pointer(point.x, point.y);
                                 use crate::features::instance_workspace::overview::msg::{
                                     OverviewMessage, OverviewMsg,
                                 };
@@ -1973,44 +2063,42 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
                         }
                         MouseEventKind::Up(MouseButton::Left) => {
-                            history_h_scrollbar_drag = None;
-                            history_v_scrollbar_drag = None;
-                            editor_v_scrollbar_drag = None;
-                            results_h_scrollbar_drag = None;
-                            results_v_scrollbar_drag = None;
-                            discover_targets_v_scrollbar_drag = None;
-                            discover_results_v_scrollbar_drag = None;
-                            explorer_objects_v_scrollbar_drag = None;
-                            explorer_instances_v_scrollbar_drag = None;
-                            explorer_objects_h_scrollbar_drag = None;
-                            explorer_instances_h_scrollbar_drag = None;
-                            iw_connections_v_scrollbar_drag = None;
-                            iw_overview_v_scrollbar_drag = None;
+                            // One drag slot covers every scrollbar, so releasing
+                            // the button ends whichever one was active — no need
+                            // to clear a flag per bar.
+                            // Releasing the button ends every held-button drag at
+                            // once (scrollbar, splitters, results column-resize).
+                            // The debug logs below are kept for diagnostics; the
+                            // state clear itself is delegated to `clear_active_drags`.
                             if explorer_split_drag {
-                                explorer_split_drag = false;
-                                state.splitter_hover.explorer_splitter_drag = false;
                                 tracing::debug!("explorer instances/objects splitter drag finished");
                             }
                             if discover_split_drag {
-                                discover_split_drag = false;
-                                state.splitter_hover.discover_splitter_drag = false;
                                 tracing::debug!("discover targets/results splitter drag finished");
                             }
                             if app_split_drag {
-                                app_split_drag = false;
-                                state.splitter_hover.app_splitter_drag = false;
                                 tracing::debug!("app explorer/workspace splitter drag finished");
                             }
                             if split_drag.take().is_some() {
-                                state.splitter_hover.sql_editor_results_drag = false;
-                                state.splitter_hover.sql_editor_history_drag = false;
-                                state.splitter_hover.sql_history_detail_drag = false;
-                                state.splitter_hover.sql_results_detail_drag = false;
                                 tracing::debug!("splitter drag finished");
                             }
-                            if let Some(col) = state.splitter_hover.results_col_resize_drag.take() {
-                                tracing::debug!(col, "results column resize drag finished");
+                            let col_resize = state.splitter_hover.results_col_resize_drag;
+                            if col_resize.is_some() {
+                                tracing::debug!(col = col_resize, "results column resize drag finished");
                             }
+                            // Ending a drag *changes the rendered highlight* (the
+                            // scrollbar thumb / splitter drops its accent color),
+                            // so force a repaint even when the release point is not
+                            // over a splitter. Without this the cleared
+                            // `scrollbar_drag` / `dragging_flags` would not be
+                            // painted and the "active" highlight would stay stuck
+                            // on screen (the `Up` only set `dirty` via hover, which
+                            // is false over a bare scrollbar).
+                            let was_dragging = state.scrollbar_drag.is_some()
+                                || state.splitter_hover.results_col_resize_drag.is_some()
+                                || state.splitter_hover.dragging_flags().iter().any(|&f| f);
+                            clear_active_drags(&mut state);
+                            needs_redraw |= was_dragging;
                             // Re-evaluate hover after drag end — the cursor may
                             // still be over a splitter.
                             let size = terminal.size()?;
@@ -2019,6 +2107,22 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                             }
                         }
                         MouseEventKind::Moved => {
+                            // A `Moved` event means *no* mouse button is pressed
+                            // (crossterm reports button-held motion as `Drag`). If
+                            // a drag is still recorded here, its `Up` was missed —
+                            // e.g. the button was released *outside* the terminal
+                            // window, so the terminal never delivered the release
+                            // and the highlight would stay stuck. End the drag now
+                            // and force a repaint so the accent color resets. Any
+                            // real (button-held) drag produces `Drag` events, never
+                            // `Moved`, so this can never fire mid-drag.
+                            if state.scrollbar_drag.is_some()
+                                || state.splitter_hover.results_col_resize_drag.is_some()
+                                || state.splitter_hover.dragging_flags().iter().any(|&f| f)
+                            {
+                                clear_active_drags(&mut state);
+                                needs_redraw = true;
+                            }
                             // Hover is a continuous gesture: only request a
                             // redraw when some hover bit actually toggles,
                             // avoiding wasteful repaints on every mouse pixel.
@@ -2576,6 +2680,20 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     state.term_width = w;
                     state.term_height = h;
                     needs_redraw = true;
+                } else if let Some(Ok(CEvent::FocusLost)) = maybe_event {
+                    // The terminal window lost focus — e.g. the user dragged a
+                    // scrollbar (or splitter) and released the mouse button
+                    // *outside* the window, so no `MouseEventKind::Up` is ever
+                    // delivered. Any held-button drag state would otherwise stay
+                    // "active" forever (the scrollbar thumb keeps its accent
+                    // color). Clear every in-progress drag here so the UI resets.
+                    let was_dragging = state.scrollbar_drag.is_some()
+                        || state.splitter_hover.results_col_resize_drag.is_some()
+                        || state.splitter_hover.dragging_flags().iter().any(|&f| f);
+                    if was_dragging {
+                        clear_active_drags(&mut state);
+                        needs_redraw = true;
+                    }
                 }
             }
             // Timed refresh: only fires when a periodic repaint is actually due
@@ -2633,6 +2751,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         std::io::stdout(),
         crossterm::terminal::LeaveAlternateScreen,
         crossterm::event::DisableMouseCapture,
+        crossterm::event::DisableFocusChange,
         crossterm::event::DisableBracketedPaste
     )?;
     Ok(())
@@ -2651,6 +2770,7 @@ impl Drop for TerminalGuard {
             std::io::stdout(),
             crossterm::terminal::LeaveAlternateScreen,
             crossterm::event::DisableMouseCapture,
+            crossterm::event::DisableFocusChange,
             crossterm::event::DisableBracketedPaste
         );
     }
@@ -4336,6 +4456,7 @@ mod tests {
                     true,
                     false,
                     false,
+                    None,
                 );
             })
             .unwrap();

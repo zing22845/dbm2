@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use crate::common::view::hints::{draw_pane_footer, footer_height, instances_pane_footer_text};
 use crate::common::view::pane_scrollbar::{
-    PaneScrollLayout, draw_horizontal_pane_scrollbar, draw_vertical_pane_scrollbar,
+    ActiveScrollbar, PaneScrollLayout, draw_horizontal_pane_scrollbar, draw_vertical_pane_scrollbar,
     pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
@@ -197,6 +197,7 @@ pub fn render(
     area: Rect,
     state: &InstancesState,
     region_focused: bool,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) {
     let p = theme.palette();
 
@@ -350,7 +351,7 @@ pub fn render(
             viewport_w,
             max_h,
             p,
-            false,
+            matches!(active_scrollbar, Some(ActiveScrollbar::TreeH)),
         );
     }
 
@@ -363,7 +364,7 @@ pub fn render(
             viewport,
             iv.max_scroll,
             p,
-            false,
+            matches!(active_scrollbar, Some(ActiveScrollbar::TreeV)),
         );
     }
 

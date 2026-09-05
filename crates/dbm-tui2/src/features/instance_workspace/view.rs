@@ -14,6 +14,7 @@ use ratatui::Frame;
 
 use crate::common::utils::text_width::wrapped_line_count;
 use crate::common::view::hints::{draw_pane_footer, instance_workspace_footer_text};
+use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::state::IwState;
@@ -57,6 +58,7 @@ pub fn render(
     area: Rect,
     state: &IwState,
     focused: bool,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) {
     let p = theme.palette();
     // Title shows the open instance's name next to the workspace label:
@@ -135,7 +137,15 @@ pub fn render(
             // The overview shows "Connections: N registered" and query
             // readiness, so it needs the connection count from the sibling pane.
             let conn_count = state.connections.connections.len();
-            overview_view::render(frame, theme, chunks[1], &state.overview, conn_count, focused)
+            overview_view::render(
+                frame,
+                theme,
+                chunks[1],
+                &state.overview,
+                conn_count,
+                focused,
+                active_scrollbar,
+            )
         }
         crate::app_shell::nav::IwPane::Connections => {
             connections_view::render(
@@ -145,6 +155,7 @@ pub fn render(
                 &state.connections,
                 state.overview.instance.as_ref(),
                 focused,
+                active_scrollbar,
             )
         }
     }

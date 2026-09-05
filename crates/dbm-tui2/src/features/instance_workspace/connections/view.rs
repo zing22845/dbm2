@@ -7,7 +7,7 @@ use ratatui::widgets::{Cell, Row, Table};
 use ratatui::Frame;
 
 use crate::common::view::pane_scrollbar::{
-    PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
+    ActiveScrollbar, PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
 
@@ -129,6 +129,7 @@ pub fn render(
     state: &ConnectionsState,
     instance: Option<&dbm_store::ManagedInstance>,
     _region_focused: bool,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) {
     // The connection list and the add/edit form are two orthogonal concerns:
     // the list is drawn first, the form (when open) is drawn last on top. The
@@ -147,7 +148,7 @@ pub fn render(
                 return;
             }
         };
-        render_connections_list(frame, theme, &cv, state, instance);
+        render_connections_list(frame, theme, &cv, state, instance, active_scrollbar);
     }
 
     // The add/edit form is drawn last as a centered popup on top of whatever is
@@ -198,6 +199,7 @@ fn render_connections_list(
     cv: &ConnectionsViewport,
     state: &ConnectionsState,
     instance: Option<&dbm_store::ManagedInstance>,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) {
     let p = theme.palette();
 
@@ -303,7 +305,7 @@ fn render_connections_list(
             cv.viewport,
             cv.max_scroll,
             p,
-            false,
+            matches!(active_scrollbar, Some(ActiveScrollbar::ConnectionsV)),
         );
     }
 }

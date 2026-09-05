@@ -6,7 +6,7 @@ use ratatui::widgets::{Block, Borders};
 use ratatui::Frame;
 
 use crate::common::view::pane_scrollbar::{
-    PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
+    ActiveScrollbar, PaneScrollLayout, draw_vertical_pane_scrollbar, pane_scroll_layout,
 };
 use crate::common::view::theme::Theme;
 
@@ -159,6 +159,7 @@ pub fn render(
     state: &TargetsState,
     focus: crate::app_shell::nav::DiscoverPane,
     layout_out: &std::cell::RefCell<Option<TargetsLayoutInfo>>,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) -> Option<crate::common::editor::EditorHardwareCursor> {
     use crate::common::view::hints::{discover_targets_footer_text, draw_pane_footer};
     let p = theme.palette();
@@ -231,7 +232,15 @@ pub fn render(
 
         if let Some(bar) = layout.v_scrollbar {
             let max_scroll = state.targets.len().saturating_sub(viewport);
-            draw_vertical_pane_scrollbar(frame, bar, start, viewport, max_scroll, p, false);
+            draw_vertical_pane_scrollbar(
+                frame,
+                bar,
+                start,
+                viewport,
+                max_scroll,
+                p,
+                matches!(active_scrollbar, Some(ActiveScrollbar::DiscoverTargetsV)),
+            );
         }
 
         // Inline-edit caret: while editing a host/ports cell, report the caret's

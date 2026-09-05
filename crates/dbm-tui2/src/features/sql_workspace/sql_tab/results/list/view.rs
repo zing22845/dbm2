@@ -20,7 +20,7 @@ use crate::common::view::format::{
 };
 use crate::common::view::hints::footer_height;
 use crate::common::view::theme::Theme;
-use crate::common::view::pane_scrollbar::{PaneScrollLayout, pane_scroll_layout};
+use crate::common::view::pane_scrollbar::{ActiveScrollbar, PaneScrollLayout, pane_scroll_layout};
 
 use super::state::ListState;
 use super::super::pagination::RESULTS_PAGINATION_BAR_HEIGHT;
@@ -38,6 +38,7 @@ pub fn render(
     state: &ListState,
     focused: bool,
     col_resize: Option<usize>,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) {
     if list_area.width == 0 || list_area.height == 0 {
         return;
@@ -84,7 +85,15 @@ pub fn render(
     let bar_scroll = state_h_scroll.min(bar_scroll_max as usize) as u16;
 
     draw_action_bar(frame, action_bar_area, &model, bar_scroll, p);
-    render_table(frame, theme, table_body, state, focused, col_resize);
+    render_table(
+        frame,
+        theme,
+        table_body,
+        state,
+        focused,
+        col_resize,
+        active_scrollbar,
+    );
 }
 
 /// Split the full-width Results Block inner area vertically into the content
@@ -267,6 +276,7 @@ fn render_table(
     state: &ListState,
     _focused: bool,
     col_resize: Option<usize>,
+    active_scrollbar: Option<ActiveScrollbar>,
 ) {
     // Extract all needed values first to avoid borrow conflicts.
     let result = match state.result.as_ref() {
@@ -657,7 +667,7 @@ fn render_table(
             visible_data_rows,
             vs.max_v_scroll,
             p,
-            false,
+            matches!(active_scrollbar, Some(ActiveScrollbar::ResultsV)),
         );
     }
 
@@ -670,7 +680,7 @@ fn render_table(
             table_area.width as usize,
             vs.max_h_scroll,
             p,
-            false,
+            matches!(active_scrollbar, Some(ActiveScrollbar::ResultsH)),
         );
     }
 
@@ -974,7 +984,7 @@ mod tests {
         // Baseline: a fresh terminal rendered directly at the destination h_scroll.
         let mut fresh = Terminal::new(TestBackend::new(30, 10)).unwrap();
         fresh
-            .draw(|f| super::render(f, &theme::default(), area, &make_state(to, col), true, None))
+            .draw(|f| super::render(f, &theme::default(), area, &make_state(to, col), true, None, None))
             .unwrap();
         let fresh_buf = fresh.backend().buffer().clone();
 
@@ -983,7 +993,7 @@ mod tests {
         let mut cumul = Terminal::new(TestBackend::new(30, 10)).unwrap();
         for h in (from..=to).step_by(3) {
             cumul
-                .draw(|f| super::render(f, &theme::default(), area, &make_state(h, col), true, None))
+                .draw(|f| super::render(f, &theme::default(), area, &make_state(h, col), true, None, None))
                 .unwrap();
         }
 
