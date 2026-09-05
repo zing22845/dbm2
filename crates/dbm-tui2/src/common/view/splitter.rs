@@ -6,7 +6,10 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::Paragraph;
 
 const SPLITTER_LINE_DIM: Style = Style::new().fg(Color::Rgb(55, 55, 60));
-const SPLITTER_LINE_HOVER: Style = Style::new().fg(Color::Cyan);
+/// The shared hover color for any resizable separator: used both by the pane
+/// splitters and by the results column-width resize handle, so hover feedback
+/// reads consistently across the UI and stays a single point of change.
+pub const SPLITTER_LINE_HOVER: Style = Style::new().fg(Color::Cyan);
 const SPLITTER_LINE_DRAG: Style = Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

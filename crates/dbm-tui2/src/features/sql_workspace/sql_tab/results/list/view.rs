@@ -437,8 +437,10 @@ fn render_table(
             .saturating_sub(h_scroll)
             .saturating_sub(1);
         if border_x >= table_area.x && border_x < table_area.x + table_area.width {
+            // The resizable boundary highlight reuses the pane splitters' hover
+            // color so hover feedback is one shared source.
             let border_style = if Some(col) == col_resize {
-                Style::default().fg(p.accent).add_modifier(Modifier::BOLD)
+                crate::common::view::splitter::SPLITTER_LINE_HOVER
             } else {
                 grid_style
             };
