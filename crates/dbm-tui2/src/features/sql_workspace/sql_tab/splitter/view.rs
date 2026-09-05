@@ -126,6 +126,9 @@ pub fn sql_tab_splitter_at(
             layout.results,
             true,
             tab.results.splitter.detail_pane_width,
+            tab.results.list.row_count(),
+            tab.results.list.search.text_input_active(),
+            &tab.results.list.executed_sql_display(),
         ) && hit(r, x, y)
         {
             splitter = Some(SqlSplitter::ResultsDetail);

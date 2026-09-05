@@ -136,33 +136,23 @@ pub fn sql_pane_footer_text(
     }
 }
 
-/// Footer for the results pane: search-active vs. table/detail hints.
+/// Footer for the results pane: search-active vs. table hints.
+///
+/// The detail pane's own footer already advertises "Back: ESC" and the global
+/// footer exposes the ["/"] pane-width hint, so neither the close-ESC nor the
+/// detail-width splitter is repeated here.
 pub fn results_pane_footer_text(
     search_active: bool,
-    detail_open: bool,
     status: &str,
 ) -> String {
     if search_active {
         return pane_search_active_footer(&[]);
     }
-    let esc_hint = if detail_open {
-        ("Close detail", lit("ESC"))
-    } else {
-        ("Deselect", lit("ESC"))
-    };
-    // When the detail pane is open the original dbm also exposes the detail
-    // width splitter ("Width: [/]") right after Inspect.
     let base = keys(&[
         ("Inspect", lit("ENTER")),
-        if detail_open {
-            ("Width", lit("[/]"))
-        } else {
-            ("Col width", lit(",/."))
-        },
+        ("Col width", lit(",/.")),
         ("Copy Col Name", hint_ctrl("n")),
-        esc_hint,
         ("Flip", lit("f/b")),
-        ("Toolbar", lit("click")),
         ("Top", lit("g")),
         ("Bottom", lit("G")),
     ]);
@@ -548,12 +538,17 @@ mod tests {
 
     #[test]
     fn results_pane_detail_open_esc_label_changes() {
-        let open = results_pane_footer_text(false, true, "");
-        assert!(open.contains("Close detail: ESC"));
-        let closed = results_pane_footer_text(false, false, "");
-        assert!(closed.contains("Deselect: ESC"));
-        let with_status = results_pane_footer_text(false, false, "updated");
-        assert!(with_status.contains("\nupdated"));
+        // The detail pane's own footer advertises "Back: ESC"; the list footer
+        // intentionally drops the duplicated close / deselect / toolbar hints.
+        let open = results_pane_footer_text(false, "");
+        assert!(!open.contains("Close detail: ESC"));
+        assert!(!open.contains("Deselect: ESC"));
+        assert!(!open.contains("Toolbar: click"));
+        let closed = results_pane_footer_text(false, "");
+        assert!(!closed.contains("Deselect: ESC"));
+        assert!(closed.contains("Col width: ,/."));
+        let open_status = results_pane_footer_text(false, "updated");
+        assert!(open_status.contains("\nupdated"));
     }
 
     #[test]

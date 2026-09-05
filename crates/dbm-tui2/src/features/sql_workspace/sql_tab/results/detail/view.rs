@@ -81,7 +81,7 @@ fn detail_footer_text(detail: &DetailState, edit_active: bool) -> String {
             " Detail  | [edit mode]  Esc:leave"
         }
     } else {
-        " Detail  | Enter:close"
+        " Detail  | Back: Esc"
     }
     .to_string()
 }

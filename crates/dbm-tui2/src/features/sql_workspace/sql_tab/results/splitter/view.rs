@@ -47,17 +47,31 @@ pub fn block_inner(outer: Rect) -> Rect {
 
 /// The rect of the Results detail/list internal splitter, if the detail is
 /// open. `outer` is the full Results Block rect (before border subtraction).
+/// The splitter spans only the content band (above the pagination toolbar and
+/// the footer), so its height stays consistent with the drawn splitter.
+#[allow(clippy::too_many_arguments)]
 pub fn results_detail_splitter(
     outer: Rect,
     detail_open: bool,
     detail_pane_width: u16,
+    row_count: usize,
+    search_active: bool,
+    sql_status: &str,
 ) -> Option<Rect> {
     if !detail_open {
         return None;
     }
     let inner = block_inner(outer);
-    let (_list, splitter, _detail) = split_inner(inner, true, detail_pane_width);
-    splitter
+    let layout =
+        crate::features::sql_workspace::sql_tab::results::view::compute_results_layout(
+            inner,
+            true,
+            detail_pane_width,
+            row_count,
+            search_active,
+            sql_status,
+        );
+    layout.splitter
 }
 
 /// Compute the detail pane width for a drag of the Results detail/list
@@ -107,7 +121,7 @@ mod tests {
     #[test]
     fn splitter_rect_uses_block_inner() {
         let outer = Rect::new(0, 3, 120, 20);
-        let splitter = results_detail_splitter(outer, true, 40).unwrap();
+        let splitter = results_detail_splitter(outer, true, 40, 1, false, "").unwrap();
         // outer minus 1-col border → inner starts at x=1, splitter is at x=1+list_w
         // where list_w = 120 - 2 - 1 - 40 = 77, so splitter at x=78
         assert_eq!(splitter.x, 78);

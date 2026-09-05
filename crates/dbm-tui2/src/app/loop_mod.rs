@@ -1847,7 +1847,6 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                                         &active_tab.results.list,
                                         col,
                                         point.x,
-                                        active_tab.results.detail_open,
                                     );
                                     let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
                                         SqlTabMessage::Results {
@@ -3510,7 +3509,6 @@ fn update_splitter_hover(
                 &active_tab.results.list,
                 x,
                 y,
-                active_tab.results.detail_open,
             );
     }
 

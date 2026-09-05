@@ -5,15 +5,18 @@
 //! is visible the Block's inner area splits horizontally into
 //! `[list | splitter | detail]`; otherwise the list fills the whole inner area.
 
+use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::widgets::{Block, Borders};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
+use crate::common::view::hints::{draw_pane_footer, results_pane_footer_text};
 use crate::common::view::theme::Theme;
 
 use super::detail::view as detail_view;
 use super::list::view as list_view;
+use super::pagination::pagination_toolbar_line;
 use super::splitter::view as splitter_view;
 use super::state::ResultsState;
 
@@ -68,19 +71,30 @@ pub fn render(
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let (list_inner, splitter_rect, detail_inner) = splitter_view::split_inner(
+    // Single source of truth for the whole Results layout: the pagination
+    // toolbar and the list footer span the full inner width (both the table and
+    // the detail), and only the content band above them is narrowed to the list
+    // side by the horizontal list|detail split. This keeps the toolbar and
+    // footer width constant whether or not the detail is open.
+    let sql_status = state.list.executed_sql_display();
+    let layout = compute_results_layout(
         inner,
         state.detail_open,
         state.splitter.detail_pane_width,
+        state.list.row_count(),
+        state.list.search.text_input_active(),
+        &sql_status,
     );
 
-    list_view::render(frame, theme, list_inner, &state.list, focused, state.detail_open, col_resize);
+    list_view::render(frame, theme, layout.list, &state.list, focused, col_resize);
 
-    if let Some(rect) = splitter_rect {
+    if let Some(rect) = layout.splitter {
         splitter_view::render(frame, rect, splitter_hover, splitter_drag);
     }
 
-    if let (Some(detail_area), true) = (detail_inner, state.detail_open) {
+    // The detail preview sits inside the content band, so its bottom aligns
+    // with the table's last row (both stop where the toolbar begins).
+    if let (Some(detail_area), true) = (layout.detail, state.detail_open) {
         let body = state.list.selected_cell().unwrap_or_default();
         let col_name = state.list.selected_column_name().unwrap_or("").to_string();
         let title_text = format!(
@@ -99,5 +113,72 @@ pub fn render(
             edit_editing,
             focused,
         );
+    }
+
+    // Full-width pagination toolbar (spans both the table and the detail).
+    if let Some(pag_area) = layout.pagination {
+        let total_rows = state
+            .list
+            .result
+            .as_ref()
+            .map(|r| r.total_rows)
+            .unwrap_or_default();
+        let toolbar = pagination_toolbar_line(
+            state.list.row_limit,
+            state.list.page,
+            total_rows,
+            state.list.row_count(),
+            false,
+            false,
+            Style::default().fg(p.accent),
+            Style::default().fg(p.muted),
+        );
+        frame.render_widget(Paragraph::new(toolbar), pag_area);
+    }
+
+    // Full-width list footer (spans both the table and the detail).
+    let hint = results_pane_footer_text(
+        state.list.search.text_input_active(),
+        &sql_status,
+    );
+    draw_pane_footer(frame, theme, layout.footer, &hint);
+}
+
+/// The Results feature's full layout, resolved once so the renderer and every
+/// hit-test path share identical geometry.
+pub struct ResultsLayout {
+    /// The content band narrowed to the list side of the list|detail split.
+    pub list: Rect,
+    /// The list|detail splitter strip, when the detail is open.
+    pub splitter: Option<Rect>,
+    /// The detail preview area (within the content band), when the detail is open.
+    pub detail: Option<Rect>,
+    /// The full-width pagination toolbar, when there are rows to paginate.
+    pub pagination: Option<Rect>,
+    /// The full-width list footer.
+    pub footer: Rect,
+}
+
+/// Resolve the Results Block's `inner` area into its full layout: a vertical
+/// split over the whole width (content band + full-width pagination toolbar +
+/// full-width footer), then a horizontal split of the content band into the
+/// list | splitter | detail. See [`ResultsLayout`].
+pub fn compute_results_layout(
+    inner: Rect,
+    detail_open: bool,
+    detail_pane_width: u16,
+    row_count: usize,
+    search_active: bool,
+    sql_status: &str,
+) -> ResultsLayout {
+    let (content, pagination, footer) =
+        list_view::results_vertical_layout(inner, row_count, search_active, sql_status);
+    let (list, splitter, detail) = splitter_view::split_inner(content, detail_open, detail_pane_width);
+    ResultsLayout {
+        list,
+        splitter,
+        detail,
+        pagination,
+        footer,
     }
 }

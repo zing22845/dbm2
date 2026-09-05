@@ -18,65 +18,54 @@ use crate::common::view::format::{
     RESULTS_HEADER_HEIGHT, RESULTS_ROW_CONTENT_HEIGHT, RESULTS_ROW_HEIGHT, column_type_label,
     results_col_text_view,
 };
-use crate::common::view::hints::{draw_pane_footer, footer_height};
+use crate::common::view::hints::footer_height;
 use crate::common::view::theme::Theme;
 use crate::common::view::pane_scrollbar::{PaneScrollLayout, pane_scroll_layout};
 
 use super::state::ListState;
-use super::super::pagination::{RESULTS_PAGINATION_BAR_HEIGHT, pagination_toolbar_line};
+use super::super::pagination::RESULTS_PAGINATION_BAR_HEIGHT;
 
-/// Render the list sub-feature: action bar + table + pagination + footer,
-/// borderless — the outer Block is drawn by the parent `results::render()`.
+/// Render the list sub-feature: the action bar and the result table, borderless
+/// — the outer Block with border + title, the full-width pagination toolbar,
+/// and the full-width list footer are all drawn by the parent `results::render()`.
+///
+/// `list_area` is the content band (above the pagination toolbar / footer)
+/// narrowed to the list side of the optional list|detail horizontal split.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
-    area: Rect,
+    list_area: Rect,
     state: &ListState,
     focused: bool,
-    detail_open: bool,
     col_resize: Option<usize>,
 ) {
-    if area.width == 0 || area.height == 0 {
+    if list_area.width == 0 || list_area.height == 0 {
         return;
     }
     let p = theme.palette();
 
     // A failed query is shown as red error text.
     if let Some(message) = state.query_error.as_deref() {
-        render_error(frame, theme, area, message);
+        render_error(frame, theme, list_area, message);
         return;
     }
 
-    let Some(result) = state.result.as_ref() else {
-        render_empty(frame, theme, area);
+    let Some(_) = state.result.as_ref() else {
+        render_empty(frame, theme, list_area);
         return;
     };
 
-    let total_rows = result.total_rows;
-    let row_count = state.row_count();
     let state_h_scroll = state.h_scroll.get();
 
-    // `area` is already the inner area of the outer Results Block.
-    let search_active = state.search.text_input_active();
-    let sql_status = state.executed_sql_display();
-    let (table_body, action_bar_area, pagination_area, footer_area) =
-        compute_table_area(area, row_count, search_active, detail_open, &sql_status);
+    // The list region splits into the action bar (top) and the table body.
+    let (action_bar_area, table_body) = results_list_regions(list_area);
 
-    let hint = crate::common::view::hints::results_pane_footer_text(
-        search_active,
-        detail_open,
-        &sql_status,
-    );
-
-    // Content area: action bar + table.
     let has_result = state.result.is_some();
     let editable = state.editable();
     let commit_n = state.commit_row_count();
     let edit_active = state.edit.editing;
     let edit_dirty = state.edit.is_dirty();
     let edit_reason = state.edit_blocked_reason.clone();
-    let row_limit = state.row_limit;
-    let page = state.page;
     let (bar_scroll_max, model) = {
         let model = ResultsToolbarModel {
             refresh_enabled: has_result,
@@ -95,54 +84,28 @@ pub fn render(
     let bar_scroll = state_h_scroll.min(bar_scroll_max as usize) as u16;
 
     draw_action_bar(frame, action_bar_area, &model, bar_scroll, p);
-    render_table(
-        frame,
-        theme,
-        table_body,
-        state,
-        focused,
-        col_resize,
-    );
-
-    // Pagination toolbar (full width, below the content area, inside the Block).
-    if let Some(pag_area) = pagination_area {
-        let toolbar = pagination_toolbar_line(
-            row_limit,
-            page,
-            total_rows,
-            row_count,
-            false,
-            false,
-            Style::default().fg(p.accent),
-            Style::default().fg(p.muted),
-        );
-        frame.render_widget(Paragraph::new(toolbar), pag_area);
-    }
-
-    // Results list footer (full width, inside the Block).
-    draw_pane_footer(frame, theme, footer_area, &hint);
+    render_table(frame, theme, table_body, state, focused, col_resize);
 }
 
-/// Single source of truth for how the results list's already-inner area is
-/// split into action_bar + table_body + (pagination) + footer. Both [`render`]
-/// and the hit-test path in [`crate::features::sql_workspace::sql_tab::view`]
-/// must call this.
+/// Split the full-width Results Block inner area vertically into the content
+/// band (which holds the list and, when open, the detail preview side by side)
+/// above a full-width pagination toolbar and a full-width list footer. The
+/// toolbar and footer span the whole inner width whether or not the detail is
+/// open, so their width never changes.
 ///
-/// Returns `(table_body_area, action_bar_area, pagination_area, footer_area)`.
-/// `pagination_area` is `None` when there are no rows to paginate.
-pub fn compute_table_area(
-    list_inner: Rect,
+/// Returns `(content, pagination, footer)`. `pagination` is `None` when there
+/// are no rows to paginate.
+pub fn results_vertical_layout(
+    inner: Rect,
     row_count: usize,
     search_active: bool,
-    detail_open: bool,
     sql_status: &str,
-) -> (Rect, Rect, Option<Rect>, Rect) {
+) -> (Rect, Option<Rect>, Rect) {
     let hint = crate::common::view::hints::results_pane_footer_text(
         search_active,
-        detail_open,
         sql_status,
     );
-    let footer_h = footer_height(&hint, list_inner.width).min(list_inner.height.saturating_sub(4));
+    let footer_h = footer_height(&hint, inner.width).min(inner.height.saturating_sub(4));
 
     let pagination_h = if row_count > 0 { RESULTS_PAGINATION_BAR_HEIGHT } else { 0 };
 
@@ -154,7 +117,7 @@ pub fn compute_table_area(
                 Constraint::Length(pagination_h),
                 Constraint::Length(footer_h),
             ])
-            .split(list_inner)
+            .split(inner)
     } else {
         Layout::default()
             .direction(Direction::Vertical)
@@ -162,25 +125,27 @@ pub fn compute_table_area(
                 Constraint::Min(1),
                 Constraint::Length(footer_h),
             ])
-            .split(list_inner)
+            .split(inner)
     };
 
     let content = chunks[0];
-    let pagination_area = if pagination_h > 0 { Some(chunks[1]) } else { None };
-    let footer_area = if pagination_h > 0 { chunks[2] } else { chunks[1] };
+    let pagination = if pagination_h > 0 { Some(chunks[1]) } else { None };
+    let footer = if pagination_h > 0 { chunks[2] } else { chunks[1] };
+    (content, pagination, footer)
+}
 
-    let list_chunks = Layout::default()
+/// Split a list region (the content band narrowed to the list side) vertically
+/// into the action bar (top) and the table body. Single source of truth used by
+/// both the renderer and the hit-test paths.
+pub fn results_list_regions(list_area: Rect) -> (Rect, Rect) {
+    let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(RESULTS_ACTION_BAR_HEIGHT),
             Constraint::Min(0),
         ])
-        .split(content);
-
-    let action_bar_area = list_chunks[0];
-    let table_body_area = list_chunks[1];
-
-    (table_body_area, action_bar_area, pagination_area, footer_area)
+        .split(list_area);
+    (chunks[0], chunks[1])
 }
 
 fn render_error(frame: &mut Frame, theme: &Theme, area: Rect, message: &str) {
@@ -815,16 +780,15 @@ pub fn compute_viewport_scroll(
 /// click lands on a data cell (not header, action bar, pagination, footer,
 /// or scrollbar), or `None` otherwise.
 ///
-/// Uses [`compute_table_area`] so hit-test geometry always matches the
+/// Uses [`results_list_regions`] so hit-test geometry always matches the
 /// renderer's split logic exactly.
 pub fn cell_hit_at(
-    inner: Rect,
+    list_area: Rect,
     state: &ListState,
     x: u16,
     y: u16,
-    detail_open: bool,
 ) -> Option<(usize, usize)> {
-    if inner.width == 0 || inner.height == 0 {
+    if list_area.width == 0 || list_area.height == 0 {
         return None;
     }
 
@@ -835,14 +799,8 @@ pub fn cell_hit_at(
 
     let col_widths = &state.col_widths;
 
-    // Use the single source of truth for geometry.
-    let (table_area, _action_bar_area, _pagination_area, _footer_area) = compute_table_area(
-        inner,
-        state.row_count(),
-        state.search.text_input_active(),
-        detail_open,
-        &state.executed_sql_display(),
-    );
+    // Use the single source of truth for the list geometry.
+    let (_, table_area) = results_list_regions(list_area);
 
     let row_count = result.rows.len();
     let table_width = crate::common::view::format::results_table_width(col_widths);
@@ -888,15 +846,14 @@ fn contains(r: Rect, x: u16, y: u16) -> bool {
 
 /// Resolve the shared results-list geometry used by both this hit-test and the
 /// drag width mapping: `(table_area, content_area, h_scroll)`. `table_area` is
-/// the table body rect via [`compute_table_area`]; `content_area` and
+/// the table body rect via [`results_list_regions`]; `content_area` and
 /// `h_scroll` come from [`compute_viewport_scroll`], the same source of truth
 /// the renderer uses. Returns `None` when there is no table to resize.
 fn results_geometry(
-    inner: Rect,
+    list_area: Rect,
     state: &ListState,
-    detail_open: bool,
 ) -> Option<(Rect, Rect, usize)> {
-    if inner.width == 0 || inner.height == 0 || state.result.is_none() {
+    if list_area.width == 0 || list_area.height == 0 || state.result.is_none() {
         return None;
     }
     let result = state.result.as_ref()?;
@@ -904,13 +861,7 @@ fn results_geometry(
         return None;
     }
     let col_widths = &state.col_widths;
-    let (table_area, _a, _p, _f) = compute_table_area(
-        inner,
-        state.row_count(),
-        state.search.text_input_active(),
-        detail_open,
-        &state.executed_sql_display(),
-    );
+    let (_, table_area) = results_list_regions(list_area);
     let table_width = crate::common::view::format::results_table_width(col_widths);
     let vs = compute_viewport_scroll(
         table_area,
@@ -928,13 +879,12 @@ fn results_geometry(
 /// must be within one column of a column's right edge. Used for the splitter
 /// hover indicator and to begin a column-width drag.
 pub fn col_resize_hit_at(
-    inner: Rect,
+    list_area: Rect,
     state: &ListState,
     x: u16,
     y: u16,
-    detail_open: bool,
 ) -> Option<usize> {
-    let (_table_area, content_area, h_scroll) = results_geometry(inner, state, detail_open)?;
+    let (_table_area, content_area, h_scroll) = results_geometry(list_area, state)?;
     if !contains(content_area, x, y) {
         return None;
     }
@@ -952,14 +902,13 @@ pub fn col_resize_hit_at(
 /// the same shared geometry as [`col_resize_hit_at`]. The caller clamps the
 /// final value via the update message.
 pub fn col_width_from_drag_x(
-    inner: Rect,
+    list_area: Rect,
     state: &ListState,
     col: usize,
     x: u16,
-    detail_open: bool,
 ) -> u16 {
     let (_table_area, content_area, h_scroll) =
-        match results_geometry(inner, state, detail_open) {
+        match results_geometry(list_area, state) {
             Some(g) => g,
             None => return crate::common::view::format::DEFAULT_RESULTS_COL_WIDTH,
         };
@@ -1025,7 +974,7 @@ mod tests {
         // Baseline: a fresh terminal rendered directly at the destination h_scroll.
         let mut fresh = Terminal::new(TestBackend::new(30, 10)).unwrap();
         fresh
-            .draw(|f| super::render(f, &theme::default(), area, &make_state(to, col), true, false, None))
+            .draw(|f| super::render(f, &theme::default(), area, &make_state(to, col), true, None))
             .unwrap();
         let fresh_buf = fresh.backend().buffer().clone();
 
@@ -1034,7 +983,7 @@ mod tests {
         let mut cumul = Terminal::new(TestBackend::new(30, 10)).unwrap();
         for h in (from..=to).step_by(3) {
             cumul
-                .draw(|f| super::render(f, &theme::default(), area, &make_state(h, col), true, false, None))
+                .draw(|f| super::render(f, &theme::default(), area, &make_state(h, col), true, None))
                 .unwrap();
         }
 

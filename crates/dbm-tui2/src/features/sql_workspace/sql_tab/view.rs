@@ -282,28 +282,24 @@ pub fn sql_workspace_click(
             height: layout.results.height.saturating_sub(2),
         };
 
-        // Step 2: delegate split geometry to the splitter sub-feature.
-        let (list_inner, _splitter_rect, _detail_inner) =
-            crate::features::sql_workspace::sql_tab::results::splitter::view::split_inner(
+        // Step 2: resolve the full Results layout (same single source of truth
+        // the renderer uses). Only the content band is narrowed to the list side.
+        let layout =
+            crate::features::sql_workspace::sql_tab::results::view::compute_results_layout(
                 block_inner,
                 tab.results.detail_open,
                 tab.results.splitter.detail_pane_width,
+                tab.results.list.row_count(),
+                tab.results.list.search.text_input_active(),
+                &tab.results.list.executed_sql_display(),
             );
 
         // Step 3: only the list sub-pane responds to cell clicks.
-        if contains(list_inner, x, y)
+        if contains(layout.list, x, y)
             && tab.results.list.result.is_some()
             && tab.results.list.row_count() > 0
         {
-            // Use the single source of truth for results list geometry.
-            let (table_area, _action_bar, _pagination, _footer) =
-                crate::features::sql_workspace::sql_tab::results::list::view::compute_table_area(
-                    list_inner,
-                    tab.results.list.row_count(),
-                    tab.results.list.search.text_input_active(),
-                    tab.results.detail_open,
-                    &tab.results.list.executed_sql_display(),
-                );
+            let table_area = crate::features::sql_workspace::sql_tab::results::list::view::results_list_regions(layout.list).1;
 
             if is_double_click && !tab.results.detail_open {
                 return Some(SqlClickAction::ResultsOpenDetail);
@@ -315,11 +311,10 @@ pub fn sql_workspace_click(
             if !is_double_click
                 && let Some(col) = crate::features::sql_workspace::sql_tab::results::list::view::
                     col_resize_hit_at(
-                        list_inner,
+                        layout.list,
                         &tab.results.list,
                         x,
                         y,
-                        tab.results.detail_open,
                     )
             {
                 return Some(SqlClickAction::ResultsColResize { col });
@@ -337,11 +332,10 @@ pub fn sql_workspace_click(
 
             if let Some((row, col)) =
                 crate::features::sql_workspace::sql_tab::results::list::view::cell_hit_at(
-                    list_inner,
+                    layout.list,
                     &tab.results.list,
                     x,
                     y,
-                    tab.results.detail_open,
                 )
             {
                 return Some(SqlClickAction::ResultsCellClicked { row, col });
@@ -395,13 +389,16 @@ pub fn results_list_rect(
         width: results.width.saturating_sub(2),
         height: results.height.saturating_sub(2),
     };
-    let (list_inner, _splitter_rect, _detail_inner) =
-        crate::features::sql_workspace::sql_tab::results::splitter::view::split_inner(
+    let layout =
+        crate::features::sql_workspace::sql_tab::results::view::compute_results_layout(
             block_inner,
             tab.results.detail_open,
             tab.results.splitter.detail_pane_width,
+            tab.results.list.row_count(),
+            tab.results.list.search.text_input_active(),
+            &tab.results.list.executed_sql_display(),
         );
-    Some(list_inner)
+    Some(layout.list)
 }
 
 /// Try to hit-test a history list row at `(x, y)`. Returns the visible row
@@ -734,7 +731,7 @@ fn history_v_scrollbar_hit(
 }
 
 /// Check if a click at `(x, y)` hits the results list vertical scrollbar.
-/// `table_area` is pre-computed by [`results::list::view::compute_table_area`]
+/// `table_area` is pre-computed by [`results::list::view::results_list_regions`]
 /// so both render and hit-test use identical geometry.
 fn results_v_scrollbar_hit(
     tab: &crate::features::sql_workspace::sql_tab::state::SqlTab,
@@ -788,7 +785,7 @@ fn results_v_scrollbar_hit(
 }
 
 /// Check if a click at `(x, y)` hits the results list horizontal scrollbar.
-/// `table_area` is pre-computed by [`results::list::view::compute_table_area`]
+/// `table_area` is pre-computed by [`results::list::view::results_list_regions`]
 /// so both render and hit-test use identical geometry.
 fn results_h_scrollbar_hit(
     tab: &crate::features::sql_workspace::sql_tab::state::SqlTab,
