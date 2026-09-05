@@ -26,8 +26,10 @@ use ratatui::layout::Rect;
 use tokio::sync::mpsc;
 
 use crate::app::action::Action;
-use crate::app::mouse::clear_active_drags;
+use crate::app::mouse::dispatch::handle_mouse_event;
+use crate::app::mouse::drag::clear_active_drags;
 use crate::app::mouse::hover::normalize_splitter_tracks;
+use crate::app::mouse::state::{MouseInteraction, MouseOutcome};
 use crate::app::msg::AppMsg;
 use crate::app::state::AppState;
 use crate::app::update::{UpdateResult, handle_action, update_unchecked};
@@ -135,7 +137,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
     // state changes flow through `update`, and these values are pure gesture
     // tracking — so the run loop owns it and hands it to `app::mouse` on every
     // mouse event.
-    let mut mouse_interaction = crate::app::mouse::MouseInteraction::default();
+    let mut mouse_interaction = MouseInteraction::default();
 
     // The hardware caret position placed on the previous frame. The editor's
     // caret is written straight to the terminal (crossterm `MoveTo`) rather
@@ -313,7 +315,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     // Mouse input lives in `app::mouse`: hit-test the position
                     // against the rendered layout, then dispatch the resulting
                     // messages through `update`.
-                    match crate::app::mouse::handle_mouse_event(
+                    match handle_mouse_event(
                         mouse,
                         &mut terminal,
                         &mut state,
@@ -323,8 +325,8 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     )? {
                         // A debounced wheel tick: skip the rest of this loop
                         // iteration, exactly as the inlined `continue` did.
-                        crate::app::mouse::MouseOutcome::Continue => continue,
-                        crate::app::mouse::MouseOutcome::Handled { repaint } => {
+                        MouseOutcome::Continue => continue,
+                        MouseOutcome::Handled { repaint } => {
                             needs_redraw |= repaint
                         }
                     }

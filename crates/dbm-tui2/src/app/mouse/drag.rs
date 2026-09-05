@@ -14,11 +14,28 @@ use crate::app_shell::effect::EffectRunner;
 use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::features::global_footer::view as footer_view;
 
-use super::clear_active_drags;
 use super::hover::update_splitter_hover;
 use super::splitter::SplitterDrag;
 use crate::app::geometry::{app_explorer_rect, sql_tab_area_for_hit, workspace_rect_for_hit};
 use crate::app::loop_mod::{AppTerminal, process_message_round};
+
+/// End every in-progress held-button drag at once: the active scrollbar, all
+/// splitter drag flags, and the results column-resize drag.
+///
+/// Called from the three places a drag is known to be over:
+/// - a real `MouseEventKind::Up`,
+/// - a `FocusLost` (the button was released *outside* the window, so no `Up`
+///   was ever delivered — otherwise the highlight would stay stuck),
+/// - a fresh `Down` that proves the previous release was missed.
+///
+/// Centralizing the clear keeps it in one place instead of three duplicated
+/// blocks (and mirrors the original dbm, which clears scrollbar/splitter/
+/// column-resize together in its single `Up` arm).
+pub(crate) fn clear_active_drags(state: &mut AppState) {
+    state.scrollbar_drag = None;
+    state.splitter_hover.set_dragging_flags([false; 7]);
+    state.splitter_hover.results_col_resize_drag = None;
+}
 
 /// A held-button drag: follow the pointer for whichever scrollbar or
 /// splitter the press armed.
