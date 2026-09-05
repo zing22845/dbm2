@@ -58,7 +58,7 @@ pub(crate) fn handle_confirm_modal_click(
         );
         let buttons = crate::common::view::modal::confirm_buttons(popup);
         let msg = if buttons.yes_rect.contains(point) {
-            crate::app::input::confirm_yes_msg(state.modal.as_ref().unwrap(), state)
+            crate::app::key::confirm_yes_msg(state.modal.as_ref().unwrap(), state)
         } else if buttons.no_rect.contains(point) {
             Some(AppMsg::CloseModal)
         } else {

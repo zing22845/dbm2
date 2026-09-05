@@ -3,7 +3,7 @@
 
 pub mod action;
 pub mod geometry;
-pub mod input;
+pub mod key;
 pub mod loop_mod;
 pub mod mouse;
 pub mod msg;

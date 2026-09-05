@@ -9,6 +9,7 @@ use ratatui::text::{Line, Span};
 
 use crate::app::state::{AppState, ModalKind};
 use crate::app_shell::pane::Pane;
+use crate::features::app_splitter::view as splitter_view;
 use crate::features::discover::view as discover_view;
 use crate::features::explorer::view as explorer_view;
 use crate::features::global_footer::view as footer_view;
@@ -16,7 +17,6 @@ use crate::features::header::view as header_view;
 use crate::features::instance_workspace::view as iw_view;
 use crate::features::perf_monitor::view as perf_view;
 use crate::features::sql_workspace::view as sql_view;
-use crate::features::app_splitter::view as splitter_view;
 
 /// Top-level render: lays out the shell regions and delegates to each
 /// feature's `view::render`. Returns the editor's hardware cursor (when the
@@ -37,8 +37,8 @@ pub fn render(
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // header (title bar with borders)
-            Constraint::Min(0),     // body (explorer + workspace)
+            Constraint::Length(3),        // header (title bar with borders)
+            Constraint::Min(0),           // body (explorer + workspace)
             Constraint::Length(footer_h), // footer
         ])
         .split(frame.area());
@@ -46,7 +46,10 @@ pub fn render(
     // The body is a horizontal split: Explorer (left) + a resizable vertical
     // splitter + the workspace region (right). The splitter width is owned by
     // the app-level `splitter` feature.
-    let body = crate::features::app_splitter::view::app_body_layout(chunks[1], state.splitter.explorer_pane_width);
+    let body = crate::features::app_splitter::view::app_body_layout(
+        chunks[1],
+        state.splitter.explorer_pane_width,
+    );
 
     // The workspace region holds only the SQL view (main). The performance
     // readout moved into the footer row (right-aligned) to save vertical space.
@@ -58,11 +61,31 @@ pub fn render(
     let explorer_focused = matches!(state.focus, Pane::Explorer(_));
     let workspace_focused = matches!(state.focus, Pane::SQLWorkspace)
         || matches!(state.focus, Pane::InstanceWorkspace(_));
-    header_view::render(frame, &state.theme, chunks[0], &state.header, header_focused);
+    header_view::render(
+        frame,
+        &state.theme,
+        chunks[0],
+        &state.header,
+        header_focused,
+    );
     let active_scrollbar = state.scrollbar_drag.map(|d| d.which);
-    explorer_view::render(frame, &state.theme, body.explorer, &state.explorer, explorer_focused, state.splitter_hover.explorer_splitter, state.splitter_hover.explorer_splitter_drag, active_scrollbar);
+    explorer_view::render(
+        frame,
+        &state.theme,
+        body.explorer,
+        &state.explorer,
+        explorer_focused,
+        state.splitter_hover.explorer_splitter,
+        state.splitter_hover.explorer_splitter_drag,
+        active_scrollbar,
+    );
     // Draw the resizable Explorer / workspace splitter strip.
-    splitter_view::render(frame, &body, state.splitter_hover.app_splitter, state.splitter_hover.app_splitter_drag);
+    splitter_view::render(
+        frame,
+        &body,
+        state.splitter_hover.app_splitter,
+        state.splitter_hover.app_splitter_drag,
+    );
     // The workspace region shows whichever workspace is active, driven by the
     // explorer tree's `active_workspace` marker (the original dbm's
     // `is_instance_workspace()`), not by keyboard focus. Opening a connection
@@ -71,10 +94,25 @@ pub fn render(
     // still show the SQL workspace (its empty-state hint) — the "connection
     // zone" the original dbm keeps visible after the last tab closes.
     let (editor_cursor, history_v_scroll) = if state.explorer.instances.active_is_instance() {
-        iw_view::render(frame, &state.theme, workspace, &state.iw, workspace_focused, active_scrollbar);
+        iw_view::render(
+            frame,
+            &state.theme,
+            workspace,
+            &state.iw,
+            workspace_focused,
+            active_scrollbar,
+        );
         (None, None)
     } else {
-        sql_view::render(frame, &state.theme, workspace, &state.sql, workspace_focused, &state.splitter_hover, active_scrollbar)
+        sql_view::render(
+            frame,
+            &state.theme,
+            workspace,
+            &state.sql,
+            workspace_focused,
+            &state.splitter_hover,
+            active_scrollbar,
+        )
     };
     // The bottom row holds the global footer on the left and the performance
     // readout on the right.
@@ -96,7 +134,18 @@ pub fn render(
             75,
             &state.discover,
             |f, t, a, s| {
-                let c = discover_view::render(f, t, a, s, sub, state.splitter_hover.discover_splitter, state.splitter_hover.discover_splitter_drag, &targets_layout_ref, &results_layout_ref, active_scrollbar);
+                let c = discover_view::render(
+                    f,
+                    t,
+                    a,
+                    s,
+                    sub,
+                    state.splitter_hover.discover_splitter,
+                    state.splitter_hover.discover_splitter_drag,
+                    &targets_layout_ref,
+                    &results_layout_ref,
+                    active_scrollbar,
+                );
                 *discover_caret_ref.borrow_mut() = c;
             },
         );
@@ -110,11 +159,21 @@ pub fn render(
         // Generic titled popup for the picker/confirm/commit-preview modals.
         render_popup_modal(frame, &state.theme, workspace, modal);
         // A modal overlays the workspace, so the editor caret is hidden.
-        return (None, targets_layout_ref.into_inner(), history_v_scroll, results_scroll_out);
+        return (
+            None,
+            targets_layout_ref.into_inner(),
+            history_v_scroll,
+            results_scroll_out,
+        );
     }
     // The discover overlay's inline-edit caret wins over the editor caret
     // underneath when discover is focused.
-    (discover_caret.or(editor_cursor), targets_layout_ref.into_inner(), history_v_scroll, results_scroll_out)
+    (
+        discover_caret.or(editor_cursor),
+        targets_layout_ref.into_inner(),
+        history_v_scroll,
+        results_scroll_out,
+    )
 }
 
 /// Render the footer row: the global footer hints on the left (flexible width)
@@ -127,7 +186,7 @@ fn render_footer_with_perf(frame: &mut ratatui::Frame, state: &AppState, area: R
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Min(1),   // footer hints
+            Constraint::Min(1),         // footer hints
             Constraint::Length(perf_w), // perf readout
         ])
         .split(area);
@@ -144,8 +203,7 @@ fn render_popup_modal(
     modal: &ModalKind,
 ) {
     use crate::common::view::modal::{
-        is_confirm_modal, modal_title, render_confirm_popup, render_popup,
-        render_titled_popup,
+        is_confirm_modal, modal_title, render_confirm_popup, render_popup, render_titled_popup,
     };
     // Confirm-style modals (delete connection / unregister / commit preview)
     // share the generic Yes/No confirm popup so their look matches the discover
@@ -192,16 +250,17 @@ fn render_popup_modal(
 
     render_popup(frame, theme, base, 45, 20, true, |f, area| {
         let body = match modal {
-            ModalKind::ResultsRowLimitPicker { current, limits } => {
-                limits
-                    .iter()
-                    .map(|l| {
-                        let marker = if *l == *current { "◄" } else { " " };
-                        Line::from(Span::raw(format!("{marker} {l} rows")))
-                    })
-                    .collect()
-            }
-            ModalKind::ResultsPageInput { current_page, total_pages } => {
+            ModalKind::ResultsRowLimitPicker { current, limits } => limits
+                .iter()
+                .map(|l| {
+                    let marker = if *l == *current { "◄" } else { " " };
+                    Line::from(Span::raw(format!("{marker} {l} rows")))
+                })
+                .collect(),
+            ModalKind::ResultsPageInput {
+                current_page,
+                total_pages,
+            } => {
                 let total = total_pages
                     .map(|t| t.to_string())
                     .unwrap_or_else(|| "?".to_string());
@@ -214,5 +273,3 @@ fn render_popup_modal(
         render_titled_popup(f, theme, area, &modal_title(modal), body);
     });
 }
-
-

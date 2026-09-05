@@ -289,7 +289,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                         // the key below.
                         _ => None,
                     };
-                    let msg = global.or_else(|| crate::app::input::key_to_msg(key, &state));
+                    let msg = global.or_else(|| crate::app::key::key_to_msg(key, &state));
                     if let Some(msg) = msg {
                         // Repaint only if the round actually changed rendered
                         // state (dirty); an input dropped by the focus guard, or
@@ -326,7 +326,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     // Bracketed paste: route the pasted text to the focused
                     // editor cell. The discover targets editor and the SQL
                     // editor both accept it (TSV host:ports rows / text).
-                    let msg = crate::app::input::paste_to_msg(&contents, &state);
+                    let msg = crate::app::key::paste_to_msg(&contents, &state);
                     if let Some(msg) = msg {
                         let result =
                             process_message_round(&effect_runner, &mut action_rx, msg, &mut state);

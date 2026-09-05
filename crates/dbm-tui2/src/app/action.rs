@@ -66,7 +66,9 @@ impl From<IwAction> for Action {
     }
 }
 impl From<crate::features::instance_workspace::connections::effect::ConnectionsAction> for Action {
-    fn from(a: crate::features::instance_workspace::connections::effect::ConnectionsAction) -> Self {
+    fn from(
+        a: crate::features::instance_workspace::connections::effect::ConnectionsAction,
+    ) -> Self {
         Action::Iw(IwAction::Connections(a))
     }
 }
