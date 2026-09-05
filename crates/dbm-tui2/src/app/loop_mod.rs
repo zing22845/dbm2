@@ -27,7 +27,6 @@ use tokio::sync::mpsc;
 use crate::app::action::Action;
 use crate::app::mouse::dispatch::handle_mouse_event;
 use crate::app::mouse::drag::clear_active_drags;
-use crate::app::mouse::hover::normalize_splitter_tracks;
 use crate::app::mouse::state::{MouseInteraction, MouseOutcome};
 use crate::app::msg::AppMsg;
 use crate::app::round::{process_action_round, process_message_round, queue_result};
@@ -181,10 +180,12 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             // don't mark every active frame as "changed" and mask real
             // redundancy.
             let size = terminal.size()?;
-            // Refresh each horizontal splitter's last-laid-out track so keyboard
-            // `+` / `-` nudges clamp against the live body height (and stop
-            // dirtying once the split reaches a boundary).
-            normalize_splitter_tracks(&mut state, size);
+            // Keep each splitter's clamp bounds on the live layout. TEA: the run
+            // loop forwards a shell message and `update` owns the write.
+            crate::app::update::update_unchecked(
+                AppMsg::Shell(crate::app_shell::msg::ShellMsg::RefreshSplitterBounds),
+                &mut state,
+            );
             let footer_h = footer_view::footer_height(&state.footer, size.width);
             terminal
                 .backend_mut()
@@ -341,8 +342,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     // horizontal-scroll can clamp at the content boundary and
                     // the persisted horizontal-split percentage can be
                     // re-materialized against the new body height.
-                    state.term_width = w;
-                    state.term_height = h;
+                    // TEA: the resize flows through `update`, which records the
+                    // cached size and marks the round dirty.
+                    crate::app::update::update_unchecked(
+                        AppMsg::Shell(crate::app_shell::msg::ShellMsg::TermResized {
+                            width: w,
+                            height: h,
+                        }),
+                        &mut state,
+                    );
                     needs_redraw = true;
                 } else if let Some(Ok(CEvent::FocusLost)) = maybe_event {
                     // The terminal window lost focus — e.g. the user dragged a

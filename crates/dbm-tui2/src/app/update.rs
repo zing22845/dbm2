@@ -7,7 +7,10 @@
 //! uniformly; the router will later convert them back into `AppMsg` /
 //! `Action`.
 
+use ratatui::layout::{Rect, Size};
+
 use crate::app::action::Action;
+use crate::app::geometry::{app_explorer_rect, workspace_rect_for_hit};
 use crate::app::msg::AppMsg;
 use crate::app::state::AppState;
 use crate::app_shell::effect::ErasedEffect;
@@ -24,6 +27,7 @@ use crate::features::explorer::objects::effect::ObjectsEffect;
 use crate::features::explorer::update::update as explorer_update;
 use crate::features::global_footer::msg::FooterMsg;
 use crate::features::global_footer::update::update as footer_update;
+use crate::features::global_footer::view as footer_view;
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 use crate::features::header::update::update as header_update;
 use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
@@ -308,6 +312,87 @@ fn explorer_load_instances_msg() -> AppMsg {
 /// paths: it drops feature messages whose target pane does not own the focus,
 /// so unfocused features never react to stray input. Shell and footer messages
 /// always pass through, and an open modal / discover parent pane owns all input.
+/// Re-derive each splitter's cached clamp bounds from the live layout.
+///
+/// The bounds are *derived* data: they depend on the terminal size and the live
+/// Explorer / workspace layout, so they are invalidated by a resize or an app
+/// splitter move. The run loop fires [`ShellMsg::RefreshSplitterBounds`] right
+/// before each repaint and this keeps the keyboard `+`/`-` nudges and mouse
+/// drags clamping against the current track. Nothing user-visible changes, so
+/// the handler never marks the round dirty.
+fn reconcile_splitter_bounds(state: &mut AppState) {
+    let size = Size::new(state.term_width, state.term_height);
+    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    // Body height: header (3) at the top, footer at the bottom.
+    let body_h = size.height.saturating_sub(3).saturating_sub(footer_h);
+    // SQL tab body track: workspace inner, minus the workspace footer and the
+    // tab bar. Computed with the same footer logic the workspace render uses.
+    let workspace = workspace_rect_for_hit(size, 3, body_h, state);
+    // Editor+history track width (the workspace inner width), matching the
+    // render (live Explorer splitter width), so `[`/`]` history nudges clamp
+    // against the exact editor min width.
+    let sql_track_w = workspace.map(|ws| ws.width.saturating_sub(2)).unwrap_or(
+        size.width
+            .saturating_sub(size.width.saturating_mul(2) / 10)
+            .saturating_sub(2),
+    );
+    let sql_body_h = workspace
+        .map(|ws| {
+            let inner_w = ws.width.saturating_sub(2);
+            let ws_footer_h = crate::common::view::hints::footer_height(
+                &crate::common::view::hints::sql_workspace_footer_text(),
+                inner_w.max(1),
+            );
+            ws.height
+                .saturating_sub(2)
+                .saturating_sub(ws_footer_h)
+                .saturating_sub(1)
+        })
+        .unwrap_or(body_h.saturating_sub(4));
+    // Derive the SQL splitter bounds from the layout itself (the same function
+    // the render uses), so nudge/drag clamp to the exact rendered boundary.
+    for tab in &mut state.sql.sql_tab.tabs {
+        let sql_area = Rect::new(0, 0, sql_track_w.max(1), sql_body_h.max(1));
+        let layout = crate::features::sql_workspace::sql_tab::layout::sql_tab_layout(
+            sql_area,
+            tab.splitter.editor_top_height,
+            tab.splitter.history_pane_width,
+        );
+        tab.splitter.editor_top_min = layout.editor_top_min;
+        tab.splitter.editor_top_max = layout.editor_top_max.max(layout.editor_top_min);
+        tab.splitter.history_min = layout.history_min;
+        tab.splitter.history_max = layout.history_max.max(layout.history_min);
+    }
+    // Explorer instances/objects bounds, derived from the same layout the render
+    // uses so nudge clamps to the exact rendered boundary.
+    if let Some(explorer) = app_explorer_rect(size, 3, body_h, state) {
+        let inner = Rect::new(
+            explorer.x + 1,
+            explorer.y + 1,
+            explorer.width.saturating_sub(2),
+            explorer.height.saturating_sub(2),
+        );
+        let layout = crate::features::explorer::splitter::view::explorer_body_layout(
+            inner,
+            state.explorer.splitter.instances_height,
+        );
+        state.explorer.splitter.instances_min = layout.instances_min;
+        state.explorer.splitter.instances_max = layout.instances_max.max(layout.instances_min);
+    }
+    // Discover targets/results bounds, from the same popup/body the render lays.
+    if let Some(ws) = workspace {
+        let discover_popup = crate::common::view::modal::popup_rect(ws, 75, 75);
+        let body =
+            crate::features::discover::view::discover_body_area(discover_popup, &state.discover);
+        let layout = crate::features::discover::splitter::view::discover_body_layout(
+            body,
+            state.discover.splitter.targets_height,
+        );
+        state.discover.splitter.targets_min = layout.targets_min;
+        state.discover.splitter.targets_max = layout.targets_max.max(layout.targets_min);
+    }
+}
+
 pub fn update(msg: AppMsg, state: &mut AppState) -> UpdateResult {
     // When a modal (data popup) is open it owns all keyboard input, so its
     // messages bypass the focus guard. The discover parent pane likewise owns
@@ -377,6 +462,14 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                 state.should_quit = true;
             }
             crate::app_shell::msg::ShellMsg::Tick => {}
+            crate::app_shell::msg::ShellMsg::TermResized { width, height } => {
+                state.term_width = width;
+                state.term_height = height;
+                result.dirty = true;
+            }
+            crate::app_shell::msg::ShellMsg::RefreshSplitterBounds => {
+                reconcile_splitter_bounds(state);
+            }
             crate::app_shell::msg::ShellMsg::FocusChanged { pane } => {
                 // While the discover parent pane owns focus, no focus change is
                 // allowed to move away from it (neither keyboard navigation nor

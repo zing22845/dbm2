@@ -15,4 +15,10 @@ pub enum ShellMsg {
     FocusChanged { pane: Pane },
     /// Toggle the active theme between its dark and light palettes.
     ToggleTheme,
+    /// The terminal was resized. `update` records the new size so derived
+    /// layout state re-materializes against it.
+    TermResized { width: u16, height: u16 },
+    /// Re-derive every splitter's cached clamp bounds from the live layout.
+    /// Fired by the run loop right before each repaint.
+    RefreshSplitterBounds,
 }
