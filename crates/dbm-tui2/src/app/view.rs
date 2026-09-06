@@ -263,11 +263,8 @@ fn render_results_picker_popup(
 ) {
     use crate::common::view::modal::{modal_title, render_titled_popup};
     use crate::common::view::overlay_clear::clear_overlay;
-    use crate::features::sql_workspace::sql_tab::results::pagination::{
-        ResultsPaginationHit, popup_above_anchor,
-    };
 
-    let (hit, body, width, height) = match modal {
+    let body = match modal {
         ModalKind::ResultsRowLimitPicker { current, limits } => {
             let mut rows: Vec<Line> = limits
                 .iter()
@@ -277,11 +274,10 @@ fn render_results_picker_popup(
                 })
                 .collect();
             rows.push(Line::from(Span::styled(
-                "Select: ENTER · Move: j/k · ESC",
+                "Select: ENTER · Move: j/k · Close: ESC",
                 Style::default().fg(theme.palette().muted),
             )));
-            let height = 2 + rows.len() as u16;
-            (ResultsPaginationHit::RowLimit, rows, 30, height)
+            rows
         }
         ModalKind::ResultsPageInput {
             current_page,
@@ -291,7 +287,7 @@ fn render_results_picker_popup(
             let total = total_pages
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| "?".to_string());
-            let body = vec![
+            vec![
                 Line::from(Span::raw(format!(
                     "Current: page {current_page} of {total}"
                 ))),
@@ -300,22 +296,19 @@ fn render_results_picker_popup(
                     Style::default().fg(theme.palette().accent),
                 )),
                 Line::from(Span::styled(
-                    "Enter: go · ESC: close",
+                    "Go: ENTER · Close: ESC",
                     Style::default().fg(theme.palette().muted),
                 )),
-            ];
-            (ResultsPaginationHit::PageNumber, body, 32, 5)
+            ]
         }
         _ => return, // unreachable: confirm modals handled by the caller
     };
 
-    let Some(anchor) = crate::app::geometry::results_picker_anchor(state, base, hit) else {
+    // Same anchored geometry the mouse hit-testing uses (see
+    // `app::geometry::results_picker_popup`).
+    let Some(picker) = crate::app::geometry::results_picker_popup(state, base) else {
         return;
     };
-    let popup = popup_above_anchor(anchor.anchor, anchor.pane_inner, width, height);
-    if popup.width < 2 || popup.height < 2 {
-        return;
-    }
-    clear_overlay(frame, popup);
-    render_titled_popup(frame, theme, popup, &modal_title(modal), body);
+    clear_overlay(frame, picker.popup);
+    render_titled_popup(frame, theme, picker.popup, &modal_title(modal), body);
 }
