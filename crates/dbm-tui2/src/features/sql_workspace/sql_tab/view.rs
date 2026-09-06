@@ -6,7 +6,7 @@ use ratatui::style::Style;
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Paragraph};
 
-use crate::common::view::pane_scrollbar::ActiveScrollbar;
+use crate::common::layout::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::editor::view as editor_view;

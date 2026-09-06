@@ -4,7 +4,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 
-use crate::common::view::pane_scrollbar::ActiveScrollbar;
+use crate::common::layout::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::engine::view as engine_view;

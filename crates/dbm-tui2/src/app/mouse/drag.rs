@@ -13,7 +13,7 @@ use crate::app::action::Action;
 use crate::app::msg::AppMsg;
 use crate::app::state::AppState;
 use crate::app_shell::effect::EffectRunner;
-use crate::common::view::pane_scrollbar::ActiveScrollbar;
+use crate::common::layout::pane_scrollbar::ActiveScrollbar;
 use crate::features::global_footer::layout as footer_layout;
 
 use super::hover::update_splitter_hover;

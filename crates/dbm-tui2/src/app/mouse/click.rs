@@ -397,7 +397,7 @@ pub(crate) fn sql_click_msgs(
             };
             use crate::features::sql_workspace::sql_tab::state::SqlFocus;
             let _rel_x = x.saturating_sub(track_x);
-            let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let position = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 x,
                 track_x,
                 viewport_width,
@@ -429,7 +429,7 @@ pub(crate) fn sql_click_msgs(
             };
             use crate::features::sql_workspace::sql_tab::state::SqlFocus;
             let _rel_y = y.saturating_sub(track_y);
-            let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let start = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 y,
                 track_y,
                 viewport_height,
@@ -501,7 +501,7 @@ pub(crate) fn sql_click_msgs(
             };
             use crate::features::sql_workspace::sql_tab::state::SqlFocus;
             let _rel_x = x.saturating_sub(track_x);
-            let position = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let position = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 x,
                 track_x,
                 viewport_width,
@@ -533,7 +533,7 @@ pub(crate) fn sql_click_msgs(
             };
             use crate::features::sql_workspace::sql_tab::state::SqlFocus;
             let _rel_y = y.saturating_sub(track_y);
-            let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let start = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 y,
                 track_y,
                 viewport_height,
@@ -574,7 +574,7 @@ pub(crate) fn sql_click_msgs(
             };
             use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
             let _rel_y = y.saturating_sub(track_y);
-            let start = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let start = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 y,
                 track_y,
                 viewport_height,

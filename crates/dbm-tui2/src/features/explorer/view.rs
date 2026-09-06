@@ -9,7 +9,7 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-use crate::common::view::pane_scrollbar::ActiveScrollbar;
+use crate::common::layout::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::instances::view as instances_view;

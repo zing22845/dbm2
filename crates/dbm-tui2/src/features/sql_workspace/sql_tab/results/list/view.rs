@@ -11,13 +11,13 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+use crate::common::layout::pane_scrollbar::ActiveScrollbar;
 use crate::common::layout::text::footer_height;
 use crate::common::view::action_bar::{ResultsToolbarModel, action_bar_width, draw_action_bar};
 use crate::common::view::format::{
     RESULTS_HEADER_HEIGHT, RESULTS_ROW_CONTENT_HEIGHT, RESULTS_ROW_HEIGHT, column_type_label,
     results_col_text_view,
 };
-use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::super::pagination::RESULTS_PAGINATION_BAR_HEIGHT;

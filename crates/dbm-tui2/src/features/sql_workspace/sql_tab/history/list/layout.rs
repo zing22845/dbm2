@@ -5,7 +5,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 use crate::common::components::line_numbers;
-use crate::common::view::pane_scrollbar::{
+use crate::common::layout::pane_scrollbar::{
     PaneScrollLayout, RowHeights, pane_anchor, pane_scroll_layout,
 };
 

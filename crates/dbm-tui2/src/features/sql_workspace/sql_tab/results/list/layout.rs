@@ -2,9 +2,9 @@
 //! viewport scroll math.
 
 use super::state::ListState;
+use crate::common::layout::pane_scrollbar::{PaneScrollLayout, pane_scroll_layout};
 use crate::common::view::action_bar::RESULTS_ACTION_BAR_HEIGHT;
 use crate::common::view::format::{RESULTS_HEADER_HEIGHT, RESULTS_ROW_HEIGHT};
-use crate::common::view::pane_scrollbar::{PaneScrollLayout, pane_scroll_layout};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// Split a list region (the content band narrowed to the list side) vertically

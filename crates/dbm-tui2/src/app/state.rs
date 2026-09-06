@@ -61,7 +61,7 @@ pub struct AppState {
     /// One value rather than one flag per bar: only a single drag can be active
     /// at a time, and every render reads it to highlight the dragged bar (thumb
     /// in the accent color) while the press is held, matching the original dbm.
-    pub scrollbar_drag: Option<crate::common::view::pane_scrollbar::ScrollbarDrag>,
+    pub scrollbar_drag: Option<crate::common::layout::pane_scrollbar::ScrollbarDrag>,
 
     // --- Feature states ---
     pub header: HeaderState,

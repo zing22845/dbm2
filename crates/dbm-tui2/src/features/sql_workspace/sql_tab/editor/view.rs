@@ -10,10 +10,9 @@ use ratatui::widgets::{Block, Borders};
 
 use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
 use crate::common::editor;
+use crate::common::layout::pane_scrollbar::{ActiveScrollbar, pane_scroll_layout};
 use crate::common::view::hints::{draw_pane_footer, sql_pane_footer_text};
-use crate::common::view::pane_scrollbar::{
-    ActiveScrollbar, draw_vertical_pane_scrollbar, pane_scroll_layout,
-};
+use crate::common::view::pane_scrollbar::draw_vertical_pane_scrollbar;
 use crate::common::view::theme::Theme;
 
 use super::context_picker::view as cp_view;

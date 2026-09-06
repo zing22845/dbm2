@@ -18,9 +18,11 @@ use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
 use crate::common::components::line_numbers;
+use crate::common::layout::pane_scrollbar::{
+    ActiveScrollbar, PaneScrollLayout, RowHeights, pane_anchor, pane_scroll_layout,
+};
 use crate::common::view::pane_scrollbar::{
-    ActiveScrollbar, PaneScrollLayout, RowHeights, draw_horizontal_pane_scrollbar,
-    draw_vertical_pane_scrollbar, pane_anchor, pane_scroll_layout,
+    draw_horizontal_pane_scrollbar, draw_vertical_pane_scrollbar,
 };
 use crate::common::view::theme::Theme;
 

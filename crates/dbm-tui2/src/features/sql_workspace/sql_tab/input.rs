@@ -299,7 +299,7 @@ pub fn sql_workspace_click(
         );
         if let Some((v_bar, max_scroll)) =
             editor_view::editor_body_v_scrollbar_info(body_area, &tab.editor.editor)
-            && crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y)
+            && crate::common::layout::pane_scrollbar::point_in_bar(v_bar, x, y)
         {
             return Some(SqlClickAction::EditorVScrollbar {
                 track_y: v_bar.y,
@@ -637,7 +637,7 @@ fn history_h_scrollbar_hit(
 
     // Compute h_scrollbar area using pane_scroll_layout to find its rect.
     let viewport_rows = inner_content.height as usize;
-    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+    let layout = crate::common::layout::pane_scrollbar::pane_scroll_layout(
         inner_content,
         selected_width as u16,
         visible.len(),
@@ -645,7 +645,7 @@ fn history_h_scrollbar_hit(
     );
     let h_bar = layout.h_scrollbar?;
 
-    if crate::common::view::pane_scrollbar::point_in_bar(h_bar, x, y) {
+    if crate::common::layout::pane_scrollbar::point_in_bar(h_bar, x, y) {
         let content_w = layout.content_area.width as usize;
         let max_scroll = selected_width.saturating_sub(content_w);
         Some(SqlClickAction::HistoryHScrollbar {
@@ -765,7 +765,7 @@ fn history_v_scrollbar_hit(
         .unwrap_or(0);
 
     let viewport_rows = inner_content.height as usize;
-    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+    let layout = crate::common::layout::pane_scrollbar::pane_scroll_layout(
         inner_content,
         selected_width as u16,
         visible.len(),
@@ -776,7 +776,7 @@ fn history_v_scrollbar_hit(
     let effective_layout = if needs_h {
         layout
     } else {
-        crate::common::view::pane_scrollbar::pane_scroll_layout(
+        crate::common::layout::pane_scrollbar::pane_scroll_layout(
             inner_content,
             0,
             visible.len(),
@@ -794,7 +794,7 @@ fn history_v_scrollbar_hit(
         return None;
     }
 
-    if crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y) {
+    if crate::common::layout::pane_scrollbar::point_in_bar(v_bar, x, y) {
         Some(SqlClickAction::HistoryVScrollbar {
             track_y: v_bar.y,
             y,
@@ -824,7 +824,7 @@ fn results_v_scrollbar_hit(
         return None;
     }
 
-    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+    let layout = crate::common::layout::pane_scrollbar::pane_scroll_layout(
         table_area,
         table_width,
         row_count,
@@ -846,7 +846,7 @@ fn results_v_scrollbar_hit(
         return None;
     }
 
-    if crate::common::view::pane_scrollbar::point_in_bar(v_bar, x, y) {
+    if crate::common::layout::pane_scrollbar::point_in_bar(v_bar, x, y) {
         Some(SqlClickAction::ResultsVScrollbar {
             track_y: v_bar.y,
             y,
@@ -878,7 +878,7 @@ fn results_h_scrollbar_hit(
         return None;
     }
 
-    let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+    let layout = crate::common::layout::pane_scrollbar::pane_scroll_layout(
         table_area,
         table_width,
         row_count,
@@ -891,7 +891,7 @@ fn results_h_scrollbar_hit(
         return None;
     }
 
-    if crate::common::view::pane_scrollbar::point_in_bar(h_bar, x, y) {
+    if crate::common::layout::pane_scrollbar::point_in_bar(h_bar, x, y) {
         Some(SqlClickAction::ResultsHScrollbar {
             track_x: h_bar.x,
             x,

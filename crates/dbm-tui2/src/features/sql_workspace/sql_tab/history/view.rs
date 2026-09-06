@@ -14,9 +14,9 @@ use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders};
 
 use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
+use crate::common::layout::pane_scrollbar::ActiveScrollbar;
 use crate::common::layout::text::footer_height;
 use crate::common::view::hints::{draw_pane_footer, history_list_footer_text};
-use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::detail::view::draw_history_detail;

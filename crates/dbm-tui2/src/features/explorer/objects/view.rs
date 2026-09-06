@@ -6,11 +6,13 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
+use crate::common::layout::pane_scrollbar::{
+    ActiveScrollbar, PaneScrollLayout, RowHeights, pane_anchor, pane_scroll_layout,
+};
 use crate::common::layout::text::footer_height;
 use crate::common::view::hints::{draw_pane_footer, objects_pane_footer_text};
 use crate::common::view::pane_scrollbar::{
-    ActiveScrollbar, PaneScrollLayout, RowHeights, draw_horizontal_pane_scrollbar,
-    draw_vertical_pane_scrollbar, pane_anchor, pane_scroll_layout,
+    draw_horizontal_pane_scrollbar, draw_vertical_pane_scrollbar,
 };
 use crate::common::view::theme::Theme;
 
@@ -110,7 +112,7 @@ pub fn compute_objects_viewport(area: Rect, state: &ObjectsState) -> Option<Obje
     })
 }
 
-use crate::common::view::pane_scrollbar::ScrollbarHitInfo;
+use crate::common::layout::pane_scrollbar::ScrollbarHitInfo;
 
 /// Hit-test the objects pane's vertical scrollbar — delegates to shared helper.
 pub fn v_scrollbar_hit(
@@ -120,7 +122,7 @@ pub fn v_scrollbar_hit(
     y: u16,
 ) -> Option<ScrollbarHitInfo> {
     let ov = compute_objects_viewport(area, state)?;
-    crate::common::view::pane_scrollbar::v_scrollbar_hit(&ov.layout, ov.max_scroll, x, y)
+    crate::common::layout::pane_scrollbar::v_scrollbar_hit(&ov.layout, ov.max_scroll, x, y)
 }
 
 /// Hit-test the objects pane's horizontal scrollbar — delegates to shared helper.
@@ -131,7 +133,7 @@ pub fn h_scrollbar_hit(
     y: u16,
 ) -> Option<ScrollbarHitInfo> {
     let ov = compute_objects_viewport(area, state)?;
-    crate::common::view::pane_scrollbar::h_scrollbar_hit(&ov.layout, ov.max_h_scroll, x, y)
+    crate::common::layout::pane_scrollbar::h_scrollbar_hit(&ov.layout, ov.max_h_scroll, x, y)
 }
 
 /// Hit-test a click inside the objects tree area to a visible row (absolute,

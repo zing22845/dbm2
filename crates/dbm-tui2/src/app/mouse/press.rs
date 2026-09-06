@@ -18,7 +18,7 @@ use crate::app::msg::AppMsg;
 use crate::app::state::AppState;
 use crate::app_shell::effect::EffectRunner;
 use crate::app_shell::pane::Pane;
-use crate::common::view::pane_scrollbar::{ActiveScrollbar, ScrollbarDrag};
+use crate::common::layout::pane_scrollbar::{ActiveScrollbar, ScrollbarDrag};
 use crate::features::global_footer::layout as footer_layout;
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 
@@ -716,7 +716,7 @@ fn press_discover(
                 viewport_len: si.track_len,
                 max_scroll: si.max_scroll,
             });
-            let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let new_scroll = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 mouse.row,
                 si.track_start,
                 si.track_len,
@@ -808,7 +808,7 @@ fn press_discover(
                 viewport_len: si.track_len,
                 max_scroll: si.max_scroll,
             });
-            let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let new_scroll = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 mouse.row,
                 si.track_start,
                 si.track_len,
@@ -885,7 +885,7 @@ fn press_explorer_scrollbars(
                 viewport_len: si.track_len,
                 max_scroll: si.max_scroll,
             });
-            let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let new_scroll = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 mouse.row,
                 si.track_start,
                 si.track_len,
@@ -924,7 +924,7 @@ fn press_explorer_scrollbars(
                 viewport_len: si.track_len,
                 max_scroll: si.max_scroll,
             });
-            let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let new_scroll = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 mouse.row,
                 si.track_start,
                 si.track_len,
@@ -958,7 +958,7 @@ fn press_explorer_scrollbars(
                 viewport_len: si.track_len,
                 max_scroll: si.max_scroll,
             });
-            let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let new_scroll = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 mouse.column,
                 si.track_start,
                 si.track_len,
@@ -995,7 +995,7 @@ fn press_explorer_scrollbars(
                 viewport_len: si.track_len,
                 max_scroll: si.max_scroll,
             });
-            let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let new_scroll = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 mouse.column,
                 si.track_start,
                 si.track_len,
@@ -1044,7 +1044,7 @@ fn press_iw(
                 viewport_len: si.track_len,
                 max_scroll: si.max_scroll,
             });
-            let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let new_scroll = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 mouse.row,
                 si.track_start,
                 si.track_len,
@@ -1134,7 +1134,7 @@ fn press_iw(
                 viewport_len: si.track_len,
                 max_scroll: si.max_scroll,
             });
-            let new_scroll = crate::common::view::pane_scrollbar::scroll_offset_from_track(
+            let new_scroll = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
                 mouse.row,
                 si.track_start,
                 si.track_len,

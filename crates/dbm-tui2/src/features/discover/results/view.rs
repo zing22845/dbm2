@@ -6,10 +6,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::common::view::pane_scrollbar::{
-    ActiveScrollbar, PaneScrollLayout, RowHeights, draw_vertical_pane_scrollbar, pane_anchor,
-    pane_scroll_layout,
+use crate::common::layout::pane_scrollbar::{
+    ActiveScrollbar, PaneScrollLayout, RowHeights, pane_anchor, pane_scroll_layout,
 };
+use crate::common::view::pane_scrollbar::draw_vertical_pane_scrollbar;
 use crate::common::view::theme::Theme;
 
 use super::state::ResultsState;
@@ -102,7 +102,7 @@ pub fn compute_results_viewport(
     })
 }
 
-use crate::common::view::pane_scrollbar::ScrollbarHitInfo;
+use crate::common::layout::pane_scrollbar::ScrollbarHitInfo;
 
 /// Hit-test the discover results pane's vertical scrollbar — delegates to shared helper.
 pub fn v_scrollbar_hit(
@@ -112,7 +112,7 @@ pub fn v_scrollbar_hit(
     y: u16,
 ) -> Option<ScrollbarHitInfo> {
     let rv = compute_results_viewport(area, state)?;
-    crate::common::view::pane_scrollbar::v_scrollbar_hit(&rv.layout, rv.max_scroll, x, y)
+    crate::common::layout::pane_scrollbar::v_scrollbar_hit(&rv.layout, rv.max_scroll, x, y)
 }
 
 /// Hit-test the discover results list content area. Returns the row index in

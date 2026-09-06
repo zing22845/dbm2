@@ -6,11 +6,11 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::common::utils::text_width::wrapped_line_count;
-use crate::common::view::pane_scrollbar::{
-    ActiveScrollbar, PaneScrollLayout, RowHeights, draw_vertical_pane_scrollbar, pane_anchor,
-    pane_scroll_layout,
+use crate::common::layout::pane_scrollbar::{
+    ActiveScrollbar, PaneScrollLayout, RowHeights, pane_anchor, pane_scroll_layout,
 };
+use crate::common::utils::text_width::wrapped_line_count;
+use crate::common::view::pane_scrollbar::draw_vertical_pane_scrollbar;
 use crate::common::view::theme::Theme;
 use dbm_store::ManagedInstance;
 
@@ -163,7 +163,7 @@ pub fn compute_overview_viewport(
     })
 }
 
-use crate::common::view::pane_scrollbar::ScrollbarHitInfo;
+use crate::common::layout::pane_scrollbar::ScrollbarHitInfo;
 
 /// Hit-test the overview pane's vertical scrollbar — delegates to shared helper.
 /// Takes `conn_count` because `compute_overview_viewport` needs it to build rows.
@@ -175,7 +175,7 @@ pub fn v_scrollbar_hit(
     y: u16,
 ) -> Option<ScrollbarHitInfo> {
     let ov = compute_overview_viewport(area, state, conn_count)?;
-    crate::common::view::pane_scrollbar::v_scrollbar_hit(&ov.layout, ov.max_scroll, x, y)
+    crate::common::layout::pane_scrollbar::v_scrollbar_hit(&ov.layout, ov.max_scroll, x, y)
 }
 
 /// Map a click Y coordinate (in the overview pane's `area`) to a data row index.

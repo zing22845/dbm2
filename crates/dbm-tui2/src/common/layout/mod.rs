@@ -7,5 +7,6 @@
 
 pub mod hints;
 pub mod modal;
+pub mod pane_scrollbar;
 pub mod splitter;
 pub mod text;

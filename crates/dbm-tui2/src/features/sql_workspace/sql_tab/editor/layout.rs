@@ -2,9 +2,9 @@
 //! body area and its scrollbar.
 
 use crate::common::editor;
+use crate::common::layout::pane_scrollbar::pane_scroll_layout;
 use crate::common::layout::text::footer_height;
 use crate::common::view::hints::sql_pane_footer_text;
-use crate::common::view::pane_scrollbar::pane_scroll_layout;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Block, Borders};
 

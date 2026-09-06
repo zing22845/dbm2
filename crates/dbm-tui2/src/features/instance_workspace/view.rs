@@ -12,9 +12,9 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
+use crate::common::layout::pane_scrollbar::ActiveScrollbar;
 use crate::common::utils::text_width::wrapped_line_count;
 use crate::common::view::hints::{draw_pane_footer, instance_workspace_footer_text};
-use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 
 use super::connections::view as connections_view;

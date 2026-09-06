@@ -6,10 +6,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Row, Table};
 
-use crate::common::view::pane_scrollbar::{
-    ActiveScrollbar, PaneScrollLayout, RowHeights, draw_vertical_pane_scrollbar, pane_anchor,
-    pane_scroll_layout,
+use crate::common::layout::pane_scrollbar::{
+    ActiveScrollbar, PaneScrollLayout, RowHeights, pane_anchor, pane_scroll_layout,
 };
+use crate::common::view::pane_scrollbar::draw_vertical_pane_scrollbar;
 use crate::common::view::theme::Theme;
 
 use super::state::{ConnectionsState, FormField};
@@ -89,7 +89,7 @@ pub fn compute_connections_viewport(
     })
 }
 
-use crate::common::view::pane_scrollbar::ScrollbarHitInfo;
+use crate::common::layout::pane_scrollbar::ScrollbarHitInfo;
 
 /// Hit-test the connections pane's vertical scrollbar — delegates to shared helper.
 pub fn v_scrollbar_hit(
@@ -99,7 +99,7 @@ pub fn v_scrollbar_hit(
     y: u16,
 ) -> Option<ScrollbarHitInfo> {
     let cv = compute_connections_viewport(area, state)?;
-    crate::common::view::pane_scrollbar::v_scrollbar_hit(&cv.layout, cv.max_scroll, x, y)
+    crate::common::layout::pane_scrollbar::v_scrollbar_hit(&cv.layout, cv.max_scroll, x, y)
 }
 
 /// Map a click Y coordinate (in the connections pane's `area`) to a data row

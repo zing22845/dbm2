@@ -5,10 +5,10 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders};
 
-use crate::common::view::pane_scrollbar::{
-    ActiveScrollbar, PaneScrollLayout, RowHeights, draw_vertical_pane_scrollbar, pane_anchor,
-    pane_scroll_layout,
+use crate::common::layout::pane_scrollbar::{
+    ActiveScrollbar, PaneScrollLayout, RowHeights, pane_anchor, pane_scroll_layout,
 };
+use crate::common::view::pane_scrollbar::draw_vertical_pane_scrollbar;
 use crate::common::view::theme::Theme;
 
 use super::state::{TargetCol, TargetsState};
@@ -116,7 +116,7 @@ pub fn compute_targets_viewport(area: Rect, state: &TargetsState) -> Option<Targ
     })
 }
 
-use crate::common::view::pane_scrollbar::ScrollbarHitInfo;
+use crate::common::layout::pane_scrollbar::ScrollbarHitInfo;
 
 /// Hit-test the targets pane's vertical scrollbar — delegates to shared helper.
 pub fn v_scrollbar_hit(
@@ -126,7 +126,7 @@ pub fn v_scrollbar_hit(
     y: u16,
 ) -> Option<ScrollbarHitInfo> {
     let tv = compute_targets_viewport(area, state)?;
-    crate::common::view::pane_scrollbar::v_scrollbar_hit(&tv.layout, tv.max_scroll, x, y)
+    crate::common::layout::pane_scrollbar::v_scrollbar_hit(&tv.layout, tv.max_scroll, x, y)
 }
 
 /// The target list's table column layout. Used both by the `Table` render and
@@ -434,7 +434,7 @@ mod tests {
             inner.width,
             inner.height.saturating_sub(footer_h),
         );
-        let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        let layout = crate::common::layout::pane_scrollbar::pane_scroll_layout(
             body,
             body.width,
             state.targets.len(),
@@ -485,7 +485,7 @@ mod tests {
             inner.width,
             inner.height.saturating_sub(footer_h),
         );
-        let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        let layout = crate::common::layout::pane_scrollbar::pane_scroll_layout(
             body,
             body.width,
             state.targets.len(),
@@ -533,7 +533,7 @@ mod tests {
             inner.width,
             inner.height.saturating_sub(footer_h),
         );
-        let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        let layout = crate::common::layout::pane_scrollbar::pane_scroll_layout(
             body,
             body.width,
             state.targets.len(),
@@ -562,7 +562,7 @@ mod tests {
         let area = Rect::new(0, 0, 40, 20);
         let block = Block::default().borders(Borders::ALL);
         let inner = block.inner(area);
-        let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        let layout = crate::common::layout::pane_scrollbar::pane_scroll_layout(
             inner,
             inner.width,
             state.targets.len(),
@@ -597,7 +597,7 @@ mod tests {
             inner.width,
             inner.height.saturating_sub(footer_h),
         );
-        let layout = crate::common::view::pane_scrollbar::pane_scroll_layout(
+        let layout = crate::common::layout::pane_scrollbar::pane_scroll_layout(
             body,
             body.width,
             state.targets.len(),
