@@ -332,7 +332,7 @@ pub(super) fn reconcile_splitter_bounds(state: &mut AppState) {
         .map(|ws| {
             let inner_w = ws.width.saturating_sub(2);
             let ws_footer_h = crate::common::layout::text::footer_height(
-                &crate::common::view::hints::sql_workspace_footer_text(),
+                &crate::common::layout::hints::sql_workspace_footer_text(),
                 inner_w.max(1),
             );
             ws.height

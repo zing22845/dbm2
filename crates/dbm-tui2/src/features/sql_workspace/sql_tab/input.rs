@@ -499,7 +499,7 @@ fn history_row_hit(
     let inner = block.inner(history_zone);
 
     // Compute the list footer height.
-    let list_footer = crate::common::view::hints::history_list_footer_text(
+    let list_footer = crate::common::layout::hints::history_list_footer_text(
         tab.history.list.search.text_input_active(),
         tab.history.list.search.has_filter(),
         true,
@@ -576,7 +576,7 @@ fn history_h_scrollbar_hit(
     let block = ratatui::widgets::Block::default().borders(ratatui::widgets::Borders::ALL);
     let inner = block.inner(history_zone);
 
-    let list_footer = crate::common::view::hints::history_list_footer_text(
+    let list_footer = crate::common::layout::hints::history_list_footer_text(
         tab.history.list.search.text_input_active(),
         tab.history.list.search.has_filter(),
         true,
@@ -704,7 +704,7 @@ fn history_v_scrollbar_hit(
     let block = ratatui::widgets::Block::default().borders(ratatui::widgets::Borders::ALL);
     let inner = block.inner(history_zone);
 
-    let list_footer = crate::common::view::hints::history_list_footer_text(
+    let list_footer = crate::common::layout::hints::history_list_footer_text(
         tab.history.list.search.text_input_active(),
         tab.history.list.search.has_filter(),
         true,

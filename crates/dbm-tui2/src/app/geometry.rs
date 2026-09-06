@@ -82,7 +82,7 @@ pub(crate) fn sql_tab_area_for_hit(
     );
     // Workspace-level tab footer at the bottom of the inner region.
     let footer_h = crate::common::layout::text::footer_height(
-        &crate::common::view::hints::sql_workspace_footer_text(),
+        &crate::common::layout::hints::sql_workspace_footer_text(),
         inner.width,
     );
     Some(Rect::new(
@@ -126,7 +126,7 @@ pub(crate) fn iw_body_area_for_hit(
     // Footer height matches instance_workspace/view.rs's wrapped-line-count
     // calculation for IW's pane footer + overview status (overview status only
     // when the active tab is Overview).
-    let mut footer_text = crate::common::view::hints::instance_workspace_footer_text(state.iw.pane);
+    let mut footer_text = crate::common::layout::hints::instance_workspace_footer_text(state.iw.pane);
     if matches!(state.iw.pane, crate::app_shell::nav::IwPane::Overview)
         && let Some(status) = state.iw.overview.status.as_deref()
         && !status.is_empty()
@@ -185,7 +185,7 @@ pub(crate) fn sql_picker_area_for_hit(
         workspace.height.saturating_sub(2),
     );
     let footer_h = crate::common::layout::text::footer_height(
-        &crate::common::view::hints::sql_workspace_footer_text(),
+        &crate::common::layout::hints::sql_workspace_footer_text(),
         inner.width,
     );
     let sql_tab_area = Rect::new(
