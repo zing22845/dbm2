@@ -47,7 +47,7 @@ pub fn render(
     // The body is a horizontal split: Explorer (left) + a resizable vertical
     // splitter + the workspace region (right). The splitter width is owned by
     // the app-level `splitter` feature.
-    let body = crate::features::app_splitter::view::app_body_layout(
+    let body = crate::features::app_splitter::layout::app_body_layout(
         chunks[1],
         state.splitter.explorer_pane_width,
     );

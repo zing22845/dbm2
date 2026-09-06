@@ -364,7 +364,7 @@ pub(super) fn reconcile_splitter_bounds(state: &mut AppState) {
             explorer.width.saturating_sub(2),
             explorer.height.saturating_sub(2),
         );
-        let layout = crate::features::explorer::splitter::view::explorer_body_layout(
+        let layout = crate::features::explorer::splitter::layout::explorer_body_layout(
             inner,
             state.explorer.splitter.instances_height,
         );
@@ -375,8 +375,8 @@ pub(super) fn reconcile_splitter_bounds(state: &mut AppState) {
     if let Some(ws) = workspace {
         let discover_popup = crate::common::layout::modal::popup_rect(ws, 75, 75);
         let body =
-            crate::features::discover::view::discover_body_area(discover_popup, &state.discover);
-        let layout = crate::features::discover::splitter::view::discover_body_layout(
+            crate::features::discover::layout::discover_body_area(discover_popup, &state.discover);
+        let layout = crate::features::discover::splitter::layout::discover_body_layout(
             body,
             state.discover.splitter.targets_height,
         );

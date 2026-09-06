@@ -68,7 +68,7 @@ pub(crate) fn handle_drag(
         // rendered split exactly.
         if let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state) {
             let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75);
-            let body = crate::features::discover::view::discover_body_area(
+            let body = crate::features::discover::layout::discover_body_area(
                 discover_popup,
                 &state.discover,
             );

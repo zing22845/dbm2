@@ -6,5 +6,6 @@
 //! and the workspace. There is no common feature parent, so it is an app-level
 //! feature itself, owning `explorer_pane_width` (the left side).
 
+pub mod layout;
 pub mod state;
 pub mod view;

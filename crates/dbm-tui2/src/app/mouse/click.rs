@@ -30,7 +30,7 @@ pub(crate) fn explorer_child_areas(
         explorer.height.saturating_sub(2),
     );
     let panes =
-        crate::features::explorer::splitter::view::explorer_body_layout(inner, instances_height);
+        crate::features::explorer::splitter::layout::explorer_body_layout(inner, instances_height);
     (panes.instances, panes.objects)
 }
 
@@ -240,7 +240,7 @@ pub(crate) fn discover_subpane_for_click(
     if col < popup.x || col >= popup.right() {
         return None;
     }
-    let body = crate::features::discover::view::discover_body_area(popup, state);
+    let body = crate::features::discover::layout::discover_body_area(popup, state);
     // The engine selector occupies the rows between the popup top and the body.
     if row >= popup.y && row < body.y {
         return Some(DiscoverPane::Engine);
@@ -251,7 +251,7 @@ pub(crate) fn discover_subpane_for_click(
     // Split the body at the same boundary the splitter renders at (the current
     // targets height, clamped to the live track), so clicking agrees with the
     // rendered splitter.
-    let layout = crate::features::discover::splitter::view::discover_body_layout(
+    let layout = crate::features::discover::splitter::layout::discover_body_layout(
         body,
         state.splitter.targets_height,
     );

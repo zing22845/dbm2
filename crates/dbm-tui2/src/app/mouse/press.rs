@@ -177,9 +177,9 @@ pub(crate) fn handle_down(
         && let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
         && let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75)
         && let body =
-            crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
+            crate::features::discover::layout::discover_body_area(discover_popup, &state.discover)
         && body.height >= 3
-        && let layout = crate::features::discover::splitter::view::discover_body_layout(
+        && let layout = crate::features::discover::splitter::layout::discover_body_layout(
             body,
             state.discover.splitter.targets_height,
         )
@@ -240,7 +240,7 @@ pub(crate) fn handle_down(
                 explorer.width.saturating_sub(2),
                 explorer.height.saturating_sub(2),
             );
-            let layout = crate::features::explorer::splitter::view::explorer_body_layout(
+            let layout = crate::features::explorer::splitter::layout::explorer_body_layout(
                 inner,
                 state.explorer.splitter.instances_height,
             );
@@ -689,9 +689,9 @@ fn press_discover(
         && let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
         && let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75)
         && let body =
-            crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
+            crate::features::discover::layout::discover_body_area(discover_popup, &state.discover)
         && !body.is_empty()
-        && let layout = crate::features::discover::splitter::view::discover_body_layout(
+        && let layout = crate::features::discover::splitter::layout::discover_body_layout(
             body,
             state.discover.splitter.targets_height,
         )
@@ -782,9 +782,9 @@ fn press_discover(
         && let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
         && let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75)
         && let body =
-            crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
+            crate::features::discover::layout::discover_body_area(discover_popup, &state.discover)
         && !body.is_empty()
-        && let layout = crate::features::discover::splitter::view::discover_body_layout(
+        && let layout = crate::features::discover::splitter::layout::discover_body_layout(
             body,
             state.discover.splitter.targets_height,
         )

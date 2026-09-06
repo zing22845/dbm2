@@ -82,9 +82,9 @@ pub(crate) fn handle_wheel_discover_targets(
     if let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
         && let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75)
         && let body =
-            crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
+            crate::features::discover::layout::discover_body_area(discover_popup, &state.discover)
         && !body.is_empty()
-        && let layout = crate::features::discover::splitter::view::discover_body_layout(
+        && let layout = crate::features::discover::splitter::layout::discover_body_layout(
             body,
             state.discover.splitter.targets_height,
         )
@@ -153,9 +153,9 @@ pub(crate) fn handle_wheel_discover_results(
     if let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
         && let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75)
         && let body =
-            crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
+            crate::features::discover::layout::discover_body_area(discover_popup, &state.discover)
         && !body.is_empty()
-        && let layout = crate::features::discover::splitter::view::discover_body_layout(
+        && let layout = crate::features::discover::splitter::layout::discover_body_layout(
             body,
             state.discover.splitter.targets_height,
         )

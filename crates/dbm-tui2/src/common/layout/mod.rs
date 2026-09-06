@@ -5,6 +5,7 @@
 //! layout, never the other way round, so update / input / state never have to
 //! reach into the rendering layer to compute a rect or a delta.
 
+pub mod hints;
 pub mod modal;
 pub mod splitter;
 pub mod text;

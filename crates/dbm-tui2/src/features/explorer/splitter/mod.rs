@@ -3,5 +3,6 @@
 //! rows); the percentage is only materialized for session persistence /
 //! resizes.
 
+pub mod layout;
 pub mod state;
 pub mod view;

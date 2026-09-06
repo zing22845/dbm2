@@ -69,7 +69,7 @@ pub(crate) fn resolve_splitter_drag(
     // feature.
     {
         let body_area = Rect::new(0, body_top, size.width, body_h);
-        let layout = crate::features::app_splitter::view::app_body_layout(
+        let layout = crate::features::app_splitter::layout::app_body_layout(
             body_area,
             state.splitter.explorer_pane_width,
         );
@@ -90,7 +90,7 @@ pub(crate) fn resolve_splitter_drag(
             explorer.width.saturating_sub(2),
             explorer.height.saturating_sub(2),
         );
-        let layout = crate::features::explorer::splitter::view::explorer_body_layout(
+        let layout = crate::features::explorer::splitter::layout::explorer_body_layout(
             inner,
             state.explorer.splitter.instances_height,
         );
@@ -147,7 +147,7 @@ mod tests {
             explorer.width.saturating_sub(2),
             explorer.height.saturating_sub(2),
         );
-        crate::features::explorer::splitter::view::explorer_body_layout(
+        crate::features::explorer::splitter::layout::explorer_body_layout(
             inner,
             state.explorer.splitter.instances_height,
         )
@@ -170,7 +170,7 @@ mod tests {
         state.focus = Pane::Explorer(ExplorerPane::Instances);
         let size = ratatui::layout::Size::new(120, 40);
         let (body_top, body_h) = test_body(&state, size);
-        let layout = crate::features::app_splitter::view::app_body_layout(
+        let layout = crate::features::app_splitter::layout::app_body_layout(
             Rect::new(0, body_top, size.width, body_h),
             state.splitter.explorer_pane_width,
         );
@@ -205,7 +205,7 @@ mod tests {
         state.focus = Pane::Explorer(ExplorerPane::Instances);
         let size = ratatui::layout::Size::new(120, 40);
         let (body_top, body_h) = test_body(&state, size);
-        let layout = crate::features::app_splitter::view::app_body_layout(
+        let layout = crate::features::app_splitter::layout::app_body_layout(
             Rect::new(0, body_top, size.width, body_h),
             state.splitter.explorer_pane_width,
         );

@@ -6,6 +6,7 @@
 pub mod effect;
 pub mod engine;
 pub mod intent;
+pub mod layout;
 pub mod msg;
 pub mod results;
 pub mod splitter;

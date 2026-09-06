@@ -56,7 +56,8 @@ pub fn render(
     // Instances (top) and objects (bottom) stacked vertically, split by a
     // 1-row draggable splitter, mirroring the original dbm explorer layout.
     // The splitter width is owned by the explorer `splitter` child feature.
-    let panes = super::splitter::view::explorer_body_layout(inner, state.splitter.instances_height);
+    let panes =
+        super::splitter::layout::explorer_body_layout(inner, state.splitter.instances_height);
 
     let instances_focused = focused && state.pane == ExplorerPane::Instances;
     let objects_focused = focused && state.pane == ExplorerPane::Objects;

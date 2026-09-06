@@ -19,9 +19,9 @@ pub(crate) fn app_body_geometry(
     body_top: u16,
     body_h: u16,
     state: &AppState,
-) -> Option<crate::features::app_splitter::view::AppBodyLayout> {
+) -> Option<crate::features::app_splitter::layout::AppBodyLayout> {
     let body_area = Rect::new(0, body_top, size.width, body_h);
-    let layout = crate::features::app_splitter::view::app_body_layout(
+    let layout = crate::features::app_splitter::layout::app_body_layout(
         body_area,
         state.splitter.explorer_pane_width,
     );
