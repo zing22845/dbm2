@@ -143,16 +143,17 @@ pub fn render(
             .map(|r| r.total_rows)
             .unwrap_or_default();
         let row_count = state.list.row_count();
+        let (counting, show_count) = state.list.toolbar_count_flags();
         let bar = layout_pagination_bar(
-            pag_area, row_limit, page, total_rows, row_count, false, false,
+            pag_area, row_limit, page, total_rows, row_count, counting, show_count,
         );
         let toolbar = pagination_toolbar_line(
             row_limit,
             page,
             total_rows,
             row_count,
-            false,
-            false,
+            counting,
+            show_count,
             Style::default().fg(p.accent),
             Style::default().fg(p.muted),
         );

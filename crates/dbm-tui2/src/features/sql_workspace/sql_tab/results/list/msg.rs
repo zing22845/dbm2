@@ -56,6 +56,12 @@ pub enum ListMessage {
     /// A `<` / `>` page key press: pages once and arms the double-press chord
     /// (`<<` / `>>` jump to first / last), mirroring the original dbm.
     PageChord { forward: bool },
+    /// Count the total rows of the last query (COUNT over the query, requested
+    /// from the `[c]count total rows` toolbar control / `c` key).
+    CountRows,
+    /// A COUNT total arrived (`sql` guards against applying a stale result
+    /// after the query changed).
+    CountReady { sql: String, total: Option<u64> },
     /// Run a SQL query.
     RunQuery {
         instance: String,

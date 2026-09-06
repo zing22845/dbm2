@@ -381,6 +381,7 @@ fn results_action_to_msg(
             // text in the results pane (stored as `query_error`).
             M::QueryError { message }
         }
+        RA::CountReady { sql, total } => M::CountReady { sql, total },
         RA::CommitResult { ok, message } => {
             tracing::info!("commit ok={ok}: {message}");
             M::ResetSelection

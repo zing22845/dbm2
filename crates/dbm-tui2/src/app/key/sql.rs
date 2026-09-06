@@ -462,6 +462,16 @@ fn results_key(
                 tab_id,
             ))
         }
+        // Count total rows (`c`, matching the `[c]count total rows` toolbar
+        // control and the original dbm binding). Only offered while the last
+        // query is count-able and its total is still unknown.
+        KeyCode::Char('c')
+            if key.modifiers.is_empty()
+                && results.list.can_count_rows()
+                && !results.list.counting =>
+        {
+            Some(sql_results(SqlResultsMessage::CountRows, tab_id))
+        }
         // Rows-per-page picker modal (`r`, matching the `[r]rows` toolbar
         // label and the original dbm binding).
         KeyCode::Char('r') if key.modifiers.is_empty() => {
@@ -1410,6 +1420,43 @@ mod tests {
         assert!(
             matches!(msg, AppMsg::OpenModal(ModalKind::ResultsPageInput { .. })),
             "p must open the page input, got {msg:?}"
+        );
+    }
+
+    #[test]
+    fn results_key_c_counts_only_when_count_allowed() {
+        let mut state = app_state_with_tab();
+        {
+            let tab = &mut state.sql.sql_tab.tabs[0];
+            tab.results.list.paginated = true;
+            tab.results.list.last_sql = "SELECT * FROM t".into();
+            tab.results.list.result = Some(
+                crate::features::sql_workspace::sql_tab::results::state::QueryResultData {
+                    columns: Vec::new(),
+                    rows: vec![Vec::new(); 100],
+                    rows_affected: None,
+                    total_rows: None,
+                },
+            );
+        }
+        // Count-able query with no total yet: `c` requests the count.
+        let results = &state.sql.sql_tab.tabs[0].results;
+        let msg = results_key(key(KeyCode::Char('c'), KeyModifiers::NONE), 0, results)
+            .expect("c should request the total-row count");
+        assert!(matches!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                msg: SqlResultsMsg::Message(SqlResultsMessage::CountRows),
+                ..
+            }
+        ));
+
+        // While a count is already running `c` is a no-op.
+        let state = app_state_with_tab();
+        let results = &state.sql.sql_tab.tabs[0].results;
+        assert!(
+            results_key(key(KeyCode::Char('c'), KeyModifiers::NONE), 0, results).is_none(),
+            "c without a count-able result must be a no-op"
         );
     }
 

@@ -27,6 +27,10 @@ pub enum ResultsAction {
     },
     /// A query failed.
     QueryError { message: String },
+    /// A COUNT total-rows request finished (`sql` guards against applying a
+    /// stale total after the query changed; `None` when the query is not
+    /// count-able or the count failed).
+    CountReady { sql: String, total: Option<u64> },
     /// The edit batch commit outcome.
     CommitResult { ok: bool, message: String },
     /// The editability of the result was resolved.
@@ -85,6 +89,14 @@ pub enum ResultsEffect {
         schema: String,
         sql: String,
         result_columns: Vec<String>,
+    },
+    /// Count the total rows of `sql` (COUNT over the query) and feed it back.
+    CountRows {
+        instance: String,
+        connection: String,
+        database: Option<String>,
+        schema: String,
+        sql: String,
     },
     Detail(DetailEffect),
     List(ListEffect),
@@ -256,6 +268,20 @@ impl Effect for ResultsEffect {
                         }),
                         blocked: None,
                     }]
+                }
+                ResultsEffect::CountRows {
+                    instance,
+                    connection,
+                    database,
+                    schema,
+                    sql,
+                } => {
+                    let total = services
+                        .count_rows(&instance, &connection, database.as_deref(), &schema, &sql)
+                        .await
+                        .ok()
+                        .flatten();
+                    vec![ResultsAction::CountReady { sql, total }]
                 }
                 ResultsEffect::Detail(_) => Vec::new(),
                 ResultsEffect::List(_) => Vec::new(),

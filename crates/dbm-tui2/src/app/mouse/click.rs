@@ -601,7 +601,15 @@ pub(crate) fn sql_click_msgs(
                     }));
                     None
                 }
-                ResultsPaginationHit::CountTotalRows => None,
+                ResultsPaginationHit::CountTotalRows => {
+                    msgs.push(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                        SqlTabMsg::Message(SqlTabMessage::Results {
+                            tab_id,
+                            msg: ResultsMsg::Message(ResultsMessage::CountRows),
+                        }),
+                    ))));
+                    None
+                }
             };
             if let Some(action) = page_action {
                 msgs.push(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(

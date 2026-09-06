@@ -303,16 +303,16 @@ pub(crate) fn results_picker_anchor(
         .pagination
         .filter(|_| list.row_count() > 0)
         .and_then(|pag| {
-            let total = list.result.as_ref().and_then(|r| r.total_rows);
+            let (counting, show_count) = list.toolbar_count_flags();
             let bar =
                 crate::features::sql_workspace::sql_tab::results::pagination::layout_pagination_bar(
                     pag,
                     list.row_limit,
                     list.page,
-                    total,
+                    list.total_rows(),
                     list.row_count(),
-                    false,
-                    false,
+                    counting,
+                    show_count,
                 );
             bar.hits
                 .into_iter()

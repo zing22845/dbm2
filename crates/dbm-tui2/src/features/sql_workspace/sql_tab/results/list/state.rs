@@ -9,7 +9,7 @@ use crate::common::view::format::init_results_layout;
 
 use super::super::edit::ResultsEditState;
 use super::super::edit_sql::EditTarget;
-use super::super::pagination::{DEFAULT_RESULTS_ROW_LIMIT, can_go_next};
+use super::super::pagination::{DEFAULT_RESULTS_ROW_LIMIT, ResultsPageAction, can_go_next};
 use super::super::state::QueryResultData;
 use super::search::ResultsSearchMatch;
 
@@ -51,6 +51,17 @@ pub struct ListState {
     /// a second press of the same key within the chord window upgrades to
     /// first / last page. Any non-chord message clears it.
     pub page_chord: Option<(bool, std::time::Instant)>,
+    /// A COUNT(*) total-rows request is in flight (`[c]counting…`).
+    pub counting: bool,
+    /// A page action queued until the in-flight count lands (the original dbm
+    /// counts first when a "last page" jump hits an unknown total).
+    pub pending_page_after_count: Option<ResultsPageAction>,
+    /// The known grand-total row count carried across paginated re-runs. Page
+    /// fetches themselves return no total (lazy count, like the original dbm);
+    /// once the user counts, this cache keeps the "page x/N" toolbar alive
+    /// while browsing further pages of the same query. Cleared when a new
+    /// query starts.
+    pub total_cache: Option<u64>,
     /// Horizontal scroll offset of the result table.
     /// Uses `Cell` for interior mutability: the view writes the computed
     /// anchored scroll back here so the next frame starts from the correct
@@ -148,9 +159,36 @@ impl ListState {
             self.page,
             self.row_limit,
             self.row_count(),
-            self.result.as_ref().and_then(|r| r.total_rows),
+            self.total_rows(),
             self.at_last_page,
         )
+    }
+
+    /// The total-row count stored on the current result, if known.
+    pub fn total_rows(&self) -> Option<u64> {
+        self.result.as_ref().and_then(|r| r.total_rows)
+    }
+
+    /// Whether the last query is a single count-able SELECT, so a COUNT total
+    /// can be requested for it (the driver also auto-counts each paginated
+    /// fetch; this covers result paths that did not carry a total).
+    pub fn can_count_rows(&self) -> bool {
+        self.paginated
+            && self.result.is_some()
+            && !self.last_sql.is_empty()
+            && dbm_driver_pg::count_select_sql(&self.last_sql).is_some()
+    }
+
+    /// Whether the pagination toolbar should offer its `[c]count total rows`
+    /// control: the query is count-able but its total is not known yet.
+    pub fn show_count_button(&self) -> bool {
+        self.can_count_rows() && self.total_rows().is_none()
+    }
+
+    /// The toolbar count flags (`counting`, `show_count_button`) shared by the
+    /// renderer and the toolbar hit-testing so geometry always matches.
+    pub fn toolbar_count_flags(&self) -> (bool, bool) {
+        (self.counting, self.show_count_button())
     }
 
     /// Whether a previous SQL page exists (the cursor is on a page > 1).

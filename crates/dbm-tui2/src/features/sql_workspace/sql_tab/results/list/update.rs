@@ -14,15 +14,42 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
     let mut effects = Vec::new();
     let dirty = match msg {
         ListMessage::SetResult { result, paginated } => {
+            let mut result = result;
             let row_count = result.rows.len();
+            // Lazy total, like the original dbm: paginated page fetches carry
+            // no grand total. When a non-empty page comes back short of the
+            // page size it is the last page, so the total is the rows seen so
+            // far (`offset + row_count`); a first page short page therefore
+            // reports its own row count. A previously counted total is
+            // re-applied so the "page x/N" toolbar survives further pages.
+            let inferred_total = if paginated && row_count > 0 && row_count < state.row_limit {
+                let offset = (state.page.saturating_sub(1) as u64) * state.row_limit as u64;
+                Some(offset + row_count as u64)
+            } else {
+                None
+            };
+            let effective_total = if paginated {
+                result.total_rows.or(state.total_cache).or(inferred_total)
+            } else {
+                None
+            };
+            if paginated {
+                state.total_cache = effective_total;
+            } else {
+                state.total_cache = None;
+            }
+            result.total_rows = effective_total;
             // A page-nav anchor decided where the cursor of the incoming page
             // lands (Prev/Last -> bottom). Consumed once per landed result.
             let anchor_bottom = state.page_anchor_bottom;
             state.page_anchor_bottom = false;
+            // A landed result supersedes any in-flight count / queued nav.
+            state.counting = false;
+            state.pending_page_after_count = None;
             // Derive whether this page is the last reachable one so page-nav
             // and the `at_last_page` guard stay consistent across runs.
             state.at_last_page = if paginated {
-                match result.total_rows {
+                match effective_total {
                     Some(total) => state.page >= page_count(total, state.row_limit).max(1),
                     None => row_count < state.row_limit || row_count == 0,
                 }
@@ -90,6 +117,9 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
             state.at_last_page = true;
             state.page_anchor_bottom = false;
             state.page_chord = None;
+            state.counting = false;
+            state.pending_page_after_count = None;
+            state.total_cache = None;
             state.row = 0;
             state.col = 0;
             state.search.reset();
@@ -109,6 +139,9 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
             state.at_last_page = true;
             state.page_anchor_bottom = false;
             state.page_chord = None;
+            state.counting = false;
+            state.pending_page_after_count = None;
+            state.total_cache = None;
             state.row = 0;
             state.col = 0;
             state.search.reset();
@@ -198,6 +231,13 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
             // page-nav (`PageNav`) sets the bottom anchor for its landing page.
             state.page_anchor_bottom = false;
             state.page_chord = None;
+            state.counting = false;
+            state.pending_page_after_count = None;
+            // A new (different) query must not inherit a previously counted
+            // grand total; re-running the identical statement may keep it.
+            if state.last_sql != sql {
+                state.total_cache = None;
+            }
             state.last_sql = sql.clone();
             state.last_instance = instance.clone();
             state.last_connection = connection.clone();
@@ -287,6 +327,46 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
                 None => false,
             }
         }
+        ListMessage::CountRows => {
+            // `c` / `[c]count total rows`: request COUNT over the last query
+            // while its total is still unknown.
+            if state.counting || !state.can_count_rows() {
+                false
+            } else {
+                state.counting = true;
+                state.pending_page_after_count = None;
+                push_count(&state, &mut effects);
+                true
+            }
+        }
+        ListMessage::CountReady { sql, total } => {
+            if state.last_sql != sql {
+                // A stale count (the query changed while it was in flight).
+                false
+            } else {
+                let mut changed = state.counting;
+                state.counting = false;
+                if let Some(total) = total {
+                    state.total_cache = Some(total);
+                    if let Some(result) = state.result.as_mut() {
+                        result.total_rows = Some(total);
+                    }
+                    changed = true;
+                }
+                // A page action queued behind the count (last page) resumes.
+                if let Some(action) = state.pending_page_after_count.take() {
+                    let nav = state.total_rows().is_some()
+                        && apply_page_action(&mut state, &mut effects, action);
+                    changed = changed || nav;
+                }
+                // Derive the page-end flag from the (possibly moved) current
+                // page and the freshly landed total.
+                if let Some(total) = state.total_rows() {
+                    state.at_last_page = state.page >= page_count(total, state.row_limit).max(1);
+                }
+                changed
+            }
+        }
         ListMessage::Commit => {
             if let Ok(statements) = state.build_commit_statements() {
                 effects.push(ResultsEffect::Commit {
@@ -368,10 +448,30 @@ fn max_h_scroll(state: &ListState) -> usize {
     table_w.saturating_sub(vp)
 }
 
+/// Push a COUNT-total effect for the last query (requires the connection
+/// context captured by the preceding run).
+fn push_count(state: &ListState, effects: &mut Vec<ResultsEffect>) {
+    if state.last_sql.is_empty()
+        || state.last_instance.is_empty()
+        || state.last_connection.is_empty()
+    {
+        return;
+    }
+    effects.push(ResultsEffect::CountRows {
+        instance: state.last_instance.clone(),
+        connection: state.last_connection.clone(),
+        database: state.last_database.clone(),
+        schema: state.last_schema.clone(),
+        sql: state.last_sql.clone(),
+    });
+}
+
 /// Apply a page action (First / Prev / Next / Last / Set): resolve the target
 /// page from the live total, guard the page edges, and re-run the query.
 /// Shared by the toolbar nav (`PageNav`) and the `<`/`>` chord (`PageChord`).
-/// Returns whether a re-run was scheduled.
+/// Returns whether a re-run was scheduled. When "last page" is requested with
+/// no total known yet but the query is count-able, a COUNT is dispatched first
+/// and the jump resumes when the total lands (mirroring the original dbm).
 fn apply_page_action(
     state: &mut ListState,
     effects: &mut Vec<ResultsEffect>,
@@ -390,10 +490,16 @@ fn apply_page_action(
                 (state.page + 1, false)
             }
         }
-        ResultsPageAction::Last => match state.result.as_ref().and_then(|r| r.total_rows) {
+        ResultsPageAction::Last => match state.total_rows() {
             Some(total) => (page_count(total, state.row_limit).max(1), true),
-            // Without a total the last page is unknown: only a forward probe
-            // could find it, so report no change.
+            None if state.can_count_rows() && !state.counting => {
+                // Unknown total: COUNT first, then resume the last-page jump
+                // from `CountReady`.
+                state.counting = true;
+                state.pending_page_after_count = Some(ResultsPageAction::Last);
+                push_count(state, effects);
+                return true;
+            }
             None => (state.page, false),
         },
         ResultsPageAction::Set(page) => (page, false),
@@ -815,16 +921,24 @@ mod tests {
             "Last lands on the final page's bottom"
         );
 
-        // Without a total the last page is unknowable: no change, no re-run.
+        // Without a total the last page is unknowable: a COUNT is dispatched
+        // first and the jump resumes when the total lands.
         let (s, effects, dirty) = update(
             ListMessage::PageNav {
                 action: super::super::super::pagination::ResultsPageAction::Last,
             },
             paginated_state(1, None, 100),
         );
-        assert!(!dirty);
-        assert_eq!(s.page, 1);
-        assert!(effects.is_empty());
+        assert!(dirty, "queuing the count must redraw the counting state");
+        assert_eq!(s.page, 1, "the page does not move until the total lands");
+        assert!(s.counting);
+        assert_eq!(s.pending_page_after_count, Some(ResultsPageAction::Last));
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, ResultsEffect::CountRows { .. })),
+            "an unknown-total last-page jump must dispatch a COUNT"
+        );
     }
 
     #[test]
@@ -859,6 +973,136 @@ mod tests {
         assert!(dirty);
         assert!(s.page_chord.is_none(), "PageNav must clear the chord");
         assert_eq!(s.page, 2);
+    }
+
+    #[test]
+    fn count_rows_dispatches_when_allowed_and_marks_counting() {
+        let (s, effects, dirty) = update(ListMessage::CountRows, paginated_state(1, None, 100));
+        assert!(dirty);
+        assert!(s.counting, "a dispatched count arms the counting flag");
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, ResultsEffect::CountRows { .. })),
+            "CountRows must push a COUNT effect"
+        );
+
+        // A second request while one is in flight is a no-op.
+        let (s, effects, dirty) = update(ListMessage::CountRows, s);
+        assert!(!dirty);
+        assert!(s.counting);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn count_ready_applies_total_and_resumes_queued_last_page() {
+        // An unknown-total "last page" jump queued a count and a pending nav.
+        let mut state = paginated_state(1, None, 100);
+        state.counting = true;
+        state.pending_page_after_count =
+            Some(super::super::super::pagination::ResultsPageAction::Last);
+        let (s, effects, dirty) = update(
+            ListMessage::CountReady {
+                sql: "SELECT * FROM t".into(),
+                total: Some(300),
+            },
+            state,
+        );
+        assert!(dirty);
+        assert!(!s.counting);
+        assert_eq!(s.total_rows(), Some(300));
+        assert_eq!(
+            rerun_page(&effects),
+            Some(3),
+            "the queued last-page jump runs once the total lands"
+        );
+        assert_eq!(s.page, 3);
+        assert!(s.at_last_page, "page 3 of 3 is the last page");
+        assert!(
+            s.pending_page_after_count.is_none(),
+            "the queued nav is consumed"
+        );
+    }
+
+    #[test]
+    fn stale_count_ready_is_ignored() {
+        let (s, effects, dirty) = update(
+            ListMessage::CountReady {
+                sql: "SELECT * FROM other".into(),
+                total: Some(9),
+            },
+            paginated_state(1, Some(300), 100),
+        );
+        assert!(!dirty);
+        assert!(effects.is_empty());
+        assert_eq!(s.total_rows(), Some(300));
+    }
+
+    #[test]
+    fn short_paginated_result_derives_total_from_row_count() {
+        // A page that came back short of the page size is the whole result, so
+        // its row count is already the total: no lazy `[c]count` affordance.
+        let (s, _e, _d) = update(
+            ListMessage::SetResult {
+                result: super::super::super::state::QueryResultData {
+                    columns: vec![crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo {
+                        name: "x".into(),
+                        type_name: "int4".into(),
+                        type_display: "int4".into(),
+                        comment: None,
+                    }],
+                    rows: vec![vec!["1".into()]; 25],
+                    rows_affected: None,
+                    total_rows: None,
+                },
+                paginated: true,
+            },
+            paginated_state(1, None, 100),
+        );
+        assert_eq!(
+            s.total_rows(),
+            Some(25),
+            "a short page reveals the whole set"
+        );
+        assert!(s.at_last_page);
+        assert!(
+            !s.show_count_button(),
+            "no count button when the total is known"
+        );
+        assert_eq!(s.total_cache, Some(25), "the derived total is cached");
+    }
+
+    #[test]
+    fn later_page_short_result_infers_total_with_offset() {
+        // Regression: a 999-row table on 500 rows/page shows page 2 with 499
+        // rows. The short final page must infer the grand total as
+        // `offset + row_count` (500 + 499), not the bare row count.
+        let mut state = paginated_state(2, None, 499);
+        state.row_limit = 500;
+        let (s, _e, _d) = update(
+            ListMessage::SetResult {
+                result: super::super::super::state::QueryResultData {
+                    columns: vec![crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo {
+                        name: "x".into(),
+                        type_name: "int4".into(),
+                        type_display: "int4".into(),
+                        comment: None,
+                    }],
+                    rows: vec![vec!["1".into()]; 499],
+                    rows_affected: None,
+                    total_rows: None,
+                },
+                paginated: true,
+            },
+            state,
+        );
+        assert_eq!(
+            s.total_rows(),
+            Some(999),
+            "offset must be added to the tail page"
+        );
+        assert!(s.at_last_page);
+        assert_eq!(s.total_cache, Some(999));
     }
 
     #[test]

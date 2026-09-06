@@ -428,15 +428,16 @@ fn results_pagination_hit_at(
     if list.row_count() == 0 {
         return None;
     }
-    let total_rows = list.result.as_ref().and_then(|r| r.total_rows);
+    let total_rows = list.total_rows();
+    let (counting, show_count) = list.toolbar_count_flags();
     let bar = crate::features::sql_workspace::sql_tab::results::pagination::layout_pagination_bar(
         pag_area,
         list.row_limit,
         list.page,
         total_rows,
         list.row_count(),
-        false,
-        false,
+        counting,
+        show_count,
     );
     for (hit, rect) in bar.hits {
         if contains(rect, x, y) {

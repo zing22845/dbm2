@@ -76,6 +76,10 @@ pub enum ResultsMessage {
     PageNav { action: ResultsPageAction },
     /// A `<` / `>` page key press (see [`ListMessage::PageChord`]).
     PageChord { forward: bool },
+    /// Count the total rows of the last query (see [`ListMessage::CountRows`]).
+    CountRows,
+    /// A COUNT total arrived (see [`ListMessage::CountReady`]).
+    CountReady { sql: String, total: Option<u64> },
     /// Commit the current edits.
     Commit,
     /// Toggle the detail sub-pane open/close (inspect mode).
@@ -173,6 +177,8 @@ impl ResultsMessage {
             ResultsMessage::SetPage { page } => ListMessage::SetPage { page },
             ResultsMessage::PageNav { action } => ListMessage::PageNav { action },
             ResultsMessage::PageChord { forward } => ListMessage::PageChord { forward },
+            ResultsMessage::CountRows => ListMessage::CountRows,
+            ResultsMessage::CountReady { sql, total } => ListMessage::CountReady { sql, total },
             ResultsMessage::Commit => ListMessage::Commit,
             ResultsMessage::SyncViewport { rows, width } => {
                 ListMessage::SyncViewport { rows, width }
