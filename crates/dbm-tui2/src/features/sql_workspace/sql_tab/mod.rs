@@ -4,6 +4,7 @@
 pub mod editor;
 pub mod effect;
 pub mod history;
+pub mod input;
 pub mod intent;
 pub mod layout;
 pub mod msg;

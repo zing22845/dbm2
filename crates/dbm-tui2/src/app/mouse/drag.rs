@@ -287,7 +287,7 @@ pub(crate) fn handle_drag(
         if let Some(tab_area) = sql_tab_area_for_hit(size, state)
             && let Some(active_tab) = state.sql.sql_tab.active_tab()
             && let Some(list_inner) =
-                crate::features::sql_workspace::sql_tab::view::results_list_rect(
+                crate::features::sql_workspace::sql_tab::input::results_list_rect(
                     active_tab, tab_area,
                 )
         {

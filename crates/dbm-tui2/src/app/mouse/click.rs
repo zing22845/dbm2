@@ -266,15 +266,15 @@ pub(crate) fn discover_subpane_for_click(
 /// picker row yields both a cursor jump and an apply, so a `Vec` is returned.
 pub(crate) fn sql_click_msgs(
     sql: &crate::features::sql_workspace::sql_tab::state::SqlTabState,
-    action: crate::features::sql_workspace::sql_tab::view::SqlClickAction,
+    action: crate::features::sql_workspace::sql_tab::input::SqlClickAction,
 ) -> Vec<AppMsg> {
     use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
     use crate::features::sql_workspace::sql_tab::editor::context_picker::msg::{
         ContextPickerMessage, ContextPickerMsg,
     };
     use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
+    use crate::features::sql_workspace::sql_tab::input::SqlClickAction;
     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
-    use crate::features::sql_workspace::sql_tab::view::SqlClickAction;
 
     let tab_id = |active: Option<usize>| active.and_then(|i| sql.tabs.get(i)).map(|t| t.session.id);
     let editor_msg = |tab_id: usize, m: EditorMessage| {

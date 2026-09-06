@@ -200,7 +200,7 @@ pub(crate) fn handle_down(
     {
         let msg = sql_click_msgs(
             &state.sql.sql_tab,
-            crate::features::sql_workspace::sql_tab::view::SqlClickAction::CloseContextPicker,
+            crate::features::sql_workspace::sql_tab::input::SqlClickAction::CloseContextPicker,
         );
         for m in msg {
             let result = process_message_round(effect_runner, action_rx, m, state);
@@ -540,7 +540,7 @@ fn press_sql(
     // original dbm.
     if matches!(target_pane, Some(Pane::SQLWorkspace))
         && let Some(tab_area) = sql_tab_area_for_hit(size, state)
-        && let Some(action) = crate::features::sql_workspace::sql_tab::view::sql_workspace_click(
+        && let Some(action) = crate::features::sql_workspace::sql_tab::input::sql_workspace_click(
             &state.sql.sql_tab,
             tab_area,
             mouse.column,
@@ -549,7 +549,7 @@ fn press_sql(
         )
     {
         // If the click was on the h_scrollbar, start dragging.
-        if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::HistoryHScrollbar {
+        if let crate::features::sql_workspace::sql_tab::input::SqlClickAction::HistoryHScrollbar {
             track_x,
             x: _,
             max_scroll,
@@ -564,7 +564,7 @@ fn press_sql(
             });
         }
         // If the click was on the v_scrollbar, start dragging.
-        if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::HistoryVScrollbar {
+        if let crate::features::sql_workspace::sql_tab::input::SqlClickAction::HistoryVScrollbar {
             track_y,
             y: _,
             max_scroll,
@@ -579,7 +579,7 @@ fn press_sql(
             });
         }
         // If the click was on the editor body's v_scrollbar, start dragging.
-        if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::EditorVScrollbar {
+        if let crate::features::sql_workspace::sql_tab::input::SqlClickAction::EditorVScrollbar {
             track_y,
             y: _,
             max_scroll,
@@ -594,7 +594,7 @@ fn press_sql(
             });
         }
         // If the click was on the results list h_scrollbar, start dragging.
-        if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::ResultsHScrollbar {
+        if let crate::features::sql_workspace::sql_tab::input::SqlClickAction::ResultsHScrollbar {
             track_x,
             x: _,
             max_scroll,
@@ -609,7 +609,7 @@ fn press_sql(
             });
         }
         // If the click was on the results list v_scrollbar, start dragging.
-        if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::ResultsVScrollbar {
+        if let crate::features::sql_workspace::sql_tab::input::SqlClickAction::ResultsVScrollbar {
             track_y,
             y: _,
             max_scroll,
@@ -625,7 +625,7 @@ fn press_sql(
         }
         // A single click on a results column header
         // splitter begins a column-width resize drag.
-        if let crate::features::sql_workspace::sql_tab::view::SqlClickAction::ResultsColResize {
+        if let crate::features::sql_workspace::sql_tab::input::SqlClickAction::ResultsColResize {
             col,
         } = action
         {

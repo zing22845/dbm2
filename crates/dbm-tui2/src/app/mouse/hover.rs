@@ -130,7 +130,7 @@ pub(crate) fn update_splitter_hover(
         && let Some(tab_area) = sql_tab_area_for_hit(size, state)
         && let Some(active_tab) = state.sql.sql_tab.active_tab()
         && let Some(list_inner) =
-            crate::features::sql_workspace::sql_tab::view::results_list_rect(active_tab, tab_area)
+            crate::features::sql_workspace::sql_tab::input::results_list_rect(active_tab, tab_area)
     {
         state.splitter_hover.results_col_resize_hover =
             crate::features::sql_workspace::sql_tab::results::list::view::col_resize_hit_at(
