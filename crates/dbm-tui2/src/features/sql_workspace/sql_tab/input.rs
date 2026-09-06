@@ -512,7 +512,7 @@ fn history_row_hit(
         history_zone.width
     };
     let footer_h =
-        crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
+        crate::common::layout::text::footer_height(&list_footer, list_w.saturating_sub(2))
             .min(inner.height.saturating_sub(3));
 
     crate::features::sql_workspace::sql_tab::history::list::view::row_hit_at(
@@ -589,7 +589,7 @@ fn history_h_scrollbar_hit(
         history_zone.width
     };
     let footer_h =
-        crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
+        crate::common::layout::text::footer_height(&list_footer, list_w.saturating_sub(2))
             .min(inner.height.saturating_sub(3));
 
     let list_area = crate::features::sql_workspace::sql_tab::history::list::view::compute_list_area(
@@ -716,7 +716,7 @@ fn history_v_scrollbar_hit(
         history_zone.width
     };
     let footer_h =
-        crate::common::view::hints::footer_height(&list_footer, list_w.saturating_sub(2))
+        crate::common::layout::text::footer_height(&list_footer, list_w.saturating_sub(2))
             .min(inner.height.saturating_sub(3));
 
     let list_area = crate::features::sql_workspace::sql_tab::history::list::view::compute_list_area(

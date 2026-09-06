@@ -353,12 +353,6 @@ pub fn pane_search_footer_if_active(search: &PaneSearch) -> Option<String> {
     }
 }
 
-/// Number of terminal rows a hint line occupies when wrapped to `cols` columns.
-/// CJK-aware, so wide footers reserve the right height instead of clipping.
-pub fn footer_height(text: &str, cols: u16) -> u16 {
-    crate::common::utils::text_width::wrapped_line_count(text, cols)
-}
-
 /// Draw a footer hint string into `area`, wrapping to the area width when it is
 /// too narrow. Pure `state -> view`: reads only the theme and text. Callers
 /// should size `area` with [`footer_height`] so wrapped lines have room.
@@ -399,21 +393,12 @@ pub fn draw_pane_footer(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::layout::text::footer_height;
 
     #[test]
     fn key_and_join_format() {
         assert_eq!(key("Run", "ALT+ENTER"), "Run: ALT+ENTER");
         assert_eq!(join(&["a: x", "b: y"]), "a: x  b: y");
-    }
-
-    #[test]
-    fn footer_height_wraps_by_width() {
-        // Single short line fits in one row regardless of a wide column.
-        assert_eq!(footer_height("a: x", 100), 1);
-        // A long line wraps: 20 chars across a 10-col window is 2 rows.
-        assert_eq!(footer_height("a: x  b: y  c: z", 10), 2);
-        // An empty text still reserves a single row.
-        assert_eq!(footer_height("", 50), 1);
     }
 
     /// Ground truth: render `text` and count the rows that received content.

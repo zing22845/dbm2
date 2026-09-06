@@ -11,6 +11,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+use crate::common::layout::text::footer_height;
 use crate::common::view::action_bar::{
     RESULTS_ACTION_BAR_HEIGHT, ResultsToolbarModel, action_bar_width, draw_action_bar,
 };
@@ -18,7 +19,6 @@ use crate::common::view::format::{
     RESULTS_HEADER_HEIGHT, RESULTS_ROW_CONTENT_HEIGHT, RESULTS_ROW_HEIGHT, column_type_label,
     results_col_text_view,
 };
-use crate::common::view::hints::footer_height;
 use crate::common::view::pane_scrollbar::{ActiveScrollbar, PaneScrollLayout, pane_scroll_layout};
 use crate::common::view::theme::Theme;
 

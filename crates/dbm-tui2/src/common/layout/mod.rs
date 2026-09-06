@@ -7,3 +7,4 @@
 
 pub mod modal;
 pub mod splitter;
+pub mod text;

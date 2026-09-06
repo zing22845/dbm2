@@ -6,7 +6,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::common::view::hints::{draw_pane_footer, footer_height, instances_pane_footer_text};
+use crate::common::layout::text::footer_height;
+use crate::common::view::hints::{draw_pane_footer, instances_pane_footer_text};
 use crate::common::view::pane_scrollbar::{
     ActiveScrollbar, PaneScrollLayout, RowHeights, draw_horizontal_pane_scrollbar,
     draw_vertical_pane_scrollbar, pane_anchor, pane_scroll_layout,

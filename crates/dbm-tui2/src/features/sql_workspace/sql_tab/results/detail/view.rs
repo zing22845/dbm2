@@ -8,8 +8,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::common::components::line_numbers;
+use crate::common::layout::text::footer_height;
 use crate::common::utils::text_width;
-use crate::common::view::hints::{draw_footer, footer_height};
+use crate::common::view::hints::draw_footer;
 use crate::common::view::theme::Theme;
 
 use super::state::DetailState;

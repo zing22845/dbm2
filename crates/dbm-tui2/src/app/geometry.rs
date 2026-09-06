@@ -12,7 +12,7 @@ use ratatui::layout::Rect;
 
 use crate::app::state::AppState;
 use crate::app_shell::pane::Pane;
-use crate::features::global_footer::view as footer_view;
+use crate::features::global_footer::layout as footer_layout;
 
 pub(crate) fn app_body_geometry(
     size: ratatui::layout::Size,
@@ -63,7 +63,7 @@ pub(crate) fn sql_tab_area_for_hit(
     {
         return None;
     }
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let footer_h = footer_layout::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
         .height
@@ -81,7 +81,7 @@ pub(crate) fn sql_tab_area_for_hit(
         workspace.height.saturating_sub(2),
     );
     // Workspace-level tab footer at the bottom of the inner region.
-    let footer_h = crate::common::view::hints::footer_height(
+    let footer_h = crate::common::layout::text::footer_height(
         &crate::common::view::hints::sql_workspace_footer_text(),
         inner.width,
     );
@@ -103,7 +103,7 @@ pub(crate) fn iw_body_area_for_hit(
     {
         return None;
     }
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let footer_h = footer_layout::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
         .height
@@ -167,7 +167,7 @@ pub(crate) fn sql_picker_area_for_hit(
     if !tab.editor.context_picker.open {
         return None;
     }
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let footer_h = footer_layout::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
         .height
@@ -184,7 +184,7 @@ pub(crate) fn sql_picker_area_for_hit(
         workspace.width.saturating_sub(2),
         workspace.height.saturating_sub(2),
     );
-    let footer_h = crate::common::view::hints::footer_height(
+    let footer_h = crate::common::layout::text::footer_height(
         &crate::common::view::hints::sql_workspace_footer_text(),
         inner.width,
     );

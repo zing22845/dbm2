@@ -12,6 +12,7 @@ use crate::app_shell::pane::Pane;
 use crate::features::app_splitter::view as splitter_view;
 use crate::features::discover::view as discover_view;
 use crate::features::explorer::view as explorer_view;
+use crate::features::global_footer::layout as footer_layout;
 use crate::features::global_footer::view as footer_view;
 use crate::features::header::view as header_view;
 use crate::features::instance_workspace::view as iw_view;
@@ -33,7 +34,7 @@ pub fn render(
 ) {
     // The footer height is dynamic: one line of hints plus the (wrapped) status
     // line when present.
-    let footer_h = footer_view::footer_height(&state.footer, frame.area().width);
+    let footer_h = footer_layout::footer_height(&state.footer, frame.area().width);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

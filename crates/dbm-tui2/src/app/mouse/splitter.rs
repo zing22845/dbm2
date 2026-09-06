@@ -9,7 +9,7 @@ use ratatui::layout::Rect;
 
 use crate::app::state::AppState;
 use crate::app_shell::pane::Pane;
-use crate::features::global_footer::view as footer_view;
+use crate::features::global_footer::layout as footer_layout;
 
 use crate::app::geometry::{app_explorer_rect, sql_tab_area_for_hit};
 
@@ -59,7 +59,7 @@ pub(crate) fn resolve_splitter_drag(
     let body_h = size
         .height
         .saturating_sub(body_top)
-        .saturating_sub(footer_view::footer_height(&state.footer, size.width));
+        .saturating_sub(footer_layout::footer_height(&state.footer, size.width));
     if body_h < 3 {
         return None;
     }
@@ -129,7 +129,7 @@ mod tests {
         let body_h = size
             .height
             .saturating_sub(body_top)
-            .saturating_sub(footer_view::footer_height(&state.footer, size.width));
+            .saturating_sub(footer_layout::footer_height(&state.footer, size.width));
         (body_top, body_h)
     }
 

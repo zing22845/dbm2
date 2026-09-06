@@ -10,7 +10,8 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Block, Borders};
 
-use crate::common::view::hints::{draw_footer, footer_height, sql_workspace_footer_text};
+use crate::common::layout::text::footer_height;
+use crate::common::view::hints::{draw_footer, sql_workspace_footer_text};
 use crate::common::view::pane_scrollbar::ActiveScrollbar;
 use crate::common::view::theme::Theme;
 

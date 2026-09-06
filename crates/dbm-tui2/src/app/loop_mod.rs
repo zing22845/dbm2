@@ -33,7 +33,7 @@ use crate::app::round::{process_action_round, process_message_round, queue_resul
 use crate::app::state::AppState;
 use crate::app::view::render;
 use crate::app_shell::effect::EffectRunner;
-use crate::features::global_footer::view as footer_view;
+use crate::features::global_footer::layout as footer_layout;
 use crate::features::perf_monitor::backend::CountingBackend;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -186,7 +186,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                 AppMsg::Shell(crate::app_shell::msg::ShellMsg::RefreshSplitterBounds),
                 &mut state,
             );
-            let footer_h = footer_view::footer_height(&state.footer, size.width);
+            let footer_h = footer_layout::footer_height(&state.footer, size.width);
             terminal
                 .backend_mut()
                 .set_exclude_rects(perf_exclude_rects(size, footer_h));

@@ -14,7 +14,7 @@ use crate::app::action::Action;
 use crate::app::msg::AppMsg;
 use crate::app::state::AppState;
 use crate::app_shell::effect::EffectRunner;
-use crate::features::global_footer::view as footer_view;
+use crate::features::global_footer::layout as footer_layout;
 
 use super::click::explorer_child_areas;
 use crate::app::geometry::{
@@ -73,7 +73,7 @@ pub(crate) fn handle_wheel_discover_targets(
     }
     *last_wheel = Some((now, dir, horizontal));
 
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let footer_h = footer_layout::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
         .height
@@ -143,7 +143,7 @@ pub(crate) fn handle_wheel_discover_results(
     }
     *last_wheel = Some((now, dir, horizontal));
 
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let footer_h = footer_layout::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
         .height
@@ -214,7 +214,7 @@ pub(crate) fn handle_wheel_explorer_objects(
     }
     *last_wheel = Some((now, dir, horizontal));
 
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let footer_h = footer_layout::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
         .height
@@ -279,7 +279,7 @@ pub(crate) fn handle_wheel_explorer_instances(
     }
     *last_wheel = Some((now, dir, horizontal));
 
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let footer_h = footer_layout::footer_height(&state.footer, size.width);
     let body_top = 3u16;
     let body_h = size
         .height

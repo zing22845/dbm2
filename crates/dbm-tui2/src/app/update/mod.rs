@@ -25,7 +25,7 @@ use crate::app_shell::nav::DiscoverPane;
 use crate::app_shell::pane::Pane;
 use crate::features::explorer::effect::ExplorerEffect;
 use crate::features::explorer::objects::effect::ObjectsEffect;
-use crate::features::global_footer::view as footer_view;
+use crate::features::global_footer::layout as footer_layout;
 use crate::features::instance_workspace::msg::{IwMessage, IwMsg};
 
 /// Result of a single update pass: side-channel intents and effects.
@@ -314,7 +314,7 @@ pub(super) fn explorer_load_instances_msg() -> AppMsg {
 /// the handler never marks the round dirty.
 pub(super) fn reconcile_splitter_bounds(state: &mut AppState) {
     let size = Size::new(state.term_width, state.term_height);
-    let footer_h = footer_view::footer_height(&state.footer, size.width);
+    let footer_h = footer_layout::footer_height(&state.footer, size.width);
     // Body height: header (3) at the top, footer at the bottom.
     let body_h = size.height.saturating_sub(3).saturating_sub(footer_h);
     // SQL tab body track: workspace inner, minus the workspace footer and the
@@ -331,7 +331,7 @@ pub(super) fn reconcile_splitter_bounds(state: &mut AppState) {
     let sql_body_h = workspace
         .map(|ws| {
             let inner_w = ws.width.saturating_sub(2);
-            let ws_footer_h = crate::common::view::hints::footer_height(
+            let ws_footer_h = crate::common::layout::text::footer_height(
                 &crate::common::view::hints::sql_workspace_footer_text(),
                 inner_w.max(1),
             );
