@@ -333,3 +333,130 @@ pub(crate) fn results_picker_anchor(
         });
     Some(ResultsPickerAnchor { pane_inner, anchor })
 }
+
+/// The results picker popup (rows-per-page / page jump) as drawn: its outer
+/// rect plus the per-preset row rects a row-limit picker offers (empty for the
+/// page input, which has no selectable rows). Geometry is shared by the
+/// renderer and the mouse hit-testing so a click lands exactly where a preset
+/// is drawn.
+#[derive(Debug, Clone)]
+pub(crate) struct ResultsPickerPopup {
+    pub popup: Rect,
+    /// One rect per `ResultsRowLimitPicker` preset, in list order. A click on
+    /// one of these applies that row limit; a click elsewhere inside the popup
+    /// (hint row / page input) keeps it open.
+    pub preset_rows: Vec<Rect>,
+}
+
+/// Resolve the geometry of the open results picker popup (if any), mirroring
+/// the size and anchoring `app::view` uses to render it. Returns `None` when no
+/// results picker modal is open or the layout cannot be resolved.
+pub(crate) fn results_picker_popup(
+    state: &AppState,
+    workspace: Rect,
+) -> Option<ResultsPickerPopup> {
+    use crate::app::state::ModalKind;
+    let (hit, width, preset_count, height) = match &state.modal {
+        Some(ModalKind::ResultsRowLimitPicker { limits, .. }) => {
+            // Body = one row per preset + a hint row, plus both borders.
+            let rows = limits.len() + 1;
+            (
+                crate::features::sql_workspace::sql_tab::results::pagination::ResultsPaginationHit::RowLimit,
+                30u16,
+                limits.len(),
+                2 + rows as u16,
+            )
+        }
+        Some(ModalKind::ResultsPageInput { .. }) => (
+            crate::features::sql_workspace::sql_tab::results::pagination::ResultsPaginationHit::PageNumber,
+            32u16,
+            0,
+            5,
+        ),
+        _ => return None,
+    };
+    let anchor = results_picker_anchor(state, workspace, hit)?;
+    let popup = crate::features::sql_workspace::sql_tab::results::pagination::popup_above_anchor(
+        anchor.anchor,
+        anchor.pane_inner,
+        width,
+        height,
+    );
+    if popup.width < 2 || popup.height < 2 {
+        return None;
+    }
+    // Preset rows run from the first body row (below the top border) down to
+    // the hint row; the renderer draws them in the same order.
+    let preset_rows = (0..preset_count)
+        .map(|i| Rect {
+            x: popup.x.saturating_add(1),
+            y: popup.y.saturating_add(1).saturating_add(i as u16),
+            width: popup.width.saturating_sub(2),
+            height: 1,
+        })
+        .filter(|r| r.bottom() <= popup.bottom().saturating_sub(1))
+        .collect();
+    Some(ResultsPickerPopup { popup, preset_rows })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::state::{AppState, ModalKind};
+    use crate::features::sql_workspace::sql_tab::results::state::QueryResultData;
+
+    /// A SQL workspace with one tab showing a paginated 300-row result and an
+    /// open rows-per-page picker, over a wide workspace region.
+    fn picker_state() -> (AppState, Rect) {
+        let mut state = AppState::default();
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+            None,
+        );
+        {
+            let tab = &mut state.sql.sql_tab.tabs[0];
+            tab.results.list.paginated = true;
+            tab.results.list.page = 1;
+            tab.results.list.row_limit = 100;
+            tab.results.list.result = Some(QueryResultData {
+                columns: Vec::new(),
+                rows: vec![Vec::new(); 100],
+                rows_affected: None,
+                total_rows: Some(300),
+            });
+        }
+        state.modal = Some(ModalKind::ResultsRowLimitPicker {
+            current: 100,
+            limits: vec![50, 100, 500, 1000],
+        });
+        (state, Rect::new(0, 3, 200, 50))
+    }
+
+    #[test]
+    fn row_limit_popup_matches_preset_rows() {
+        let (state, workspace) = picker_state();
+        let popup = results_picker_popup(&state, workspace).expect("popup geometry");
+        assert_eq!(
+            popup.preset_rows.len(),
+            4,
+            "one hit row per rows-per-page preset"
+        );
+        // Rows start under the top border and each is one cell tall.
+        assert_eq!(popup.preset_rows[0].y, popup.popup.y + 1);
+        assert_eq!(popup.preset_rows[1].y, popup.popup.y + 2);
+        // The whole popup stays inside the workspace and above the toolbar.
+        assert!(popup.popup.y >= workspace.y);
+        assert!(popup.popup.right() <= workspace.right());
+    }
+
+    #[test]
+    fn no_picker_modal_yields_no_popup_geometry() {
+        let (mut state, workspace) = picker_state();
+        state.modal = None;
+        assert!(results_picker_popup(&state, workspace).is_none());
+    }
+}

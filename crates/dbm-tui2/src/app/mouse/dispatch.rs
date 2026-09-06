@@ -15,7 +15,10 @@ use crate::app_shell::effect::EffectRunner;
 use crate::app_shell::pane::Pane;
 
 use super::drag::{handle_drag, handle_moved, handle_up};
-use super::press::{handle_confirm_modal_click, handle_discover_close_confirm_click, handle_down};
+use super::press::{
+    handle_confirm_modal_click, handle_discover_close_confirm_click, handle_down,
+    handle_results_picker_modal_click,
+};
 use super::state::{MouseInteraction, MouseOutcome};
 use super::wheel::{
     WheelOutcome, handle_wheel_discover_results, handle_wheel_discover_targets,
@@ -86,6 +89,27 @@ pub(crate) fn handle_mouse_event(
                     .is_some_and(crate::common::view::modal::is_confirm_modal) =>
             {
                 handle_confirm_modal_click(
+                    size,
+                    state,
+                    effect_runner,
+                    action_rx,
+                    point,
+                    &mut dirty,
+                )?
+            }
+            // A rows-per-page / page-jump picker is open: clicking a row-limit
+            // preset applies it and a click outside the anchored popup closes
+            // it, matching the original dbm's picker mouse handling.
+            MouseEventKind::Down(MouseButton::Left)
+                if state.modal.as_ref().is_some_and(|m| {
+                    matches!(
+                        m,
+                        crate::app::state::ModalKind::ResultsRowLimitPicker { .. }
+                            | crate::app::state::ModalKind::ResultsPageInput { .. }
+                    )
+                }) =>
+            {
+                handle_results_picker_modal_click(
                     size,
                     state,
                     effect_runner,

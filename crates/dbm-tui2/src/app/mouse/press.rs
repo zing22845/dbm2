@@ -72,6 +72,74 @@ pub(crate) fn handle_confirm_modal_click(
     Ok(())
 }
 
+/// A left press while a results picker (rows-per-page / page jump) is open:
+/// clicking a row-limit preset applies that limit, a click outside the popup
+/// closes it, and a click elsewhere inside the popup keeps it open (mirroring
+/// the original dbm's `handle_results_row_limit_mouse` /
+/// `handle_results_page_input_mouse`).
+pub(crate) fn handle_results_picker_modal_click(
+    size: Size,
+    state: &mut AppState,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
+    point: Position,
+    dirty: &mut bool,
+) -> anyhow::Result<()> {
+    use crate::app::state::ModalKind;
+    let footer_h = footer_layout::footer_height(&state.footer, size.width);
+    let body_top = 3u16;
+    let body_h = size
+        .height
+        .saturating_sub(body_top)
+        .saturating_sub(footer_h);
+    // The picker popups float inside the workspace (see `app::view`), so they
+    // are hit-tested against the same workspace region.
+    let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state) else {
+        return Ok(());
+    };
+    let Some(picker) = crate::app::geometry::results_picker_popup(state, workspace) else {
+        return Ok(());
+    };
+    let msg = if picker.popup.contains(point) {
+        // A click on a row-limit preset row applies it; anywhere else inside
+        // the popup (page input / hint row) keeps the picker open.
+        if let Some(ModalKind::ResultsRowLimitPicker { limits, .. }) = &state.modal {
+            let limit = picker
+                .preset_rows
+                .iter()
+                .enumerate()
+                .find(|(_, rect)| rect.contains(point))
+                .and_then(|(idx, _)| limits.get(idx).copied());
+            limit.map(|limit| {
+                use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+                use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+                use crate::features::sql_workspace::sql_tab::results::msg::{
+                    ResultsMessage, ResultsMsg,
+                };
+                let Some(tab_id) = state.sql.sql_tab.active_tab().map(|t| t.session.id) else {
+                    return AppMsg::CloseModal;
+                };
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        tab_id,
+                        msg: ResultsMsg::Message(ResultsMessage::SetRowLimit { limit }),
+                    },
+                ))))
+            })
+        } else {
+            None
+        }
+    } else {
+        // Clicking outside the anchored popup closes it (like Esc).
+        Some(AppMsg::CloseModal)
+    };
+    if let Some(msg) = msg {
+        let result = process_message_round(effect_runner, action_rx, msg, state);
+        *dirty |= result.dirty;
+    }
+    Ok(())
+}
+
 /// A left press on discover's close-confirmation dialog.
 pub(crate) fn handle_discover_close_confirm_click(
     size: Size,
