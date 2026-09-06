@@ -126,7 +126,7 @@ pub(super) fn apply(msg: SqlTabMessage, state: &mut SqlTabState, out: &mut SqlTa
                         instance.as_str(),
                         connection.as_str(),
                         selected_sql,
-                        super::history::detail::view::detail_text_width(40),
+                        super::history::detail::layout::detail_text_width(40),
                         8,
                     );
                     state.tabs[idx].history = s;
@@ -145,7 +145,7 @@ pub(super) fn apply(msg: SqlTabMessage, state: &mut SqlTabState, out: &mut SqlTa
                         instance.as_str(),
                         connection.as_str(),
                         selected_sql,
-                        super::history::detail::view::detail_text_width(40),
+                        super::history::detail::layout::detail_text_width(40),
                         8,
                     );
                     state.tabs[idx].history = s;

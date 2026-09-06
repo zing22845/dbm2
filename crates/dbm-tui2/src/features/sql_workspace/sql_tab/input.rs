@@ -7,7 +7,7 @@
 
 use ratatui::layout::Rect;
 
-use super::editor::view as editor_view;
+use super::editor::layout as editor_view;
 use super::layout::sql_tab_layout;
 use super::session::{TabSession, session_view_key};
 use super::state::{SqlFocus, SqlTabState};
@@ -103,8 +103,8 @@ pub fn sql_workspace_click(
     y: u16,
     is_double_click: bool,
 ) -> Option<SqlClickAction> {
+    use crate::features::sql_workspace::sql_tab::editor::context_picker::layout as cp_view;
     use crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn;
-    use crate::features::sql_workspace::sql_tab::editor::context_picker::view as cp_view;
 
     // The tab bar is the single top row; the child panes are below it.
     let tab_bar = ratatui::layout::Rect {
@@ -225,12 +225,12 @@ pub fn sql_workspace_click(
     let editor_hit;
     let history_hit;
     if detail_visible {
-        let zone_x = super::history::splitter::view::history_zone_x(
+        let zone_x = super::history::splitter::layout::history_zone_x(
             body,
             &layout,
             tab.history.splitter.detail_pane_width,
         );
-        let zone_w = super::history::splitter::view::history_zone_width(
+        let zone_w = super::history::splitter::layout::history_zone_width(
             &layout,
             tab.history.splitter.detail_pane_width,
         )
@@ -326,14 +326,15 @@ pub fn sql_workspace_click(
 
         // Step 2: resolve the full Results layout (same single source of truth
         // the renderer uses). Only the content band is narrowed to the list side.
-        let layout = crate::features::sql_workspace::sql_tab::results::view::compute_results_layout(
-            block_inner,
-            tab.results.detail_open,
-            tab.results.splitter.detail_pane_width,
-            tab.results.list.row_count(),
-            tab.results.list.search.text_input_active(),
-            &tab.results.list.executed_sql_display(),
-        );
+        let layout =
+            crate::features::sql_workspace::sql_tab::results::layout::compute_results_layout(
+                block_inner,
+                tab.results.detail_open,
+                tab.results.splitter.detail_pane_width,
+                tab.results.list.row_count(),
+                tab.results.list.search.text_input_active(),
+                &tab.results.list.executed_sql_display(),
+            );
 
         // Step 3: only the list sub-pane responds to cell clicks.
         if contains(layout.list, x, y)
@@ -341,7 +342,7 @@ pub fn sql_workspace_click(
             && tab.results.list.row_count() > 0
         {
             let table_area =
-                crate::features::sql_workspace::sql_tab::results::list::view::results_list_regions(
+                crate::features::sql_workspace::sql_tab::results::list::layout::results_list_regions(
                     layout.list,
                 )
                 .1;
@@ -355,7 +356,7 @@ pub fn sql_workspace_click(
             // it takes precedence). Only the top header lines are resizable.
             if !is_double_click
                 && let Some(col) =
-                    crate::features::sql_workspace::sql_tab::results::list::view::col_resize_hit_at(
+                    crate::features::sql_workspace::sql_tab::results::list::layout::col_resize_hit_at(
                         layout.list,
                         &tab.results.list,
                         x,
@@ -376,7 +377,7 @@ pub fn sql_workspace_click(
             }
 
             if let Some((row, col)) =
-                crate::features::sql_workspace::sql_tab::results::list::view::cell_hit_at(
+                crate::features::sql_workspace::sql_tab::results::list::layout::cell_hit_at(
                     layout.list,
                     &tab.results.list,
                     x,
@@ -438,7 +439,7 @@ pub fn results_list_rect(
         width: results.width.saturating_sub(2),
         height: results.height.saturating_sub(2),
     };
-    let layout = crate::features::sql_workspace::sql_tab::results::view::compute_results_layout(
+    let layout = crate::features::sql_workspace::sql_tab::results::layout::compute_results_layout(
         block_inner,
         tab.results.detail_open,
         tab.results.splitter.detail_pane_width,
@@ -478,13 +479,13 @@ fn history_row_hit(
             height: layout.editor.height,
         };
         let zone_x =
-            crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(
+            crate::features::sql_workspace::sql_tab::history::splitter::layout::history_zone_x(
                 body_area,
                 layout,
                 tab.history.splitter.detail_pane_width,
             );
         let zone_w =
-            crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_width(
+            crate::features::sql_workspace::sql_tab::history::splitter::layout::history_zone_width(
                 layout,
                 tab.history.splitter.detail_pane_width,
             );
@@ -515,7 +516,7 @@ fn history_row_hit(
         crate::common::layout::text::footer_height(&list_footer, list_w.saturating_sub(2))
             .min(inner.height.saturating_sub(3));
 
-    crate::features::sql_workspace::sql_tab::history::list::view::row_hit_at(
+    crate::features::sql_workspace::sql_tab::history::list::layout::row_hit_at(
         inner,
         &tab.history.list,
         &state.history_store,
@@ -557,13 +558,13 @@ fn history_h_scrollbar_hit(
             height: layout.editor.height,
         };
         let zone_x =
-            crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(
+            crate::features::sql_workspace::sql_tab::history::splitter::layout::history_zone_x(
                 body_area,
                 layout,
                 tab.history.splitter.detail_pane_width,
             );
         let zone_w =
-            crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_width(
+            crate::features::sql_workspace::sql_tab::history::splitter::layout::history_zone_width(
                 layout,
                 tab.history.splitter.detail_pane_width,
             );
@@ -592,12 +593,13 @@ fn history_h_scrollbar_hit(
         crate::common::layout::text::footer_height(&list_footer, list_w.saturating_sub(2))
             .min(inner.height.saturating_sub(3));
 
-    let list_area = crate::features::sql_workspace::sql_tab::history::list::view::compute_list_area(
-        inner,
-        detail_visible,
-        detail_w,
-        footer_h,
-    );
+    let list_area =
+        crate::features::sql_workspace::sql_tab::history::list::layout::compute_list_area(
+            inner,
+            detail_visible,
+            detail_w,
+            footer_h,
+        );
 
     let visible = tab
         .history
@@ -684,13 +686,13 @@ fn history_v_scrollbar_hit(
             height: layout.editor.height,
         };
         let zone_x =
-            crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(
+            crate::features::sql_workspace::sql_tab::history::splitter::layout::history_zone_x(
                 body_area,
                 layout,
                 tab.history.splitter.detail_pane_width,
             );
         let zone_w =
-            crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_width(
+            crate::features::sql_workspace::sql_tab::history::splitter::layout::history_zone_width(
                 layout,
                 tab.history.splitter.detail_pane_width,
             );
@@ -719,12 +721,13 @@ fn history_v_scrollbar_hit(
         crate::common::layout::text::footer_height(&list_footer, list_w.saturating_sub(2))
             .min(inner.height.saturating_sub(3));
 
-    let list_area = crate::features::sql_workspace::sql_tab::history::list::view::compute_list_area(
-        inner,
-        detail_visible,
-        detail_w,
-        footer_h,
-    );
+    let list_area =
+        crate::features::sql_workspace::sql_tab::history::list::layout::compute_list_area(
+            inner,
+            detail_visible,
+            detail_w,
+            footer_h,
+        );
 
     let visible = tab
         .history
@@ -902,7 +905,7 @@ fn results_h_scrollbar_hit(
 
 #[cfg(test)]
 mod tests {
-    use super::super::history::splitter::view::history_zone_width;
+    use super::super::history::splitter::layout::history_zone_width;
     use super::*;
     use ratatui::layout::Rect;
 
@@ -1013,8 +1016,8 @@ mod tests {
     #[test]
     fn picker_row_click_and_column_click_and_outside_close() {
         use crate::features::sql_workspace::sql_tab::editor::context_picker::{
+            layout as cp_view,
             state::{CachedList, ContextPickerState, PickerColumn},
-            view as cp_view,
         };
         let mut state = state_with_tabs(1);
         state.tabs[0].session.database = Some("mydb".into());

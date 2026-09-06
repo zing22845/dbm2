@@ -209,5 +209,8 @@ pub(crate) fn sql_picker_area_for_hit(
         tab.splitter.editor_top_height,
         tab.splitter.history_pane_width,
     );
-    crate::features::sql_workspace::sql_tab::editor::view::context_picker_area(layout.editor, true)
+    crate::features::sql_workspace::sql_tab::editor::layout::context_picker_area(
+        layout.editor,
+        true,
+    )
 }

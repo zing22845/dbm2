@@ -134,7 +134,7 @@ pub fn render(
     // history pane and drawing a bogus second line.
     let mut editor_history_splitter_x = layout.v_splitter.x;
     let history_zone = if history_detail_visible {
-        let zone_x = super::history::splitter::view::history_zone_x(
+        let zone_x = super::history::splitter::layout::history_zone_x(
             area,
             &layout,
             tab.history.splitter.detail_pane_width,
@@ -148,7 +148,7 @@ pub fn render(
                 crate::features::sql_workspace::sql_tab::splitter::state::MIN_SQL_PANE_WIDTH,
             )
             .max(1);
-        let zone_w = super::history::splitter::view::history_zone_width(
+        let zone_w = super::history::splitter::layout::history_zone_width(
             &layout,
             tab.history.splitter.detail_pane_width,
         )

@@ -493,7 +493,7 @@ pub(crate) fn handle_wheel_sql(
                 &connection,
             );
             let zone_rect = if detail_visible {
-                use crate::features::sql_workspace::sql_tab::history::splitter::view::{
+                use crate::features::sql_workspace::sql_tab::history::splitter::layout::{
                     history_zone_width, history_zone_x,
                 };
                 let zone_x =

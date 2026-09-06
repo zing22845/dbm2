@@ -5,6 +5,7 @@
 //! (`msg`), a pure by-value `update` transition (plus the cross-feature
 //! `reconcile_on_selection_change` helper), and the themed renderer (`view`).
 
+pub mod layout;
 pub mod msg;
 pub mod state;
 pub mod update;

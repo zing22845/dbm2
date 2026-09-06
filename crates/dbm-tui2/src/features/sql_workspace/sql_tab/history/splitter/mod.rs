@@ -7,5 +7,6 @@
 //! `detail_pane_width`. The History zone geometry (`history_zone_width`,
 //! `history_zone_x`, `history_detail_splitter`) is computed here.
 
+pub mod layout;
 pub mod state;
 pub mod view;

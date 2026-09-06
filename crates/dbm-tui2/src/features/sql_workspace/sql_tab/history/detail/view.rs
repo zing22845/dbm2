@@ -26,11 +26,6 @@ pub fn sql_line_count(sql: &str) -> usize {
     }
 }
 
-/// Text area width inside the Detail block (borders excluded).
-pub fn detail_text_width(pane_width: u16) -> u16 {
-    pane_width.saturating_sub(2).max(1)
-}
-
 pub(crate) fn wrapped_row_count(line: &str, width: usize) -> usize {
     if line.is_empty() {
         return 1;
@@ -319,6 +314,7 @@ pub fn draw_history_detail(
 mod tests {
     use super::*;
     use crate::common::components::search::PaneSearch;
+    use crate::features::sql_workspace::sql_tab::history::detail::layout::detail_text_width;
 
     #[test]
     fn first_match_line_finds_earliest_hit() {

@@ -24,8 +24,7 @@ use crate::common::view::pane_scrollbar::{
 };
 use crate::common::view::theme::Theme;
 
-use super::super::splitter::state::clamp_detail_pane_width;
-use super::super::store::{SqlHistoryStore, history_one_line};
+use super::super::store::history_one_line;
 use super::state::ListState;
 
 /// Shared viewport computation used by both [`render`] and [`row_hit_at`].
@@ -252,98 +251,6 @@ pub fn render(
     }
 
     Some(reconciled_start)
-}
-
-/// Hit-test: given the history pane's `inner` area, compute which visible
-/// row index was clicked at `(x, y)`. Returns `None` when the click is
-/// outside the list content (scrollbar, footer, detail pane, etc.).
-#[allow(clippy::too_many_arguments)]
-pub fn row_hit_at(
-    inner: Rect,
-    state: &ListState,
-    store: &SqlHistoryStore,
-    instance: &str,
-    connection: &str,
-    x: u16,
-    y: u16,
-    detail_visible: bool,
-    detail_w: u16,
-    list_footer_height: u16,
-) -> Option<usize> {
-    let visible = state.visible_indices(store, instance, connection);
-    if visible.is_empty() {
-        return None;
-    }
-
-    let list_area = compute_list_area(inner, detail_visible, detail_w, list_footer_height);
-    if !contains(list_area, x, y) {
-        return None;
-    }
-
-    // ---- SHARED VIEWPORT CALCULATION ----
-    // Same function render uses — so gutter split, effective_layout (h_scrollbar
-    // eating a row), discover-style anchor (with scroll_locked guard) are all
-    // identical between what we draw and what we hit-test.
-    let entries = store.entries(instance, connection);
-    let cursor = state.cursor.min(visible.len().saturating_sub(1));
-    let selected_width = visible
-        .get(cursor)
-        .copied()
-        .and_then(|idx| entries.get(idx))
-        .map(|sql| super::super::store::history_line_display_width(sql) as usize)
-        .unwrap_or(0);
-
-    let hv = compute_history_viewport(list_area, state, selected_width, &visible, cursor)?;
-    let content = hv.effective_layout.content_area;
-    if !contains(content, x, y) {
-        return None;
-    }
-
-    let y_offset = y.saturating_sub(content.y) as usize;
-    let row_in_viewport = y_offset.min(hv.viewport.saturating_sub(1));
-    let visible_idx = hv.start + row_in_viewport;
-
-    if visible_idx < visible.len() {
-        Some(visible_idx)
-    } else {
-        None
-    }
-}
-
-/// Compute the list area (content + optional footer) inside the History
-/// pane's `inner` rect, mirroring the renderer's split logic.
-pub fn compute_list_area(
-    inner: Rect,
-    detail_visible: bool,
-    detail_w: u16,
-    list_footer_height: u16,
-) -> Rect {
-    if detail_visible {
-        let clamped_detail = clamp_detail_pane_width(detail_w).min(inner.width.saturating_sub(2));
-        let body_w = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(clamped_detail),
-                Constraint::Length(1),
-                Constraint::Min(0),
-            ])
-            .split(inner);
-        let list_col = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(list_footer_height)])
-            .split(body_w[2]);
-        list_col[0]
-    } else {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(list_footer_height)])
-            .split(inner);
-        chunks[0]
-    }
-}
-
-fn contains(r: Rect, x: u16, y: u16) -> bool {
-    x >= r.x && x < r.x.saturating_add(r.width) && y >= r.y && y < r.y.saturating_add(r.height)
 }
 
 /// Truncate a display string to `avail` width cells, handling the prefix offset.

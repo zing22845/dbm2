@@ -62,7 +62,7 @@ pub fn results_detail_splitter(
         return None;
     }
     let inner = block_inner(outer);
-    let layout = crate::features::sql_workspace::sql_tab::results::view::compute_results_layout(
+    let layout = crate::features::sql_workspace::sql_tab::results::layout::compute_results_layout(
         inner,
         true,
         detail_pane_width,

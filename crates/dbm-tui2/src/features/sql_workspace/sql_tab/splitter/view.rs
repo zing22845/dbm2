@@ -13,9 +13,8 @@ use crate::common::view::splitter::{SplitOrientation, draw};
 use super::super::layout::sql_tab_layout;
 use super::super::msg::SqlTabMessage;
 use super::super::state::SqlTabState;
-use crate::features::sql_workspace::sql_tab::history::splitter::view::{
-    history_detail_splitter, history_zone_x,
-};
+use crate::features::sql_workspace::sql_tab::history::splitter::layout::history_zone_x;
+use crate::features::sql_workspace::sql_tab::history::splitter::view::history_detail_splitter;
 
 /// Identifies which splitter a mouse position is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -330,7 +329,7 @@ mod tests {
         assert_eq!(result, Some(SqlSplitter::EditorResults));
         // The vertical editor/history splitter must also still be hittable.
         let zone_x =
-            crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(
+            crate::features::sql_workspace::sql_tab::history::splitter::layout::history_zone_x(
                 body, &layout, detail_w,
             );
         let a_x = zone_x.saturating_sub(1);
@@ -405,7 +404,7 @@ mod tests {
 
         // v_splitter hit at its top should NOT match h_splitter.
         let zone_x =
-            crate::features::sql_workspace::sql_tab::history::splitter::view::history_zone_x(
+            crate::features::sql_workspace::sql_tab::history::splitter::layout::history_zone_x(
                 body, &layout, detail_w,
             );
         let vx = zone_x.saturating_sub(1);

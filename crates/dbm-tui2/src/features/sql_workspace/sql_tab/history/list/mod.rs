@@ -5,6 +5,7 @@
 //! its own message enum (`msg`), a pure by-value `update` transition, and
 //! a renderer + hit-test helpers (`view`).
 
+pub mod layout;
 pub mod msg;
 pub mod state;
 pub mod update;
