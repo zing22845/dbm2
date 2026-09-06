@@ -1,18 +1,40 @@
 //! The application layer: the central message router, global state,
 //! central update dispatcher and the run loop.
+//!
+//! The children are grouped by their role in the TEA data flow
+//! (`input -> msg -> update -> view`):
+//!
+//! - **core**: [`msg`] (the message enumeration), [`state`] (the model),
+//!   [`update`] (the only state transition) and [`view`] (pure rendering);
+//! - **input adapters**: [`key`] and [`mouse`] turn terminal events into an
+//!   [`AppMsg`]. They only *read* state and never mutate it, so they are not
+//!   part of `update` — and `update` must never depend on them (or on
+//!   [`geometry`], since hit-testing reads the layout the renderer draws);
+//! - **runtime**: [`loop_mod`] (event loop), [`round`] (draining the message
+//!   cascade) and [`action`] (results of running effects);
+//! - **shared**: [`confirm`] (modal -> action, used by both input channels),
+//!   [`geometry`] (layout source shared by hit-testing and rendering) and
+//!   [`session`] (state <-> on-disk snapshot).
 
-pub mod action;
-pub mod confirm;
-pub mod geometry;
-pub mod key;
-pub mod loop_mod;
-pub mod mouse;
+// --- TEA core ---
 pub mod msg;
-pub mod round;
-pub mod session;
 pub mod state;
 pub mod update;
 pub mod view;
+
+// --- Input adapters: terminal events -> AppMsg (state is read-only) ---
+pub mod key;
+pub mod mouse;
+
+// --- Runtime: event loop, message cascade, effects ---
+pub mod action;
+pub mod loop_mod;
+pub mod round;
+
+// --- Shared / cross-cutting ---
+pub mod confirm;
+pub mod geometry;
+pub mod session;
 
 pub use msg::AppMsg;
 pub use state::{AppState, ModalKind};
