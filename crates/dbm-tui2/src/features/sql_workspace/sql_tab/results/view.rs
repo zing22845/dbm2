@@ -17,7 +17,7 @@ use crate::common::view::theme::Theme;
 use super::detail::view as detail_view;
 use super::layout::compute_results_layout;
 use super::list::view as list_view;
-use super::pagination::pagination_toolbar_line;
+use super::pagination::{layout_pagination_bar, pagination_toolbar_line};
 use super::splitter::view as splitter_view;
 use super::state::ResultsState;
 
@@ -130,24 +130,33 @@ pub fn render(
     }
 
     // Full-width pagination toolbar (spans both the table and the detail).
+    // The text itself is right-aligned: it renders into the right-anchored
+    // `bar_rect` computed by `layout_pagination_bar` (the same rect the mouse
+    // hit-testing uses), matching the original dbm.
     if let Some(pag_area) = layout.pagination {
+        let row_limit = state.list.row_limit;
+        let page = state.list.page;
         let total_rows = state
             .list
             .result
             .as_ref()
             .map(|r| r.total_rows)
             .unwrap_or_default();
+        let row_count = state.list.row_count();
+        let bar = layout_pagination_bar(
+            pag_area, row_limit, page, total_rows, row_count, false, false,
+        );
         let toolbar = pagination_toolbar_line(
-            state.list.row_limit,
-            state.list.page,
+            row_limit,
+            page,
             total_rows,
-            state.list.row_count(),
+            row_count,
             false,
             false,
             Style::default().fg(p.accent),
             Style::default().fg(p.muted),
         );
-        frame.render_widget(Paragraph::new(toolbar), pag_area);
+        frame.render_widget(Paragraph::new(toolbar), bar.bar_rect);
     }
 
     // Full-width list footer (spans both the table and the detail).

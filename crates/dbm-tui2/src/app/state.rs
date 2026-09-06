@@ -190,6 +190,8 @@ pub enum ModalKind {
     ResultsPageInput {
         current_page: usize,
         total_pages: Option<usize>,
+        /// The digits typed so far; the live buffer shown while editing.
+        input: String,
     },
     /// Confirm deleting a stored connection.
     DeleteConnectionConfirm {

@@ -19,6 +19,7 @@ use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
 use crate::features::sql_workspace::sql_tab::results::msg::{
     ResultsMessage as SqlResultsMessage, ResultsMsg as SqlResultsMsg,
 };
+use crate::features::sql_workspace::sql_tab::results::pagination::ResultsPageAction;
 use crate::features::sql_workspace::sql_tab::state::SqlFocus;
 use crate::features::sql_workspace::state::SqlState;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -349,9 +350,77 @@ fn results_key(
         {
             Some(sql_results(SqlResultsMessage::DelRow, tab_id))
         }
-        // Cell selection via arrows.
-        KeyCode::Up => Some(sql_results(SqlResultsMessage::MoveSelection { dr: -1, dc: 0 }, tab_id)),
-        KeyCode::Down => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 1, dc: 0 }, tab_id)),
+        // Page navigation: `>` next page / `<` previous page, arming the
+        // original dbm double-press chord — a second `>` within the chord
+        // window jumps to the last page, a second `<` to the first. `<`/`>`
+        // only exist directly on some keyboard layouts, so PageDown/PageUp
+        // mirror the single-step nav below (they do not arm a chord).
+        KeyCode::Char('>')
+            if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            Some(sql_results(
+                SqlResultsMessage::PageChord { forward: true },
+                tab_id,
+            ))
+        }
+        KeyCode::Char('<')
+            if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            Some(sql_results(
+                SqlResultsMessage::PageChord { forward: false },
+                tab_id,
+            ))
+        }
+        KeyCode::PageDown => Some(sql_results(
+            SqlResultsMessage::PageNav {
+                action: ResultsPageAction::Next,
+            },
+            tab_id,
+        )),
+        KeyCode::PageUp => Some(sql_results(
+            SqlResultsMessage::PageNav {
+                action: ResultsPageAction::Prev,
+            },
+            tab_id,
+        )),
+        // Cell selection via arrows; on the last/first row of a page they
+        // cross into the next/previous SQL page (mirroring the original dbm's
+        // `move_results_row_selection`).
+        KeyCode::Down => {
+            let list = &results.list;
+            if list.row_count() > 0
+                && list.row + 1 >= list.row_count()
+                && list.can_go_next_page()
+            {
+                Some(sql_results(
+                    SqlResultsMessage::PageNav {
+                        action: ResultsPageAction::Next,
+                    },
+                    tab_id,
+                ))
+            } else {
+                Some(sql_results(
+                    SqlResultsMessage::MoveSelection { dr: 1, dc: 0 },
+                    tab_id,
+                ))
+            }
+        }
+        KeyCode::Up => {
+            let list = &results.list;
+            if list.row == 0 && list.can_go_prev_page() {
+                Some(sql_results(
+                    SqlResultsMessage::PageNav {
+                        action: ResultsPageAction::Prev,
+                    },
+                    tab_id,
+                ))
+            } else {
+                Some(sql_results(
+                    SqlResultsMessage::MoveSelection { dr: -1, dc: 0 },
+                    tab_id,
+                ))
+            }
+        }
         KeyCode::Left => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: -1 }, tab_id)),
         KeyCode::Right => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: 1 }, tab_id)),
         // `,` / `.` narrow / widen the selected column (Vim-style), mirroring
@@ -393,16 +462,18 @@ fn results_key(
                 tab_id,
             ))
         }
-        // Row-limit picker modal.
-        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::ALT) => {
+        // Rows-per-page picker modal (`r`, matching the `[r]rows` toolbar
+        // label and the original dbm binding).
+        KeyCode::Char('r') if key.modifiers.is_empty() => {
             Some(AppMsg::OpenModal(ModalKind::ResultsRowLimitPicker {
                 current: results.list.row_limit,
                 limits: crate::features::sql_workspace::sql_tab::results::pagination::RESULTS_ROW_LIMIT_PRESETS
                     .to_vec(),
             }))
         }
-        // Page input modal.
-        KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::ALT) => {
+        // Page input modal (`p`, matching the `[p]` page-number toolbar label
+        // and the original dbm binding).
+        KeyCode::Char('p') if key.modifiers.is_empty() => {
             let total_pages = crate::features::sql_workspace::sql_tab::results::pagination::max_page(
                 results.list.result.as_ref().and_then(|r| r.total_rows),
                 results.list.row_limit,
@@ -410,6 +481,7 @@ fn results_key(
             Some(AppMsg::OpenModal(ModalKind::ResultsPageInput {
                 current_page: results.list.page,
                 total_pages,
+                input: results.list.page.to_string(),
             }))
         }
         _ => None,
@@ -1295,5 +1367,137 @@ mod tests {
             ),
             "Ctrl+/ while editor search active must route to Editor; got {msg:?}"
         );
+    }
+    #[test]
+    fn results_key_gt_and_lt_arm_page_chord() {
+        let state = app_state_with_tab();
+        let results = &state.sql.sql_tab.tabs[0].results;
+        let next = results_key(key(KeyCode::Char('>'), KeyModifiers::NONE), 0, results)
+            .expect("> should page forward (arming the chord)");
+        assert_eq!(
+            extract_tab_msg(next),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::PageChord { forward: true }),
+            }
+        );
+        let prev = results_key(key(KeyCode::Char('<'), KeyModifiers::SHIFT), 0, results)
+            .expect("< should page back (arming the chord)");
+        assert_eq!(
+            extract_tab_msg(prev),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::PageChord { forward: false }),
+            }
+        );
+    }
+
+    #[test]
+    fn results_key_r_and_p_open_their_modals() {
+        let state = app_state_with_tab();
+        let results = &state.sql.sql_tab.tabs[0].results;
+        let msg = results_key(key(KeyCode::Char('r'), KeyModifiers::NONE), 0, results)
+            .expect("r should open the rows-per-page picker");
+        assert!(
+            matches!(
+                msg,
+                AppMsg::OpenModal(ModalKind::ResultsRowLimitPicker { .. })
+            ),
+            "r must open the row-limit picker, got {msg:?}"
+        );
+        let msg = results_key(key(KeyCode::Char('p'), KeyModifiers::NONE), 0, results)
+            .expect("p should open the page input");
+        assert!(
+            matches!(msg, AppMsg::OpenModal(ModalKind::ResultsPageInput { .. })),
+            "p must open the page input, got {msg:?}"
+        );
+    }
+
+    #[test]
+    fn results_key_pageup_pagedown_alias_page_nav() {
+        let state = app_state_with_tab();
+        let results = &state.sql.sql_tab.tabs[0].results;
+        let msg = results_key(key(KeyCode::PageDown, KeyModifiers::NONE), 0, results)
+            .expect("PageDown should page forward");
+        assert!(matches!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                msg: SqlResultsMsg::Message(SqlResultsMessage::PageNav {
+                    action: ResultsPageAction::Next,
+                }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn results_key_down_on_last_row_crosses_to_next_page() {
+        let mut state = app_state_with_tab();
+        // Paginated page 1 of 2 (100 rows per page, 200 total) with the
+        // cursor on the last row: Down must page forward, not clamp.
+        {
+            let tab = &mut state.sql.sql_tab.tabs[0];
+            tab.results.list.paginated = true;
+            tab.results.list.page = 1;
+            tab.results.list.row_limit = 100;
+            tab.results.list.result = Some(
+                crate::features::sql_workspace::sql_tab::results::state::QueryResultData {
+                    columns: Vec::new(),
+                    rows: vec![Vec::new(); 100],
+                    rows_affected: None,
+                    total_rows: Some(200),
+                },
+            );
+            tab.results.list.row = 99;
+        }
+        let results = &state.sql.sql_tab.tabs[0].results;
+        let msg = results_key(key(KeyCode::Down, KeyModifiers::NONE), 0, results)
+            .expect("Down on the last row should navigate to the next page");
+        assert!(matches!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                msg: SqlResultsMsg::Message(SqlResultsMessage::PageNav {
+                    action: ResultsPageAction::Next,
+                }),
+                ..
+            }
+        ));
+
+        // On a middle row, Down stays a plain cell move.
+        let state = app_state_with_tab();
+        let results = &state.sql.sql_tab.tabs[0].results;
+        let msg = results_key(key(KeyCode::Down, KeyModifiers::NONE), 0, results)
+            .expect("Down should move the cell selection");
+        assert!(matches!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                msg: SqlResultsMsg::Message(SqlResultsMessage::MoveSelection { .. }),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn results_key_up_on_first_row_crosses_to_prev_page() {
+        let mut state = app_state_with_tab();
+        {
+            let tab = &mut state.sql.sql_tab.tabs[0];
+            tab.results.list.paginated = true;
+            tab.results.list.page = 2;
+            tab.results.list.row_limit = 100;
+            tab.results.list.row = 0;
+        }
+        let results = &state.sql.sql_tab.tabs[0].results;
+        let msg = results_key(key(KeyCode::Up, KeyModifiers::NONE), 0, results)
+            .expect("Up on the first row of a later page should go back a page");
+        assert!(matches!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                msg: SqlResultsMsg::Message(SqlResultsMessage::PageNav {
+                    action: ResultsPageAction::Prev,
+                }),
+                ..
+            }
+        ));
     }
 }

@@ -3,6 +3,7 @@
 use crossterm::event::KeyEvent;
 
 use super::super::edit_sql::EditTarget;
+use super::super::pagination::ResultsPageAction;
 use super::super::state::QueryResultData;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +51,11 @@ pub enum ListMessage {
     SetRowLimit { limit: usize },
     /// Jump to a page.
     SetPage { page: usize },
+    /// Navigate by a page action (First / Prev / Next / Last).
+    PageNav { action: ResultsPageAction },
+    /// A `<` / `>` page key press: pages once and arms the double-press chord
+    /// (`<<` / `>>` jump to first / last), mirroring the original dbm.
+    PageChord { forward: bool },
     /// Run a SQL query.
     RunQuery {
         instance: String,

@@ -158,7 +158,7 @@ pub fn render(
     // Render any active modal (data popup) as a centered overlay.
     if let Some(modal) = &state.modal {
         // Generic titled popup for the picker/confirm/commit-preview modals.
-        render_popup_modal(frame, &state.theme, workspace, modal);
+        render_popup_modal(frame, &state.theme, workspace, modal, state);
         // A modal overlays the workspace, so the editor caret is hidden.
         return (
             None,
@@ -195,20 +195,18 @@ fn render_footer_with_perf(frame: &mut ratatui::Frame, state: &AppState, area: R
     perf_view::render(frame, &state.theme, chunks[1], &state.perf);
 }
 
-/// Render a data-carrying modal (row-limit picker / page input / confirm /
-/// commit-preview) as a centered, titled popup with a body summarizing it.
+/// Render a data-carrying modal. Confirm-style modals (delete connection /
+/// unregister / commit preview) use the generic centered Yes/No confirm popup;
+/// the results rows-per-page / page-input pickers instead float a small popup
+/// just above their toolbar button, so they never cover the whole workspace.
 fn render_popup_modal(
     frame: &mut ratatui::Frame,
     theme: &crate::common::view::theme::Theme,
     base: Rect,
     modal: &ModalKind,
+    state: &AppState,
 ) {
-    use crate::common::view::modal::{
-        is_confirm_modal, modal_title, render_confirm_popup, render_popup, render_titled_popup,
-    };
-    // Confirm-style modals (delete connection / unregister / commit preview)
-    // share the generic Yes/No confirm popup so their look matches the discover
-    // close dialog and every other confirm dialog.
+    use crate::common::view::modal::{is_confirm_modal, modal_title, render_confirm_popup};
     if is_confirm_modal(modal) {
         let title = modal_title(modal);
         let body = match modal {
@@ -249,28 +247,75 @@ fn render_popup_modal(
         return;
     }
 
-    render_popup(frame, theme, base, 45, 20, true, |f, area| {
-        let body = match modal {
-            ModalKind::ResultsRowLimitPicker { current, limits } => limits
+    render_results_picker_popup(frame, theme, base, modal, state);
+}
+
+/// Render the rows-per-page / page-input pickers as a compact popup anchored
+/// above their toolbar button (the `[r]rows` / `[p]page` controls). The popup
+/// is sized to its content and clamps inside the results pane; nothing behind
+/// it is dimmed or covered.
+fn render_results_picker_popup(
+    frame: &mut ratatui::Frame,
+    theme: &crate::common::view::theme::Theme,
+    base: Rect,
+    modal: &ModalKind,
+    state: &AppState,
+) {
+    use crate::common::view::modal::{modal_title, render_titled_popup};
+    use crate::common::view::overlay_clear::clear_overlay;
+    use crate::features::sql_workspace::sql_tab::results::pagination::{
+        ResultsPaginationHit, popup_above_anchor,
+    };
+
+    let (hit, body, width, height) = match modal {
+        ModalKind::ResultsRowLimitPicker { current, limits } => {
+            let mut rows: Vec<Line> = limits
                 .iter()
                 .map(|l| {
                     let marker = if *l == *current { "◄" } else { " " };
                     Line::from(Span::raw(format!("{marker} {l} rows")))
                 })
-                .collect(),
-            ModalKind::ResultsPageInput {
-                current_page,
-                total_pages,
-            } => {
-                let total = total_pages
-                    .map(|t| t.to_string())
-                    .unwrap_or_else(|| "?".to_string());
-                vec![Line::from(Span::raw(format!(
-                    "Page {current_page} of {total} — type a page number"
-                )))]
-            }
-            _ => Vec::new(), // unreachable: confirm modals handled above
-        };
-        render_titled_popup(f, theme, area, &modal_title(modal), body);
-    });
+                .collect();
+            rows.push(Line::from(Span::styled(
+                "Select: ENTER · Move: j/k · ESC",
+                Style::default().fg(theme.palette().muted),
+            )));
+            let height = 2 + rows.len() as u16;
+            (ResultsPaginationHit::RowLimit, rows, 30, height)
+        }
+        ModalKind::ResultsPageInput {
+            current_page,
+            total_pages,
+            input,
+        } => {
+            let total = total_pages
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "?".to_string());
+            let body = vec![
+                Line::from(Span::raw(format!(
+                    "Current: page {current_page} of {total}"
+                ))),
+                Line::from(Span::styled(
+                    format!("Go to: [{input}]"),
+                    Style::default().fg(theme.palette().accent),
+                )),
+                Line::from(Span::styled(
+                    "Enter: go · ESC: close",
+                    Style::default().fg(theme.palette().muted),
+                )),
+            ];
+            (ResultsPaginationHit::PageNumber, body, 32, 5)
+        }
+        _ => return, // unreachable: confirm modals handled by the caller
+    };
+
+    let Some(anchor) = crate::app::geometry::results_picker_anchor(state, base, hit) else {
+        return;
+    };
+    let popup = popup_above_anchor(anchor.anchor, anchor.pane_inner, width, height);
+    if popup.width < 2 || popup.height < 2 {
+        return;
+    }
+    clear_overlay(frame, popup);
+    render_titled_popup(frame, theme, popup, &modal_title(modal), body);
 }

@@ -559,6 +559,60 @@ pub(crate) fn sql_click_msgs(
                 SqlTabMsg::Message(SqlTabMessage::ToggleTableCompletion { tab_id }),
             )))]
         }
+        SqlClickAction::ResultsPagination { hit } => {
+            let Some(tab) = sql.active_tab() else {
+                return Vec::new();
+            };
+            let tab_id = tab.session.id;
+            use crate::app::state::ModalKind;
+            use crate::features::sql_workspace::sql_tab::results::msg::{
+                ResultsMessage, ResultsMsg,
+            };
+            use crate::features::sql_workspace::sql_tab::results::pagination::{
+                RESULTS_ROW_LIMIT_PRESETS, ResultsPageAction, ResultsPaginationHit, max_page,
+            };
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            // The click first focuses the results sub-pane, then acts on the
+            // toolbar control (page nav / modal open).
+            let mut msgs = vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                SqlTabMsg::Message(SqlTabMessage::Focus(SqlFocus::Results)),
+            )))];
+            let page_action = match hit {
+                ResultsPaginationHit::FirstPage => Some(ResultsPageAction::First),
+                ResultsPaginationHit::PrevPage => Some(ResultsPageAction::Prev),
+                ResultsPaginationHit::NextPage => Some(ResultsPageAction::Next),
+                ResultsPaginationHit::LastPage => Some(ResultsPageAction::Last),
+                ResultsPaginationHit::RowLimit => {
+                    msgs.push(AppMsg::OpenModal(ModalKind::ResultsRowLimitPicker {
+                        current: tab.results.list.row_limit,
+                        limits: RESULTS_ROW_LIMIT_PRESETS.to_vec(),
+                    }));
+                    None
+                }
+                ResultsPaginationHit::PageNumber => {
+                    let total_pages = max_page(
+                        tab.results.list.result.as_ref().and_then(|r| r.total_rows),
+                        tab.results.list.row_limit,
+                    );
+                    msgs.push(AppMsg::OpenModal(ModalKind::ResultsPageInput {
+                        current_page: tab.results.list.page,
+                        total_pages,
+                        input: tab.results.list.page.to_string(),
+                    }));
+                    None
+                }
+                ResultsPaginationHit::CountTotalRows => None,
+            };
+            if let Some(action) = page_action {
+                msgs.push(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::Results {
+                        tab_id,
+                        msg: ResultsMsg::Message(ResultsMessage::PageNav { action }),
+                    }),
+                ))));
+            }
+            msgs
+        }
         // A column-width resize drag is handled entirely by the shell's mouse
         // Down/Drag/Up handlers (geometry is computed there); no feature
         // message is dispatched for the initiating click itself.

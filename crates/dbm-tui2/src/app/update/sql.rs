@@ -3,11 +3,14 @@
 use super::UpdateResult;
 use super::{box_effect, box_intent, sync_objects_active, sync_objects_binding};
 use crate::app::msg::AppMsg;
-use crate::app::state::AppState;
+use crate::app::state::{AppState, ModalKind};
 use crate::app_shell::pane::Pane;
 use crate::features::explorer::effect::ExplorerEffect;
 use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
 use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+use crate::features::sql_workspace::sql_tab::results::msg::{
+    ResultsMessage as ResultsMessageInner, ResultsMsg,
+};
 use crate::features::sql_workspace::update::update as sql_workspace_update;
 
 pub(super) fn apply(msg: AppMsg, state: &mut AppState, result: &mut UpdateResult) {
@@ -32,6 +35,24 @@ pub(super) fn apply(msg: AppMsg, state: &mut AppState, result: &mut UpdateResult
     {
         state.focus = Pane::SQLWorkspace;
         result.dirty = true;
+    }
+    // A rows-per-page / page-number apply dispatched from the open results
+    // modal (Enter) closes the modal once the feature has processed it, so the
+    // updated page/limit becomes visible immediately (shell orchestration; the
+    // row-limit/page modals are the only senders of these two messages).
+    if matches!(
+        &inner,
+        SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Results {
+            msg: ResultsMsg::Message(
+                ResultsMessageInner::SetRowLimit { .. } | ResultsMessageInner::SetPage { .. }
+            ),
+            ..
+        }))
+    ) && matches!(
+        state.modal,
+        Some(ModalKind::ResultsRowLimitPicker { .. }) | Some(ModalKind::ResultsPageInput { .. })
+    ) {
+        result.pending.push_back(AppMsg::CloseModal);
     }
     // The sql feature's update is a pure by-value transition: move the
     // state out, update it, move the result back. No deep clone.

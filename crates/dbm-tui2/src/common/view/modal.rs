@@ -106,9 +106,11 @@ pub fn modal_footer_text(modal: Option<&ModalKind>) -> String {
     match modal {
         None => String::new(),
         Some(ModalKind::ResultsRowLimitPicker { .. }) => {
-            "Select: ENTER · Move: j/k · Custom: c · Close: ESC".to_string()
+            "Select: ENTER · Move: j/k · Close: ESC".to_string()
         }
-        Some(ModalKind::ResultsPageInput { .. }) => "Go: ENTER · Close: ESC".to_string(),
+        Some(ModalKind::ResultsPageInput { .. }) => {
+            "Type a page · Go: ENTER · Close: ESC".to_string()
+        }
         Some(ModalKind::DeleteConnectionConfirm { .. })
         | Some(ModalKind::UnregisterInstanceConfirm { .. })
         | Some(ModalKind::ResultsEditCommitPreview { .. }) => {

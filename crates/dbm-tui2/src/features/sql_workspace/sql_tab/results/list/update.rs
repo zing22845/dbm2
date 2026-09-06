@@ -6,6 +6,7 @@
 use crate::common::components::search::PaneSearchInput;
 
 use super::super::effect::ResultsEffect;
+use super::super::pagination::{ResultsPageAction, max_page, page_count, resolve_page_chord};
 use super::msg::ListMessage;
 use super::state::ListState;
 
@@ -13,14 +14,42 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
     let mut effects = Vec::new();
     let dirty = match msg {
         ListMessage::SetResult { result, paginated } => {
+            let row_count = result.rows.len();
+            // A page-nav anchor decided where the cursor of the incoming page
+            // lands (Prev/Last -> bottom). Consumed once per landed result.
+            let anchor_bottom = state.page_anchor_bottom;
+            state.page_anchor_bottom = false;
+            // Derive whether this page is the last reachable one so page-nav
+            // and the `at_last_page` guard stay consistent across runs.
+            state.at_last_page = if paginated {
+                match result.total_rows {
+                    Some(total) => state.page >= page_count(total, state.row_limit).max(1),
+                    None => row_count < state.row_limit || row_count == 0,
+                }
+            } else {
+                true
+            };
             state.set_result(result);
             state.query_error = None;
             state.paginated = paginated;
-            state.row = 0;
-            state.col = 0;
-            // A fresh result is deselected (matching the original dbm, which
-            // clears the cell selection after every query run).
-            state.selected = false;
+            if anchor_bottom && row_count > 0 {
+                // Landing on a page reached by moving backwards: park the
+                // cursor on its last row and scroll the viewport to the bottom
+                // (mirroring the original dbm's `results_scroll_to_page_bottom`
+                // after a Prev/Last nav).
+                state.row = row_count - 1;
+                state.col = 0;
+                state.selected = true;
+                let vr = state.viewport_rows.get().max(1);
+                state.v_scroll.set(row_count.saturating_sub(vr));
+            } else {
+                state.row = 0;
+                state.col = 0;
+                state.v_scroll.set(0);
+                // A fresh result is deselected (matching the original dbm, which
+                // clears the cell selection after every query run).
+                state.selected = false;
+            }
             state.h_scroll.set(0);
             state.search.reset();
             state.search_matches.clear();
@@ -58,6 +87,9 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
             state.result = None;
             state.col_widths.clear();
             state.query_error = None;
+            state.at_last_page = true;
+            state.page_anchor_bottom = false;
+            state.page_chord = None;
             state.row = 0;
             state.col = 0;
             state.search.reset();
@@ -74,6 +106,9 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
             state.result = None;
             state.col_widths.clear();
             state.query_error = Some(message);
+            state.at_last_page = true;
+            state.page_anchor_bottom = false;
+            state.page_chord = None;
             state.row = 0;
             state.col = 0;
             state.search.reset();
@@ -159,6 +194,10 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
             row_limit,
         } => {
             state.query_error = None;
+            // A fresh run restarts the cursor anchoring at the top; only a
+            // page-nav (`PageNav`) sets the bottom anchor for its landing page.
+            state.page_anchor_bottom = false;
+            state.page_chord = None;
             state.last_sql = sql.clone();
             state.last_instance = instance.clone();
             state.last_connection = connection.clone();
@@ -201,13 +240,23 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
             true
         }
         ListMessage::SetRowLimit { limit } => {
+            if state.edit.editing && state.edit.is_dirty() {
+                return (state, effects, false);
+            }
+            state.page_chord = None;
             state.row_limit = limit.max(1);
             state.page = 1;
+            // A new page size re-runs from page 1, landing at the top.
+            state.page_anchor_bottom = false;
             rerun_query(&state, &mut effects);
             true
         }
         ListMessage::SetPage { page } => {
-            let max = super::super::pagination::max_page(
+            if state.edit.editing && state.edit.is_dirty() {
+                return (state, effects, false);
+            }
+            state.page_chord = None;
+            let max = max_page(
                 state.result.as_ref().and_then(|r| r.total_rows),
                 state.row_limit,
             );
@@ -215,8 +264,28 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
             if let Some(max) = max {
                 state.page = state.page.min(max.max(1));
             }
+            // A direct page jump parks the cursor at the top of the target
+            // page (the landing page's row anchoring is set only by PageNav).
+            state.page_anchor_bottom = false;
             rerun_query(&state, &mut effects);
             true
+        }
+        ListMessage::PageNav { action } => {
+            // Toolbar / boundary navigation is not part of the `<`/`>` chord:
+            // using it disarms any pending double-press.
+            state.page_chord = None;
+            apply_page_action(&mut state, &mut effects, action)
+        }
+        ListMessage::PageChord { forward } => {
+            // `<`/`>` single-step nav that arms the double-press chord; a second
+            // press of the same key within the window upgrades to first/last.
+            let (pending, action) =
+                resolve_page_chord(state.page_chord.take(), std::time::Instant::now(), forward);
+            state.page_chord = pending;
+            match action {
+                Some(action) => apply_page_action(&mut state, &mut effects, action),
+                None => false,
+            }
         }
         ListMessage::Commit => {
             if let Ok(statements) = state.build_commit_statements() {
@@ -297,6 +366,45 @@ fn max_h_scroll(state: &ListState) -> usize {
     let table_w = crate::common::view::format::results_table_width(&state.col_widths) as usize;
     let vp = state.viewport_width.get() as usize;
     table_w.saturating_sub(vp)
+}
+
+/// Apply a page action (First / Prev / Next / Last / Set): resolve the target
+/// page from the live total, guard the page edges, and re-run the query.
+/// Shared by the toolbar nav (`PageNav`) and the `<`/`>` chord (`PageChord`).
+/// Returns whether a re-run was scheduled.
+fn apply_page_action(
+    state: &mut ListState,
+    effects: &mut Vec<ResultsEffect>,
+    action: ResultsPageAction,
+) -> bool {
+    if state.edit.editing && state.edit.is_dirty() {
+        return false;
+    }
+    let (next, anchor_bottom) = match action {
+        ResultsPageAction::First => (1usize, false),
+        ResultsPageAction::Prev => (state.page.saturating_sub(1).max(1), true),
+        ResultsPageAction::Next => {
+            if !state.can_go_next_page() {
+                (state.page, false)
+            } else {
+                (state.page + 1, false)
+            }
+        }
+        ResultsPageAction::Last => match state.result.as_ref().and_then(|r| r.total_rows) {
+            Some(total) => (page_count(total, state.row_limit).max(1), true),
+            // Without a total the last page is unknown: only a forward probe
+            // could find it, so report no change.
+            None => (state.page, false),
+        },
+        ResultsPageAction::Set(page) => (page, false),
+    };
+    if next == state.page {
+        return false;
+    }
+    state.page = next;
+    state.page_anchor_bottom = anchor_bottom;
+    rerun_query(state, effects);
+    true
 }
 
 /// Re-run the last query with the current page/row-limit.
@@ -608,5 +716,197 @@ mod tests {
         // An unknown column is a safe no-op.
         let (_s, _e, dirty) = update(ListMessage::AdjustColWidthTo { col: 99, width: 30 }, s);
         assert!(!dirty);
+    }
+
+    fn paginated_state(page: usize, total: Option<u64>, rows: usize) -> ListState {
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+        ListState {
+            result: Some(super::super::super::state::QueryResultData {
+                columns: vec![ColumnInfo {
+                    name: "x".into(),
+                    type_name: "int4".into(),
+                    type_display: "int4".into(),
+                    comment: None,
+                }],
+                rows: vec![vec!["1".into()]; rows],
+                rows_affected: None,
+                total_rows: total,
+            }),
+            paginated: true,
+            page,
+            row_limit: 100,
+            selected: true,
+            // `rerun_query` needs the last-run connection context to re-issue.
+            last_sql: "SELECT * FROM t".into(),
+            last_instance: "inst".into(),
+            last_connection: "conn".into(),
+            last_schema: "public".into(),
+            ..ListState::default()
+        }
+    }
+
+    fn rerun_page(effects: &[ResultsEffect]) -> Option<usize> {
+        effects.iter().find_map(|e| match e {
+            ResultsEffect::RunQuery { page, .. } => Some(*page),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn page_nav_next_increments_page_and_reruns() {
+        let (s, effects, dirty) = update(
+            ListMessage::PageNav {
+                action: super::super::super::pagination::ResultsPageAction::Next,
+            },
+            paginated_state(1, Some(300), 100),
+        );
+        assert!(dirty);
+        assert_eq!(rerun_page(&effects), Some(2), "Next re-runs page 2");
+        assert_eq!(s.page, 2);
+        assert!(
+            !s.page_anchor_bottom,
+            "moving forward anchors the landing page at the top"
+        );
+    }
+
+    #[test]
+    fn page_nav_next_at_last_page_is_a_noop() {
+        let (s, effects, dirty) = update(
+            ListMessage::PageNav {
+                action: super::super::super::pagination::ResultsPageAction::Next,
+            },
+            paginated_state(3, Some(300), 100),
+        );
+        assert!(!dirty);
+        assert_eq!(s.page, 3);
+        assert!(effects.is_empty(), "no re-run beyond the last page");
+    }
+
+    #[test]
+    fn page_nav_prev_decrements_and_anchors_bottom() {
+        let (s, effects, dirty) = update(
+            ListMessage::PageNav {
+                action: super::super::super::pagination::ResultsPageAction::Prev,
+            },
+            paginated_state(2, Some(300), 100),
+        );
+        assert!(dirty);
+        assert_eq!(rerun_page(&effects), Some(1));
+        assert_eq!(s.page, 1);
+        assert!(
+            s.page_anchor_bottom,
+            "moving backwards anchors the landing page at the bottom"
+        );
+    }
+
+    #[test]
+    fn page_nav_last_uses_total_to_compute_final_page() {
+        let (s, effects, dirty) = update(
+            ListMessage::PageNav {
+                action: super::super::super::pagination::ResultsPageAction::Last,
+            },
+            paginated_state(1, Some(300), 100),
+        );
+        assert!(dirty);
+        assert_eq!(rerun_page(&effects), Some(3));
+        assert_eq!(s.page, 3);
+        assert!(
+            s.page_anchor_bottom,
+            "Last lands on the final page's bottom"
+        );
+
+        // Without a total the last page is unknowable: no change, no re-run.
+        let (s, effects, dirty) = update(
+            ListMessage::PageNav {
+                action: super::super::super::pagination::ResultsPageAction::Last,
+            },
+            paginated_state(1, None, 100),
+        );
+        assert!(!dirty);
+        assert_eq!(s.page, 1);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn page_chord_single_press_pages_and_arms_chord() {
+        // A single `>` pages forward like PageNav but keeps the armed chord
+        // for a potential second press.
+        let (s, effects, dirty) = update(
+            ListMessage::PageChord { forward: true },
+            paginated_state(1, Some(300), 100),
+        );
+        assert!(dirty);
+        assert_eq!(rerun_page(&effects), Some(2));
+        assert_eq!(s.page, 2);
+        assert!(
+            s.page_chord.is_some(),
+            "a first `>` must arm the double-press chord"
+        );
+    }
+
+    #[test]
+    fn page_nav_disarms_armed_chord() {
+        // A toolbar / boundary nav is not a chord key: using one clears any
+        // armed `<`/`>` chord so the next `>` starts a fresh single page.
+        let mut state = paginated_state(1, Some(300), 100);
+        state.page_chord = Some((true, std::time::Instant::now()));
+        let (s, _e, dirty) = update(
+            ListMessage::PageNav {
+                action: super::super::super::pagination::ResultsPageAction::Next,
+            },
+            state,
+        );
+        assert!(dirty);
+        assert!(s.page_chord.is_none(), "PageNav must clear the chord");
+        assert_eq!(s.page, 2);
+    }
+
+    #[test]
+    fn set_result_uses_bottom_anchor_and_sets_at_last_page() {
+        // Prev nav left the bottom anchor armed; the landing result parks the
+        // cursor on its last row instead of the top.
+        let mut state = paginated_state(2, Some(300), 100);
+        state.page_anchor_bottom = true;
+        let (s, _e, _d) = update(
+            ListMessage::SetResult {
+                result: super::super::super::state::QueryResultData {
+                    columns: state.result.clone().unwrap().columns,
+                    rows: vec![vec!["1".into()]; 3],
+                    rows_affected: None,
+                    total_rows: Some(300),
+                },
+                paginated: true,
+            },
+            state,
+        );
+        assert_eq!(s.row, 2, "bottom-anchored landing selects the last row");
+        assert!(s.selected);
+        assert!(!s.page_anchor_bottom, "the anchor is consumed once");
+        assert!(!s.at_last_page, "page 2 of 3 is not the last page");
+
+        // Without a total a page returning fewer rows than the limit is the
+        // last one, and an unanchored landing selects the first row.
+        let (s, _e, _d) = update(
+            ListMessage::SetResult {
+                result: super::super::super::state::QueryResultData {
+                    columns: vec![crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo {
+                        name: "x".into(),
+                        type_name: "int4".into(),
+                        type_display: "int4".into(),
+                        comment: None,
+                    }],
+                    rows: vec![vec!["1".into()]; 2],
+                    rows_affected: None,
+                    total_rows: None,
+                },
+                paginated: true,
+            },
+            paginated_state(1, None, 100),
+        );
+        assert!(
+            s.at_last_page,
+            "a short page with no total is the last page"
+        );
+        assert_eq!(s.row, 0, "a top-anchored landing selects the first row");
     }
 }

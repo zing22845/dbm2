@@ -9,6 +9,7 @@ use ratatui::layout::Rect;
 
 use super::editor::layout as editor_view;
 use super::layout::sql_tab_layout;
+use super::results::pagination::ResultsPaginationHit;
 use super::session::{TabSession, session_view_key};
 use super::state::{SqlFocus, SqlTabState};
 
@@ -88,6 +89,9 @@ pub enum SqlClickAction {
     /// Single click on a results column's header splitter: begin a drag to
     /// resize that column's width.
     ResultsColResize { col: usize },
+    /// Single click on the results pagination toolbar (`« ‹ [p] › »` or the
+    /// row-limit control). The hit rects mirror `layout_pagination_bar`.
+    ResultsPagination { hit: ResultsPaginationHit },
 }
 
 /// Hit-test a click at `(x, y)` inside the SQL workspace's tab-bar + body
@@ -336,7 +340,13 @@ pub fn sql_workspace_click(
                 &tab.results.list.executed_sql_display(),
             );
 
-        // Step 3: only the list sub-pane responds to cell clicks.
+        // Step 3: clicking a pagination-toolbar control (page nav / row limit /
+        // page number) acts on pagination, before the list cell handling below.
+        if let Some(hit) = results_pagination_hit_at(tab, layout.pagination, x, y) {
+            return Some(SqlClickAction::ResultsPagination { hit });
+        }
+
+        // Step 4: only the list sub-pane responds to cell clicks.
         if contains(layout.list, x, y)
             && tab.results.list.result.is_some()
             && tab.results.list.row_count() > 0
@@ -401,6 +411,39 @@ pub fn sql_workspace_click(
         return None; // splitter or footer
     };
     Some(SqlClickAction::FocusSubPane(focus))
+}
+
+/// Map a click inside the Results Block's inner area to a pagination-toolbar
+/// hit, mirroring the toolbar geometry `results::view` renders (the
+/// right-aligned `layout_pagination_bar` rects). Returns `None` for clicks
+/// elsewhere, so only genuine toolbar controls act on pagination.
+fn results_pagination_hit_at(
+    tab: &crate::features::sql_workspace::sql_tab::state::SqlTab,
+    pagination: Option<Rect>,
+    x: u16,
+    y: u16,
+) -> Option<ResultsPaginationHit> {
+    let list = &tab.results.list;
+    let pag_area = pagination?;
+    if list.row_count() == 0 {
+        return None;
+    }
+    let total_rows = list.result.as_ref().and_then(|r| r.total_rows);
+    let bar = crate::features::sql_workspace::sql_tab::results::pagination::layout_pagination_bar(
+        pag_area,
+        list.row_limit,
+        list.page,
+        total_rows,
+        list.row_count(),
+        false,
+        false,
+    );
+    for (hit, rect) in bar.hits {
+        if contains(rect, x, y) {
+            return Some(hit);
+        }
+    }
+    None
 }
 
 fn contains(r: ratatui::layout::Rect, x: u16, y: u16) -> bool {

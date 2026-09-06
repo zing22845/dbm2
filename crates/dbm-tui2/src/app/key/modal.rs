@@ -38,12 +38,8 @@ pub(super) fn modal_key(key: KeyEvent, modal: &ModalKind, state: &AppState) -> O
     match key.code {
         KeyCode::Esc => Some(close()),
         // Row-limit picker: up/down cycle the presets, enter applies.
-        KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') | KeyCode::Enter => {
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
             if let ModalKind::ResultsRowLimitPicker { current, limits } = modal {
-                if key.code == KeyCode::Enter {
-                    return active_tab_id()
-                        .map(|id| sql_results(R::SetRowLimit { limit: *current }, id));
-                }
                 let delta = if matches!(key.code, KeyCode::Up | KeyCode::Char('k')) {
                     usize::MAX // -1 wraps below
                 } else {
@@ -61,19 +57,72 @@ pub(super) fn modal_key(key: KeyEvent, modal: &ModalKind, state: &AppState) -> O
                     limits: limits.clone(),
                 }));
             }
-            // Page input: enter applies the shown page.
-            if let ModalKind::ResultsPageInput { current_page, .. } = modal {
-                return active_tab_id().map(|id| {
-                    sql_results(
-                        R::SetPage {
-                            page: *current_page,
-                        },
-                        id,
-                    )
-                });
+            None
+        }
+        // Page input: digits build the target, Backspace edits, Enter jumps.
+        KeyCode::Char(c)
+            if c.is_ascii_digit() && matches!(modal, ModalKind::ResultsPageInput { .. }) =>
+        {
+            if let ModalKind::ResultsPageInput {
+                current_page,
+                total_pages,
+                input,
+            } = modal
+            {
+                let mut next = input.clone();
+                if next.len() < 8 {
+                    next.push(c);
+                }
+                return Some(AppMsg::OpenModal(ModalKind::ResultsPageInput {
+                    current_page: *current_page,
+                    total_pages: *total_pages,
+                    input: next,
+                }));
             }
             None
         }
+        KeyCode::Backspace if matches!(modal, ModalKind::ResultsPageInput { .. }) => {
+            if let ModalKind::ResultsPageInput {
+                current_page,
+                total_pages,
+                input,
+            } = modal
+            {
+                let mut next = input.clone();
+                next.pop();
+                return Some(AppMsg::OpenModal(ModalKind::ResultsPageInput {
+                    current_page: *current_page,
+                    total_pages: *total_pages,
+                    input: next,
+                }));
+            }
+            None
+        }
+        KeyCode::Enter => match modal {
+            ModalKind::ResultsRowLimitPicker { current, .. } => {
+                active_tab_id().map(|id| sql_results(R::SetRowLimit { limit: *current }, id))
+            }
+            ModalKind::ResultsPageInput {
+                current_page,
+                total_pages,
+                input,
+            } => {
+                // Resolve the typed page (clamped to the known page count,
+                // falling back to the current page for empty/invalid input).
+                let parsed = input.trim().parse::<usize>().unwrap_or(*current_page);
+                let page = if parsed == 0 {
+                    *current_page
+                } else {
+                    match total_pages {
+                        Some(max) => parsed.min((*max).max(1)),
+                        None => parsed,
+                    }
+                };
+                active_tab_id().map(|id| sql_results(R::SetPage { page }, id))
+            }
+            // Confirm modals ignore Enter (they confirm with y / cancel with n).
+            _ => None,
+        },
         // Confirm modals: `y`/`Y` confirms, `n`/`N` cancels (shared handling).
         _ => confirm_yes_no_key(
             key,
@@ -124,6 +173,91 @@ mod tests {
                 assert_eq!(connection_name, "conn");
             }
             other => panic!("expected DeleteConnection, got {other:?}"),
+        }
+    }
+    #[test]
+    fn page_input_digit_appends_to_buffer_and_enter_jumps_clamped() {
+        use crate::app::state::{AppState, ModalKind};
+        use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+        use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+        use crate::features::sql_workspace::sql_tab::results::msg::{
+            ResultsMessage as R, ResultsMsg,
+        };
+
+        let mut state = AppState::default();
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+            None,
+        );
+        let modal = ModalKind::ResultsPageInput {
+            current_page: 2,
+            total_pages: Some(9),
+            input: "2".into(),
+        };
+        // A digit appends to the live buffer (keeping the page context).
+        let msg = modal_key(key(KeyCode::Char('5'), KeyModifiers::NONE), &modal, &state)
+            .expect("a digit should edit the page buffer");
+        let buffer = match msg {
+            AppMsg::OpenModal(ModalKind::ResultsPageInput { input, .. }) => input,
+            other => panic!("expected an updated page-input modal, got {other:?}"),
+        };
+        assert_eq!(buffer, "25");
+
+        // Enter applies the typed page, clamped to the total page count.
+        let modal = ModalKind::ResultsPageInput {
+            current_page: 2,
+            total_pages: Some(9),
+            input: buffer,
+        };
+        let msg = modal_key(key(KeyCode::Enter, KeyModifiers::NONE), &modal, &state)
+            .expect("Enter should jump to the typed page");
+        let page = match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Results {
+                    msg: ResultsMsg::Message(R::SetPage { page }),
+                    ..
+                },
+            )))) => page,
+            other => panic!("expected Results SetPage, got {other:?}"),
+        };
+        assert_eq!(page, 9, "page 25 must clamp to the 9 available pages");
+    }
+    #[test]
+    fn row_limit_picker_enter_applies_current_limit() {
+        use crate::app::state::{AppState, ModalKind};
+        use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+        use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+        use crate::features::sql_workspace::sql_tab::results::msg::{
+            ResultsMessage as R, ResultsMsg,
+        };
+
+        let mut state = AppState::default();
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+            None,
+        );
+        let modal = ModalKind::ResultsRowLimitPicker {
+            current: 200,
+            limits: vec![50, 100, 200],
+        };
+        let msg = modal_key(key(KeyCode::Enter, KeyModifiers::NONE), &modal, &state)
+            .expect("Enter should apply the selected row limit");
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Results {
+                    msg: ResultsMsg::Message(R::SetRowLimit { limit }),
+                    ..
+                },
+            )))) => assert_eq!(limit, 200),
+            other => panic!("expected Results SetRowLimit, got {other:?}"),
         }
     }
 }

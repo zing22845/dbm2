@@ -10,6 +10,7 @@ use super::detail::msg::DetailMsg;
 use super::edit_sql::EditTarget;
 use super::list::msg::ListMessage;
 pub use super::list::msg::ListMsg;
+use super::pagination::ResultsPageAction;
 use super::state::QueryResultData;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +72,10 @@ pub enum ResultsMessage {
     SetRowLimit { limit: usize },
     /// Jump to a page.
     SetPage { page: usize },
+    /// Navigate by a page action (First / Prev / Next / Last).
+    PageNav { action: ResultsPageAction },
+    /// A `<` / `>` page key press (see [`ListMessage::PageChord`]).
+    PageChord { forward: bool },
     /// Commit the current edits.
     Commit,
     /// Toggle the detail sub-pane open/close (inspect mode).
@@ -166,6 +171,8 @@ impl ResultsMessage {
             ResultsMessage::DelRow => ListMessage::DelRow,
             ResultsMessage::SetRowLimit { limit } => ListMessage::SetRowLimit { limit },
             ResultsMessage::SetPage { page } => ListMessage::SetPage { page },
+            ResultsMessage::PageNav { action } => ListMessage::PageNav { action },
+            ResultsMessage::PageChord { forward } => ListMessage::PageChord { forward },
             ResultsMessage::Commit => ListMessage::Commit,
             ResultsMessage::SyncViewport { rows, width } => {
                 ListMessage::SyncViewport { rows, width }

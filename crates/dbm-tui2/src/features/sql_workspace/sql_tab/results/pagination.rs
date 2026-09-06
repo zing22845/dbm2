@@ -12,6 +12,9 @@ pub const MIN_RESULTS_ROW_LIMIT: usize = 1;
 pub const MAX_RESULTS_ROW_LIMIT: usize = 10_000;
 pub const RESULTS_ROW_LIMIT_PRESETS: [usize; 4] = [50, 100, 500, 1000];
 pub const RESULTS_PAGINATION_BAR_HEIGHT: u16 = 1;
+/// Window (ms) within which a repeated `<` / `>` upgrades to first / last
+/// page, mirroring the original dbm's `PAGE_CHORD_MS`.
+pub const RESULTS_PAGE_CHORD_MS: u128 = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResultsPageAction {
@@ -335,6 +338,73 @@ pub fn layout_pagination_bar(
     ResultsPaginationLayout { bar_rect, hits }
 }
 
+/// Resolve the `<` / `>` double-press chord: the first press navigates one
+/// page and arms the chord; a second press of the same key within
+/// [`RESULTS_PAGE_CHORD_MS`] upgrades to first (`<<`) / last (`>>`) page
+/// (original dbm `resolve_page_chord`). A press of the *other* direction (or
+/// any expired chord) simply re-arms. Returns `(next_pending, action)`.
+pub fn resolve_page_chord(
+    pending: Option<(bool, std::time::Instant)>,
+    now: std::time::Instant,
+    forward: bool,
+) -> (
+    Option<(bool, std::time::Instant)>,
+    Option<ResultsPageAction>,
+) {
+    match pending {
+        Some((dir, at))
+            if dir == forward && now.duration_since(at).as_millis() <= RESULTS_PAGE_CHORD_MS =>
+        {
+            (
+                None,
+                Some(if forward {
+                    ResultsPageAction::Last
+                } else {
+                    ResultsPageAction::First
+                }),
+            )
+        }
+        _ => (
+            Some((forward, now)),
+            Some(if forward {
+                ResultsPageAction::Next
+            } else {
+                ResultsPageAction::Prev
+            }),
+        ),
+    }
+}
+
+/// Position a small popup of `width` × `height` just above `anchor` while
+/// staying inside `body` (the pane the toolbar belongs to). Used by the
+/// rows-per-page / page-number pickers, which float above their toolbar button
+/// instead of covering the whole workspace (matching the original dbm's
+/// `layout_page_input_popup` / `layout_row_limit_popup`).
+pub fn popup_above_anchor(anchor: Rect, body: Rect, width: u16, height: u16) -> Rect {
+    if body.width == 0 || body.height == 0 {
+        return Rect::default();
+    }
+    let width = width.min(body.width);
+    // The popup opens upward from the anchor's top edge; if there is not
+    // enough room above, the available space caps the height rather than
+    // overlapping the button.
+    let max_height = anchor.y.saturating_sub(body.y).max(1);
+    let height = height.min(max_height);
+    let x = anchor
+        .x
+        .saturating_add(anchor.width / 2)
+        .saturating_sub(width / 2)
+        .max(body.x)
+        .min(body.x.saturating_add(body.width.saturating_sub(width)));
+    let y = anchor.y.saturating_sub(height).max(body.y);
+    Rect {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
 pub fn point_in_rect(x: u16, y: u16, rect: Rect) -> bool {
     x >= rect.x
         && y >= rect.y
@@ -421,5 +491,105 @@ mod tests {
         let layout = layout_pagination_bar(area, 100, 1, None, 100, false, true);
         assert!(!layout.hits.is_empty());
         assert!(layout.bar_rect.width <= area.width);
+    }
+
+    #[test]
+    fn popup_above_anchor_sits_above_and_inside_body() {
+        let body = Rect {
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 40,
+        };
+        let anchor = Rect {
+            x: 100,
+            y: 30,
+            width: 6,
+            height: 1,
+        };
+        let popup = popup_above_anchor(anchor, body, 24, 5);
+        assert_eq!(popup.height, 5);
+        assert!(
+            popup.bottom() <= anchor.y,
+            "popup must sit above the anchor"
+        );
+        assert!(popup.x >= body.x && popup.right() <= body.right());
+        // Horizontally centered over the anchor.
+        let anchor_center = anchor.x.saturating_add(anchor.width / 2);
+        assert!(popup.x <= anchor_center && popup.right() >= anchor_center);
+    }
+
+    #[test]
+    fn popup_above_anchor_clamps_height_when_little_room() {
+        // Anchor at the very top of the body: only one row is available above,
+        // so the popup collapses instead of overlapping the anchor.
+        let body = Rect {
+            x: 0,
+            y: 5,
+            width: 80,
+            height: 20,
+        };
+        let anchor = Rect {
+            x: 40,
+            y: 6,
+            width: 6,
+            height: 1,
+        };
+        let popup = popup_above_anchor(anchor, body, 24, 8);
+        assert_eq!(popup.y, body.y);
+        assert_eq!(popup.height, 1);
+        assert!(popup.bottom() <= anchor.y);
+    }
+
+    #[test]
+    fn first_gt_pages_next_and_arms_the_chord() {
+        let t0 = std::time::Instant::now();
+        let (pending, action) = resolve_page_chord(None, t0, true);
+        assert!(pending.is_some(), "first `>` arms the chord");
+        assert_eq!(action, Some(ResultsPageAction::Next));
+    }
+
+    #[test]
+    fn double_gt_within_window_jumps_last() {
+        let t0 = std::time::Instant::now();
+        let (pending, _) = resolve_page_chord(None, t0, true);
+        let (pending2, action2) = resolve_page_chord(pending, t0, true);
+        assert!(pending2.is_none(), "`>>` consumes the chord");
+        assert_eq!(action2, Some(ResultsPageAction::Last));
+    }
+
+    #[test]
+    fn double_lt_within_window_jumps_first() {
+        let t0 = std::time::Instant::now();
+        let (pending, _) = resolve_page_chord(None, t0, false);
+        let (_, action) = resolve_page_chord(pending, t0, false);
+        assert_eq!(action, Some(ResultsPageAction::First));
+    }
+
+    #[test]
+    fn opposite_direction_rearms_instead_of_escalating() {
+        let t0 = std::time::Instant::now();
+        let (pending, _) = resolve_page_chord(None, t0, true);
+        // `>` then `<`: the opposite direction does not escalate; `<` pages
+        // back and re-arms in its own direction.
+        let (pending2, action2) = resolve_page_chord(pending, t0, false);
+        assert_eq!(action2, Some(ResultsPageAction::Prev));
+        assert!(pending2.is_some());
+        let (_, action3) = resolve_page_chord(pending2, t0, false);
+        assert_eq!(action3, Some(ResultsPageAction::First));
+    }
+
+    #[test]
+    fn expired_chord_pages_once_more() {
+        let t0 = std::time::Instant::now();
+        let (pending, _) = resolve_page_chord(None, t0, true);
+        let late = t0 + std::time::Duration::from_millis(RESULTS_PAGE_CHORD_MS as u64 + 1);
+        let (pending2, action) = resolve_page_chord(pending, late, true);
+        assert_eq!(
+            action,
+            Some(ResultsPageAction::Next),
+            "late repeat is a plain page"
+        );
+        assert!(pending2.is_some());
     }
 }

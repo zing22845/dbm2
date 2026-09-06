@@ -42,6 +42,15 @@ pub struct ListState {
     pub at_last_page: bool,
     /// Whether the result came from a paginated query.
     pub paginated: bool,
+    /// Transient cursor anchor for the next landed result: when a page-nav
+    /// moved *backwards* (Prev / Last) the incoming page's cursor is placed on
+    /// its last row instead of the top, mirroring the original dbm's
+    /// "previous page lands at the bottom". Cleared once the result lands.
+    pub page_anchor_bottom: bool,
+    /// Transient `<` / `>` double-press chord state (`forward`, armed-at):
+    /// a second press of the same key within the chord window upgrades to
+    /// first / last page. Any non-chord message clears it.
+    pub page_chord: Option<(bool, std::time::Instant)>,
     /// Horizontal scroll offset of the result table.
     /// Uses `Cell` for interior mutability: the view writes the computed
     /// anchored scroll back here so the next frame starts from the correct
@@ -142,6 +151,11 @@ impl ListState {
             self.result.as_ref().and_then(|r| r.total_rows),
             self.at_last_page,
         )
+    }
+
+    /// Whether a previous SQL page exists (the cursor is on a page > 1).
+    pub fn can_go_prev_page(&self) -> bool {
+        self.paginated && self.page > 1
     }
 
     /// Whether the current result is editable (has an edit target).
