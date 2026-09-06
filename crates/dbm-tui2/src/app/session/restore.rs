@@ -1,258 +1,16 @@
-//! TUI session persistence: save/restore the open SQL tabs and their context
-//! across app restarts.
-//!
-//! The on-disk schema lives in `dbm_store` (`TuiSessionSnapshot`, stored as
-//! JSON under `tui_session`). This module adapts the current `AppState` to that
-//! schema. Fields the shell does not yet track (split ratios, tree width, etc.)
-//! are persisted as defaults and round-trip harmlessly; the schema is additive
-//! so older/newer snapshots remain compatible as the shell grows.
-
-use dbm_store::{
-    TUI_SESSION_VERSION, TuiInstanceWorkspaceSnapshot, TuiSessionSnapshot, TuiTabSnapshot,
-    TuiTreeSelection, TuiTreeSnapshot, load_tui_session, save_tui_session,
+//! Session restore: apply a persisted snapshot back onto the [`AppState`].
+use super::snapshot::{
+    approx_discover_body_height, approx_explorer_body_height, approx_sql_body_height,
 };
+use dbm_store::{TuiSessionSnapshot, TuiTreeSelection};
 
 use crate::app::action::Action;
 use crate::app::state::AppState;
 use crate::app_shell::effect::ErasedEffect;
 use crate::app_shell::nav::{ExplorerPane, IwPane};
-use crate::app_shell::pane::{Pane, pane_from_name, pane_name};
+use crate::app_shell::pane::{Pane, pane_from_name};
 
-/// Restore a previously persisted session into `state`. Returns the
-/// `LoadConnections` effects needed to fetch the subtrees of instances that
-/// were restored expanded (their connections are loaded lazily). Returns an
-/// empty vec when no compatible snapshot exists (fresh start).
-pub fn restore_session(state: &mut AppState) -> anyhow::Result<Vec<Box<dyn ErasedEffect<Action>>>> {
-    // Load the persisted SQL history once at startup and seed it into every
-    // restored tab, mirroring the original dbm's `load_sql_history` (the store
-    // groups by `(instance, connection)`, so each tab sees the history for any
-    // connection it later binds to).
-    let loaded = dbm_store::Store::open_default()
-        .ok()
-        .and_then(|store| store.load_sql_history().ok());
-    let effects = if let Some(snapshot) = load_tui_session()? {
-        apply_snapshot(state, &snapshot)
-    } else {
-        Vec::new()
-    };
-    if let Some(map) = loaded {
-        state.sql.sql_tab.history_store =
-            crate::features::sql_workspace::sql_tab::history::store::SqlHistoryStore::from_map(map);
-    }
-    Ok(effects)
-}
-
-/// Persist the current session. Best-effort: a failure to write is surfaced to
-/// the caller (which may log or ignore it at exit).
-pub fn persist_session(state: &AppState) -> anyhow::Result<()> {
-    save_tui_session(&snapshot_from_app(state))
-        .map_err(|e| anyhow::anyhow!("failed to save TUI session: {e}"))
-}
-
-/// Approximate the SQL tab body height (the track the horizontal splitter is a
-/// percentage of) from the cached terminal height. The exact value depends on
-/// the live layout (header/footer/border rows), but this is only used to
-/// round-trip a persisted percentage to/from rows; the layout re-clamps the
-/// materialized rows to `[20%, 80%]` of the true track anyway.
-fn approx_sql_body_height(state: &AppState) -> u16 {
-    state
-        .term_height
-        .saturating_sub(6) // header + footer + borders
-        .max(1)
-}
-
-/// Approximate the discover targets/results track height: the discover popup
-/// overlays ~75% of the body height (centered), minus the engine selector rows.
-/// Only used to round-trip the persisted percentage to/from rows; the layout
-/// re-clamps to `[20%, 80%]` of the true track.
-fn approx_discover_body_height(state: &AppState) -> u16 {
-    let body_h = state.term_height.saturating_sub(6).max(1);
-    let popup_h = (body_h * 3) / 4;
-    popup_h
-        .saturating_sub(6) // border (2) + engine selector (~4)
-        .max(1)
-}
-
-/// Approximate the explorer instances/objects track height: the explorer
-/// column's inner height (body minus the outer border). Only used to
-/// round-trip the persisted percentage to/from rows; the layout re-clamps to
-/// `[20%, 80%]` of the true track.
-fn approx_explorer_body_height(state: &AppState) -> u16 {
-    state
-        .term_height
-        .saturating_sub(6) // header + footer + borders
-        .saturating_sub(2) // explorer outer border
-        .max(1)
-}
-
-fn snapshot_from_app(state: &AppState) -> TuiSessionSnapshot {
-    let track_h = approx_sql_body_height(state);
-    let tabs = state
-        .sql
-        .sql_tab
-        .tabs
-        .iter()
-        .map(|tab| {
-            let session = &tab.session;
-            let sql = crate::common::editor::editor_text(&tab.editor.editor);
-            TuiTabSnapshot {
-                instance: session.instance.clone().unwrap_or_default(),
-                connection: session.connection.clone().unwrap_or_default(),
-                sequence: session.sequence as u32,
-                sql,
-                // Persist the horizontal split as a percentage (stable across
-                // terminals); the running state keeps it in absolute rows.
-                split_ratio: tab.splitter.editor_top_pct(track_h),
-                history_pane_width: tab.splitter.history_pane_width,
-                detail_pane_width: tab.history.splitter.detail_pane_width,
-                database: session.database.clone().unwrap_or_default(),
-                schema: session.schema.clone().unwrap_or_default(),
-                complete_table_names: tab.complete_table_names,
-            }
-        })
-        .collect();
-
-    TuiSessionSnapshot {
-        version: TUI_SESSION_VERSION,
-        focus: pane_name(state.focus).to_string(),
-        // `tree_width` doubles as the Explorer / workspace splitter width (the
-        // Explorer pane is the tree); persisted in absolute columns.
-        tree_width: state.splitter.explorer_pane_width,
-        tree: tree_snapshot(&state.explorer),
-        tabs,
-        active_tab: state.sql.sql_tab.active_tab,
-        instance_workspace: iw_snapshot(state),
-        // Persist the discover targets/results split as a percentage (stable
-        // across terminals); the running state keeps it in absolute rows.
-        discover_targets_ratio: state
-            .discover
-            .splitter
-            .targets_height_pct(approx_discover_body_height(state)),
-        // Persist the explorer instances/objects split as a percentage (stable
-        // across terminals); the running state keeps it in absolute rows.
-        explorer_split_ratio: state
-            .explorer
-            .splitter
-            .instances_height_pct(approx_explorer_body_height(state)),
-        explorer_pane: match state.explorer.pane {
-            ExplorerPane::Instances => "instances",
-            ExplorerPane::Objects => "objects",
-        }
-        .into(),
-    }
-}
-
-/// Persist the explorer tree's expansion and cursor state. Instances are
-/// remembered by name; the objects tree by its expansion keys.
-fn tree_snapshot(explorer: &crate::features::explorer::state::ExplorerState) -> TuiTreeSnapshot {
-    // Expanded instance names (expansion lives on each node's `expanded` flag).
-    let expanded_instances: Vec<String> = explorer
-        .instances
-        .nodes
-        .iter()
-        .filter(|n| n.expanded)
-        .filter_map(|n| n.instance.as_ref())
-        .map(|i| i.name.clone())
-        .collect();
-
-    // Cursor: resolve the highlighted row to an instance or connection name.
-    let cursor = explorer.instances.cursor_selection().and_then(|(i, conn)| {
-        let instance = explorer.instances.instance_name(i);
-        if instance.is_empty() {
-            return None;
-        }
-        Some(match conn {
-            Some(ci) => {
-                let connection = explorer
-                    .instances
-                    .nodes
-                    .get(i)
-                    .and_then(|n| n.connections.get(ci))
-                    .map(|c| c.name.clone())
-                    .unwrap_or_default();
-                if connection.is_empty() {
-                    return None;
-                }
-                TuiTreeSelection::Connection {
-                    instance,
-                    connection,
-                }
-            }
-            None => TuiTreeSelection::Instance { instance },
-        })
-    });
-
-    // Sort for a deterministic order (the underlying storage is a HashSet, whose
-    // iteration order is not stable) so the serialized session and tests are
-    // reproducible.
-    let mut expanded_objects: Vec<String> = explorer.objects.expanded.iter().cloned().collect();
-    expanded_objects.sort();
-
-    // The active workspace node (instance or connection), so restarting restores
-    // the active-row highlight and the workspace shown.
-    let active_workspace = explorer.instances.active_workspace.and_then(|aw| {
-        use crate::features::explorer::instances::state::ActiveWorkspaceKind;
-        match aw {
-            ActiveWorkspaceKind::Instance(instance_idx) => {
-                let instance = explorer.instances.instance_name(instance_idx);
-                if instance.is_empty() {
-                    None
-                } else {
-                    Some(TuiTreeSelection::Instance { instance })
-                }
-            }
-            ActiveWorkspaceKind::Connection {
-                instance_idx,
-                conn_idx,
-            } => {
-                let instance = explorer.instances.instance_name(instance_idx);
-                let connection = explorer
-                    .instances
-                    .nodes
-                    .get(instance_idx)
-                    .and_then(|n| n.connections.get(conn_idx))
-                    .map(|c| c.name.clone())
-                    .unwrap_or_default();
-                if instance.is_empty() || connection.is_empty() {
-                    None
-                } else {
-                    Some(TuiTreeSelection::Connection {
-                        instance,
-                        connection,
-                    })
-                }
-            }
-        }
-    });
-
-    TuiTreeSnapshot {
-        expanded_instances,
-        cursor,
-        active_workspace,
-        expanded_objects,
-        objects_bound_instance: explorer.objects.bound_instance.clone(),
-        objects_bound_connection: explorer.objects.bound_connection.clone(),
-        objects_active_db: explorer.objects.active_db.clone(),
-        objects_active_schema: explorer.objects.active_schema.clone(),
-    }
-}
-
-/// Persist the instance-workspace sub-pane focus and connections cursor.
-fn iw_snapshot(state: &AppState) -> Option<TuiInstanceWorkspaceSnapshot> {
-    if !state.instance_workspace_open() {
-        return None;
-    }
-    Some(TuiInstanceWorkspaceSnapshot {
-        section: match state.iw.pane {
-            IwPane::Overview => "overview",
-            IwPane::Connections => "connections",
-        }
-        .to_string(),
-        connections_cursor: state.iw.connections.cursor,
-    })
-}
-
-fn apply_snapshot(
+pub(super) fn apply_snapshot(
     state: &mut AppState,
     snapshot: &TuiSessionSnapshot,
 ) -> Vec<Box<dyn ErasedEffect<Action>>> {
@@ -474,12 +232,11 @@ fn apply_snapshot(
 
     restore_effects
 }
-
 /// Restore the instances tree's expansion set and cursor from the snapshot.
 /// Returns `LoadConnections` effects for every restored-expanded instance whose
 /// connections are not yet loaded, so the lazily-loaded subtrees are fetched
 /// right after startup (matching the interactive `Expand` behavior).
-fn apply_instances_tree(
+pub(super) fn apply_instances_tree(
     state: &mut AppState,
     snapshot: &TuiSessionSnapshot,
     effects: &mut Vec<Box<dyn ErasedEffect<Action>>>,
@@ -529,12 +286,11 @@ fn apply_instances_tree(
         }
     }
 }
-
 /// Stage the objects tree's expansion keys for restore. The tree is usually
 /// unbound right after startup, so the keys are parked until it is next bound
 /// to the saved connection (`ObjectsState::rebind`), at which point they are
 /// re-applied and the catalog is re-fetched.
-fn apply_objects_expansion(state: &mut AppState, snapshot: &TuiSessionSnapshot) {
+pub(super) fn apply_objects_expansion(state: &mut AppState, snapshot: &TuiSessionSnapshot) {
     // Restore the active database immediately (so its row is forced expanded)
     // but defer the active schema: the tree is unbound at startup and its
     // schemas load lazily, so the schema is validated (and degraded if it no
@@ -571,103 +327,41 @@ fn apply_objects_expansion(state: &mut AppState, snapshot: &TuiSessionSnapshot) 
     state.explorer.objects.restore_bound_connection =
         snapshot.tree.objects_bound_connection.clone();
 }
-
-fn non_empty(s: String) -> Option<String> {
+pub(super) fn non_empty(s: String) -> Option<String> {
     if s.is_empty() { None } else { Some(s) }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::snapshot::snapshot_from_app;
     use super::*;
+    use dbm_store::{
+        TUI_SESSION_VERSION, TuiInstanceWorkspaceSnapshot, TuiTabSnapshot, TuiTreeSnapshot,
+    };
 
     fn sample_state() -> AppState {
         AppState::default()
     }
 
-    #[test]
-    fn snapshot_round_trips_default_state() {
-        let state = sample_state();
-        let snap = snapshot_from_app(&state);
-        assert_eq!(snap.version, TUI_SESSION_VERSION);
-        assert_eq!(snap.focus, "header");
-        // Default app opens no tabs (a tab is opened when a connection is
-        // selected in the tree).
-        assert!(snap.tabs.is_empty());
-    }
-
-    #[test]
-    fn snapshot_persists_and_restores_explorer_instances_split() {
-        // The explorer instances/objects split is persisted as a percentage and
-        // re-materialized to rows against the current body height on restore.
-        let mut state = sample_state();
-        state.term_height = 48; // explorer body ≈ 40 rows
-        state
-            .explorer
-            .splitter
-            .set_instances_height_pct(50, approx_explorer_body_height(&state));
-        let snap = snapshot_from_app(&state);
-        assert_eq!(snap.explorer_split_ratio, 50);
-
-        let mut restored = sample_state();
-        restored.term_height = 48;
-        let effects = apply_snapshot(&mut restored, &snap);
-        let track = approx_explorer_body_height(&restored);
-        assert_eq!(
-            restored.explorer.splitter.instances_height,
-            (track * 50) / 100
-        );
-        assert_eq!(restored.explorer.splitter.instances_height_pct(track), 50);
-        drop(effects);
-    }
-
-    #[test]
-    fn snapshot_persists_and_restores_explorer_pane_width() {
-        // The Explorer / workspace splitter width is persisted in `tree_width`
-        // and clamped on restore.
-        let mut state = sample_state();
-        state.splitter.explorer_pane_width = 40;
-        let snap = snapshot_from_app(&state);
-        assert_eq!(snap.tree_width, 40);
-
-        // An out-of-range persisted width is clamped on restore.
-        let mut restored = sample_state();
-        let mut s = snap.clone();
-        s.tree_width = 9999;
-        let effects = apply_snapshot(&mut restored, &s);
-        assert!(
-            restored.splitter.explorer_pane_width
-                == crate::features::app_splitter::state::MAX_EXPLORER_WIDTH
-        );
-        // A valid width restores exactly.
-        let mut restored2 = sample_state();
-        apply_snapshot(&mut restored2, &snap);
-        assert_eq!(restored2.splitter.explorer_pane_width, 40);
-        drop(effects);
-    }
-
-    #[test]
-    fn snapshot_persists_and_restores_discover_targets_split() {
-        // The discover targets/results split is persisted as a percentage and
-        // re-materialized to rows against the current body height on restore.
-        let mut state = sample_state();
-        state.term_height = 46; // discover body ≈ 24 rows
-        state
-            .discover
-            .splitter
-            .set_targets_height_pct(50, approx_discover_body_height(&state));
-        let snap = snapshot_from_app(&state);
-        assert_eq!(snap.discover_targets_ratio, 50);
-
-        let mut restored = sample_state();
-        restored.term_height = 46;
-        let effects = apply_snapshot(&mut restored, &snap);
-        let track = approx_discover_body_height(&restored);
-        assert_eq!(
-            restored.discover.splitter.targets_height,
-            (track * 50) / 100
-        );
-        assert_eq!(restored.discover.splitter.targets_height_pct(track), 50);
-        drop(effects);
+    fn managed_instance(name: &str) -> dbm_store::ManagedInstance {
+        dbm_store::ManagedInstance {
+            id: format!("id-{name}"),
+            fingerprint: format!("fp-{name}"),
+            name: name.to_string(),
+            engine: dbm_core::Engine::Postgres,
+            host: "127.0.0.1".to_string(),
+            port: 5432,
+            socket_path: None,
+            data_dir: None,
+            env_label: None,
+            registered_at: "now".to_string(),
+            version_full: None,
+            version_short: None,
+            version_checked_at: None,
+            lifecycle_status: None,
+            lifecycle_checked_at: None,
+            lifecycle_detail: None,
+        }
     }
 
     #[test]
@@ -777,105 +471,6 @@ mod tests {
             state.focus,
             Pane::Explorer(crate::app_shell::nav::ExplorerPane::default())
         );
-    }
-
-    fn managed_instance(name: &str) -> dbm_store::ManagedInstance {
-        dbm_store::ManagedInstance {
-            id: format!("id-{name}"),
-            fingerprint: format!("fp-{name}"),
-            name: name.to_string(),
-            engine: dbm_core::Engine::Postgres,
-            host: "127.0.0.1".to_string(),
-            port: 5432,
-            socket_path: None,
-            data_dir: None,
-            env_label: None,
-            registered_at: "now".to_string(),
-            version_full: None,
-            version_short: None,
-            version_checked_at: None,
-            lifecycle_status: None,
-            lifecycle_checked_at: None,
-            lifecycle_detail: None,
-        }
-    }
-
-    fn connection(name: &str) -> dbm_store::InstanceConnection {
-        dbm_store::InstanceConnection {
-            id: format!("c-{name}"),
-            instance_id: "id".to_string(),
-            name: name.to_string(),
-            username: "postgres".to_string(),
-            database: "postgres".to_string(),
-            has_password: false,
-            ssl_mode: String::new(),
-            env_label: None,
-            created_at: "now".to_string(),
-            updated_at: "now".to_string(),
-            test_succeeded_at: None,
-            test_failed_at: None,
-        }
-    }
-
-    #[test]
-    fn snapshot_collects_tree_and_iw_state() {
-        let mut state = sample_state();
-        // Instances tree: two instances, first expanded, cursor on "app".
-        state
-            .explorer
-            .instances
-            .set_instances(vec![managed_instance("local"), managed_instance("remote")]);
-        state.explorer.instances.nodes[0].expanded = true;
-        state.explorer.instances.nodes[0].connections = vec![connection("app")];
-        state.explorer.instances.nodes[0].loaded = true;
-        // Cursor on the "app" connection row (row 1).
-        state.explorer.instances.cursor = 1;
-        // Instance workspace is active (drives `instance_workspace_open()`).
-        state.explorer.instances.set_active_instance(0);
-        // Objects tree expansion keys + active schema.
-        state.explorer.objects.expanded.insert("mydb".to_string());
-        state
-            .explorer
-            .objects
-            .expanded
-            .insert("mydb\tpublic".to_string());
-        state.explorer.objects.active_db = Some("mydb".into());
-        state.explorer.objects.active_schema = Some("public".into());
-        // Explorer focuses the objects sub-pane.
-        state.explorer.pane = ExplorerPane::Objects;
-        // Instance workspace on the connections pane with a cursor.
-        state.iw.instance_name = "local".into();
-        state.iw.pane = IwPane::Connections;
-        state.iw.connections.connections = vec![connection("app"), connection("analytics")];
-        state.iw.connections.cursor = 1;
-
-        let snap = snapshot_from_app(&state);
-        assert_eq!(snap.tree.expanded_instances, vec!["local".to_string()]);
-        assert_eq!(
-            snap.tree.cursor,
-            Some(TuiTreeSelection::Connection {
-                instance: "local".into(),
-                connection: "app".into(),
-            })
-        );
-        assert_eq!(
-            snap.tree.expanded_objects,
-            vec!["mydb".to_string(), "mydb\tpublic".to_string()]
-        );
-        // The active workspace (instance 0) is persisted.
-        assert_eq!(
-            snap.tree.active_workspace,
-            Some(TuiTreeSelection::Instance {
-                instance: "local".into()
-            })
-        );
-        // The objects tree's active schema is persisted too.
-        assert_eq!(snap.tree.objects_active_db.as_deref(), Some("mydb"));
-        assert_eq!(snap.tree.objects_active_schema.as_deref(), Some("public"));
-        assert_eq!(snap.explorer_pane, "objects");
-        let iw = snap.instance_workspace.expect("iw snapshot present");
-        assert_eq!(iw.section, "connections");
-        assert_eq!(iw.connections_cursor, 1);
     }
 
     #[test]
