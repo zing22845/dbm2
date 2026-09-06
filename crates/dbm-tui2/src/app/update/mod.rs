@@ -373,7 +373,7 @@ pub(super) fn reconcile_splitter_bounds(state: &mut AppState) {
     }
     // Discover targets/results bounds, from the same popup/body the render lays.
     if let Some(ws) = workspace {
-        let discover_popup = crate::common::view::modal::popup_rect(ws, 75, 75);
+        let discover_popup = crate::common::layout::modal::popup_rect(ws, 75, 75);
         let body =
             crate::features::discover::view::discover_body_area(discover_popup, &state.discover);
         let layout = crate::features::discover::splitter::view::discover_body_layout(

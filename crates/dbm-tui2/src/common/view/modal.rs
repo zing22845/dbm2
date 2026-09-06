@@ -12,22 +12,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::state::ModalKind;
+use crate::common::layout::modal::{confirm_popup_rect, popup_rect};
 use crate::common::view::overlay_clear::clear_overlay;
 use crate::common::view::theme::Theme;
-
-/// The centered `width_pct` × `height_pct` popup rect over `base` (pure
-/// geometry). Shared by the renderer and the mouse hit-tester so both agree on
-/// where a popup sits.
-pub fn popup_rect(base: Rect, width_pct: u16, height_pct: u16) -> Rect {
-    let w = (base.width * width_pct) / 100;
-    let h = (base.height * height_pct) / 100;
-    Rect {
-        x: base.x + (base.width - w) / 2,
-        y: base.y + (base.height - h) / 2,
-        width: w,
-        height: h,
-    }
-}
 
 /// Render a centered popup of `width_pct` × `height_pct` over `base`, clearing
 /// the overlay so wide glyphs below don't bleed through, and delegating the
@@ -184,26 +171,6 @@ pub fn yes_button_label() -> &'static str {
 /// The No button label, including its keys (`No (n/N)`).
 pub fn no_button_label() -> &'static str {
     " No (n/N) "
-}
-
-/// The centered rect of a confirm popup over `area` (pure geometry). The height
-/// grows with the body so multi-line content (e.g. an unregister message) fits
-/// without overlapping the Yes/No button row. Shared by the renderer and the
-/// mouse hit-tester so both agree on the popup position.
-pub fn confirm_popup_rect(area: Rect, body_rows: usize) -> Rect {
-    let popup_w = area.width.clamp(28, 44);
-    // border top + body rows + blank row + button row + border bottom.
-    let popup_h = (body_rows as u16).saturating_add(4).clamp(6, 14);
-    Rect {
-        x: area
-            .x
-            .saturating_add(area.width.saturating_sub(popup_w) / 2),
-        y: area
-            .y
-            .saturating_add(area.height.saturating_sub(popup_h) / 2),
-        width: popup_w,
-        height: popup_h.min(area.height),
-    }
 }
 
 /// Compute the Yes/No button rects inside a confirm popup (pure layout). The

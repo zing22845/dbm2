@@ -52,7 +52,7 @@ pub(crate) fn handle_confirm_modal_click(
     // The confirm modal renders over the live workspace
     // (app_body_layout), so hit-test against the same.
     if let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state) {
-        let popup = crate::common::view::modal::confirm_popup_rect(
+        let popup = crate::common::layout::modal::confirm_popup_rect(
             workspace,
             crate::common::view::modal::confirm_body_rows(state.modal.as_ref().unwrap()),
         );
@@ -98,9 +98,9 @@ pub(crate) fn handle_discover_close_confirm_click(
         // discover overlay (75% of the workspace), matching
         // `render_modal_popup`, so the popup the mouse hits
         // is the same one that is drawn.
-        let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75);
+        let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75);
         // Discover's close-confirm body is a single line.
-        let popup = crate::common::view::modal::confirm_popup_rect(discover_popup, 1);
+        let popup = crate::common::layout::modal::confirm_popup_rect(discover_popup, 1);
         let buttons = crate::common::view::modal::confirm_buttons(popup);
         if buttons.yes_rect.contains(point) {
             Some(AppMsg::Discover(
@@ -175,7 +175,7 @@ pub(crate) fn handle_down(
     if matches!(state.focus, Pane::Discover(_))
         && !state.discover.close_confirm
         && let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
-        && let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75)
+        && let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75)
         && let body =
             crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
         && body.height >= 3
@@ -687,7 +687,7 @@ fn press_discover(
         && splitter_drag.is_none()
         && matches!(sub, crate::app_shell::nav::DiscoverPane::Targets)
         && let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
-        && let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75)
+        && let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75)
         && let body =
             crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
         && !body.is_empty()
@@ -780,7 +780,7 @@ fn press_discover(
         && splitter_drag.is_none()
         && matches!(sub, crate::app_shell::nav::DiscoverPane::Results)
         && let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
-        && let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75)
+        && let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75)
         && let body =
             crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
         && !body.is_empty()

@@ -341,7 +341,7 @@ const FORM_HEIGHT_PCT: u16 = 58;
 /// geometry). Mirrors the popup used in [`render_form`] so mouse hit-testing
 /// and rendering agree on where the popup sits.
 pub fn form_popup_rect(area: Rect) -> Rect {
-    crate::common::view::modal::popup_rect(area, FORM_WIDTH_PCT, FORM_HEIGHT_PCT)
+    crate::common::layout::modal::popup_rect(area, FORM_WIDTH_PCT, FORM_HEIGHT_PCT)
 }
 
 /// Map a mouse position (in the pane's `area`) to the connection form field

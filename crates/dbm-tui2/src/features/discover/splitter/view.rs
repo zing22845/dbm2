@@ -7,7 +7,8 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-use crate::common::view::splitter::{SplitOrientation, clamp_split_px, draw, hit};
+use crate::common::layout::splitter::{clamp_split_px, hit};
+use crate::common::view::splitter::{SplitOrientation, draw};
 
 /// The panes computed by [`discover_body_layout`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

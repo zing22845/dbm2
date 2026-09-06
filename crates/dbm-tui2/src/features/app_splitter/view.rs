@@ -7,7 +7,8 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-use crate::common::view::splitter::{SplitOrientation, draw, hit};
+use crate::common::layout::splitter::hit;
+use crate::common::view::splitter::{SplitOrientation, draw};
 
 use super::state::{MAX_EXPLORER_WIDTH, MIN_EXPLORER_WIDTH};
 

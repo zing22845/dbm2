@@ -22,13 +22,13 @@ pub(super) fn explorer_width_nudge(key: KeyEvent, state: &AppState) -> Option<Ap
         return None;
     }
     let nudge = match key.code {
-        KeyCode::Char('[') => Some(crate::common::view::splitter::VerticalSplitterNudge::Left),
-        KeyCode::Char(']') => Some(crate::common::view::splitter::VerticalSplitterNudge::Right),
+        KeyCode::Char('[') => Some(crate::common::layout::splitter::VerticalSplitterNudge::Left),
+        KeyCode::Char(']') => Some(crate::common::layout::splitter::VerticalSplitterNudge::Right),
         _ => None,
     };
-    let delta = crate::common::view::splitter::width_delta_for_left_pane(
+    let delta = crate::common::layout::splitter::width_delta_for_left_pane(
         nudge?,
-        crate::common::view::splitter::WIDTH_NUDGE_STEP,
+        crate::common::layout::splitter::WIDTH_NUDGE_STEP,
     );
     let next = (state.splitter.explorer_pane_width as i16 + delta).max(0) as u16;
     Some(AppMsg::SetExplorerWidth(next))

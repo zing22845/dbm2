@@ -111,19 +111,19 @@ pub enum SqlTabMessage {
     /// `]` grows — the detail is the LEFT side of the internal splitter).
     NudgeHistoryDetailWidth {
         tab_id: usize,
-        nudge: crate::common::view::splitter::VerticalSplitterNudge,
+        nudge: crate::common::layout::splitter::VerticalSplitterNudge,
     },
     /// Nudge the Results detail pane width (same `[` shrinks, `]` grows
     /// convention — detail is on the RIGHT side so `]` shrinks the detail).
     NudgeResultsDetailWidth {
         tab_id: usize,
-        nudge: crate::common::view::splitter::VerticalSplitterNudge,
+        nudge: crate::common::layout::splitter::VerticalSplitterNudge,
     },
     /// Nudge the history pane width by one keyboard step (`[` grows, `]`
     /// shrinks — history owns the right side of the editor/history splitter).
     NudgeHistoryWidth {
         tab_id: usize,
-        nudge: crate::common::view::splitter::VerticalSplitterNudge,
+        nudge: crate::common::layout::splitter::VerticalSplitterNudge,
     },
     /// Forwarded editor message, targeted at the tab with `tab_id`.
     Editor { tab_id: usize, msg: EditorMsg },

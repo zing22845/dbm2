@@ -65,9 +65,9 @@ impl SqlTabSplitterState {
     /// stored width unchanged (no redundant repaint).
     pub fn nudge_history_width(
         &mut self,
-        nudge: crate::common::view::splitter::VerticalSplitterNudge,
+        nudge: crate::common::layout::splitter::VerticalSplitterNudge,
     ) -> bool {
-        use crate::common::view::splitter::{WIDTH_NUDGE_STEP, width_delta_for_right_pane};
+        use crate::common::layout::splitter::{WIDTH_NUDGE_STEP, width_delta_for_right_pane};
         let delta = width_delta_for_right_pane(nudge, WIDTH_NUDGE_STEP);
         let current = i32::from(self.history_pane_width);
         // Bound by the layout's range, intersected with the storage range
@@ -127,7 +127,7 @@ impl SqlTabSplitterState {
     /// `set_editor_top_height` clamps to, so the nudge target and the stored
     /// value always agree (no redundant repaint at the boundary).
     pub fn nudge_editor_top_height(&mut self, plus: bool, top_focused: bool) -> bool {
-        use crate::common::view::splitter::WIDTH_NUDGE_STEP;
+        use crate::common::layout::splitter::WIDTH_NUDGE_STEP;
         // `+` grows the focused pane; the top height moves opposite to a
         // bottom focus.
         let grow_top = if plus { top_focused } else { !top_focused };
@@ -217,14 +217,18 @@ mod tests {
         s.history_max = 19;
         s.history_pane_width = 8; // below MIN_HISTORY_WIDTH
         // `[` grows history; it clamps up to the min width.
-        assert!(s.nudge_history_width(crate::common::view::splitter::VerticalSplitterNudge::Left));
+        assert!(
+            s.nudge_history_width(crate::common::layout::splitter::VerticalSplitterNudge::Left)
+        );
         assert_eq!(s.history_pane_width, MIN_HISTORY_WIDTH);
         // Grow to the editor-min boundary (19) then stop dirtying.
         s.history_pane_width = 18;
-        assert!(s.nudge_history_width(crate::common::view::splitter::VerticalSplitterNudge::Left));
+        assert!(
+            s.nudge_history_width(crate::common::layout::splitter::VerticalSplitterNudge::Left)
+        );
         assert_eq!(s.history_pane_width, 19);
         assert!(
-            !s.nudge_history_width(crate::common::view::splitter::VerticalSplitterNudge::Left),
+            !s.nudge_history_width(crate::common::layout::splitter::VerticalSplitterNudge::Left),
             "growing past the editor min must not dirty"
         );
         assert_eq!(s.history_pane_width, 19);
@@ -237,10 +241,12 @@ mod tests {
         s.history_max = 60;
         // `]` shrinks history (right side); down to the min then stop dirtying.
         s.history_pane_width = 18;
-        assert!(s.nudge_history_width(crate::common::view::splitter::VerticalSplitterNudge::Right));
+        assert!(
+            s.nudge_history_width(crate::common::layout::splitter::VerticalSplitterNudge::Right)
+        );
         assert_eq!(s.history_pane_width, 16);
         assert!(
-            !s.nudge_history_width(crate::common::view::splitter::VerticalSplitterNudge::Right),
+            !s.nudge_history_width(crate::common::layout::splitter::VerticalSplitterNudge::Right),
             "shrinking past the min must not dirty"
         );
         assert_eq!(s.history_pane_width, 16);

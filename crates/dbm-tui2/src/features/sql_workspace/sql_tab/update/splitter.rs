@@ -147,9 +147,9 @@ pub(super) fn apply(msg: SqlTabMessage, state: &mut SqlTabState, out: &mut SqlTa
         }
         SqlTabMessage::NudgeHistoryDetailWidth { tab_id, nudge } => {
             if let Some(idx) = state.index_of(tab_id) {
-                let delta = crate::common::view::splitter::width_delta_for_left_pane(
+                let delta = crate::common::layout::splitter::width_delta_for_left_pane(
                     nudge,
-                    crate::common::view::splitter::WIDTH_NUDGE_STEP,
+                    crate::common::layout::splitter::WIDTH_NUDGE_STEP,
                 );
                 let next = (state.tabs[idx].history.splitter.detail_pane_width as i16 + delta)
                     .max(0) as u16;
@@ -176,9 +176,9 @@ pub(super) fn apply(msg: SqlTabMessage, state: &mut SqlTabState, out: &mut SqlTa
             if let Some(idx) = state.index_of(tab_id) {
                 // Results detail is on the RIGHT side of its splitter, so the
                 // delta flips sign vs. History detail (which is on the left).
-                let delta = crate::common::view::splitter::width_delta_for_right_pane(
+                let delta = crate::common::layout::splitter::width_delta_for_right_pane(
                     nudge,
-                    crate::common::view::splitter::WIDTH_NUDGE_STEP,
+                    crate::common::layout::splitter::WIDTH_NUDGE_STEP,
                 );
                 let next = (state.tabs[idx].results.splitter.detail_pane_width as i16 + delta)
                     .max(0) as u16;

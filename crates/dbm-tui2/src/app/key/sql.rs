@@ -124,8 +124,12 @@ pub(super) fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     // pane (which owns the right side of the editor/history split).
     if !key.modifiers.contains(KeyModifiers::CONTROL) {
         let nudge = match key.code {
-            KeyCode::Char('[') => Some(crate::common::view::splitter::VerticalSplitterNudge::Left),
-            KeyCode::Char(']') => Some(crate::common::view::splitter::VerticalSplitterNudge::Right),
+            KeyCode::Char('[') => {
+                Some(crate::common::layout::splitter::VerticalSplitterNudge::Left)
+            }
+            KeyCode::Char(']') => {
+                Some(crate::common::layout::splitter::VerticalSplitterNudge::Right)
+            }
             _ => None,
         };
         if let Some(nudge) = nudge {

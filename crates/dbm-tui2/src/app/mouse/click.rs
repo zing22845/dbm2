@@ -236,7 +236,7 @@ pub(crate) fn discover_subpane_for_click(
     state: &crate::features::discover::state::DiscoverState,
 ) -> Option<crate::app_shell::nav::DiscoverPane> {
     use crate::app_shell::nav::DiscoverPane;
-    let popup = crate::common::view::modal::popup_rect(workspace, 75, 75);
+    let popup = crate::common::layout::modal::popup_rect(workspace, 75, 75);
     if col < popup.x || col >= popup.right() {
         return None;
     }

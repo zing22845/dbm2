@@ -64,7 +64,7 @@ impl DiscoverSplitterState {
     /// focused rather than the results (bottom). `+` always grows the focused
     /// pane and `-` shrinks it. Returns `true` when the split actually moved.
     pub fn nudge_targets_height(&mut self, plus: bool, top_focused: bool) -> bool {
-        use crate::common::view::splitter::WIDTH_NUDGE_STEP;
+        use crate::common::layout::splitter::WIDTH_NUDGE_STEP;
         let grow_top = if plus { top_focused } else { !top_focused };
         let delta = if grow_top {
             WIDTH_NUDGE_STEP

@@ -25,7 +25,7 @@ pub(crate) fn update_splitter_hover(
     y: u16,
     size: ratatui::layout::Size,
 ) -> bool {
-    use crate::common::view::splitter::hit;
+    use crate::common::layout::splitter::hit;
 
     let before = state.splitter_hover;
 
@@ -83,7 +83,7 @@ pub(crate) fn update_splitter_hover(
     if matches!(state.focus, Pane::Discover(_))
         && let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
     {
-        let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75);
+        let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75);
         let body =
             crate::features::discover::view::discover_body_area(discover_popup, &state.discover);
         if body.height >= 3 {

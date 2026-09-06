@@ -80,7 +80,7 @@ pub(crate) fn handle_wheel_discover_targets(
         .saturating_sub(body_top)
         .saturating_sub(footer_h);
     if let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
-        && let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75)
+        && let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75)
         && let body =
             crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
         && !body.is_empty()
@@ -151,7 +151,7 @@ pub(crate) fn handle_wheel_discover_results(
         .saturating_sub(footer_h);
     let point = ratatui::layout::Position::new(mouse.column, mouse.row);
     if let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state)
-        && let discover_popup = crate::common::view::modal::popup_rect(workspace, 75, 75)
+        && let discover_popup = crate::common::layout::modal::popup_rect(workspace, 75, 75)
         && let body =
             crate::features::discover::view::discover_body_area(discover_popup, &state.discover)
         && !body.is_empty()

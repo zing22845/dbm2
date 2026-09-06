@@ -7,7 +7,8 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-use crate::common::view::splitter::{SplitOrientation, draw, hit};
+use crate::common::layout::splitter::hit;
+use crate::common::view::splitter::{SplitOrientation, draw};
 
 use super::super::layout::sql_tab_layout;
 use super::super::msg::SqlTabMessage;
@@ -193,7 +194,7 @@ pub fn sql_tab_splitter_resize_msg(
             // otherwise inflate the waste metric.
             let track_h = layout.results.bottom().saturating_sub(layout.editor.y);
             let top_h = y.saturating_sub(layout.editor.y);
-            let height = crate::common::view::splitter::clamp_split_px(top_h, track_h, 20, 20);
+            let height = crate::common::layout::splitter::clamp_split_px(top_h, track_h, 20, 20);
             Some(SqlTabMessage::SetEditorTopHeight { tab_id, height })
         }
         SqlSplitter::EditorHistory => {
