@@ -31,6 +31,8 @@ pub enum ResultsAction {
     /// stale total after the query changed; `None` when the query is not
     /// count-able or the count failed).
     CountReady { sql: String, total: Option<u64> },
+    /// The selected column name was copied to the system clipboard.
+    CopyColumnName { ok: bool },
     /// The edit batch commit outcome.
     CommitResult { ok: bool, message: String },
     /// The editability of the result was resolved.
@@ -97,6 +99,10 @@ pub enum ResultsEffect {
         database: Option<String>,
         schema: String,
         sql: String,
+    },
+    /// Copy `text` (the selected column name, or all names) to the clipboard.
+    CopyColumnName {
+        text: String,
     },
     Detail(DetailEffect),
     List(ListEffect),
@@ -282,6 +288,10 @@ impl Effect for ResultsEffect {
                         .ok()
                         .flatten();
                     vec![ResultsAction::CountReady { sql, total }]
+                }
+                ResultsEffect::CopyColumnName { text } => {
+                    let ok = crate::common::service::clipboard::copy_to_system(&text).is_ok();
+                    vec![ResultsAction::CopyColumnName { ok }]
                 }
                 ResultsEffect::Detail(_) => Vec::new(),
                 ResultsEffect::List(_) => Vec::new(),

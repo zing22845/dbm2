@@ -7,7 +7,6 @@
 use ratatui::layout::Rect;
 
 use crate::app_shell::pane::Pane;
-use crate::features::global_footer::layout as footer_layout;
 
 use crate::app::geometry::{
     app_body_geometry, app_explorer_rect, sql_tab_area_for_hit, workspace_rect_for_hit,
@@ -45,7 +44,7 @@ pub(crate) fn update_splitter_hover(
         return before != state.splitter_hover;
     }
 
-    let footer_h = footer_layout::footer_height(&state.footer, size.width);
+    let footer_h = crate::app::geometry::global_footer_height(state, size.width);
     let body_top = 3u16;
     let body_h = size
         .height

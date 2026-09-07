@@ -160,6 +160,9 @@ pub(crate) fn action_to_app_msgs(action: Action) -> Vec<AppMsg> {
             use crate::features::sql_workspace::sql_tab::effect::SqlTabAction;
             use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
             let mut msgs = Vec::new();
+            // A clipboard copy produces no feature message: its outcome is
+            // surfaced as a global-footer status only.
+            let mut copy_column_name = false;
             match &action {
                 SqlAction::SqlTab(SqlTabAction::Results {
                     action: ResultsAction::CommitResult { .. },
@@ -182,11 +185,28 @@ pub(crate) fn action_to_app_msgs(action: Action) -> Vec<AppMsg> {
                         ),
                     ));
                 }
+                SqlAction::SqlTab(SqlTabAction::Results {
+                    action: ResultsAction::CopyColumnName { ok },
+                    ..
+                }) => {
+                    msgs.push(AppMsg::Footer(
+                        crate::features::global_footer::msg::FooterMsg::Message(
+                            crate::features::global_footer::msg::FooterMessage::SetStatus(if *ok {
+                                "Copied to clipboard".to_string()
+                            } else {
+                                "Copy failed".to_string()
+                            }),
+                        ),
+                    ));
+                    copy_column_name = true;
+                }
                 _ => {}
             }
-            msgs.push(AppMsg::Sql(
-                crate::features::sql_workspace::msg::SqlMsg::Message(sql_action_to_msg(action)),
-            ));
+            if !copy_column_name {
+                msgs.push(AppMsg::Sql(
+                    crate::features::sql_workspace::msg::SqlMsg::Message(sql_action_to_msg(action)),
+                ));
+            }
             msgs
         }
         // Header/footer/perf effects are currently stateless; nothing to route.
@@ -382,6 +402,11 @@ fn results_action_to_msg(
             M::QueryError { message }
         }
         RA::CountReady { sql, total } => M::CountReady { sql, total },
+        // The copy outcome is surfaced as a footer status by the round (see
+        // `action_to_app_msgs`); it never reaches this feature-message path.
+        RA::CopyColumnName { .. } => {
+            unreachable!("column-name copy is reported by the round footer status")
+        }
         RA::CommitResult { ok, message } => {
             tracing::info!("commit ok={ok}: {message}");
             M::ResetSelection

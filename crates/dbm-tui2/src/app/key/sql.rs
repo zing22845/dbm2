@@ -19,7 +19,9 @@ use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
 use crate::features::sql_workspace::sql_tab::results::msg::{
     ResultsMessage as SqlResultsMessage, ResultsMsg as SqlResultsMsg,
 };
-use crate::features::sql_workspace::sql_tab::results::pagination::ResultsPageAction;
+use crate::features::sql_workspace::sql_tab::results::pagination::{
+    ResultsPageAction, ResultsPageScrollPlan, plan_results_page_scroll,
+};
 use crate::features::sql_workspace::sql_tab::state::SqlFocus;
 use crate::features::sql_workspace::state::SqlState;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -423,6 +425,58 @@ fn results_key(
         }
         KeyCode::Left => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: -1 }, tab_id)),
         KeyCode::Right => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: 1 }, tab_id)),
+        // Copy the selected column name (`Ctrl+n`, original dbm binding). With
+        // no cell selected the whole column-name list is copied.
+        KeyCode::Char('n')
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && results.list.result.as_ref().is_some_and(|r| !r.columns.is_empty()) =>
+        {
+            Some(sql_results(SqlResultsMessage::CopyColumnName, tab_id))
+        }
+        // Flip one viewport inside the current page (`f` forward / `b` back,
+        // vim-style); at the page edges the flip continues into the next /
+        // previous SQL page (original dbm `page_scroll_results_selection`).
+        KeyCode::Char(c)
+            if (c.eq_ignore_ascii_case(&'f') || c.eq_ignore_ascii_case(&'b'))
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            results_flip(&results.list, tab_id, c.eq_ignore_ascii_case(&'f'))
+        }
+        // Jump to the first / last row of the current page (`g` / `G`).
+        KeyCode::Char('g')
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            let list = &results.list;
+            (list.row_count() > 0).then(|| {
+                sql_results(
+                    SqlResultsMessage::SetSelection {
+                        row: 0,
+                        col: list.col,
+                    },
+                    tab_id,
+                )
+            })
+        }
+        KeyCode::Char('G')
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            let list = &results.list;
+            (list.row_count() > 0).then(|| {
+                sql_results(
+                    SqlResultsMessage::SetSelection {
+                        row: list.row_count() - 1,
+                        col: list.col,
+                    },
+                    tab_id,
+                )
+            })
+        }
         // `,` / `.` narrow / widen the selected column (Vim-style), mirroring
         // the original dbm's column-width adjustment.
         KeyCode::Char(',') if key.modifiers.is_empty() => Some(sql_results(
@@ -496,6 +550,44 @@ fn results_key(
         }
         _ => None,
     }
+}
+
+/// Map a viewport flip (`f` / `b`) onto a results message: move the selection
+/// by one viewport within the page, or cross into the next/previous SQL page
+/// when the flip starts at the page edge (mirrors the original dbm
+/// `page_scroll_results_selection`). `None` when there is nothing to flip.
+fn results_flip(
+    list: &crate::features::sql_workspace::sql_tab::results::list::state::ListState,
+    tab_id: usize,
+    forward: bool,
+) -> Option<AppMsg> {
+    let row_count = list.row_count();
+    if row_count == 0 {
+        return None;
+    }
+    let visible = list.viewport_rows.get().max(1);
+    let plan = plan_results_page_scroll(
+        list.row,
+        row_count,
+        visible,
+        forward,
+        list.paginated,
+        list.page,
+        list.can_go_next_page(),
+    );
+    let msg = match plan {
+        ResultsPageScrollPlan::MoveToRow(row) => {
+            SqlResultsMessage::SetSelection { row, col: list.col }
+        }
+        ResultsPageScrollPlan::NextPage => SqlResultsMessage::PageNav {
+            action: ResultsPageAction::Next,
+        },
+        ResultsPageScrollPlan::PrevPage => SqlResultsMessage::PageNav {
+            action: ResultsPageAction::Prev,
+        },
+        ResultsPageScrollPlan::NoPlan => return None,
+    };
+    Some(sql_results(msg, tab_id))
 }
 
 /// History sub-pane keys: navigation and apply. Runs only when sub-pane focus
@@ -1458,6 +1550,84 @@ mod tests {
             results_key(key(KeyCode::Char('c'), KeyModifiers::NONE), 0, results).is_none(),
             "c without a count-able result must be a no-op"
         );
+    }
+
+    fn filled_results_state() -> crate::app::state::AppState {
+        let mut state = app_state_with_tab();
+        let tab = &mut state.sql.sql_tab.tabs[0];
+        tab.results.list.selected = true;
+        tab.results.list.viewport_rows.set(10);
+        tab.results.list.result =
+            Some(crate::features::sql_workspace::sql_tab::results::state::QueryResultData {
+                columns: vec![crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo {
+                    name: "id".into(),
+                    type_name: "int4".into(),
+                    type_display: "int4".into(),
+                    comment: None,
+                }],
+                rows: vec![vec!["x".into()]; 30],
+                rows_affected: None,
+                total_rows: None,
+            });
+        state
+    }
+
+    #[test]
+    fn results_key_ctrl_n_copies_column_name() {
+        let state = filled_results_state();
+        let results = &state.sql.sql_tab.tabs[0].results;
+        let msg = results_key(key(KeyCode::Char('n'), KeyModifiers::CONTROL), 0, results)
+            .expect("Ctrl+n should copy the column name");
+        assert!(matches!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                msg: SqlResultsMsg::Message(SqlResultsMessage::CopyColumnName),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn results_key_f_flips_by_one_viewport() {
+        let state = filled_results_state();
+        let results = &state.sql.sql_tab.tabs[0].results;
+        // Row 0, viewport 10: `f` moves the selection down 10 rows.
+        let msg = results_key(key(KeyCode::Char('f'), KeyModifiers::NONE), 0, results)
+            .expect("f should flip forward one viewport");
+        assert!(matches!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                msg: SqlResultsMsg::Message(SqlResultsMessage::SetSelection { row: 10, .. }),
+                ..
+            }
+        ));
+        // `b` from row 0 stays put (nothing above to flip to).
+        let msg = results_key(key(KeyCode::Char('b'), KeyModifiers::NONE), 0, results);
+        assert!(msg.is_none(), "b at the first row is a no-op");
+    }
+
+    #[test]
+    fn results_key_g_and_caps_g_jump_page_ends() {
+        let state = filled_results_state();
+        let results = &state.sql.sql_tab.tabs[0].results;
+        let msg = results_key(key(KeyCode::Char('G'), KeyModifiers::SHIFT), 0, results)
+            .expect("G should jump to the last row");
+        assert!(matches!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                msg: SqlResultsMsg::Message(SqlResultsMessage::SetSelection { row: 29, .. }),
+                ..
+            }
+        ));
+        let msg = results_key(key(KeyCode::Char('g'), KeyModifiers::NONE), 0, results)
+            .expect("g should jump to the first row");
+        assert!(matches!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                msg: SqlResultsMsg::Message(SqlResultsMessage::SetSelection { row: 0, .. }),
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -13,6 +13,26 @@ use ratatui::layout::Rect;
 use crate::app::state::AppState;
 use crate::app_shell::pane::Pane;
 use crate::features::global_footer::layout as footer_layout;
+use crate::features::perf_monitor::view as perf_view;
+
+/// Width of the global footer row's right perf strip (what the footer's
+/// horizontal split reserves in `app::view`). Centralized here so the footer
+/// height math and the actual perf slot never drift apart.
+pub(crate) fn global_footer_perf_width(state: &AppState, width: u16) -> u16 {
+    perf_view::perf_width(&state.perf).min(width / 3)
+}
+
+/// Height of the global footer row for `width` columns.
+///
+/// Mirrors the renderer: the hints render beside the perf readout, so size the
+/// footer against `width - perf_w` — not the full width — or the wrapped hints
+/// steal the status line's row and clip it off the bottom. Every layer that
+/// reserves body space above the footer (render, hit-testing, splitter tracks)
+/// must use this one function so their geometry stays identical.
+pub(crate) fn global_footer_height(state: &AppState, width: u16) -> u16 {
+    let hints_w = width.saturating_sub(global_footer_perf_width(state, width));
+    footer_layout::footer_height(&state.footer, hints_w)
+}
 
 pub(crate) fn app_body_geometry(
     size: ratatui::layout::Size,
@@ -63,7 +83,7 @@ pub(crate) fn sql_tab_area_for_hit(
     {
         return None;
     }
-    let footer_h = footer_layout::footer_height(&state.footer, size.width);
+    let footer_h = global_footer_height(state, size.width);
     let body_top = 3u16;
     let body_h = size
         .height
@@ -103,7 +123,7 @@ pub(crate) fn iw_body_area_for_hit(
     {
         return None;
     }
-    let footer_h = footer_layout::footer_height(&state.footer, size.width);
+    let footer_h = global_footer_height(state, size.width);
     let body_top = 3u16;
     let body_h = size
         .height
@@ -168,7 +188,7 @@ pub(crate) fn sql_picker_area_for_hit(
     if !tab.editor.context_picker.open {
         return None;
     }
-    let footer_h = footer_layout::footer_height(&state.footer, size.width);
+    let footer_h = global_footer_height(state, size.width);
     let body_top = 3u16;
     let body_h = size
         .height

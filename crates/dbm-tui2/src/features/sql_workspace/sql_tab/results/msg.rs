@@ -41,6 +41,8 @@ pub enum ResultsMessage {
     /// Move to the next/previous match while an applied filter is shown
     /// (`n` / `N` outside of input mode), wrapping.
     SearchNavigate { forward: bool },
+    /// Copy the selected column's name (or all names) to the clipboard.
+    CopyColumnName,
     /// Reset the result selection / scroll.
     ResetSelection,
     /// Run a SQL query.
@@ -147,6 +149,7 @@ impl ResultsMessage {
             ResultsMessage::BeginSearch => ListMessage::BeginSearch,
             ResultsMessage::SearchKey(key) => ListMessage::SearchKey(key),
             ResultsMessage::SearchNavigate { forward } => ListMessage::SearchNavigate { forward },
+            ResultsMessage::CopyColumnName => ListMessage::CopyColumnName,
             ResultsMessage::ResetSelection => ListMessage::ResetSelection,
             ResultsMessage::RunQuery {
                 instance,

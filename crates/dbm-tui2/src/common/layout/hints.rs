@@ -173,7 +173,13 @@ pub fn results_pane_footer_text(search_active: bool, status: &str) -> String {
     if search_active {
         return pane_search_active_footer(&[]);
     }
-    let base = keys(&[("Inspect", lit("ENTER")), ("Col width", lit(",/."))]);
+    let base = keys(&[
+        ("Inspect", lit("ENTER")),
+        ("Col width", lit(",/.")),
+        ("Copy Col Name", hint_ctrl("n")),
+        ("Flip", lit("f/b")),
+        ("Top/Bottom", lit("g/G")),
+    ]);
     if status.is_empty() {
         base
     } else {

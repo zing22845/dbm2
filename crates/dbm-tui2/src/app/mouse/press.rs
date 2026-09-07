@@ -19,7 +19,6 @@ use crate::app::state::AppState;
 use crate::app_shell::effect::EffectRunner;
 use crate::app_shell::pane::Pane;
 use crate::common::layout::pane_scrollbar::{ActiveScrollbar, ScrollbarDrag};
-use crate::features::global_footer::layout as footer_layout;
 use crate::features::header::msg::{HeaderMessage, HeaderMsg};
 
 use super::click::{
@@ -43,7 +42,7 @@ pub(crate) fn handle_confirm_modal_click(
     point: Position,
     dirty: &mut bool,
 ) -> anyhow::Result<()> {
-    let footer_h = footer_layout::footer_height(&state.footer, size.width);
+    let footer_h = crate::app::geometry::global_footer_height(state, size.width);
     let body_top = 3u16;
     let body_h = size
         .height
@@ -86,7 +85,7 @@ pub(crate) fn handle_results_picker_modal_click(
     dirty: &mut bool,
 ) -> anyhow::Result<()> {
     use crate::app::state::ModalKind;
-    let footer_h = footer_layout::footer_height(&state.footer, size.width);
+    let footer_h = crate::app::geometry::global_footer_height(state, size.width);
     let body_top = 3u16;
     let body_h = size
         .height
@@ -149,7 +148,7 @@ pub(crate) fn handle_discover_close_confirm_click(
     point: Position,
     dirty: &mut bool,
 ) -> anyhow::Result<()> {
-    let footer_h = footer_layout::footer_height(&state.footer, size.width);
+    let footer_h = crate::app::geometry::global_footer_height(state, size.width);
     let body_top = 3u16;
     let body_h = size
         .height
@@ -223,7 +222,7 @@ pub(crate) fn handle_down(
     // Map the click to a focus pane by region. The layout
     // mirrors `app/view.rs`: header (top 3 rows), explorer
     // (left 20% of the body), workspace (right 80%).
-    let footer_h = footer_layout::footer_height(&state.footer, size.width);
+    let footer_h = crate::app::geometry::global_footer_height(state, size.width);
     let body_top = 3u16;
     let body_h = size
         .height

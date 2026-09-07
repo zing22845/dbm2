@@ -14,7 +14,6 @@ use crate::app::msg::AppMsg;
 use crate::app::state::AppState;
 use crate::app_shell::effect::EffectRunner;
 use crate::common::layout::pane_scrollbar::ActiveScrollbar;
-use crate::features::global_footer::layout as footer_layout;
 
 use super::hover::update_splitter_hover;
 use super::splitter::SplitterDrag;
@@ -58,10 +57,9 @@ pub(crate) fn handle_drag(
     // one reads `y`).
     if *splitter_drag == Some(SplitterDrag::Discover) {
         let body_top = 3u16;
-        let body_h = size
-            .height
-            .saturating_sub(body_top)
-            .saturating_sub(footer_layout::footer_height(&state.footer, size.width));
+        let body_h = size.height.saturating_sub(body_top).saturating_sub(
+            crate::app::geometry::global_footer_height(state, size.width),
+        );
         // Use the same workspace/popup/body geometry the
         // render uses (live Explorer width + dynamic
         // engine height), so the drag track matches the
@@ -85,10 +83,9 @@ pub(crate) fn handle_drag(
     }
     if *splitter_drag == Some(SplitterDrag::Explorer) {
         let body_top = 3u16;
-        let body_h = size
-            .height
-            .saturating_sub(body_top)
-            .saturating_sub(footer_layout::footer_height(&state.footer, size.width));
+        let body_h = size.height.saturating_sub(body_top).saturating_sub(
+            crate::app::geometry::global_footer_height(state, size.width),
+        );
         let inner = app_explorer_rect(size, body_top, body_h, state).map(|explorer| {
             Rect::new(
                 explorer.x.saturating_add(1),
@@ -112,10 +109,9 @@ pub(crate) fn handle_drag(
     }
     if *splitter_drag == Some(SplitterDrag::App) {
         let body_top = 3u16;
-        let body_h = size
-            .height
-            .saturating_sub(body_top)
-            .saturating_sub(footer_layout::footer_height(&state.footer, size.width));
+        let body_h = size.height.saturating_sub(body_top).saturating_sub(
+            crate::app::geometry::global_footer_height(state, size.width),
+        );
         if body_h >= 3 {
             let body_area = Rect::new(0, body_top, size.width, body_h);
             let width =

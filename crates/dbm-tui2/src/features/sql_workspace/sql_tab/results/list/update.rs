@@ -200,6 +200,30 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
             state.advance_search_match(if forward { 1 } else { -1 });
             true
         }
+        ListMessage::CopyColumnName => {
+            // Copy the selected column's name; with no cell selected, copy all
+            // column names joined by ", " (matching the original dbm).
+            state.page_chord = None;
+            let Some(result) = state.result.as_ref() else {
+                return (state, effects, false);
+            };
+            let text = if state.selected && state.col < result.columns.len() {
+                result.columns[state.col].name.clone()
+            } else {
+                result
+                    .columns
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            if text.is_empty() {
+                false
+            } else {
+                effects.push(ResultsEffect::CopyColumnName { text });
+                true
+            }
+        }
         ListMessage::ResetSelection => {
             // True deselect (matching the original dbm's `select_cell(None)`):
             // no cell cursor is shown, and a search started from here matches
@@ -1036,6 +1060,58 @@ mod tests {
         assert!(!dirty);
         assert!(effects.is_empty());
         assert_eq!(s.total_rows(), Some(300));
+    }
+
+    #[test]
+    fn copy_column_name_uses_selected_or_all_names() {
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+        let result = super::super::super::state::QueryResultData {
+            columns: vec![
+                ColumnInfo {
+                    name: "id".into(),
+                    type_name: "int4".into(),
+                    type_display: "int4".into(),
+                    comment: None,
+                },
+                ColumnInfo {
+                    name: "name".into(),
+                    type_name: "text".into(),
+                    type_display: "text".into(),
+                    comment: None,
+                },
+            ],
+            rows: vec![vec!["1".into(), "a".into()]],
+            rows_affected: None,
+            total_rows: None,
+        };
+        let state = ListState {
+            result: Some(result.clone()),
+            selected: true,
+            col: 1,
+            row: 0,
+            ..ListState::default()
+        };
+        let (s, effects, dirty) = update(ListMessage::CopyColumnName, state);
+        assert!(dirty);
+        let copied = effects.iter().find_map(|e| match e {
+            ResultsEffect::CopyColumnName { text } => Some(text.as_str()),
+            _ => None,
+        });
+        assert_eq!(copied, Some("name"), "the selected column name is copied");
+        assert_eq!(s.page_chord, None, "copy disarms a pending page chord");
+
+        // Deselected (or a column index out of range): all names are copied.
+        let state = ListState {
+            result: Some(result),
+            selected: false,
+            ..ListState::default()
+        };
+        let (_s, effects, _d) = update(ListMessage::CopyColumnName, state);
+        let copied = effects.iter().find_map(|e| match e {
+            ResultsEffect::CopyColumnName { text } => Some(text.clone()),
+            _ => None,
+        });
+        assert_eq!(copied.as_deref(), Some("id, name"));
     }
 
     #[test]

@@ -33,6 +33,8 @@ pub enum ListMessage {
     /// Move to the next/previous match while an applied filter is shown
     /// (`n` / `N` outside of input mode), wrapping.
     SearchNavigate { forward: bool },
+    /// Copy the selected column's name (or all column names) to the clipboard.
+    CopyColumnName,
     /// Reset the result selection / scroll (after a new result).
     ResetSelection,
     /// Enter / toggle edit mode.

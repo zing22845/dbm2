@@ -33,7 +33,6 @@ use crate::app::round::{process_action_round, process_message_round, queue_resul
 use crate::app::state::AppState;
 use crate::app::view::render;
 use crate::app_shell::effect::EffectRunner;
-use crate::features::global_footer::layout as footer_layout;
 use crate::features::perf_monitor::backend::CountingBackend;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -186,10 +185,11 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                 AppMsg::Shell(crate::app_shell::msg::ShellMsg::RefreshSplitterBounds),
                 &mut state,
             );
-            let footer_h = footer_layout::footer_height(&state.footer, size.width);
+            let perf_w = crate::app::geometry::global_footer_perf_width(&state, size.width);
+            let footer_h = crate::app::geometry::global_footer_height(&state, size.width);
             terminal
                 .backend_mut()
-                .set_exclude_rects(perf_exclude_rects(size, footer_h));
+                .set_exclude_rects(perf_exclude_rects(size, footer_h, perf_w));
             // Draw the current frame. The perf_monitor feature is passive: the
             // run loop samples each frame here and feeds the smoothed FPS and
             // redundant-redraw ratio from the wrapped backend.
@@ -497,12 +497,13 @@ async fn sleep_until_opt(deadline: Option<Instant>) {
 
 /// The rect of the footer's self-updating fps/waste slot, excluded from the
 /// changed-cell count so it doesn't mask real redundancy. The perf readout is
-/// the rightmost `perf_w` columns of the bottom `footer_h` rows.
-fn perf_exclude_rects(size: ratatui::layout::Size, footer_h: u16) -> Vec<Rect> {
+/// the rightmost `perf_w` columns of the bottom `footer_h` rows; `perf_w` comes
+/// from [`crate::app::geometry::global_footer_perf_width`] so the exclusion
+/// matches the slot the renderer actually reserves.
+fn perf_exclude_rects(size: ratatui::layout::Size, footer_h: u16, perf_w: u16) -> Vec<Rect> {
     if footer_h == 0 || size.height < footer_h {
         return Vec::new();
     }
-    let perf_w = 23u16.min(size.width);
     let x = size.width.saturating_sub(perf_w);
     vec![Rect::new(
         x,
@@ -520,7 +521,7 @@ mod tests {
     #[test]
     fn perf_exclude_rects_covers_the_footer_stats_slot() {
         // A 100x30 terminal with a 1-row footer excludes the rightmost 23 cols.
-        let rects = perf_exclude_rects(ratatui::layout::Size::new(100, 30), 1);
+        let rects = perf_exclude_rects(ratatui::layout::Size::new(100, 30), 1, 23);
         assert_eq!(rects.len(), 1);
         let r = rects[0];
         assert_eq!(r.x, 100 - 23);
@@ -528,16 +529,18 @@ mod tests {
         assert_eq!(r.y, 30 - 1);
         assert_eq!(r.height, 1);
         // A multi-row footer excludes the whole right strip of the footer.
-        let rects = perf_exclude_rects(ratatui::layout::Size::new(100, 30), 2);
+        let rects = perf_exclude_rects(ratatui::layout::Size::new(100, 30), 2, 23);
         assert_eq!(rects.len(), 1);
         assert_eq!(rects[0].height, 2);
-        // A terminal narrower than the perf slot excludes the entire width.
-        let rects = perf_exclude_rects(ratatui::layout::Size::new(10, 30), 1);
+        // A terminal narrower than the perf readout still reserves only the
+        // shared width/3 strip (what the renderer splits off), so the exclusion
+        // matches the slot exactly instead of over-covering the width.
+        let rects = perf_exclude_rects(ratatui::layout::Size::new(10, 30), 1, 3);
         assert_eq!(rects.len(), 1);
-        assert_eq!(rects[0].x, 0);
-        assert_eq!(rects[0].width, 10);
+        assert_eq!(rects[0].x, 10 - 3);
+        assert_eq!(rects[0].width, 3);
         // No footer -> nothing to exclude.
-        assert!(perf_exclude_rects(ratatui::layout::Size::new(100, 30), 0).is_empty());
+        assert!(perf_exclude_rects(ratatui::layout::Size::new(100, 30), 0, 23).is_empty());
     }
 
     #[test]

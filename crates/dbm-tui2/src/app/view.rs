@@ -12,7 +12,6 @@ use crate::app_shell::pane::Pane;
 use crate::features::app_splitter::view as splitter_view;
 use crate::features::discover::view as discover_view;
 use crate::features::explorer::view as explorer_view;
-use crate::features::global_footer::layout as footer_layout;
 use crate::features::global_footer::view as footer_view;
 use crate::features::header::view as header_view;
 use crate::features::instance_workspace::view as iw_view;
@@ -33,8 +32,11 @@ pub fn render(
     Option<usize>,
 ) {
     // The footer height is dynamic: one line of hints plus the (wrapped) status
-    // line when present.
-    let footer_h = footer_layout::footer_height(&state.footer, frame.area().width);
+    // line when present. It is sized against the width the hints actually get
+    // (full width minus the perf strip) via the shared geometry helper, so a
+    // status line never wraps the hints onto extra rows and gets clipped off
+    // the bottom, and every layer agrees on the footer's height.
+    let footer_h = crate::app::geometry::global_footer_height(state, frame.area().width);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -181,9 +183,10 @@ pub fn render(
 /// and the performance readout pinned to the right. The perf portion is
 /// right-aligned; when there is not enough room the perf strip is skipped.
 fn render_footer_with_perf(frame: &mut ratatui::Frame, state: &AppState, area: Rect) {
-    // Reserve a fixed right portion for the perf readout. The footer hints get
-    // the remainder (which is what makes the footer "shorter" in practice).
-    let perf_w = perf_view::perf_width(&state.perf).min(area.width / 3);
+    // Reserve the same right portion for the perf readout that the shared
+    // footer-height helper subtracted, so the hints wrap at the same width the
+    // height was sized against.
+    let perf_w = crate::app::geometry::global_footer_perf_width(state, area.width);
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([

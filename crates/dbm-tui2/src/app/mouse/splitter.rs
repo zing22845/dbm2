@@ -9,7 +9,6 @@ use ratatui::layout::Rect;
 
 use crate::app::state::AppState;
 use crate::app_shell::pane::Pane;
-use crate::features::global_footer::layout as footer_layout;
 
 use crate::app::geometry::{app_explorer_rect, sql_tab_area_for_hit};
 
@@ -56,10 +55,9 @@ pub(crate) fn resolve_splitter_drag(
     y: u16,
 ) -> Option<SplitterDrag> {
     let body_top = 3u16;
-    let body_h = size
-        .height
-        .saturating_sub(body_top)
-        .saturating_sub(footer_layout::footer_height(&state.footer, size.width));
+    let body_h = size.height.saturating_sub(body_top).saturating_sub(
+        crate::app::geometry::global_footer_height(state, size.width),
+    );
     if body_h < 3 {
         return None;
     }
@@ -126,10 +124,9 @@ mod tests {
     /// computed against, for a given terminal size.
     fn test_body(state: &AppState, size: ratatui::layout::Size) -> (u16, u16) {
         let body_top = 3u16;
-        let body_h = size
-            .height
-            .saturating_sub(body_top)
-            .saturating_sub(footer_layout::footer_height(&state.footer, size.width));
+        let body_h = size.height.saturating_sub(body_top).saturating_sub(
+            crate::app::geometry::global_footer_height(state, size.width),
+        );
         (body_top, body_h)
     }
 
