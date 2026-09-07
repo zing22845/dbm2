@@ -126,11 +126,17 @@ pub(super) fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         _ => {}
     }
 
-    // Vertical-splitter nudges work from any sub-pane: `[` / `]` resize the
-    // splitter boundary of the focused pane. When the History pane is focused
-    // they resize the internal detail/list splitter (the detail owns the left
-    // side: `]` grows it, `[` shrinks it); otherwise they resize the history
-    // pane (which owns the right side of the editor/history split).
+    // Vertical-splitter nudges resize the *vertical* splitter owned by the
+    // focused sub-pane — matching the original dbm, which only moves a splitter
+    // when the focused pane actually owns one:
+    //   * Editor  -> the editor/history split (the history pane owns the right
+    //                side, so `[` / `]` resize it);
+    //   * History -> the internal detail/list split (the detail owns the left
+    //                side: `]` grows it, `[` shrinks it);
+    //   * Results -> the results detail/list split, and only while the detail
+    //                pane is open. With the detail closed the results pane has
+    //                no vertical splitter, so `[` / `]` are a no-op (they must
+    //                NOT fall through to the history width as they used to).
     if !key.modifiers.contains(KeyModifiers::CONTROL) {
         let nudge = match key.code {
             KeyCode::Char('[') => {
@@ -142,20 +148,18 @@ pub(super) fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
             _ => None,
         };
         if let Some(nudge) = nudge {
-            if tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::History {
-                return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
-                    SqlTabMsg::Message(SqlTabMessage::NudgeHistoryDetailWidth { tab_id, nudge }),
-                ))));
-            }
-            if tab.focus == crate::features::sql_workspace::sql_tab::state::SqlFocus::Results
-                && tab.results.detail_open
-            {
-                return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
-                    SqlTabMsg::Message(SqlTabMessage::NudgeResultsDetailWidth { tab_id, nudge }),
-                ))));
-            }
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            let msg = match tab.focus {
+                SqlFocus::History => SqlTabMessage::NudgeHistoryDetailWidth { tab_id, nudge },
+                SqlFocus::Results if tab.results.detail_open => {
+                    SqlTabMessage::NudgeResultsDetailWidth { tab_id, nudge }
+                }
+                // Results with the detail closed: no vertical splitter to move.
+                SqlFocus::Results => return None,
+                SqlFocus::Editor => SqlTabMessage::NudgeHistoryWidth { tab_id, nudge },
+            };
             return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
-                SqlTabMsg::Message(SqlTabMessage::NudgeHistoryWidth { tab_id, nudge }),
+                SqlTabMsg::Message(msg),
             ))));
         }
     }
@@ -1752,6 +1756,67 @@ mod tests {
             ),
             "the copy chord belongs to the global gate, not to sql_key"
         );
+    }
+
+    #[test]
+    fn bracket_nudges_the_vertical_splitter_of_the_focused_subpane() {
+        use crate::common::layout::splitter::VerticalSplitterNudge as N;
+
+        // History focused: the internal detail/list splitter (detail on the left).
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].focus = SqlFocus::History;
+        let msg = sql_key(key(KeyCode::Char(']'), KeyModifiers::NONE), &state)
+            .expect("] must nudge the history detail split");
+        assert!(matches!(
+            msg,
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::NudgeHistoryDetailWidth {
+                    nudge: N::Right,
+                    ..
+                }
+            ))))
+        ));
+
+        // Results focused with the detail open: the results detail split.
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].focus = SqlFocus::Results;
+        state.sql_tab.tabs[0].results.detail_open = true;
+        let msg = sql_key(key(KeyCode::Char('['), KeyModifiers::NONE), &state)
+            .expect("[ must nudge the results detail split");
+        assert!(matches!(
+            msg,
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::NudgeResultsDetailWidth { nudge: N::Left, .. }
+            ))))
+        ));
+
+        // Results focused with the detail CLOSED: no vertical splitter to move,
+        // so the key is a no-op (it must not resize the history pane).
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].focus = SqlFocus::Results;
+        state.sql_tab.tabs[0].results.detail_open = false;
+        for code in [KeyCode::Char('['), KeyCode::Char(']')] {
+            let msg = sql_key(key(code, KeyModifiers::NONE), &state);
+            assert!(
+                msg.is_none(),
+                "[ / ] with the results detail closed must do nothing, got {msg:?}"
+            );
+        }
+
+        // Editor focused: the editor/history split (history owns the right side).
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].focus = SqlFocus::Editor;
+        let msg = sql_key(key(KeyCode::Char(']'), KeyModifiers::NONE), &state)
+            .expect("] must nudge the history pane width");
+        assert!(matches!(
+            msg,
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::NudgeHistoryWidth {
+                    nudge: N::Right,
+                    ..
+                }
+            ))))
+        ));
     }
 
     #[test]
