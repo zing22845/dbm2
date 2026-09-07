@@ -274,18 +274,15 @@ fn render_results_picker_popup(
 
     let body = match modal {
         ModalKind::ResultsRowLimitPicker { current, limits } => {
-            let mut rows: Vec<Line> = limits
+            // No footer hint row: the global footer is a fixed hint line and a
+            // pane that needs context-sensitive keys draws its own footer.
+            limits
                 .iter()
                 .map(|l| {
                     let marker = if *l == *current { "◄" } else { " " };
                     Line::from(Span::raw(format!("{marker} {l} rows")))
                 })
-                .collect();
-            rows.push(Line::from(Span::styled(
-                "Select: ENTER · Move: j/k · Close: ESC",
-                Style::default().fg(theme.palette().muted),
-            )));
-            rows
+                .collect()
         }
         ModalKind::ResultsPageInput {
             current_page,
@@ -302,10 +299,6 @@ fn render_results_picker_popup(
                 Line::from(Span::styled(
                     format!("Go to: [{input}]"),
                     Style::default().fg(theme.palette().accent),
-                )),
-                Line::from(Span::styled(
-                    "Go: ENTER · Close: ESC",
-                    Style::default().fg(theme.palette().muted),
                 )),
             ]
         }

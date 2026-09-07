@@ -252,11 +252,6 @@ mod tests {
     }
 
     #[test]
-    fn modal_footer_with_no_modal_is_empty() {
-        assert_eq!(modal_footer_text(None), "");
-    }
-
-    #[test]
     fn discover_footers_switch_on_state() {
         // Footer lists pane nav + scan/close; a status appends a line.
         let footer = discover_footer_text("");

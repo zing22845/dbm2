@@ -1,9 +1,12 @@
-//! Shared modal/popup rendering and footer hints.
+//! Shared modal/popup rendering.
 //!
-//! Provides a centered, bordered popup renderer plus the `ModalKind` footer
-//! hints shared across the confirm/picker popups (row limit, page input,
-//! delete/unregister confirm, edit-commit preview). The Discover modal draws
-//! its own footer and leaves `modal_footer_text` empty.
+//! Provides the centered, bordered popup renderer used by the confirm dialogs
+//! and the anchored toolbar pickers (row limit, page input), plus the
+//! `ModalKind` classification/title helpers the shell needs to route them.
+//!
+//! There is deliberately **no** per-modal global footer: the bottom-of-screen
+//! footer is a fixed hint line (see `global_footer_text`) and every pane that
+//! needs context-sensitive keys draws its own footer inside its own border.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -99,24 +102,6 @@ pub fn render_titled_popup(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(body), inner);
-}
-
-/// The footer hint line for a modal (data popup).
-pub fn modal_footer_text(modal: Option<&ModalKind>) -> String {
-    match modal {
-        None => String::new(),
-        Some(ModalKind::ResultsRowLimitPicker { .. }) => {
-            "Select: ENTER · Move: j/k · Close: ESC".to_string()
-        }
-        Some(ModalKind::ResultsPageInput { .. }) => {
-            "Type a page · Go: ENTER · Close: ESC".to_string()
-        }
-        Some(ModalKind::DeleteConnectionConfirm { .. })
-        | Some(ModalKind::UnregisterInstanceConfirm { .. })
-        | Some(ModalKind::ResultsEditCommitPreview { .. }) => {
-            "Confirm: y · Cancel: n/ESC".to_string()
-        }
-    }
 }
 
 /// Whether a `ModalKind` is a "confirm-style" popup (y/n prompt).
@@ -300,28 +285,6 @@ pub fn key_line(desc: &str, key_name: &str) -> Line<'static> {
 mod tests {
     use super::*;
     use ratatui::layout::Position;
-
-    #[test]
-    fn no_modal_has_empty_footer() {
-        assert_eq!(modal_footer_text(None), "");
-    }
-
-    #[test]
-    fn picker_and_confirm_have_expected_footers() {
-        let picker = modal_footer_text(Some(&ModalKind::ResultsRowLimitPicker {
-            current: 100,
-            limits: vec![50, 100, 200],
-        }));
-        assert!(picker.contains("Select: ENTER"));
-        assert!(picker.contains("Close: ESC"));
-
-        let confirm = modal_footer_text(Some(&ModalKind::DeleteConnectionConfirm {
-            instance: "i".into(),
-            connection: "c".into(),
-        }));
-        assert!(confirm.contains("Confirm: y"));
-        assert!(confirm.contains("Cancel: n/ESC"));
-    }
 
     #[test]
     fn confirm_modal_classification() {

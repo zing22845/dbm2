@@ -378,8 +378,9 @@ pub(crate) fn results_picker_popup(
     use crate::app::state::ModalKind;
     let (hit, width, preset_count, height) = match &state.modal {
         Some(ModalKind::ResultsRowLimitPicker { limits, .. }) => {
-            // Body = one row per preset + a hint row, plus both borders.
-            let rows = limits.len() + 1;
+            // Body = one row per preset (no footer hint row) plus both borders.
+            // Keep in lockstep with `render_results_picker_popup`.
+            let rows = limits.len();
             (
                 crate::features::sql_workspace::sql_tab::results::pagination::ResultsPaginationHit::RowLimit,
                 30u16,
@@ -387,11 +388,13 @@ pub(crate) fn results_picker_popup(
                 2 + rows as u16,
             )
         }
+        // Body = "Current: page n of m" + "Go to: [input]" (no footer hint row),
+        // plus both borders.
         Some(ModalKind::ResultsPageInput { .. }) => (
             crate::features::sql_workspace::sql_tab::results::pagination::ResultsPaginationHit::PageNumber,
             32u16,
             0,
-            5,
+            4,
         ),
         _ => return None,
     };

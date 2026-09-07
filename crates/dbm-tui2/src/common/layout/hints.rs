@@ -7,7 +7,6 @@
 
 use crate::common::utils::shortcuts::hint_ctrl;
 
-use crate::app::state::ModalKind;
 use crate::common::components::search::PaneSearch;
 use crate::common::utils::shortcuts::{
     copy_shortcut_label, paste_shortcut_label, quit_shortcut_label,
@@ -263,12 +262,6 @@ pub fn discover_results_footer_text() -> String {
         ]),
         RESULTS_LEGEND
     )
-}
-
-/// Footer hints for the data-carrying modals; Discover draws its own footer
-/// and returns empty.
-pub fn modal_footer_text(modal: Option<&ModalKind>) -> String {
-    crate::common::view::modal::modal_footer_text(modal)
 }
 
 /// Global footer hints (pane navigation + shortcuts).
