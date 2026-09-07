@@ -84,6 +84,10 @@ pub enum ResultsMessage {
     CountReady { sql: String, total: Option<u64> },
     /// Commit the current edits.
     Commit,
+    /// A commit finished (`ok`). The round surfaces its status in the global
+    /// footer; on success this message drives the post-commit flow (exit edit
+    /// mode and re-run the query so the committed rows refresh).
+    CommitOutcome { ok: bool },
     /// Toggle the detail sub-pane open/close (inspect mode).
     ToggleDetail,
     /// Synchronise the viewport dimensions.
@@ -193,9 +197,9 @@ impl ResultsMessage {
             ResultsMessage::AdjustColWidthTo { col, width } => {
                 ListMessage::AdjustColWidthTo { col, width }
             }
-            ResultsMessage::SetDetailDraft { .. } | ResultsMessage::ToggleDetail => {
-                ListMessage::ResetSelection
-            }
+            ResultsMessage::SetDetailDraft { .. }
+            | ResultsMessage::ToggleDetail
+            | ResultsMessage::CommitOutcome { .. } => ListMessage::ResetSelection,
             ResultsMessage::List(_) | ResultsMessage::Detail(_) => {
                 panic!("into_list_message called on already-routed message")
             }

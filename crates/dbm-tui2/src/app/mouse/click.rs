@@ -559,6 +559,65 @@ pub(crate) fn sql_click_msgs(
                 SqlTabMsg::Message(SqlTabMessage::ToggleTableCompletion { tab_id }),
             )))]
         }
+        // A click on an enabled action-bar button maps to the same messages as
+        // its key chord (Ctrl+r / i / C-i / C-p / dd / C-s / C-u).
+        SqlClickAction::ResultsToolbar { action } => {
+            use crate::app::state::ModalKind;
+            use crate::common::view::action_bar::ResultsAction as A;
+            use crate::features::sql_workspace::sql_tab::results::msg::{
+                ResultsMessage, ResultsMsg,
+            };
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            let Some(tab) = sql.active_tab() else {
+                return Vec::new();
+            };
+            let tab_id = tab.session.id;
+            let results_msg = |msg: ResultsMessage| {
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        tab_id,
+                        msg: ResultsMsg::Message(msg),
+                    },
+                ))))
+            };
+            // The click first focuses the results sub-pane, then acts.
+            let mut msgs = vec![AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                SqlTabMsg::Message(SqlTabMessage::Focus(SqlFocus::Results)),
+            )))];
+            match action {
+                A::Refresh => {
+                    let list = &tab.results.list;
+                    if !list.last_sql.is_empty()
+                        && !list.last_instance.is_empty()
+                        && !list.last_connection.is_empty()
+                    {
+                        msgs.push(results_msg(ResultsMessage::RunQuery {
+                            instance: list.last_instance.clone(),
+                            connection: list.last_connection.clone(),
+                            database: list.last_database.clone(),
+                            schema: list.last_schema.clone(),
+                            sql: list.last_sql.clone(),
+                            paginated: list.paginated,
+                            page: list.page,
+                            row_limit: list.row_limit,
+                        }));
+                    }
+                }
+                A::Edit => msgs.push(results_msg(ResultsMessage::EnterEdit)),
+                A::AddRow => msgs.push(results_msg(ResultsMessage::AddRow)),
+                A::DupRow => msgs.push(results_msg(ResultsMessage::DupRow)),
+                A::DelRow => msgs.push(results_msg(ResultsMessage::DelRow)),
+                A::Rollback => msgs.push(results_msg(ResultsMessage::Rollback)),
+                A::Commit => {
+                    if let Ok(statements) = tab.results.list.build_commit_statements() {
+                        msgs.push(AppMsg::OpenModal(ModalKind::ResultsEditCommitPreview {
+                            statements,
+                        }));
+                    }
+                }
+            }
+            msgs
+        }
         SqlClickAction::ResultsPagination { hit } => {
             let Some(tab) = sql.active_tab() else {
                 return Vec::new();

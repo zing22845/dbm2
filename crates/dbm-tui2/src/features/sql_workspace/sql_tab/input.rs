@@ -92,6 +92,12 @@ pub enum SqlClickAction {
     /// Single click on the results pagination toolbar (`« ‹ [p] › »` or the
     /// row-limit control). The hit rects mirror `layout_pagination_bar`.
     ResultsPagination { hit: ResultsPaginationHit },
+    /// Single click on an enabled Results action-bar button (Refresh / Edit /
+    /// Inst / Dup / Del / Commit / Rollback). Only produced when the button is
+    /// active, mirroring `action_bar_button_at`.
+    ResultsToolbar {
+        action: crate::common::view::action_bar::ResultsAction,
+    },
 }
 
 /// Hit-test a click at `(x, y)` inside the SQL workspace's tab-bar + body
@@ -340,13 +346,27 @@ pub fn sql_workspace_click(
                 &tab.results.list.executed_sql_display(),
             );
 
-        // Step 3: clicking a pagination-toolbar control (page nav / row limit /
+        // Step 3: clicking an *enabled* Results action-bar button (Refresh /
+        // Edit / Inst / Dup / Del / Commit / Rollback) acts on it. Disabled
+        // buttons (and clicks on the bar's blank space) fall through.
+        if let Some(action) =
+            crate::features::sql_workspace::sql_tab::results::list::layout::action_bar_button_at(
+                layout.list,
+                &tab.results.list,
+                x,
+                y,
+            )
+        {
+            return Some(SqlClickAction::ResultsToolbar { action });
+        }
+
+        // Step 4: clicking a pagination-toolbar control (page nav / row limit /
         // page number) acts on pagination, before the list cell handling below.
         if let Some(hit) = results_pagination_hit_at(tab, layout.pagination, x, y) {
             return Some(SqlClickAction::ResultsPagination { hit });
         }
 
-        // Step 4: only the list sub-pane responds to cell clicks.
+        // Step 5: only the list sub-pane responds to cell clicks.
         if contains(layout.list, x, y)
             && tab.results.list.result.is_some()
             && tab.results.list.row_count() > 0

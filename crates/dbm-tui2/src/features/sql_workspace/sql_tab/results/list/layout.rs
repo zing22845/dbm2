@@ -3,7 +3,10 @@
 
 use super::state::ListState;
 use crate::common::layout::pane_scrollbar::{PaneScrollLayout, pane_scroll_layout};
-use crate::common::view::action_bar::RESULTS_ACTION_BAR_HEIGHT;
+use crate::common::view::action_bar::{
+    RESULTS_ACTION_BAR_HEIGHT, ResultsAction, ResultsToolbarModel, action_bar_width,
+    layout_action_bar,
+};
 use crate::common::view::format::{RESULTS_HEADER_HEIGHT, RESULTS_ROW_HEIGHT};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
@@ -19,6 +22,52 @@ pub fn results_list_regions(list_area: Rect) -> (Rect, Rect) {
         ])
         .split(list_area);
     (chunks[0], chunks[1])
+}
+
+/// The enable/disable model for the Results action bar, derived from the list
+/// state. Single source of truth shared by the renderer (`list::view`) and the
+/// click hit-testing (`action_bar_button_at`) so they can never disagree about
+/// which buttons are active.
+pub fn results_toolbar_model(state: &ListState) -> ResultsToolbarModel {
+    let has_result = state.result.is_some();
+    let editable = state.editable();
+    let commit_n = state.commit_row_count();
+    let edit_active = state.edit.editing;
+    let edit_dirty = state.edit.is_dirty();
+    ResultsToolbarModel {
+        refresh_enabled: has_result,
+        edit_enabled: editable,
+        edit_active,
+        commit_enabled: edit_active && commit_n > 0,
+        rollback_enabled: edit_active && edit_dirty,
+        commit_n,
+        edit_reason: state.edit_blocked_reason.clone(),
+    }
+}
+
+/// The action-bar button the pointer `(x, y)` lands on, if the button is
+/// enabled. Mirrors exactly the geometry `list::view` draws — `results_list_regions`
+/// with the h_scroll-clamped `layout_action_bar` — so clicking always hits what
+/// is painted.
+pub fn action_bar_button_at(
+    list_area: Rect,
+    state: &ListState,
+    x: u16,
+    y: u16,
+) -> Option<ResultsAction> {
+    let (bar_area, _) = results_list_regions(list_area);
+    if bar_area.width == 0 || !contains(bar_area, x, y) {
+        return None;
+    }
+    let model = results_toolbar_model(state);
+    let bar_scroll_max = action_bar_width(&model).saturating_sub(bar_area.width);
+    let bar_scroll = (state.h_scroll.get() as u16).min(bar_scroll_max);
+    for (action, rect, enabled) in layout_action_bar(bar_area, &model, bar_scroll) {
+        if enabled && contains(rect, x, y) {
+            return Some(action);
+        }
+    }
+    None
 }
 
 /// Column index whose header boundary the pointer is over in the results

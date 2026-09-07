@@ -61,6 +61,35 @@ pub fn update(
             }
             (state, intents, effects, true)
         }
+        // Post-commit flow: a successful commit exits edit mode (clearing the
+        // snapshots / detail draft) and re-runs the last query so the committed
+        // rows refresh on screen, mirroring the original dbm's
+        // `apply_commit_completion` + `enqueue_refresh`. A failed commit leaves
+        // the edit session intact (the round surfaces the error in the footer).
+        ResultsMessage::CommitOutcome { ok } => {
+            if ok {
+                route_to_list(
+                    super::list::msg::ListMessage::ExitEdit,
+                    &mut state,
+                    &mut effects,
+                );
+                let list = &state.list;
+                let run = super::list::msg::ListMessage::RunQuery {
+                    instance: list.last_instance.clone(),
+                    connection: list.last_connection.clone(),
+                    database: list.last_database.clone(),
+                    schema: list.last_schema.clone(),
+                    sql: list.last_sql.clone(),
+                    paginated: list.paginated,
+                    page: list.page,
+                    row_limit: list.row_limit,
+                };
+                route_to_list(run, &mut state, &mut effects);
+                (state, intents, effects, true)
+            } else {
+                (state, intents, effects, false)
+            }
+        }
         other => {
             let list_msg = other.into_list_message();
             let dirty = route_to_list(list_msg, &mut state, &mut effects);
@@ -211,6 +240,61 @@ mod tests {
         let (s, _i, _e, dirty) = update(msg, state);
         assert_eq!(s.list.row, 1);
         assert!(dirty);
+    }
+
+    #[test]
+    fn commit_outcome_ok_exits_edit_and_reruns_last_query() {
+        let mut state = ResultsState::default();
+        state.list.result = Some(sample_result_multirow());
+        state.list.last_instance = "inst".into();
+        state.list.last_connection = "c1".into();
+        state.list.last_schema = "public".into();
+        state.list.last_sql = "select * from t".into();
+        state.list.edit_target = Some(
+            crate::features::sql_workspace::sql_tab::results::edit_sql::EditTarget {
+                schema: "public".into(),
+                table: "t".into(),
+                primary_keys: vec!["id".into()],
+                columns: vec!["id".into()],
+            },
+        );
+        state.list.enter_edit();
+        assert!(state.list.edit.editing);
+        let (s, _i, effects, dirty) = update(ResultsMessage::CommitOutcome { ok: true }, state);
+        assert!(
+            !s.list.edit.editing,
+            "a successful commit must exit edit mode"
+        );
+        assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                ResultsEffect::RunQuery { sql, .. } if sql == "select * from t"
+            )),
+            "a successful commit must re-run the last query, got: {effects:?}"
+        );
+        assert!(dirty, "the post-commit repaint must be requested");
+    }
+
+    #[test]
+    fn commit_outcome_failure_keeps_edit_session() {
+        let mut state = ResultsState::default();
+        state.list.result = Some(sample_result_multirow());
+        state.list.edit_target = Some(
+            crate::features::sql_workspace::sql_tab::results::edit_sql::EditTarget {
+                schema: "public".into(),
+                table: "t".into(),
+                primary_keys: vec!["id".into()],
+                columns: vec!["id".into()],
+            },
+        );
+        state.list.enter_edit();
+        let (s, _i, effects, dirty) = update(ResultsMessage::CommitOutcome { ok: false }, state);
+        assert!(
+            s.list.edit.editing,
+            "a failed commit must keep the edit session"
+        );
+        assert!(effects.is_empty());
+        assert!(!dirty);
     }
 
     #[test]

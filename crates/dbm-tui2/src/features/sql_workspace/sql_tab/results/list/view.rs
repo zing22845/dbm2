@@ -13,7 +13,7 @@ use ratatui::widgets::Paragraph;
 
 use crate::common::layout::pane_scrollbar::ActiveScrollbar;
 use crate::common::layout::text::footer_height;
-use crate::common::view::action_bar::{ResultsToolbarModel, action_bar_width, draw_action_bar};
+use crate::common::view::action_bar::{action_bar_width, draw_action_bar};
 use crate::common::view::format::{
     RESULTS_HEADER_HEIGHT, RESULTS_ROW_CONTENT_HEIGHT, RESULTS_ROW_HEIGHT, column_type_label,
     results_col_text_view,
@@ -21,7 +21,9 @@ use crate::common::view::format::{
 use crate::common::view::theme::Theme;
 
 use super::super::pagination::RESULTS_PAGINATION_BAR_HEIGHT;
-use super::layout::{compute_viewport_scroll, results_geometry, results_list_regions};
+use super::layout::{
+    compute_viewport_scroll, results_geometry, results_list_regions, results_toolbar_model,
+};
 use super::state::ListState;
 
 /// Render the list sub-feature: the action bar and the result table, borderless
@@ -60,27 +62,8 @@ pub fn render(
     // The list region splits into the action bar (top) and the table body.
     let (action_bar_area, table_body) = results_list_regions(list_area);
 
-    let has_result = state.result.is_some();
-    let editable = state.editable();
-    let commit_n = state.commit_row_count();
-    let edit_active = state.edit.editing;
-    let edit_dirty = state.edit.is_dirty();
-    let edit_reason = state.edit_blocked_reason.clone();
-    let (bar_scroll_max, model) = {
-        let model = ResultsToolbarModel {
-            refresh_enabled: has_result,
-            edit_enabled: editable,
-            edit_active,
-            commit_enabled: edit_active && commit_n > 0,
-            rollback_enabled: edit_active && edit_dirty,
-            commit_n,
-            edit_reason,
-        };
-        (
-            action_bar_width(&model).saturating_sub(action_bar_area.width),
-            model,
-        )
-    };
+    let model = results_toolbar_model(state);
+    let bar_scroll_max = action_bar_width(&model).saturating_sub(action_bar_area.width);
     let bar_scroll = state_h_scroll.min(bar_scroll_max as usize) as u16;
 
     draw_action_bar(frame, action_bar_area, &model, bar_scroll, p);

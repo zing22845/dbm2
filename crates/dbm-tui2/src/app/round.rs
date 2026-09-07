@@ -165,12 +165,43 @@ pub(crate) fn action_to_app_msgs(action: Action) -> Vec<AppMsg> {
             // surfaced as a global-footer status only.
             let mut copy_column_name = false;
             let mut editor_copy_selection = false;
+            let mut commit_handled = false;
             match &action {
+                // A commit finished: close the preview modal, surface the
+                // outcome in the global footer, and on success drive the
+                // post-commit flow inside the results feature (exit edit + rerun
+                // via `CommitOutcome`). A failed commit keeps the edit session.
                 SqlAction::SqlTab(SqlTabAction::Results {
-                    action: ResultsAction::CommitResult { .. },
-                    ..
+                    tab_id,
+                    action: ResultsAction::CommitResult { ok, message },
                 }) => {
                     msgs.push(AppMsg::CloseModal);
+                    msgs.push(AppMsg::Footer(
+                        crate::features::global_footer::msg::FooterMsg::Message(
+                            crate::features::global_footer::msg::FooterMessage::SetStatus(if *ok {
+                                message.clone()
+                            } else {
+                                format!("Commit failed: {message}")
+                            }),
+                        ),
+                    ));
+                    if *ok {
+                        msgs.push(AppMsg::Sql(
+                            crate::features::sql_workspace::msg::SqlMsg::Message(
+                                crate::features::sql_workspace::msg::SqlMessage::SqlTab(
+                                    crate::features::sql_workspace::sql_tab::msg::SqlTabMsg::Message(
+                                        crate::features::sql_workspace::sql_tab::msg::SqlTabMessage::Results {
+                                            tab_id: *tab_id,
+                                            msg: crate::features::sql_workspace::sql_tab::results::msg::ResultsMsg::Message(
+                                                crate::features::sql_workspace::sql_tab::results::msg::ResultsMessage::CommitOutcome { ok: true },
+                                            ),
+                                        },
+                                    ),
+                                ),
+                            ),
+                        ));
+                    }
+                    commit_handled = true;
                 }
                 // A failed query surfaces its message in the results pane (via
                 // the routed `QueryError` message) and in the global footer
@@ -221,7 +252,7 @@ pub(crate) fn action_to_app_msgs(action: Action) -> Vec<AppMsg> {
                 }
                 _ => {}
             }
-            if !copy_column_name && !editor_copy_selection {
+            if !copy_column_name && !editor_copy_selection && !commit_handled {
                 msgs.push(AppMsg::Sql(
                     crate::features::sql_workspace::msg::SqlMsg::Message(sql_action_to_msg(action)),
                 ));
@@ -431,9 +462,11 @@ fn results_action_to_msg(
         RA::CopyColumnName { .. } => {
             unreachable!("column-name copy is reported by the round footer status")
         }
+        // The commit outcome is handled entirely by the round (footer status +
+        // post-commit `CommitOutcome` message); it never reaches this route.
         RA::CommitResult { ok, message } => {
             tracing::info!("commit ok={ok}: {message}");
-            M::ResetSelection
+            unreachable!("commit outcome is handled by the round footer / CommitOutcome flow")
         }
         RA::EditabilityReady { target, blocked } => M::EditabilityReady { target, blocked },
     }
@@ -564,7 +597,7 @@ pub fn handle_action(action: Action, state: &mut AppState) -> UpdateResult {
 mod tests {
     use super::*;
     use crate::features::sql_workspace::effect::SqlAction;
-    use crate::features::sql_workspace::msg::SqlMessage;
+    use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
     use crate::features::sql_workspace::sql_tab::effect::SqlTabAction;
     use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
     use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
@@ -661,6 +694,71 @@ mod tests {
         assert!(
             !msgs.iter().any(|m| matches!(m, AppMsg::Sql(_))),
             "a clipboard copy must not feed back a feature message"
+        );
+    }
+
+    #[test]
+    fn commit_result_success_closes_modal_reports_status_and_posts_outcome() {
+        use crate::app::action::Action;
+        use crate::features::global_footer::msg::{FooterMessage, FooterMsg};
+        use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+        let action = Action::Sql(SqlAction::SqlTab(SqlTabAction::Results {
+            tab_id: 1,
+            action: ResultsAction::CommitResult {
+                ok: true,
+                message: "Committed 2 statement(s)".into(),
+            },
+        }));
+        let msgs = action_to_app_msgs(action);
+        assert!(msgs.iter().any(|m| matches!(m, AppMsg::CloseModal)));
+        assert!(msgs.iter().any(|m| matches!(
+            m,
+            AppMsg::Footer(FooterMsg::Message(FooterMessage::SetStatus(s)))
+                if s == "Committed 2 statement(s)"
+        )));
+        assert!(
+            msgs.iter().any(|m| matches!(
+                m,
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        msg: ResultsMsg::Message(ResultsMessage::CommitOutcome { ok: true }),
+                        ..
+                    },
+                ))))
+            )),
+            "a successful commit must drive the post-commit flow"
+        );
+    }
+
+    #[test]
+    fn commit_result_failure_reports_error_and_skips_post_commit() {
+        use crate::app::action::Action;
+        use crate::features::global_footer::msg::{FooterMessage, FooterMsg};
+        use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+        let action = Action::Sql(SqlAction::SqlTab(SqlTabAction::Results {
+            tab_id: 1,
+            action: ResultsAction::CommitResult {
+                ok: false,
+                message: "conflict on row 3".into(),
+            },
+        }));
+        let msgs = action_to_app_msgs(action);
+        assert!(msgs.iter().any(|m| matches!(
+            m,
+            AppMsg::Footer(FooterMsg::Message(FooterMessage::SetStatus(s)))
+                if s == "Commit failed: conflict on row 3"
+        )));
+        assert!(
+            !msgs.iter().any(|m| matches!(
+                m,
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        msg: ResultsMsg::Message(ResultsMessage::CommitOutcome { .. }),
+                        ..
+                    },
+                ))))
+            )),
+            "a failed commit must keep the edit session intact"
         );
     }
 
