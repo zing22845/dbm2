@@ -4,6 +4,7 @@ pub mod context_picker;
 pub mod effect;
 pub mod intent;
 pub mod layout;
+pub mod mouse;
 pub mod msg;
 pub mod sql_completion;
 pub mod sql_search;

@@ -22,7 +22,8 @@ use super::state::{SqlFocus, SqlTabState};
 /// tells whether the shell focus is on the SQL workspace; the active sub-pane's
 /// border/title only lights up while the workspace itself is focused (matching
 /// the original dbm). Returns the editor's hardware cursor when the editor
-/// sub-pane holds focus (so the shell can place the terminal caret), else `None`.
+/// sub-pane holds focus (so the shell can place the terminal caret), else `None`,
+/// plus the editor's rendered mouse hit area (for the pointer layer).
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
@@ -43,6 +44,7 @@ pub fn render(
 ) -> (
     Option<crate::common::editor::EditorHardwareCursor>,
     Option<usize>,
+    Option<crate::common::editor::EditorMouseHitArea>,
 ) {
     // No tab open for the active connection: show an empty-state hint and no
     // tab bar, mirroring the original dbm's `workspace_empty_hint` (no phantom
@@ -55,7 +57,7 @@ pub fn render(
         );
         let para = Paragraph::new(Span::styled(hint, Style::default().fg(p.muted)));
         frame.render_widget(para, area);
-        return (None, None);
+        return (None, None, None);
     }
 
     let chunks = Layout::default()
@@ -76,7 +78,7 @@ pub fn render(
     let Some(tab) = state.active_tab() else {
         // No open tab for the active connection: render an empty placeholder.
         frame.render_widget(Block::default().title("No open SQL tab"), body_area);
-        return (None, None);
+        return (None, None, None);
     };
 
     // Layout mirrors the original dbm `sql_tab_layout` (ui.rs §11): editor +
@@ -104,7 +106,7 @@ pub fn render(
             results_col_resize,
             active_scrollbar,
         );
-        return (None, None);
+        return (None, None, None);
     }
 
     let (instance, connection) = session_view_key(&tab.session);
@@ -199,33 +201,25 @@ pub fn render(
         None
     };
 
-    // Only the focused editor sub-pane exposes its caret to the shell.
+    // Only the focused editor sub-pane exposes its caret to the shell. The
+    // rendered mouse hit area is captured either way: the pointer layer needs
+    // it to route clicks/selection even while another sub-pane has focus.
     let db = tab.session.database.as_deref();
     let schema = tab.session.schema.as_deref();
+    let (rendered_cursor, editor_mouse_area) = editor_view::render(
+        frame,
+        theme,
+        editor_area,
+        &tab.editor,
+        editor_focused,
+        tab.complete_table_names,
+        db,
+        schema,
+        active_scrollbar,
+    );
     let cursor = if editor_focused {
-        editor_view::render(
-            frame,
-            theme,
-            editor_area,
-            &tab.editor,
-            editor_focused,
-            tab.complete_table_names,
-            db,
-            schema,
-            active_scrollbar,
-        )
+        rendered_cursor
     } else {
-        editor_view::render(
-            frame,
-            theme,
-            editor_area,
-            &tab.editor,
-            editor_focused,
-            tab.complete_table_names,
-            db,
-            schema,
-            active_scrollbar,
-        );
         None
     };
 
@@ -302,7 +296,7 @@ pub fn render(
     );
 
     let hw_cursor = if editor_focused { cursor } else { None };
-    (hw_cursor, history_v_scroll)
+    (hw_cursor, history_v_scroll, editor_mouse_area)
 }
 
 #[cfg(test)]

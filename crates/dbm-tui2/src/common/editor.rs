@@ -392,6 +392,35 @@ pub struct EditorHardwareCursor {
     pub style: SetCursorStyle,
 }
 
+/// The editor's mouse hit region, mirroring what the last render drew.
+///
+/// edtui converts terminal coordinates to buffer positions from the editor's
+/// own `screen_area` + viewport, which its renderer only refreshes on the
+/// `&mut` editor it draws. dbm2 renders a *copy* each frame, so the run loop
+/// captures these two values from the render copy and stores them here; the
+/// pointer handlers feed them back into a scratch editor before calling
+/// edtui's mouse handler, keeping the mapping identical to what is on screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorMouseHitArea {
+    /// The text-drawing area (after the line-number gutter and scrollbar) in
+    /// absolute terminal coordinates — edtui's `screen_area`.
+    pub text_area: Rect,
+    /// The first visible *visual* (wrapped) row as actually rendered.
+    pub viewport_y: usize,
+}
+
+impl EditorMouseHitArea {
+    /// Whether `point` lands on the editor's text area (mouse hit region).
+    #[must_use]
+    pub fn contains(&self, point: Position) -> bool {
+        let area = self.text_area;
+        point.x >= area.x
+            && point.y >= area.y
+            && point.x < area.x.saturating_add(area.width)
+            && point.y < area.y.saturating_add(area.height)
+    }
+}
+
 /// Keep the hardware cursor inside `area` (edtui wrap can report a y below the
 /// viewport for long single lines).
 pub fn clamp_hardware_cursor_to_area(
@@ -417,6 +446,63 @@ pub fn reset_hardware_cursor() -> io::Result<()> {
     io::stdout()
         .execute(SetCursorStyle::DefaultUserShape)
         .map(|_| ())
+}
+
+/// Insert-mode click placement: a click on the empty cells right of the text
+/// (or past the wrapped last row) must land the cursor *after* the last
+/// character (`col == len`), not on the last character itself.
+///
+/// edtui's mouse handler clamps a click beyond the end of a line to the last
+/// character index, so appending text would insert before the final char.
+/// Mirrors the original dbm's `fix_insert_mode_click_cursor`. Applied on a
+/// scratch editor copy before its cursor/mode/selection are read back, so the
+/// fix never runs mid-edit on the live buffer.
+pub fn fix_insert_mode_click_cursor(
+    editor: &mut EditorState,
+    event: &crossterm::event::MouseEvent,
+    area: Rect,
+) {
+    use crossterm::event::{MouseButton, MouseEventKind};
+    if editor.mode != EditorMode::Insert || area.width == 0 {
+        return;
+    }
+    if !matches!(
+        event.kind,
+        MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Up(MouseButton::Left)
+    ) {
+        return;
+    }
+    if event.column < area.x
+        || event.row < area.y
+        || event.column >= area.x.saturating_add(area.width)
+        || event.row >= area.y.saturating_add(area.height)
+    {
+        return;
+    }
+
+    let len_col = editor.lines.len_col(editor.cursor.row).unwrap_or(0);
+    if len_col == 0 {
+        return;
+    }
+    let last_char_index = len_col.saturating_sub(1);
+    if editor.cursor.col != last_char_index {
+        return;
+    }
+
+    let Some(line) = editor.lines.iter_row().nth(editor.cursor.row) else {
+        return;
+    };
+    let line_display_width: u16 = line
+        .iter()
+        .map(|ch| crate::common::utils::text_width::char_width(*ch) as u16)
+        .sum();
+    let click_col = event.column.saturating_sub(area.x);
+    let fits_one_row = line_display_width <= area.width;
+    if (fits_one_row && click_col >= line_display_width)
+        || (!fits_one_row && click_col.saturating_add(1) >= area.width)
+    {
+        editor.cursor.col = len_col;
+    }
 }
 
 /// Move the terminal hardware caret to the editor cursor and set its style.

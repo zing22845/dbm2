@@ -31,7 +31,10 @@ pub fn render(
     database: Option<&str>,
     schema: Option<&str>,
     active_scrollbar: Option<ActiveScrollbar>,
-) -> Option<crate::common::editor::EditorHardwareCursor> {
+) -> (
+    Option<crate::common::editor::EditorHardwareCursor>,
+    Option<crate::common::editor::EditorMouseHitArea>,
+) {
     let p = theme.palette();
 
     // The editor gets a titled border like the results / history panes, with
@@ -146,6 +149,23 @@ pub fn render(
     let content_area = scroll_layout.content_area;
     let cursor = editor::render_editor(&mut editor, content_area, frame.buffer_mut());
 
+    // Capture the rendered mouse hit region: edtui draws the line-number gutter
+    // inside `content_area`, so its `screen_area` is `content_area` minus the
+    // gutter. The viewport is the value the clone actually rendered with (its
+    // auto-scroll may have nudged the persisted offset). The run loop stores
+    // this so the pointer layer can feed mouse events back through edtui's own
+    // coordinate conversion.
+    let (_, rendered_viewport_y) = editor.viewport_offset();
+    let mouse_hit_area = crate::common::editor::EditorMouseHitArea {
+        text_area: Rect {
+            x: content_area.x.saturating_add(gutter_w),
+            y: content_area.y,
+            width: content_area.width.saturating_sub(gutter_w),
+            height: content_area.height,
+        },
+        viewport_y: rendered_viewport_y,
+    };
+
     // Draw the vertical scrollbar thumb after render so its position reflects
     // the final viewport_offset (edtui may nudge it to keep the cursor visible).
     if let Some(v_bar) = scroll_layout.v_scrollbar {
@@ -188,7 +208,7 @@ pub fn render(
 
     // Hand the hardware cursor up so the shell can place the terminal caret at
     // the editor cursor (it also drives the completion popup anchor above).
-    cursor
+    (cursor, Some(mouse_hit_area))
 }
 
 #[cfg(test)]

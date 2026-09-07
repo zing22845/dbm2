@@ -5,7 +5,7 @@
 //! helpers handle terminal quirks (Shift vs. Caps Lock, pane-jump chords) shared
 //! by panes that accept typed characters, e.g. the in-pane `/` search.
 
-use crossterm::event::{KeyEvent, KeyEventState, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventState, KeyModifiers};
 
 /// Whether Caps Lock is active for this key event (from the key state, or the
 /// tracked flag the event loop keeps when a terminal does not report it).
@@ -75,6 +75,24 @@ pub fn copy_shortcut_label() -> String {
     #[cfg(not(target_os = "macos"))]
     {
         hint_ctrl("C")
+    }
+}
+
+/// Whether `key` is the platform copy shortcut: `CMD/Ctrl+C` on macOS
+/// (terminals report the OS paste shortcut as `SUPER` when they deliver it at
+/// all), `CTRL+C` elsewhere. Matches the original dbm's `is_copy_shortcut`.
+pub fn is_copy_shortcut(key: &KeyEvent) -> bool {
+    if !matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C')) {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        key.modifiers
+            .intersects(KeyModifiers::SUPER | KeyModifiers::CONTROL | KeyModifiers::META)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        key.modifiers.contains(KeyModifiers::CONTROL)
     }
 }
 

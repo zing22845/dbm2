@@ -12,6 +12,7 @@
 //!   its kind;
 //! - [`press`] and [`drag`] hold those per-kind handlers;
 //! - [`click`] routes a position to a message, [`wheel`] owns scrolling;
+//! - [`editor_gesture`] decodes SQL-editor mouse text selection;
 //! - [`splitter`] resolves which splitter a press armed;
 //! - [`hover`] maintains the splitter highlight;
 //! - [`state`] owns the transient gesture values, which deliberately stay out
@@ -20,6 +21,7 @@
 pub(crate) mod click;
 pub(crate) mod dispatch;
 pub(crate) mod drag;
+pub(crate) mod editor_gesture;
 pub(crate) mod hover;
 pub(crate) mod press;
 pub(crate) mod splitter;

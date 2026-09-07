@@ -59,6 +59,18 @@ pub enum EditorMessage {
     ScrollH { delta: i32 },
     /// Set the editor horizontal viewport offset to `position` (column).
     SetHScroll { position: usize },
+
+    // —— Mouse text selection ——
+    /// A mouse Down/Drag/Up decoded by the pointer layer. The outcome is
+    /// produced by edtui's own handler against a scratch copy (with the
+    /// rendered hit area fed in), so `update` just applies the resulting
+    /// cursor/mode/selection without touching terminal geometry.
+    MouseGesture {
+        outcome: super::mouse::MouseGestureOutcome,
+    },
+    /// Copy the current selection (if any) to the system clipboard. Raised by
+    /// the copy shortcut (Cmd/Ctrl+C) while the editor is focused.
+    CopySelection,
 }
 
 /// Feature message envelope (central-router compatible).

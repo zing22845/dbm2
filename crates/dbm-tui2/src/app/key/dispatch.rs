@@ -37,6 +37,18 @@ pub fn key_to_msg(key: KeyEvent, state: &AppState) -> Option<AppMsg> {
     if let Pane::Discover(sub) = state.focus {
         return discover_key(key, sub, &state.discover);
     }
+    // The platform copy chord is resolved by `copy_selection_msg` before pane
+    // routing, mirroring the original dbm's global `copy_active_selection`: a
+    // copy chord is *global* — it copies whichever editor holds a selection no
+    // matter which sub-pane has focus — so it cannot live inside one feature's
+    // key map. That helper is also the single place that enumerates the
+    // candidate editors, so a new copyable pane is wired in one spot.
+    if state.modal.is_none()
+        && crate::common::utils::shortcuts::is_copy_shortcut(&key)
+        && let Some(msg) = copy_selection_msg(state)
+    {
+        return Some(msg);
+    }
     // Uppercase letter jumps (`[S]`/`[I]`/`[O]`/`[H]`/`[R]` in the pane titles)
     // move focus to the matching pane, mirroring the original dbm. They are
     // blocked while typing in the SQL editor (insert mode), so `S`/`H`/`R` do
@@ -89,6 +101,30 @@ pub fn key_to_msg(key: KeyEvent, state: &AppState) -> Option<AppMsg> {
             Pane::Discover(_) => None,
         },
     }
+}
+
+/// The message for the platform copy chord, if some editor currently holds a
+/// selection.
+///
+/// Candidates are probed in the order the original dbm's `copy_active_selection`
+/// used. Today only the SQL workspace's editor is an `edtui` buffer with a
+/// selection (the discover targets cell editor and the results detail pane have
+/// none), so a new copyable pane is added here — one place, no per-feature key
+/// maps to touch.
+fn copy_selection_msg(state: &AppState) -> Option<AppMsg> {
+    if state.focus != Pane::SQLWorkspace {
+        return None;
+    }
+    let tab = state.sql.sql_tab.active_tab()?;
+    if tab.editor.editor.selection.is_some() {
+        return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+            SqlTabMsg::Message(SqlTabMessage::Editor {
+                tab_id: tab.session.id,
+                msg: EditorMsg::Message(EditorMessage::CopySelection),
+            }),
+        ))));
+    }
+    None
 }
 
 /// Route a bracketed-paste payload to the focused editor cell. The discover
@@ -178,6 +214,62 @@ mod tests {
                 DiscoverPane::Targets
             )))
         ));
+    }
+
+    #[test]
+    fn copy_chord_without_selection_is_not_claimed() {
+        // No selection → the global gate must not swallow the chord; it falls
+        // through to the focused pane's own key map.
+        let mut state = app_state_with_tab();
+        state.focus = Pane::SQLWorkspace;
+        state.sql.sql_tab.tabs[0].focus = SqlFocus::Editor;
+        #[cfg(not(target_os = "macos"))]
+        let copy = key(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        #[cfg(target_os = "macos")]
+        let copy = key(KeyCode::Char('c'), KeyModifiers::SUPER);
+        let msg = key_to_msg(copy, &state);
+        assert!(
+            !matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::Editor {
+                        msg: EditorMsg::Message(EditorMessage::CopySelection),
+                        ..
+                    },)
+                ))))
+            ),
+            "copy with no selection must not emit CopySelection"
+        );
+    }
+
+    #[test]
+    fn copy_chord_copies_editor_selection_from_any_subpane_focus() {
+        let mut state = app_state_with_tab();
+        state.focus = Pane::SQLWorkspace;
+        // The mouse-made selection lives on the editor even while another
+        // sub-pane (results) holds focus: the global copy gate must still copy.
+        state.sql.sql_tab.tabs[0].focus = SqlFocus::Results;
+        state.sql.sql_tab.tabs[0].editor.editor.selection = Some(edtui::Selection::new(
+            edtui::Index2::new(0, 1),
+            edtui::Index2::new(0, 3),
+        ));
+        #[cfg(not(target_os = "macos"))]
+        let copy = key(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        #[cfg(target_os = "macos")]
+        let copy = key(KeyCode::Char('c'), KeyModifiers::SUPER);
+        let msg = key_to_msg(copy, &state).expect("copy chord must be handled");
+        assert!(
+            matches!(
+                msg,
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Editor {
+                        msg: EditorMsg::Message(EditorMessage::CopySelection),
+                        ..
+                    },
+                ))))
+            ),
+            "expected CopySelection, got {msg:?}"
+        );
     }
 
     #[test]

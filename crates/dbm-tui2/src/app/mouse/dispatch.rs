@@ -64,12 +64,14 @@ pub(crate) fn handle_mouse_event(
     // intervening `Up`.
     if matches!(mouse.kind, MouseEventKind::Down(_))
         && (state.scrollbar_drag.is_some()
+            || state.sql_editor_selecting
             || splitter_drag.is_some()
             || state.splitter_hover.results_col_resize_drag.is_some()
             || state.splitter_hover.dragging_flags().iter().any(|&f| f))
     {
         splitter_drag = None;
         state.scrollbar_drag = None;
+        state.sql_editor_selecting = false;
         state.splitter_hover.set_dragging_flags([false; 7]);
         state.splitter_hover.results_col_resize_drag = None;
         dirty = true;
@@ -154,9 +156,15 @@ pub(crate) fn handle_mouse_event(
                 &mut dirty,
                 &mut splitter_drag,
             )?,
-            MouseEventKind::Up(MouseButton::Left) => {
-                handle_up(&mouse, size, state, &mut dirty, &mut splitter_drag)?
-            }
+            MouseEventKind::Up(MouseButton::Left) => handle_up(
+                &mouse,
+                size,
+                state,
+                &mut dirty,
+                &mut splitter_drag,
+                effect_runner,
+                action_rx,
+            )?,
             MouseEventKind::Moved => {
                 handle_moved(&mouse, size, state, &mut dirty, &mut splitter_drag)?
             }

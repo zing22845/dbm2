@@ -80,6 +80,12 @@ pub(super) fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
         ));
     }
 
+    // Note: the platform copy chord is *not* handled here. It is a global
+    // shortcut — it must copy whichever editor holds a selection regardless of
+    // the sub-pane focus — so it is resolved once in `key/dispatch.rs`
+    // (`copy_selection_msg`), mirroring the original dbm's global
+    // `copy_active_selection`.
+
     // Tab-bar / tab management keys (only when the popups are closed).
     if let Some(msg) = sql_tab_navigation_key(key, state) {
         return Some(msg);
@@ -1716,5 +1722,56 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn sql_key_does_not_claim_the_copy_chord() {
+        // The copy chord is global (`key/dispatch::copy_selection_msg`), so the
+        // workspace's own key map must never produce it — otherwise the same
+        // chord would have two owners.
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].focus = SqlFocus::Editor;
+        state.sql_tab.tabs[0].editor.editor.selection = Some(edtui::Selection::new(
+            edtui::Index2::new(0, 1),
+            edtui::Index2::new(0, 3),
+        ));
+        #[cfg(not(target_os = "macos"))]
+        let copy_key = key(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        #[cfg(target_os = "macos")]
+        let copy_key = key(KeyCode::Char('c'), KeyModifiers::SUPER);
+        let msg = sql_key(copy_key, &state);
+        assert!(
+            !matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::Editor {
+                        msg: EditorMsg::Message(EditorMessage::CopySelection),
+                        ..
+                    },)
+                ))))
+            ),
+            "the copy chord belongs to the global gate, not to sql_key"
+        );
+    }
+
+    #[test]
+    fn plain_c_in_editor_is_not_a_copy() {
+        // An unmodified `c` must stay editor input (insert a char in insert
+        // mode / vim motion prefix in normal mode), never trigger copy.
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].focus = SqlFocus::Editor;
+        let msg = sql_key(key(KeyCode::Char('c'), KeyModifiers::NONE), &state);
+        assert!(
+            !matches!(
+                msg,
+                Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+                    SqlTabMsg::Message(SqlTabMessage::Editor {
+                        msg: EditorMsg::Message(EditorMessage::CopySelection),
+                        ..
+                    },)
+                ))))
+            ),
+            "plain c must not copy"
+        );
     }
 }

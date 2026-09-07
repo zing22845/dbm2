@@ -20,3 +20,14 @@ When `wrap(true)`:
   (so the gutter does not disappear with the scrolled-off wrap segments)
 
 Wired via workspace `[patch.crates-io]` in the root `Cargo.toml`.
+
+## Change 2
+
+Expose `EditorState::set_mouse_screen_area(area)`.
+
+Upstream mouse routing relies on `state.view.screen_area`, which is only
+refreshed when the editor is rendered `&mut`. dbm2 renders a *copy* of the
+editor each frame (keeping the render pass pure), so the real editor's
+`screen_area` would stay stale and mouse events would map to the wrong buffer
+position. This setter lets the host feed the rendered text area to the mouse
+handler before dispatching a Down/Drag/Up event.

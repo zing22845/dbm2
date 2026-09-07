@@ -21,6 +21,9 @@ pub enum EditorAction {
     ContextPicker(ContextPickerAction),
     /// The completion catalog for the tab's connection/schema was loaded.
     CompletionCatalogLoaded(CompletionCatalogData),
+    /// The selection-copy effect finished. Its outcome is surfaced as a global
+    /// footer status by the round; it never feeds back into the editor.
+    CopySelection { ok: bool },
 }
 
 impl From<ContextPickerAction> for EditorAction {
@@ -49,6 +52,8 @@ pub enum EditorEffect {
         database: Option<String>,
         schema: String,
     },
+    /// Write a selected editor range to the system clipboard.
+    CopySelection { text: String },
 }
 
 impl Effect for EditorEffect {
@@ -106,6 +111,10 @@ impl Effect for EditorEffect {
                             Vec::new()
                         }
                     }
+                }
+                EditorEffect::CopySelection { text } => {
+                    let ok = crate::common::service::clipboard::copy_to_system(&text).is_ok();
+                    vec![EditorAction::CopySelection { ok }]
                 }
             }
         })

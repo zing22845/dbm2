@@ -157,12 +157,14 @@ pub(crate) fn action_to_app_msgs(action: Action) -> Vec<AppMsg> {
         // the commit-preview modal.
         Action::Sql(action) => {
             use crate::features::sql_workspace::effect::SqlAction;
+            use crate::features::sql_workspace::sql_tab::editor::effect::EditorAction;
             use crate::features::sql_workspace::sql_tab::effect::SqlTabAction;
             use crate::features::sql_workspace::sql_tab::results::effect::ResultsAction;
             let mut msgs = Vec::new();
             // A clipboard copy produces no feature message: its outcome is
             // surfaced as a global-footer status only.
             let mut copy_column_name = false;
+            let mut editor_copy_selection = false;
             match &action {
                 SqlAction::SqlTab(SqlTabAction::Results {
                     action: ResultsAction::CommitResult { .. },
@@ -200,9 +202,26 @@ pub(crate) fn action_to_app_msgs(action: Action) -> Vec<AppMsg> {
                     ));
                     copy_column_name = true;
                 }
+                // An editor selection copy is surfaced exactly like the
+                // column-name copy: a global-footer status, no feature message.
+                SqlAction::SqlTab(SqlTabAction::Editor {
+                    action: EditorAction::CopySelection { ok },
+                    ..
+                }) => {
+                    msgs.push(AppMsg::Footer(
+                        crate::features::global_footer::msg::FooterMsg::Message(
+                            crate::features::global_footer::msg::FooterMessage::SetStatus(if *ok {
+                                "Copied to clipboard".to_string()
+                            } else {
+                                "Copy failed".to_string()
+                            }),
+                        ),
+                    ));
+                    editor_copy_selection = true;
+                }
                 _ => {}
             }
-            if !copy_column_name {
+            if !copy_column_name && !editor_copy_selection {
                 msgs.push(AppMsg::Sql(
                     crate::features::sql_workspace::msg::SqlMsg::Message(sql_action_to_msg(action)),
                 ));
@@ -349,6 +368,11 @@ fn sql_action_to_msg(
                         tables: data.tables,
                         columns_by_table: data.columns_by_table,
                     })
+                }
+                // The selection-copy outcome is reported by the round footer
+                // status; it never reaches this feature-message path.
+                EA::CopySelection { .. } => {
+                    unreachable!("editor selection copy is reported by the round footer status")
                 }
             };
             SqlMessage::SqlTab(SqlTabMsg::Message(SqlTabMessage::Editor { tab_id, msg }))
@@ -614,6 +638,30 @@ mod tests {
         };
         assert_eq!(tab_id, 7);
         assert_eq!(store.entries("inst", "c1"), &["SELECT 1", "SELECT 2"]);
+    }
+
+    #[test]
+    fn editor_copy_action_surfaces_footer_status_only() {
+        use crate::app::action::Action;
+        use crate::features::global_footer::msg::{FooterMessage, FooterMsg};
+        use crate::features::sql_workspace::sql_tab::editor::effect::EditorAction;
+        let action = Action::Sql(SqlAction::SqlTab(SqlTabAction::Editor {
+            tab_id: 2,
+            action: EditorAction::CopySelection { ok: true },
+        }));
+        let msgs = action_to_app_msgs(action);
+        assert!(
+            msgs.iter().any(|m| matches!(
+                m,
+                AppMsg::Footer(FooterMsg::Message(FooterMessage::SetStatus(s)))
+                    if s == "Copied to clipboard"
+            )),
+            "copy action must surface a footer status, got: {msgs:?}"
+        );
+        assert!(
+            !msgs.iter().any(|m| matches!(m, AppMsg::Sql(_))),
+            "a clipboard copy must not feed back a feature message"
+        );
     }
 
     #[test]

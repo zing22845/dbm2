@@ -22,6 +22,7 @@ use crate::features::sql_workspace::view as sql_view;
 /// feature's `view::render`. Returns the editor's hardware cursor (when the
 /// active SQL tab's editor sub-pane holds focus) so the run loop can place the
 /// terminal caret.
+#[allow(clippy::type_complexity)]
 pub fn render(
     frame: &mut ratatui::Frame,
     state: &AppState,
@@ -30,6 +31,7 @@ pub fn render(
     Option<crate::features::discover::targets::view::TargetsLayoutInfo>,
     Option<usize>,
     Option<usize>,
+    Option<crate::common::editor::EditorMouseHitArea>,
 ) {
     // The footer height is dynamic: one line of hints plus the (wrapped) status
     // line when present. It is sized against the width the hints actually get
@@ -96,27 +98,28 @@ pub fn render(
     // the instance workspace to the SQL workspace. With no active workspace we
     // still show the SQL workspace (its empty-state hint) — the "connection
     // zone" the original dbm keeps visible after the last tab closes.
-    let (editor_cursor, history_v_scroll) = if state.explorer.instances.active_is_instance() {
-        iw_view::render(
-            frame,
-            &state.theme,
-            workspace,
-            &state.iw,
-            workspace_focused,
-            active_scrollbar,
-        );
-        (None, None)
-    } else {
-        sql_view::render(
-            frame,
-            &state.theme,
-            workspace,
-            &state.sql,
-            workspace_focused,
-            &state.splitter_hover,
-            active_scrollbar,
-        )
-    };
+    let (editor_cursor, history_v_scroll, editor_mouse_hit) =
+        if state.explorer.instances.active_is_instance() {
+            iw_view::render(
+                frame,
+                &state.theme,
+                workspace,
+                &state.iw,
+                workspace_focused,
+                active_scrollbar,
+            );
+            (None, None, None)
+        } else {
+            sql_view::render(
+                frame,
+                &state.theme,
+                workspace,
+                &state.sql,
+                workspace_focused,
+                &state.splitter_hover,
+                active_scrollbar,
+            )
+        };
     // The bottom row holds the global footer on the left and the performance
     // readout on the right.
     render_footer_with_perf(frame, state, chunks[2]);
@@ -167,6 +170,7 @@ pub fn render(
             targets_layout_ref.into_inner(),
             history_v_scroll,
             results_scroll_out,
+            None,
         );
     }
     // The discover overlay's inline-edit caret wins over the editor caret
@@ -176,6 +180,7 @@ pub fn render(
         targets_layout_ref.into_inner(),
         history_v_scroll,
         results_scroll_out,
+        editor_mouse_hit,
     )
 }
 

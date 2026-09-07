@@ -380,4 +380,36 @@ mod tests {
             "a failed query must not record history, got: {intents:?}"
         );
     }
+    #[test]
+    fn copy_selection_editor_message_emits_editor_copy_effect() {
+        use crate::features::sql_workspace::sql_tab::editor::effect::EditorEffect;
+        use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
+        use crate::features::sql_workspace::sql_tab::effect::SqlTabEffect;
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let tab_id = s.tabs[0].session.id;
+        crate::common::editor::set_sql_text(&mut s.tabs[0].editor.editor, "hello");
+        s.tabs[0].editor.editor.mode = edtui::EditorMode::Visual;
+        s.tabs[0].editor.editor.selection = Some(edtui::Selection::new(
+            edtui::Index2::new(0, 1),
+            edtui::Index2::new(0, 3),
+        ));
+        let (_s, _i, effects, _d) = update(
+            SqlTabMessage::Editor {
+                tab_id,
+                msg: EditorMsg::Message(EditorMessage::CopySelection),
+            },
+            s,
+        );
+        assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                SqlTabEffect::Editor {
+                    tab_id: t,
+                    effect: EditorEffect::CopySelection { text },
+                } if *t == tab_id && text == "ell"
+            )),
+            "copy must surface as an editor clipboard effect, got: {effects:?}"
+        );
+    }
 }

@@ -17,7 +17,7 @@ use crate::actions::Execute;
 use crate::clipboard::{Clipboard, ClipboardTrait};
 use crate::helper::max_col;
 use crate::{Index2, Lines};
-use ratatui_core::layout::Position;
+use ratatui_core::layout::{Position, Rect};
 
 /// Represents the state of an editor.
 #[derive(Clone)]
@@ -211,6 +211,17 @@ impl EditorState {
     /// to call this manually.
     pub fn set_viewport_height(&mut self, height: usize) {
         self.view.update_num_rows(height);
+    }
+
+    /// Sets the terminal area the editor text occupies (the mouse hit region).
+    ///
+    /// Normally this is maintained automatically by [`EditorView::render`]
+    /// (which derives it from the area minus the line-number gutter). Hosts
+    /// that render a *copy* of the editor and route mouse events on the real
+    /// state need this setter so [`EditorEventHandler::on_mouse_event`] maps
+    /// terminal coordinates to buffer positions correctly.
+    pub fn set_mouse_screen_area<T: Into<Rect>>(&mut self, area: T) {
+        self.view.set_screen_area(area);
     }
 
     /// Whether the viewport is currently locked from cursor-following auto-scroll.

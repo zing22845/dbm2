@@ -126,6 +126,42 @@ pub fn update(
             state.editor.set_scroll_locked(true);
             dirty = true;
         }
+        // A decoded mouse gesture: apply the edtui-produced cursor/mode/
+        // selection. Clicking resumes cursor-following (a prior wheel scroll
+        // must not keep the clicked location off-screen), and a mode/cursor
+        // change recomputes the completion popup like an arrow-key move would.
+        EditorMessage::MouseGesture { outcome } => {
+            state.editor.set_scroll_locked(false);
+            let before = (
+                state.editor.cursor,
+                state.editor.mode,
+                state.editor.selection.clone(),
+            );
+            state.editor.cursor = outcome.cursor;
+            state.editor.mode = outcome.mode;
+            state.editor.selection = outcome.selection;
+            if before
+                != (
+                    state.editor.cursor,
+                    state.editor.mode,
+                    state.editor.selection.clone(),
+                )
+            {
+                refresh_completion(&mut state, false);
+                dirty = true;
+            }
+        }
+        // Copy the current visual selection (mouse-drag or `v`-mode) to the
+        // system clipboard. The buffer/mode are untouched, so the selection
+        // stays highlighted for further edits (Esc clears it via the key path).
+        EditorMessage::CopySelection => {
+            if let Some(sel) = state.editor.selection.as_ref() {
+                let text = sel.copy_from(&state.editor.lines).to_string();
+                if !text.is_empty() {
+                    effects.push(EditorEffect::CopySelection { text });
+                }
+            }
+        }
     }
 
     // The editor owns the buffer, so a completion Apply intent is resolved here
@@ -363,6 +399,7 @@ fn editor_cursor(editor: &edtui::EditorState) -> crate::common::utils::cursor::C
 mod tests {
     use super::*;
     use crate::common::editor;
+    use crate::features::sql_workspace::sql_tab::editor::mouse::MouseGestureOutcome;
     use crate::features::sql_workspace::sql_tab::editor::sql_completion::state::SqlCompletionState;
     use crossterm::event::{KeyCode, KeyEventKind, KeyEventState, KeyModifiers};
 
@@ -858,6 +895,73 @@ mod tests {
         assert_eq!(
             editor::editor_text(&EditorState::with_sql("select 1").editor),
             "select 1"
+        );
+    }
+
+    #[test]
+    fn mouse_gesture_applies_outcome_and_marks_dirty() {
+        // A decoded mouse gesture replaces cursor/mode/selection wholesale (the
+        // outcome was produced by edtui on a scratch copy) and repaints.
+        let state = EditorState::with_sql("hello");
+        let outcome = MouseGestureOutcome {
+            cursor: edtui::Index2::new(0, 2),
+            mode: edtui::EditorMode::Visual,
+            selection: Some(edtui::Selection::new(
+                edtui::Index2::new(0, 2),
+                edtui::Index2::new(0, 4),
+            )),
+        };
+        let (s, _i, _e, dirty) = update(EditorMessage::MouseGesture { outcome }, state);
+        assert_eq!(s.editor.cursor, edtui::Index2::new(0, 2));
+        assert_eq!(s.editor.mode, edtui::EditorMode::Visual);
+        let sel = s
+            .editor
+            .selection
+            .expect("gesture must install the selection");
+        assert_eq!(sel.start, edtui::Index2::new(0, 2));
+        assert_eq!(sel.end, edtui::Index2::new(0, 4));
+        assert!(dirty, "a cursor/mode/selection change must repaint");
+    }
+
+    #[test]
+    fn mouse_gesture_that_changes_nothing_is_not_dirty() {
+        // A redundant drag frame / outside release changes nothing, so it must
+        // not repaint (the same cell as the previous gesture).
+        let state = EditorState::with_sql("hello");
+        let outcome = MouseGestureOutcome {
+            cursor: state.editor.cursor,
+            mode: state.editor.mode,
+            selection: state.editor.selection.clone(),
+        };
+        let (_s, _i, _e, dirty) = update(EditorMessage::MouseGesture { outcome }, state);
+        assert!(!dirty, "an unchanged gesture must not repaint");
+    }
+
+    #[test]
+    fn copy_selection_emits_clipboard_effect() {
+        use super::super::effect::EditorEffect as E;
+        let mut state = EditorState::with_sql("hello");
+        state.editor.mode = edtui::EditorMode::Visual;
+        state.editor.selection = Some(edtui::Selection::new(
+            edtui::Index2::new(0, 1),
+            edtui::Index2::new(0, 3),
+        ));
+        let (_s, _i, effects, _d) = update(EditorMessage::CopySelection, state);
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, E::CopySelection { text } if text == "ell")),
+            "copy must emit the selected buffer text, got: {effects:?}"
+        );
+    }
+
+    #[test]
+    fn copy_without_selection_is_a_noop() {
+        let state = EditorState::with_sql("hello");
+        let (_s, _i, effects, _d) = update(EditorMessage::CopySelection, state);
+        assert!(
+            effects.is_empty(),
+            "copy without a selection must not emit an effect, got: {effects:?}"
         );
     }
 }

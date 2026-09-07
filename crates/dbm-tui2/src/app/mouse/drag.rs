@@ -3,7 +3,7 @@
 //! These run after the press has armed something (a splitter drag or a scrollbar
 //! grab) or when the pointer moves with no button held at all.
 
-use crossterm::event::MouseEvent;
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{
     Size, {Position, Rect},
 };
@@ -36,6 +36,7 @@ pub(crate) fn clear_active_drags(state: &mut AppState) {
     state.scrollbar_drag = None;
     state.splitter_hover.set_dragging_flags([false; 7]);
     state.splitter_hover.results_col_resize_drag = None;
+    state.sql_editor_selecting = false;
 }
 
 /// A held-button drag: follow the pointer for whichever scrollbar or
@@ -49,6 +50,23 @@ pub(crate) fn handle_drag(
     dirty: &mut bool,
     splitter_drag: &mut Option<SplitterDrag>,
 ) -> anyhow::Result<()> {
+    // A drag that began on the editor text extends the selection. A text press
+    // never armed a scrollbar/splitter, so nothing else can be active here —
+    // forward the pointer and return. Events that leave the text area are
+    // ignored by edtui itself, freezing the selection (matching the original).
+    if state.sql_editor_selecting
+        && let Some(msg) = super::editor_gesture::editor_gesture_msg(
+            state,
+            MouseEventKind::Drag(MouseButton::Left),
+            point.x,
+            point.y,
+            false,
+        )
+    {
+        let result = process_message_round(effect_runner, action_rx, msg, state);
+        *dirty |= result.dirty;
+        return Ok(());
+    }
     // Exactly one of the arms below can match:
     // `splitter_drag` is a single slot armed by the
     // press, so a drag resizes only the splitter it
@@ -430,7 +448,23 @@ pub(crate) fn handle_up(
     state: &mut AppState,
     dirty: &mut bool,
     splitter_drag: &mut Option<SplitterDrag>,
+    effect_runner: &EffectRunner<Action>,
+    action_rx: &mut mpsc::UnboundedReceiver<Action>,
 ) -> anyhow::Result<()> {
+    // A release that ends an editor text selection places the cursor at the
+    // release point but keeps the selection highlighted (for the copy key).
+    if state.sql_editor_selecting
+        && let Some(msg) = super::editor_gesture::editor_gesture_msg(
+            state,
+            MouseEventKind::Up(MouseButton::Left),
+            mouse.column,
+            mouse.row,
+            false,
+        )
+    {
+        let result = process_message_round(effect_runner, action_rx, msg, state);
+        *dirty |= result.dirty;
+    }
     // One drag slot covers every scrollbar, so releasing
     // the button ends whichever one was active — no need
     // to clear a flag per bar.
@@ -473,6 +507,7 @@ pub(crate) fn handle_up(
     // on screen (the `Up` only set `dirty` via hover, which
     // is false over a bare scrollbar).
     let was_dragging = state.scrollbar_drag.is_some()
+        || state.sql_editor_selecting
         || state.splitter_hover.results_col_resize_drag.is_some()
         || state.splitter_hover.dragging_flags().iter().any(|&f| f);
     clear_active_drags(state);
@@ -504,6 +539,7 @@ pub(crate) fn handle_moved(
     // real (button-held) drag produces `Drag` events, never
     // `Moved`, so this can never fire mid-drag.
     if state.scrollbar_drag.is_some()
+        || state.sql_editor_selecting
         || splitter_drag.is_some()
         || state.splitter_hover.results_col_resize_drag.is_some()
         || state.splitter_hover.dragging_flags().iter().any(|&f| f)

@@ -63,6 +63,21 @@ pub struct AppState {
     /// in the accent color) while the press is held, matching the original dbm.
     pub scrollbar_drag: Option<crate::common::layout::pane_scrollbar::ScrollbarDrag>,
 
+    /// The SQL editor's rendered mouse hit region, fed back by the run loop
+    /// after every draw.
+    ///
+    /// The editor is rendered from a *copy* each frame, so only the render knows
+    /// the true text area and (auto-scrolled) viewport that mouse coordinates
+    /// must be mapped against. The loop captures those two numbers from the
+    /// render and stores them here; the pointer layer reads them when a
+    /// Down/Drag/Up lands on the editor text. `None` when no editor is shown.
+    pub sql_editor_mouse_area: Option<crate::common::editor::EditorMouseHitArea>,
+    /// Whether a held-button drag began on the SQL editor's text (a mouse-text
+    /// selection is in progress). Transient like `scrollbar_drag`: armed by the
+    /// press, forwarded by Drag, and cleared on Up / FocusLost / a fresh Down
+    /// that proves a previous release was missed.
+    pub sql_editor_selecting: bool,
+
     // --- Feature states ---
     pub header: HeaderState,
     pub explorer: ExplorerState,
@@ -227,6 +242,8 @@ impl Default for AppState {
             splitter: crate::features::app_splitter::state::AppSplitterState::default(),
             splitter_hover: SplitterHoverState::default(),
             scrollbar_drag: None,
+            sql_editor_mouse_area: None,
+            sql_editor_selecting: false,
             theme: crate::common::view::theme::default(),
             header: HeaderState::default(),
             explorer: ExplorerState::default(),

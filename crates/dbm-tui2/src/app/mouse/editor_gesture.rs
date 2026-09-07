@@ -1,0 +1,59 @@
+//! Shared plumbing for SQL-editor mouse text selection (Down/Drag/Up).
+//!
+//! The three gesture handlers live in separate files (`press.rs`, `drag.rs`),
+//! so the common steps live here: run the event through edtui's own mouse
+//! handler on a scratch editor copy (using the rendered hit area the run loop
+//! fed back) and package the resulting cursor/mode/selection as an
+//! [`EditorMessage::MouseGesture`] for the active tab.
+
+use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
+
+use crate::app::msg::AppMsg;
+use crate::app::state::AppState;
+use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+use crate::features::sql_workspace::sql_tab::editor::mouse;
+use crate::features::sql_workspace::sql_tab::editor::msg::{EditorMessage, EditorMsg};
+use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+
+/// Build the mouse event edtui expects from a decoded gesture.
+fn mouse_event(kind: MouseEventKind, x: u16, y: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column: x,
+        row: y,
+        modifiers: KeyModifiers::empty(),
+    }
+}
+
+/// Decode a Down/Drag/Up gesture on the active tab's editor text and return
+/// the message that applies it. `None` when there is no active tab or no
+/// rendered editor hit region (e.g. the first frames before any draw).
+///
+/// Callers gate *Down* events to the editor text area first; Drag/Up run
+/// unconditionally while `sql_editor_selecting` is set (edtui itself ignores
+/// events that leave the text area, freezing the selection).
+pub(super) fn editor_gesture_msg(
+    state: &AppState,
+    kind: MouseEventKind,
+    x: u16,
+    y: u16,
+    double_click: bool,
+) -> Option<AppMsg> {
+    let tab = state.sql.sql_tab.active_tab()?;
+    let hit = state.sql_editor_mouse_area?;
+    let event = mouse_event(kind, x, y);
+    let outcome = mouse::apply_mouse_event(
+        &tab.editor.handler,
+        &tab.editor.editor,
+        &event,
+        hit,
+        double_click,
+    );
+    let tab_id = tab.session.id;
+    Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+        SqlTabMsg::Message(SqlTabMessage::Editor {
+            tab_id,
+            msg: EditorMsg::Message(EditorMessage::MouseGesture { outcome }),
+        }),
+    ))))
+}

@@ -47,7 +47,14 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
         crossterm::terminal::EnterAlternateScreen,
         crossterm::event::EnableMouseCapture,
         crossterm::event::EnableFocusChange,
-        crossterm::event::EnableBracketedPaste
+        crossterm::event::EnableBracketedPaste,
+        // Ask the terminal for the kitty keyboard protocol (as the original dbm
+        // does). Besides disambiguating `Esc` from `Alt+key`, it is what makes a
+        // terminal report `Cmd`-modified keys (`Cmd+C` arrives as `c` + SUPER)
+        // instead of keeping them for its own OS copy shortcut.
+        crossterm::event::PushKeyboardEnhancementFlags(
+            crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+        )
     )?;
     // Restore the terminal even on an early `?` return or a panic so raw mode /
     // alternate screen never leak out and leave the terminal looking "frozen"
@@ -200,16 +207,22 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             let targets_layout = std::cell::RefCell::new(None);
             let history_v_scroll_out = std::cell::RefCell::new(None);
             let results_scroll_out = std::cell::RefCell::new(None);
+            let editor_mouse_hit = std::cell::RefCell::new(None);
             terminal.draw(|frame| {
-                let (c, t, h, r) = render(frame, &state);
+                let (c, t, h, r, e) = render(frame, &state);
                 *editor_cursor.borrow_mut() = c;
                 *targets_layout.borrow_mut() = t;
                 *history_v_scroll_out.borrow_mut() = h;
                 *results_scroll_out.borrow_mut() = r;
+                *editor_mouse_hit.borrow_mut() = e;
             })?;
             let cursor = editor_cursor.into_inner();
             let cursor_pos = cursor.as_ref().map(|c| c.position);
             crate::common::editor::apply_hardware_cursor(cursor)?;
+            // Feed back the SQL editor's rendered hit region (text area +
+            // viewport) so pointer handlers map clicks onto the buffer exactly
+            // as the drawn frame did. Only the render knows the true text area.
+            state.sql_editor_mouse_area = editor_mouse_hit.into_inner();
             // Feed back the computed targets layout (scroll offset, viewport)
             // to the state so update handlers can clamp scroll correctly.
             if let Some(info) = targets_layout.into_inner() {
@@ -360,6 +373,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     // "active" forever (the scrollbar thumb keeps its accent
                     // color). Clear every in-progress drag here so the UI resets.
                     let was_dragging = state.scrollbar_drag.is_some()
+                        || state.sql_editor_selecting
                         || mouse_interaction.splitter_drag.is_some()
                         || state.splitter_hover.results_col_resize_drag.is_some()
                         || state.splitter_hover.dragging_flags().iter().any(|&f| f);
@@ -446,6 +460,7 @@ pub fn restore_terminal() {
     let _ = crossterm::terminal::disable_raw_mode();
     let _ = crossterm::execute!(
         std::io::stdout(),
+        crossterm::event::PopKeyboardEnhancementFlags,
         crossterm::terminal::LeaveAlternateScreen,
         crossterm::event::DisableMouseCapture,
         crossterm::event::DisableFocusChange,

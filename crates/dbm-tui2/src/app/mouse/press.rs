@@ -7,7 +7,7 @@
 
 use std::time::Instant;
 
-use crossterm::event::MouseEvent;
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{
     Size, {Position, Rect},
 };
@@ -699,7 +699,35 @@ fn press_sql(
             state.splitter_hover.results_col_resize_drag = Some(col);
             tracing::debug!(col, "results column resize drag started");
         }
-        for msg in sql_click_msgs(&state.sql.sql_tab, action) {
+        // A press on the editor's *text* (not its scrollbar / header / footer
+        // rows, which the action above already claims) begins mouse text
+        // selection: arm the capture so subsequent Drag/Up events route back to
+        // the editor, and let edtui place the cursor / clear the old selection.
+        let text_click = matches!(
+            action,
+            crate::features::sql_workspace::sql_tab::input::SqlClickAction::FocusSubPane(
+                crate::features::sql_workspace::sql_tab::state::SqlFocus::Editor
+            )
+        ) && state.focus == Pane::SQLWorkspace
+            && state
+                .sql_editor_mouse_area
+                .is_some_and(|area| area.contains(Position::new(mouse.column, mouse.row)));
+        if text_click {
+            state.sql_editor_selecting = true;
+        }
+        let mut msgs = sql_click_msgs(&state.sql.sql_tab, action);
+        if text_click
+            && let Some(msg) = super::editor_gesture::editor_gesture_msg(
+                state,
+                MouseEventKind::Down(MouseButton::Left),
+                mouse.column,
+                mouse.row,
+                is_double_click,
+            )
+        {
+            msgs.push(msg);
+        }
+        for msg in msgs {
             let result = process_message_round(effect_runner, action_rx, msg, state);
             *dirty |= result.dirty;
         }
