@@ -51,6 +51,10 @@ pub struct ListState {
     /// a second press of the same key within the chord window upgrades to
     /// first / last page. Any non-chord message clears it.
     pub page_chord: Option<(bool, std::time::Instant)>,
+    /// When the last `d` (delete-row) press was made while editing, for the
+    /// original dbm's `dd` chord: a second `d` within 500 ms deletes the
+    /// selected row, a lone `d` does nothing.
+    pub del_chord_at: Option<std::time::Instant>,
     /// A COUNT(*) total-rows request is in flight (`[c]counting…`).
     pub counting: bool,
     /// A page action queued until the in-flight count lands (the original dbm

@@ -298,6 +298,33 @@ mod tests {
     }
 
     #[test]
+    fn del_chord_requires_second_press_within_window() {
+        let mut state = ResultsState::default();
+        state.list.result = Some(sample_result_multirow());
+        state.list.row = 0;
+        state.list.edit_target = Some(
+            crate::features::sql_workspace::sql_tab::results::edit_sql::EditTarget {
+                schema: "public".into(),
+                table: "t".into(),
+                primary_keys: vec!["id".into()],
+                columns: vec!["id".into()],
+            },
+        );
+        state.list.enter_edit();
+        // A lone `d` arms the chord and deletes nothing.
+        let (s, _i, _e, dirty) = update(ResultsMessage::DelChord, state);
+        assert!(!dirty, "a lone d must not delete");
+        assert!(s.list.edit.editing);
+        // A second `d` within the window deletes the selected row.
+        let (s2, _i2, _e2, dirty2) = update(ResultsMessage::DelChord, s);
+        assert!(dirty2, "the second d must delete the row");
+        assert!(
+            s2.list.edit.deleted.contains(&0),
+            "the selected loaded row must be marked deleted"
+        );
+    }
+
+    #[test]
     fn set_detail_draft_updates_both_detail_and_list() {
         let msg = ResultsMessage::SetDetailDraft {
             text: "new_value".into(),

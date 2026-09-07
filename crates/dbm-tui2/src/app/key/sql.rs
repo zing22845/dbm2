@@ -346,21 +346,24 @@ fn results_key(
         {
             Some(sql_results(SqlResultsMessage::Rollback, tab_id))
         }
-        // Insert / duplicate / delete rows (edit mode only).
+        // Insert / duplicate / delete rows (edit mode only), matching the
+        // original dbm's chords: Ctrl+i inserts a row, Ctrl+p duplicates the
+        // selected row, and `d` `d` (two presses within 500 ms) deletes it — a
+        // lone `d` only arms the chord (see `ListMessage::DelChord`).
         KeyCode::Char('i')
-            if key.modifiers.contains(KeyModifiers::ALT) && results.list.edit.editing =>
+            if key.modifiers.contains(KeyModifiers::CONTROL) && results.list.edit.editing =>
         {
             Some(sql_results(SqlResultsMessage::AddRow, tab_id))
         }
         KeyCode::Char('p')
-            if key.modifiers.contains(KeyModifiers::ALT) && results.list.edit.editing =>
+            if key.modifiers.contains(KeyModifiers::CONTROL) && results.list.edit.editing =>
         {
             Some(sql_results(SqlResultsMessage::DupRow, tab_id))
         }
         KeyCode::Char('d')
             if key.modifiers.is_empty() && results.list.edit.editing =>
         {
-            Some(sql_results(SqlResultsMessage::DelRow, tab_id))
+            Some(sql_results(SqlResultsMessage::DelChord, tab_id))
         }
         // Page navigation: `>` next page / `<` previous page, arming the
         // original dbm double-press chord — a second `>` within the chord

@@ -49,6 +49,10 @@ pub enum ListMessage {
     DupRow,
     /// Delete the selected row.
     DelRow,
+    /// A `d` key press while editing: the original dbm's `dd` chord — the first
+    /// press arms it, a second `d` within 500 ms deletes the selected row, a
+    /// lone `d` does nothing.
+    DelChord,
     /// Apply a new rows-per-page limit.
     SetRowLimit { limit: usize },
     /// Jump to a page.

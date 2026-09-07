@@ -68,6 +68,9 @@ pub enum ResultsMessage {
     DupRow,
     /// Delete the selected row.
     DelRow,
+    /// A `d` key press while editing (the original `dd` chord — see
+    /// [`ListMessage::DelChord`]).
+    DelChord,
     /// Set the detail draft text (edited cell value).
     SetDetailDraft { text: String },
     /// Apply a new rows-per-page limit.
@@ -180,6 +183,7 @@ impl ResultsMessage {
             ResultsMessage::AddRow => ListMessage::AddRow,
             ResultsMessage::DupRow => ListMessage::DupRow,
             ResultsMessage::DelRow => ListMessage::DelRow,
+            ResultsMessage::DelChord => ListMessage::DelChord,
             ResultsMessage::SetRowLimit { limit } => ListMessage::SetRowLimit { limit },
             ResultsMessage::SetPage { page } => ListMessage::SetPage { page },
             ResultsMessage::PageNav { action } => ListMessage::PageNav { action },

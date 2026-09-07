@@ -301,7 +301,25 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
         }
         ListMessage::DelRow => {
             state.edit_del_row();
+            state.del_chord_at = None;
             true
+        }
+        ListMessage::DelChord => {
+            // `dd`: a second `d` within 500 ms deletes the selected row; a
+            // lone `d` only arms the chord (mirrors the original dbm's
+            // `edit_del_row` guard in `handle_edit_table_key`).
+            const DEL_CHORD_WINDOW_MS: u128 = 500;
+            let now = std::time::Instant::now();
+            let second = state
+                .del_chord_at
+                .is_some_and(|at| now.duration_since(at).as_millis() <= DEL_CHORD_WINDOW_MS);
+            state.del_chord_at = Some(now);
+            if second {
+                state.edit_del_row();
+                true
+            } else {
+                false
+            }
         }
         ListMessage::SetRowLimit { limit } => {
             if state.edit.editing && state.edit.is_dirty() {
