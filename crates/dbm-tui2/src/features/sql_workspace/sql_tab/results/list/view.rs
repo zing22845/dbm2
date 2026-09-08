@@ -242,13 +242,15 @@ fn draw_match_cell_frame(
 /// anchored inside the viewport, the values are synced back into `state` so
 /// the next frame starts from the correct scroll position (fixes the stale
 /// h_scroll problem where state.h_scroll was never updated from the view).
-/// Style for an edit-session change marker / border, shared with the detail
-/// draft's dirty highlights: every changed row (`~`/`+`/`-`) uses the theme's
-/// single "unsaved change" orange — the row kind is conveyed by the glyph, not
-/// by a per-kind color.
+/// Style for an edit-session change marker / text, using the theme's three
+/// dirty colours: green for an insert, red for a delete, and the orange for a
+/// modified/update row (the same colour the detail draft's diff uses).
 fn change_kind_style(p: &crate::common::view::theme::Palette, kind: RowChangeKind) -> Style {
+    use crate::common::view::theme::{DIRTY_DELETE_COLOR, DIRTY_INSERT_COLOR};
     Style::default().fg(match kind {
-        RowChangeKind::Insert | RowChangeKind::Delete | RowChangeKind::Update => p.dirty,
+        RowChangeKind::Insert => DIRTY_INSERT_COLOR,
+        RowChangeKind::Delete => DIRTY_DELETE_COLOR,
+        RowChangeKind::Update => p.dirty,
         RowChangeKind::NoChange => p.fg,
     })
 }
@@ -520,18 +522,6 @@ fn render_table(
                     .set_string(table_area.x, y_base, glyph.to_string(), style);
             }
         }
-        // Dirty-row border tint in the change marker's colour. An Insert /
-        // Delete row is tinted as a whole; an Update row tints only the cells
-        // that actually changed (cell-level, decided while painting below).
-        let row_tint = if gutter_w > 0 && row_kind != RowChangeKind::NoChange {
-            Some(change_kind_style(p, row_kind))
-        } else {
-            None
-        };
-        // Screen spans `(col_x, border_x)` of this row's changed cells, whose
-        // top/bottom border segments get the tint.
-        let mut dirty_cell_spans: Vec<(u16, u16)> = Vec::new();
-
         // Horizontal span (`(left, right)`) of the current-match cell on this
         // row, if any; the row separator below tints this segment as the cell's
         // bottom border so all four edges are drawn consistently.
@@ -567,17 +557,21 @@ fn render_table(
                         row_idx,
                         col,
                     ));
+            // Dirty text keeps its change-kind colour (insert green / delete
+            // red / update orange) even on the selection background, so a
+            // focused dirty row still reads as changed.
+            let kind_fg = dirty.then(|| change_kind_style(p, row_kind).fg.unwrap_or(p.fg));
             let base_style = if cell_selected {
                 Style::default()
-                    .fg(p.selection_focus_text)
+                    .fg(kind_fg.unwrap_or(p.selection_focus_text))
                     .bg(p.selection_cell_bg)
                     .add_modifier(Modifier::BOLD)
             } else if row_selected || is_active {
-                Style::default().fg(p.selection_text).bg(p.selection_bg)
-            } else if dirty {
-                Style::default().fg(change_kind_style(p, row_kind).fg.unwrap_or(p.fg))
+                Style::default()
+                    .fg(kind_fg.unwrap_or(p.selection_text))
+                    .bg(p.selection_bg)
             } else {
-                Style::default().fg(p.fg)
+                Style::default().fg(kind_fg.unwrap_or(p.fg))
             };
 
             // Shift the window for the cell holding the current match so the highlighted
@@ -657,11 +651,9 @@ fn render_table(
                 Rect::new(col_x, y_base, tv.text_w, RESULTS_ROW_CONTENT_HEIGHT),
             );
 
-            // Column border for this row. It takes the change tint when it
-            // belongs to a changed cell: either this cell or the cell to its
-            // right is dirty (whole row for Insert/Delete, isolated changed
-            // cells for an Update row). The current-match frame repaints its
-            // own accent segment afterwards.
+            // Column border for this row: always the plain grid line — dirty
+            // rows are marked by the gutter glyph and the cell text colour,
+            // never by a border colour.
             let col_right = crate::common::view::format::col_x_end(col, col_widths);
             let border_x = table_area
                 .x
@@ -669,27 +661,9 @@ fn render_table(
                 .saturating_add(col_right as u16)
                 .saturating_sub(h_scroll)
                 .saturating_sub(1);
-            if dirty && border_x >= table_area.x && border_x < table_area.x + table_area.width {
-                dirty_cell_spans.push((col_x, border_x));
-            }
-            let right_cell_dirty = dirty
-                || (gutter_w > 0
-                    && col + 1 < num_cols
-                    && (matches!(row_kind, RowChangeKind::Insert | RowChangeKind::Delete)
-                        || crate::features::sql_workspace::sql_tab::results::edit::cell_is_dirty(
-                            &state.edit,
-                            row_idx,
-                            col + 1,
-                        )));
-            let border_style = match row_tint {
-                Some(t) if right_cell_dirty => t,
-                _ => grid_style,
-            };
             if border_x >= table_area.x && border_x < table_area.x + table_area.width {
                 for y in y_base..(y_base + RESULTS_ROW_HEIGHT).min(table_area.bottom()) {
-                    frame
-                        .buffer_mut()
-                        .set_string(border_x, y, "│", border_style);
+                    frame.buffer_mut().set_string(border_x, y, "│", grid_style);
                 }
             }
 
@@ -728,37 +702,6 @@ fn render_table(
                     _ => ("─", grid_style),
                 };
                 frame.buffer_mut().set_string(x, row_sep_y, glyph, style);
-            }
-        }
-
-        // Paint the changed cells' own top + bottom border segments in the tint
-        // (the shared separator/header line above is repainted only over the
-        // cells that changed). Update rows therefore tint only their changed
-        // cells, while Insert/Delete rows cover the whole line; the current
-        // match's accent frame keeps its span.
-        if let Some(tint) = row_tint {
-            let top_y = y_base.saturating_sub(1);
-            for &(left, right) in &dirty_cell_spans {
-                for (line_y, drawn) in [
-                    (top_y, top_y < table_area.bottom()),
-                    (row_sep_y, row_sep_y < table_area.bottom()),
-                ] {
-                    if !drawn || line_y < table_area.y {
-                        continue;
-                    }
-                    for x in left..right {
-                        if x < table_area.x || x >= table_area.right() {
-                            continue;
-                        }
-                        if let Some((l, r)) = match_bottom_span
-                            && x >= l
-                            && x <= r
-                        {
-                            continue;
-                        }
-                        frame.buffer_mut().set_string(x, line_y, "─", tint);
-                    }
-                }
             }
         }
     }

@@ -12,11 +12,15 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
-/// The orange used for *unsaved-change* visuals everywhere: the results list's
-/// dirty row markers/borders (`~`/`+`/`-`) and the results detail draft's
-/// baseline-diff highlights. Both derive from this one constant so a re-color
-/// of "changed but not committed" happens in one place.
+/// The orange used for an *update*/modified row (and the results detail
+/// draft's baseline-diff highlights).
 pub const DIRTY_CHANGE_COLOR: Color = Color::Rgb(255, 140, 0);
+
+/// Green for a pending *insert* row's marker / text.
+pub const DIRTY_INSERT_COLOR: Color = Color::Green;
+
+/// Red for a *deleted* row's marker / text.
+pub const DIRTY_DELETE_COLOR: Color = Color::Red;
 
 /// The semantic color slots available to every view.
 ///
@@ -83,9 +87,10 @@ pub struct Palette {
     /// separate so "unsaved change" reads as its own color against status
     /// colors like `success`/`error`.
     pub modified_text: Color,
-    /// Unsaved-change visuals shared with the results detail: the dirty row
-    /// markers/borders (`~`/`+`/`-`) and the detail draft's baseline-diff
-    /// highlights (the same orange, see [`DIRTY_CHANGE_COLOR`]).
+    /// Unsaved *update*/modified visuals shared with the results detail: an
+    /// Update row's marker (`~`) / text and the detail draft's baseline-diff
+    /// highlights. Inserts and deletes use [`DIRTY_INSERT_COLOR`] /
+    /// [`DIRTY_DELETE_COLOR`] instead.
     pub dirty: Color,
     /// Informational status.
     pub info: Color,
