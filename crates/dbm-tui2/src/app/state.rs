@@ -223,8 +223,13 @@ pub enum ModalKind {
     },
     /// Confirm unregistering an instance.
     UnregisterInstanceConfirm { instance: String },
-    /// Preview the edit-batch statements before committing.
-    ResultsEditCommitPreview { statements: Vec<String> },
+    /// Preview the edit-batch statements before committing. `scroll` is the
+    /// vertical offset of the preview body (wrapped visual rows) while the SQL
+    /// exceeds the popup's maximum size.
+    ResultsEditCommitPreview {
+        statements: Vec<String>,
+        scroll: usize,
+    },
 }
 
 impl AppState {

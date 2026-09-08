@@ -51,10 +51,19 @@ pub(crate) fn handle_confirm_modal_click(
     // The confirm modal renders over the live workspace
     // (app_body_layout), so hit-test against the same.
     if let Some(workspace) = workspace_rect_for_hit(size, body_top, body_h, state) {
-        let popup = crate::common::layout::modal::confirm_popup_rect(
-            workspace,
-            crate::common::view::modal::confirm_body_rows(state.modal.as_ref().unwrap()),
-        );
+        use crate::app::state::ModalKind;
+        let popup = match state.modal.as_ref() {
+            Some(ModalKind::ResultsEditCommitPreview { statements, .. }) => {
+                crate::common::layout::modal::commit_preview_rect(workspace, statements)
+            }
+            _ => Some(crate::common::layout::modal::confirm_popup_rect(
+                workspace,
+                crate::common::view::modal::confirm_body_rows(state.modal.as_ref().unwrap()),
+            )),
+        };
+        let Some(popup) = popup else {
+            return Ok(());
+        };
         let buttons = crate::common::view::modal::confirm_buttons(popup);
         let msg = if buttons.yes_rect.contains(point) {
             crate::app::confirm::confirm_yes_msg(state.modal.as_ref().unwrap(), state)

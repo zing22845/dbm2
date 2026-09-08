@@ -171,6 +171,35 @@ pub(crate) fn handle_mouse_event(
                 handle_moved(&mouse, size, state, &mut dirty, &mut splitter_drag)?
             }
 
+            // Scroll wheel over an open commit preview scrolls its SQL body.
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                if matches!(
+                    state.modal,
+                    Some(crate::app::state::ModalKind::ResultsEditCommitPreview { .. })
+                ) =>
+            {
+                use crate::app::state::ModalKind;
+                let up = matches!(mouse.kind, MouseEventKind::ScrollUp);
+                if let Some(ModalKind::ResultsEditCommitPreview { statements, scroll }) =
+                    &state.modal
+                {
+                    let msg =
+                        crate::app::msg::AppMsg::OpenModal(ModalKind::ResultsEditCommitPreview {
+                            statements: statements.clone(),
+                            scroll: (*scroll as i64)
+                                .saturating_add(if up { -1 } else { 1 })
+                                .max(0) as usize,
+                        });
+                    let result = crate::app::round::process_message_round(
+                        effect_runner,
+                        action_rx,
+                        msg,
+                        state,
+                    );
+                    dirty |= result.dirty;
+                }
+            }
+
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
                 if matches!(
                     state.focus,

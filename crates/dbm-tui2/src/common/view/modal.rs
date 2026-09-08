@@ -15,7 +15,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::state::ModalKind;
-use crate::common::layout::modal::{confirm_popup_rect, popup_rect};
+use crate::common::components::line_numbers::{format_gutter, gutter_style};
+use crate::common::layout::modal::{
+    CommitPreviewLayout, commit_preview_layout, confirm_popup_rect, popup_rect,
+};
 use crate::common::view::overlay_clear::clear_overlay;
 use crate::common::view::theme::Theme;
 
@@ -142,7 +145,7 @@ pub fn confirm_body_rows(modal: &ModalKind) -> usize {
     match modal {
         ModalKind::DeleteConnectionConfirm { .. } => 3,
         ModalKind::UnregisterInstanceConfirm { .. } => 1,
-        ModalKind::ResultsEditCommitPreview { statements } => {
+        ModalKind::ResultsEditCommitPreview { statements, .. } => {
             let shown = statements.len().min(6);
             shown + if statements.len() > 6 { 1 } else { 0 }
         }
@@ -266,6 +269,154 @@ pub fn render_confirm_popup(
     buttons
 }
 
+/// Render the commit-preview modal: a self-sizing popup (width follows the
+/// longest statement, height follows the wrapped SQL — each clamped to the
+/// workspace), line numbers, word wrapping, and a vertical scrollbar when the
+/// content exceeds the popup's maximum size.
+pub fn render_commit_preview_popup(
+    frame: &mut Frame,
+    theme: &Theme,
+    base: Rect,
+    statements: &[String],
+    scroll: usize,
+) {
+    let Some(layout) = commit_preview_layout(base, statements) else {
+        return;
+    };
+    render_commit_preview(frame, theme, scroll, &layout);
+}
+
+fn render_commit_preview(
+    frame: &mut Frame,
+    theme: &Theme,
+    scroll: usize,
+    layout: &CommitPreviewLayout,
+) {
+    let p = theme.palette();
+    let popup = layout.rect;
+    if popup.width < 2 || popup.height < 2 {
+        return;
+    }
+    clear_overlay(frame, popup);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(p.surface)),
+        popup,
+    );
+
+    let block = Block::default()
+        .title("Commit preview")
+        .borders(Borders::ALL)
+        .border_style(p.popup_border(true))
+        .style(Style::default().bg(p.surface));
+    let inner = block.inner(popup);
+    frame.render_widget(&block, popup);
+    if inner.width == 0 || inner.height < 2 {
+        return;
+    }
+    // Body rows, a blank spacer row, then the Yes/No button row.
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    let body = chunks[0];
+
+    let max_scroll = layout.max_scroll();
+    let scroll = scroll.min(max_scroll);
+
+    // Flatten each statement's wrapped rows; only the first row of a statement
+    // carries its line number (continuation rows leave the gutter blank).
+    let mut display: Vec<(Option<usize>, String)> = Vec::new();
+    for (i, rows) in layout.rows.iter().enumerate() {
+        for (k, row_text) in rows.iter().enumerate() {
+            display.push(((k == 0).then_some(i + 1), row_text.clone()));
+        }
+    }
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let visible = body.height as usize;
+    for (num, text) in display.iter().skip(scroll).take(visible) {
+        let gutter = match num {
+            Some(n) => format_gutter(*n, layout.gutter_w),
+            None => " ".repeat(layout.gutter_w as usize),
+        };
+        lines.push(Line::from(vec![
+            Span::styled(gutter, gutter_style()),
+            Span::raw(text.clone()),
+        ]));
+    }
+    while lines.len() < visible {
+        lines.push(Line::from(""));
+    }
+    frame.render_widget(
+        Paragraph::new(lines).style(Style::default().bg(p.surface)),
+        body,
+    );
+
+    draw_commit_preview_scrollbar(
+        frame,
+        theme,
+        body,
+        scroll,
+        max_scroll,
+        layout.total_rows,
+        layout.visible_rows,
+    );
+
+    // Yes/No button row (shared geometry with mouse hit-testing).
+    let buttons = confirm_buttons(popup);
+    let btn_style = Style::default()
+        .fg(p.bg)
+        .bg(p.accent)
+        .add_modifier(ratatui::style::Modifier::BOLD);
+    frame.render_widget(
+        Paragraph::new(yes_button_label()).style(btn_style),
+        buttons.yes_rect,
+    );
+    if buttons.no_rect.right() <= popup.right() {
+        frame.render_widget(
+            Paragraph::new(no_button_label()).style(btn_style),
+            buttons.no_rect,
+        );
+    }
+}
+
+/// Draw the commit preview's vertical scrollbar in the rightmost body column
+/// when the wrapped SQL overflows the popup's maximum height.
+fn draw_commit_preview_scrollbar(
+    frame: &mut Frame,
+    theme: &Theme,
+    body: Rect,
+    scroll: usize,
+    max_scroll: usize,
+    total_rows: usize,
+    visible_rows: usize,
+) {
+    if max_scroll == 0 || body.height == 0 {
+        return;
+    }
+    let x = (body.x.saturating_add(body.width.saturating_sub(1))) as usize;
+    let track_h = body.height as usize;
+    let thumb_h = (visible_rows.max(1) * track_h / total_rows.max(1))
+        .max(1)
+        .min(track_h);
+    let top = if track_h > thumb_h {
+        scroll * (track_h - thumb_h) / max_scroll.max(1)
+    } else {
+        0
+    };
+    for r in 0..track_h {
+        let pos = ratatui::layout::Position::new(x as u16, body.y + r as u16);
+        let cell = &mut frame.buffer_mut()[pos];
+        if r >= top && r < top + thumb_h {
+            cell.set_symbol("█");
+            cell.set_fg(theme.palette().accent);
+        }
+    }
+}
+
 /// A convenience span builder so popup bodies read like the original hints.rs.
 pub fn key(desc: &str, key_name: &str) -> String {
     format!("{desc}: {key_name}")
@@ -297,6 +448,7 @@ mod tests {
         }));
         assert!(is_confirm_modal(&ModalKind::ResultsEditCommitPreview {
             statements: Vec::new(),
+            scroll: 0,
         }));
         assert!(!is_confirm_modal(&ModalKind::ResultsRowLimitPicker {
             current: 1,

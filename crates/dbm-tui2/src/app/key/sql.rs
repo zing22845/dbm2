@@ -405,7 +405,10 @@ fn results_key(
         {
             let statements = results.list.build_commit_statements().ok();
             statements.map(|statements| {
-                AppMsg::OpenModal(ModalKind::ResultsEditCommitPreview { statements })
+                AppMsg::OpenModal(ModalKind::ResultsEditCommitPreview {
+                    statements,
+                    scroll: 0,
+                })
             })
         }
         // Roll back edits.

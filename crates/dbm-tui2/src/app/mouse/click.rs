@@ -635,6 +635,7 @@ pub(crate) fn sql_click_msgs(
                     if let Ok(statements) = tab.results.list.build_commit_statements() {
                         msgs.push(AppMsg::OpenModal(ModalKind::ResultsEditCommitPreview {
                             statements,
+                            scroll: 0,
                         }));
                     }
                 }

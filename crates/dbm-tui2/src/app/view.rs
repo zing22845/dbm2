@@ -219,7 +219,16 @@ fn render_popup_modal(
     modal: &ModalKind,
     state: &AppState,
 ) {
-    use crate::common::view::modal::{is_confirm_modal, modal_title, render_confirm_popup};
+    use crate::common::view::modal::{
+        is_confirm_modal, modal_title, render_commit_preview_popup, render_confirm_popup,
+    };
+    // The commit preview has its own self-sizing popup with line numbers,
+    // wrapping and a vertical scrollbar — it does not use the small generic
+    // confirm popup (which used to truncate the SQL).
+    if let ModalKind::ResultsEditCommitPreview { statements, scroll } = modal {
+        render_commit_preview_popup(frame, theme, base, statements, *scroll);
+        return;
+    }
     if is_confirm_modal(modal) {
         let title = modal_title(modal);
         let body = match modal {
@@ -235,23 +244,9 @@ fn render_popup_modal(
                     "This will remove the instance and its connections.",
                 ))]
             }
-            ModalKind::ResultsEditCommitPreview { statements } => {
-                let shown: Vec<Line> = statements
-                    .iter()
-                    .take(6)
-                    .map(|s| Line::from(Span::raw(s.clone())))
-                    .collect();
-                if statements.len() > 6 {
-                    let mut with_overflow = shown;
-                    with_overflow.push(Line::from(Span::styled(
-                        format!("… and {} more", statements.len() - 6),
-                        Style::default().fg(theme.palette().muted),
-                    )));
-                    with_overflow
-                } else {
-                    shown
-                }
-            }
+            // The commit preview is rendered by its own self-sizing popup
+            // (early-return above); this arm is unreachable.
+            ModalKind::ResultsEditCommitPreview { .. } => Vec::new(),
             ModalKind::ResultsRowLimitPicker { .. } | ModalKind::ResultsPageInput { .. } => {
                 Vec::new() // unreachable: not a confirm modal
             }

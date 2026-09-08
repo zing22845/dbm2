@@ -35,9 +35,31 @@ pub(super) fn modal_key(key: KeyEvent, modal: &ModalKind, state: &AppState) -> O
     use ModalKind;
     let close = || AppMsg::CloseModal;
     let active_tab_id = || state.sql.sql_tab.active_tab().map(|t| t.session.id);
+    // Scroll the commit-preview body by `delta` visual rows (the renderer
+    // clamps to the real content length).
+    let commit_scroll_by = |delta: i64| match modal {
+        ModalKind::ResultsEditCommitPreview { statements, scroll } => {
+            Some(AppMsg::OpenModal(ModalKind::ResultsEditCommitPreview {
+                statements: statements.clone(),
+                scroll: (*scroll as i64).saturating_add(delta).max(0) as usize,
+            }))
+        }
+        _ => None,
+    };
+    // Jump the commit preview to an absolute scroll position (0 / bottom).
+    let commit_scroll_to = |to: usize| match modal {
+        ModalKind::ResultsEditCommitPreview { statements, .. } => {
+            Some(AppMsg::OpenModal(ModalKind::ResultsEditCommitPreview {
+                statements: statements.clone(),
+                scroll: to,
+            }))
+        }
+        _ => None,
+    };
     match key.code {
         KeyCode::Esc => Some(close()),
         // Row-limit picker: up/down cycle the presets, enter applies.
+        // Commit preview: up/down (and vim j/k) scroll the SQL body.
         KeyCode::Up | KeyCode::Char('k') | KeyCode::Down | KeyCode::Char('j') => {
             if let ModalKind::ResultsRowLimitPicker { current, limits } = modal {
                 let delta = if matches!(key.code, KeyCode::Up | KeyCode::Char('k')) {
@@ -57,8 +79,18 @@ pub(super) fn modal_key(key: KeyEvent, modal: &ModalKind, state: &AppState) -> O
                     limits: limits.clone(),
                 }));
             }
-            None
+            if matches!(modal, ModalKind::ResultsEditCommitPreview { .. }) {
+                let up = matches!(key.code, KeyCode::Up | KeyCode::Char('k'));
+                commit_scroll_by(if up { -1 } else { 1 })
+            } else {
+                None
+            }
         }
+        // Commit preview paging / top / bottom.
+        KeyCode::PageUp => commit_scroll_by(-10),
+        KeyCode::PageDown => commit_scroll_by(10),
+        KeyCode::Home => commit_scroll_to(0),
+        KeyCode::End => commit_scroll_to(usize::MAX),
         // Page input: digits build the target, Backspace edits, Enter jumps.
         KeyCode::Char(c)
             if c.is_ascii_digit() && matches!(modal, ModalKind::ResultsPageInput { .. }) =>
@@ -175,6 +207,45 @@ mod tests {
             other => panic!("expected DeleteConnection, got {other:?}"),
         }
     }
+    #[test]
+    fn commit_preview_scroll_keys_move_the_body_offset() {
+        use crate::app::state::{AppState, ModalKind};
+        let state = AppState::default();
+        let mk = |scroll| ModalKind::ResultsEditCommitPreview {
+            statements: vec!["select 1".into(), "select 2".into()],
+            scroll,
+        };
+        let extract = |msg: AppMsg| match msg {
+            AppMsg::OpenModal(ModalKind::ResultsEditCommitPreview { scroll, .. }) => scroll,
+            other => panic!("expected an updated commit preview, got {other:?}"),
+        };
+        // Down / j scroll down one row; Up / k scroll back up.
+        assert_eq!(
+            extract(modal_key(key(KeyCode::Down, KeyModifiers::NONE), &mk(0), &state).unwrap()),
+            1
+        );
+        assert_eq!(
+            extract(
+                modal_key(key(KeyCode::Char('j'), KeyModifiers::NONE), &mk(1), &state).unwrap()
+            ),
+            2
+        );
+        assert_eq!(
+            extract(modal_key(key(KeyCode::Up, KeyModifiers::NONE), &mk(2), &state).unwrap()),
+            1
+        );
+        assert_eq!(
+            extract(modal_key(key(KeyCode::Home, KeyModifiers::NONE), &mk(9), &state).unwrap()),
+            0
+        );
+        // End parks at the bottom marker; the renderer clamps it to the real
+        // content length.
+        assert!(
+            extract(modal_key(key(KeyCode::End, KeyModifiers::NONE), &mk(0), &state).unwrap())
+                > 1000
+        );
+    }
+
     #[test]
     fn page_input_digit_appends_to_buffer_and_enter_jumps_clamped() {
         use crate::app::state::{AppState, ModalKind};
