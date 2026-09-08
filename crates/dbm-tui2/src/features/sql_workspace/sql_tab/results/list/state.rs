@@ -497,6 +497,49 @@ impl ListState {
         self.col_widths = init_results_layout(&result.columns, &result.rows);
         self.result = Some(result);
     }
+
+    /// Where the next unsaved change sits, for cycling with the `m` key. Each
+    /// changed row contributes one stop, in row order after the current row
+    /// (wrapping to the first change when none follows): a pending insert or a
+    /// deleted row lands on the row's first cell (column 0), an updated row on
+    /// its first modified cell. Returns `None` when there is nothing to jump to
+    /// — no active edit session, no pending changes, or the cursor already sits
+    /// on the only stop.
+    pub fn next_change(&self) -> Option<(usize, usize)> {
+        let e = &self.edit;
+        if !e.editing {
+            return None;
+        }
+        let loaded = e.snapshots.len();
+        let mut anchors: Vec<(usize, usize)> = Vec::new();
+        for r in 0..loaded {
+            if e.deleted.contains(&r) {
+                anchors.push((r, 0));
+            } else if let Some(first_col) = e
+                .dirty_cells
+                .keys()
+                .filter(|(rr, _)| *rr == r)
+                .map(|(_, c)| *c)
+                .min()
+            {
+                anchors.push((r, first_col));
+            }
+        }
+        for i in 0..e.new_rows.len() {
+            anchors.push((loaded + i, 0));
+        }
+        if anchors.is_empty() {
+            return None;
+        }
+        anchors.sort_unstable();
+        let cursor = (self.row, self.col);
+        let target = anchors
+            .iter()
+            .copied()
+            .find(|a| *a > cursor)
+            .unwrap_or(anchors[0]);
+        (target != cursor).then_some(target)
+    }
 }
 
 #[cfg(test)]
@@ -524,6 +567,84 @@ mod tests {
             rows_affected: None,
             total_rows: None,
         }
+    }
+
+    /// A ListState with an active edit session over three 3-column rows.
+    fn editable() -> ListState {
+        let mut s = ListState {
+            result: Some(QueryResultData {
+                columns: vec![col("a"), col("b"), col("c")],
+                rows: vec![
+                    vec!["1".into(), "2".into(), "3".into()],
+                    vec!["4".into(), "5".into(), "6".into()],
+                    vec!["7".into(), "8".into(), "9".into()],
+                ],
+                rows_affected: None,
+                total_rows: Some(3),
+            }),
+            edit_target: Some(edit_sql::EditTarget {
+                schema: "public".into(),
+                table: "t".into(),
+                primary_keys: vec!["a".into()],
+                columns: vec!["a".into(), "b".into(), "c".into()],
+            }),
+            ..ListState::default()
+        };
+        s.enter_edit();
+        s
+    }
+
+    #[test]
+    fn next_change_jumps_to_update_first_dirty_cell() {
+        let mut s = editable();
+        s.apply_cell_value(0, 2, "changed".into()); // row 0 update, cell col2
+        s.apply_cell_value(2, 0, "changed".into()); // row 2 update, cell col0
+        // From the top: the first change is row 0's modified cell (col 2).
+        s.row = 0;
+        s.col = 0;
+        assert_eq!(s.next_change(), Some((0, 2)));
+        // From row 0's change: on to row 2's first modified cell.
+        s.row = 0;
+        s.col = 2;
+        assert_eq!(s.next_change(), Some((2, 0)));
+        // Past the last change wraps back to the first.
+        s.row = 2;
+        s.col = 0;
+        assert_eq!(s.next_change(), Some((0, 2)));
+    }
+
+    #[test]
+    fn next_change_lands_delete_and_insert_on_their_rows() {
+        let mut s = editable();
+        s.edit.mark_delete(1); // row 1 deleted
+        s.edit_add_row(); // pending insert appended (row 3)
+        // Row 1 is a delete, row 3 is an insert: both stop on column 0.
+        s.row = 0;
+        s.col = 0;
+        assert_eq!(s.next_change(), Some((1, 0)));
+        s.row = 1;
+        assert_eq!(s.next_change(), Some((3, 0)));
+        s.row = 3;
+        assert_eq!(
+            s.next_change(),
+            Some((1, 0)),
+            "wrap back to the first change"
+        );
+    }
+
+    #[test]
+    fn next_change_none_when_clean_or_at_the_only_stop() {
+        // A clean session has no change stops.
+        let mut clean = editable();
+        assert_eq!(clean.next_change(), None);
+        // With a single changed row, sitting on its stop means nothing to jump.
+        clean.apply_cell_value(1, 1, "x".into());
+        clean.row = 1;
+        clean.col = 1;
+        assert_eq!(clean.next_change(), None);
+        // From another cell of the same row it still jumps to that stop.
+        clean.col = 0;
+        assert_eq!(clean.next_change(), Some((1, 1)));
     }
 
     #[test]

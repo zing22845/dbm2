@@ -536,6 +536,14 @@ fn results_key(
                 )
             })
         }
+        // Jump to the next unsaved change while an edit session is active
+        // (`m`, in Results-list focus): a pending insert / deleted row lands on
+        // its row, an updated row on its first modified cell. Cycles forward
+        // from the current row, wrapping to the first change.
+        KeyCode::Char('m') if key.modifiers.is_empty() => results
+            .list
+            .next_change()
+            .map(|(row, col)| sql_results(SqlResultsMessage::SetSelection { row, col }, tab_id)),
         // `,` / `.` narrow / widen the selected column (Vim-style), mirroring
         // the original dbm's column-width adjustment.
         KeyCode::Char(',') if key.modifiers.is_empty() => Some(sql_results(
@@ -1459,6 +1467,47 @@ mod tests {
             SqlTabMessage::Results {
                 tab_id: 0,
                 msg: SqlResultsMsg::Message(SqlResultsMessage::FocusDetail),
+            }
+        );
+    }
+
+    #[test]
+    fn results_key_m_jumps_to_the_next_unsaved_change() {
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+        use crate::features::sql_workspace::sql_tab::results::edit_sql::EditTarget;
+        use crate::features::sql_workspace::sql_tab::results::state::{
+            QueryResultData, ResultsState,
+        };
+        // One-column result; row 1 gets a pending update so `m` must land on it.
+        let mut results = ResultsState::default();
+        results.list.result = Some(QueryResultData {
+            columns: vec![ColumnInfo {
+                name: "a".into(),
+                type_name: "text".into(),
+                type_display: "text".into(),
+                comment: None,
+            }],
+            rows: vec![vec!["1".into()], vec!["2".into()]],
+            rows_affected: None,
+            total_rows: Some(2),
+        });
+        results.list.row = 0;
+        results.list.col = 0;
+        results.list.edit_target = Some(EditTarget {
+            schema: "public".into(),
+            table: "t".into(),
+            primary_keys: vec!["a".into()],
+            columns: vec!["a".into()],
+        });
+        results.list.enter_edit();
+        results.list.apply_cell_value(1, 0, "changed".into());
+        let msg = results_key(key(KeyCode::Char('m'), KeyModifiers::NONE), 0, &results)
+            .expect("m while editing must jump to the next change");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::SetSelection { row: 1, col: 0 }),
             }
         );
     }
