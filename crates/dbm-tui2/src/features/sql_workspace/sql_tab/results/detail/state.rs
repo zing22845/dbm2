@@ -93,6 +93,31 @@ impl DetailState {
         self.scroll = self.scroll.min(max);
     }
 
+    /// Persist the vertical viewport offset edtui actually rendered with (its
+    /// per-frame auto-scroll may have nudged it) back into the real editor.
+    ///
+    /// The detail pane draws an edtui *copy* each frame, so without this the
+    /// live editor keeps its stale `viewport.y` (usually the initial 0) and
+    /// the next frame re-anchors from that stale value. edtui's scroll only
+    /// keeps the cursor at the viewport edge when it *needs* to; with the
+    /// anchor permanently reset to 0 the offset is recomputed as
+    /// `cursor - (height - 1)` every frame, which pins the cursor to the
+    /// bottom visible row while the first line is scrolled out of view and
+    /// makes pressing Up scroll the view instead of moving the cursor.
+    /// Recording what this frame actually drew keeps the next frame's anchor
+    /// identical to an in-place-rendered editor (what the SQL editor gets).
+    pub fn sync_editor_viewport(&mut self, viewport_y: usize) -> bool {
+        if !self.focused {
+            return false;
+        }
+        let Some(host) = self.editor.as_mut() else {
+            return false;
+        };
+        // The detail editor always wraps, so `viewport.x` is unused (0).
+        host.editor.set_viewport_offset(0, viewport_y);
+        true
+    }
+
     /// Load a cell value as the draft baseline (used when entering edit / when
     /// the selection moves while the detail is a read-only preview).
     pub fn load_cell(&mut self, value: &str) {

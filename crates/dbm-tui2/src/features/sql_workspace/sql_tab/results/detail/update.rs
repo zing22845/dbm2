@@ -304,4 +304,25 @@ mod tests {
         assert!(!dirty);
         assert!(s2.editor.is_none());
     }
+
+    #[test]
+    fn sync_editor_viewport_persists_the_rendered_offset_when_focused() {
+        // A focused detail editor records the viewport edtui drew with, so the
+        // next frame re-anchors from it (in-place-render behaviour) instead of
+        // a stale 0 that pins the cursor to the bottom visible row.
+        let mut s = focused_state("line0\nline1\nline2\nline3\nline4\nline5");
+        assert!(
+            s.sync_editor_viewport(3),
+            "focused editor must accept the offset"
+        );
+        assert_eq!(
+            s.editor.as_ref().unwrap().editor.viewport_offset().1,
+            3,
+            "the real editor's viewport.y must be written back"
+        );
+        // Not focused (read-only preview / no editor) -> refused.
+        s.unfocus();
+        assert!(!s.sync_editor_viewport(3));
+        assert!(s.editor.is_none());
+    }
 }

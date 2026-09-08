@@ -228,6 +228,19 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             // Same for the results detail cell editor (second embedded edtui):
             // only present while an edit session is active and it has focus.
             state.results_detail_mouse_area = detail_mouse_hit.into_inner();
+            // The detail pane renders an edtui *copy* each frame, so the live
+            // editor never learns which viewport was actually drawn. Feed the
+            // rendered offset back, or the next frame re-anchors from the stale
+            // value (usually 0) and pins the cursor to the bottom visible row
+            // while the first line is scrolled out of view — pressing Up would
+            // scroll the view instead of walking the cursor up through the
+            // viewport. Only a focused editor carries a hit area here.
+            if let Some(hit) = state.results_detail_mouse_area
+                && let Some(tab_idx) = state.sql.sql_tab.active_tab
+                && let Some(tab) = state.sql.sql_tab.tabs.get_mut(tab_idx)
+            {
+                tab.results.detail.sync_editor_viewport(hit.viewport_y);
+            }
             // Feed back the computed targets layout (scroll offset, viewport)
             // to the state so update handlers can clamp scroll correctly.
             if let Some(info) = targets_layout.into_inner() {
