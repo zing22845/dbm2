@@ -335,6 +335,12 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
                 false
             }
         }
+        ListMessage::DelChordCancel => {
+            // An intervening key (bound or not) cleared the arm at the top of
+            // `update`; nothing else to do.
+            state.del_chord_at = None;
+            false
+        }
         ListMessage::SetRowLimit { limit } => {
             if state.edit.editing && state.edit.is_dirty() {
                 return (state, effects, false);

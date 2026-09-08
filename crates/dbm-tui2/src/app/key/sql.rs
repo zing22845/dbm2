@@ -615,7 +615,17 @@ fn results_key(
                 input: results.list.page.to_string(),
             }))
         }
-        _ => None,
+        _ => {
+            // Any *unbound* key between the two presses must break an armed
+            // `dd` chord (a fast `d s d` must not delete): the chord is only
+            // cleared by a message reaching the list update, so the key layer
+            // turns an unmatched editing key into an explicit cancel.
+            if results.list.edit.editing && results.list.del_chord_at.is_some() {
+                Some(sql_results(SqlResultsMessage::DelChordCancel, tab_id))
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -1509,6 +1519,31 @@ mod tests {
                 tab_id: 0,
                 msg: SqlResultsMsg::Message(SqlResultsMessage::SetSelection { row: 1, col: 0 }),
             }
+        );
+    }
+
+    #[test]
+    fn unbound_editing_key_cancels_an_armed_dd_chord() {
+        // With a `d` armed, an otherwise-unmapped key (plain `s`) must cancel
+        // the chord instead of silently passing — otherwise a fast `d s d`
+        // would still delete.
+        let mut results = editing_results();
+        results.list.del_chord_at = Some(std::time::Instant::now());
+        let msg = results_key(key(KeyCode::Char('s'), KeyModifiers::NONE), 0, &results)
+            .expect("an unbound key while a chord is armed must cancel it");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::DelChordCancel),
+            }
+        );
+        // Outside an edit session unbound keys stay a no-op.
+        let clean =
+            crate::features::sql_workspace::sql_tab::results::state::ResultsState::default();
+        assert!(
+            results_key(key(KeyCode::Char('s'), KeyModifiers::NONE), 0, &clean).is_none(),
+            "an unbound key outside editing must not dispatch a cancel"
         );
     }
 

@@ -53,6 +53,10 @@ pub enum ListMessage {
     /// press arms it, a second `d` within 500 ms deletes the selected row, a
     /// lone `d` does nothing.
     DelChord,
+    /// An unmatched key pressed while an edit session is active cancels an
+    /// armed `dd` chord (e.g. the `s` in a fast `d s d`). The key layer emits
+    /// this so the chord only fires on two *consecutive* `d` presses.
+    DelChordCancel,
     /// Apply a new rows-per-page limit.
     SetRowLimit { limit: usize },
     /// Jump to a page.

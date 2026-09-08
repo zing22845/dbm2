@@ -622,6 +622,34 @@ mod tests {
     }
 
     #[test]
+    fn del_chord_cancelled_by_unbound_editing_key() {
+        // `d`, an *unbound* key (`s` produces no other message), `d`: the
+        // explicit DelChordCancel keeps the delete from firing on non-adjacent
+        // `d`s.
+        let mut state = ResultsState::default();
+        state.list.result = Some(sample_result_multirow());
+        state.list.row = 0;
+        state.list.edit_target = Some(
+            crate::features::sql_workspace::sql_tab::results::edit_sql::EditTarget {
+                schema: "public".into(),
+                table: "t".into(),
+                primary_keys: vec!["id".into()],
+                columns: vec!["id".into()],
+            },
+        );
+        state.list.enter_edit();
+        let (s, _i, _e, _d) = update(ResultsMessage::DelChord, state);
+        let (s2, _i2, _e2, _d2) = update(ResultsMessage::DelChordCancel, s);
+        assert!(
+            s2.list.del_chord_at.is_none(),
+            "the cancel must drop the armed chord"
+        );
+        let (s3, _i3, _e3, dirty3) = update(ResultsMessage::DelChord, s2);
+        assert!(!dirty3, "d s d must not delete");
+        assert!(s3.list.edit.deleted.is_empty());
+    }
+
+    #[test]
     fn set_detail_draft_updates_both_detail_and_list() {
         let msg = ResultsMessage::SetDetailDraft {
             text: "new_value".into(),

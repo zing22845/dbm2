@@ -71,6 +71,9 @@ pub enum ResultsMessage {
     /// A `d` key press while editing (the original `dd` chord — see
     /// [`ListMessage::DelChord`]).
     DelChord,
+    /// An unmatched editing key (the `s` in a fast `d s d`) cancels an armed
+    /// `dd` chord so it only fires on two consecutive `d` presses.
+    DelChordCancel,
     /// An Esc / focus-leave attempt was made while the edit session has
     /// unsaved changes: block the leave and surface the reason on the results
     /// footer instead of silently dropping the edits.
@@ -206,6 +209,7 @@ impl ResultsMessage {
             ResultsMessage::DupRow => ListMessage::DupRow,
             ResultsMessage::DelRow => ListMessage::DelRow,
             ResultsMessage::DelChord => ListMessage::DelChord,
+            ResultsMessage::DelChordCancel => ListMessage::DelChordCancel,
             ResultsMessage::SetRowLimit { limit } => ListMessage::SetRowLimit { limit },
             ResultsMessage::SetPage { page } => ListMessage::SetPage { page },
             ResultsMessage::PageNav { action } => ListMessage::PageNav { action },
