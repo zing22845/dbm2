@@ -4,12 +4,16 @@
 //! offset and the inline-edit draft state. The detail pane width lives in the
 //! `splitter` sub-feature (`super::splitter::state`).
 //!
-//! While the whole-result edit session is active the detail can take keyboard
-//! focus (`focused`) and host an edtui editor over a *draft* of the current
-//! cell (see [`DetailEditor`]): typing only mutates the draft, Ctrl+S saves it
-//! back into the edit session's `dirty_cells`, Ctrl+U discards it, Esc leaves
-//! the editor (mirroring the original dbm's detail editor). `baseline` is the
-//! cell value the draft started from; `dirty` compares them.
+//! The detail can take keyboard focus (`focused`) and host an edtui editor over
+//! a *draft* of the current cell (see [`DetailEditor`]) — whether or not the
+//! whole-result edit session is active. Focusing (Enter / a single click on the
+//! open detail) always starts the editor in Normal mode: motion keys, Visual
+//! selection and copy work immediately, and the first *editing* key (one that
+//! would change the buffer or enter Insert) auto-starts the edit session
+//! (mirroring the original dbm). Inside a session typing only mutates the
+//! draft, Ctrl+S saves it back into the session's `dirty_cells`, Ctrl+U
+//! discards it, and Esc leaves the editor. `baseline` is the cell value the
+//! draft started from; `dirty` compares them.
 
 use super::super::detail_edit::detail_draft_dirty;
 
@@ -55,9 +59,8 @@ pub struct DetailState {
     pub dirty: bool,
     /// Whether an unsaved detail draft blocks leaving Detail.
     pub leave_warning: bool,
-    /// Whether the detail editor currently owns the keyboard. Only meaningful
-    /// while the whole-result edit session is active; when `false` the detail
-    /// is a read-only preview that follows the table selection.
+    /// Whether the detail editor currently owns the keyboard. When `false` the
+    /// detail is a read-only preview that follows the table selection.
     pub focused: bool,
     /// The active cell-draft editor (present only while `focused`).
     pub editor: Option<DetailEditor>,

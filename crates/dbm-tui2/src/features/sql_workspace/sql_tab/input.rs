@@ -62,7 +62,7 @@ pub enum SqlClickAction {
     ResultsCellClicked { row: usize, col: usize },
     /// Double-click inside the results pane: toggle the detail inspect mode.
     ResultsOpenDetail,
-    /// Single-click on the results detail body while an edit session is active:
+    /// Single-click on the results detail body while it is open and unfocused:
     /// focus the detail cell editor for the selected cell.
     ResultsFocusDetail,
     /// Click/drag on the results list horizontal scrollbar.
@@ -421,11 +421,11 @@ pub fn sql_workspace_click(
             }
         }
 
-        // A single click on the detail body while an edit session is active
-        // focuses the detail cell editor for the selected cell (the table stays
-        // focused otherwise, matching the read-only inspect detail).
+        // A single click on the open detail body while it is not focused moves
+        // the focus into the detail cell editor for the selected cell (whether
+        // or not an edit session is active) — matching the keyboard Enter path.
         if !is_double_click
-            && tab.results.list.edit.editing
+            && tab.results.detail_open
             && !tab.results.detail.focused
             && let Some(detail_area) = layout.detail
             && contains(detail_area, x, y)

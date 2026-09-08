@@ -1,10 +1,14 @@
 //! Results detail sub-module rendering.
 //!
-//! Two modes:
-//!  * **Read-only preview** (default): shows the selected cell's value with
-//!    line numbers, following the table selection. Used while the whole-result
-//!    edit session is off, or while it is on but the detail editor is not
-//!    focused.
+//! The detail is its own bordered panel (mirroring the original dbm's
+//! `draw_results_detail`): the border doubles as the focus cue — bright while
+//! the detail cell editor holds focus, dim otherwise — and its title carries
+//! the cell reference plus, while focused, the current editor mode.
+//!
+//! Two body modes:
+//!  * **Read-only preview**: shows the selected cell's value with line numbers,
+//!    following the table selection. Used while the detail editor is not
+//!    focused (focus returned to the table).
 //!  * **Cell editor** (`detail.focused`): embeds the edtui editor over the
 //!    draft (with baseline-diff highlights). Save / Discard action row and
 //!    footer appear while the draft is dirty.
@@ -13,7 +17,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::common::components::line_numbers;
 use crate::common::layout::text::footer_height;
@@ -131,7 +135,8 @@ fn detail_action_buttons_line(detail: &DetailState, edit_active: bool) -> Option
 /// body area, and a detail footer.
 ///
 /// `edit_active` is passed from the parent (list state) since edit mode is
-/// owned by the list sub-feature.
+/// owned by the list sub-feature. The returned hit region is the focused
+/// editor's text area (pointer → draft gestures).
 #[allow(clippy::too_many_arguments)]
 pub fn render(
     frame: &mut Frame,
@@ -148,27 +153,27 @@ pub fn render(
     }
     let p = theme.palette();
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(0)])
-        .split(area);
-
-    // Title line inside the outer Results block — no own border. The focused
-    // editor appends its mode so the user can tell Insert/Normal apart.
-    let title = if detail.focused {
+    // The detail is its own bordered panel. Its border doubles as the focus
+    // cue: bright while the cell editor holds focus, dim otherwise. While
+    // focused the title also carries the current editor mode so Insert /
+    // Normal / Visual can be told apart at a glance.
+    let title_text = if detail.focused {
         format!("{title}  [{}]", editor_mode_label(detail))
     } else {
         title
     };
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            title,
-            Style::default().fg(if focused { p.accent } else { p.muted }),
-        ))),
-        chunks[0],
-    );
-
-    let inner = chunks[1];
+    let border_style = if detail.focused {
+        p.child_border(focused)
+    } else {
+        Style::default().fg(p.border)
+    };
+    let title_style = Style::default().fg(if detail.focused { p.accent } else { p.muted });
+    let block = Block::default()
+        .title(Line::from(Span::styled(title_text, title_style)))
+        .borders(Borders::ALL)
+        .border_style(border_style);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
     let has_action_btns = edit_active && detail.dirty && detail.focused;
     let footer_h = footer_height(&detail_footer_text(detail, edit_active), inner.width).min(3);

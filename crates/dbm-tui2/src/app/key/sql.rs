@@ -288,11 +288,13 @@ fn results_key(
     results: &crate::features::sql_workspace::sql_tab::results::state::ResultsState,
 ) -> Option<AppMsg> {
     // While the detail cell editor is focused the keys belong to it (edtui
-    // editing / Esc mode ladder), mirroring the original dbm's
-    // `handle_results_detail_section_key`. Ctrl+S / Ctrl+U are the single-cell
-    // Save / Discard here — the table's Commit / Rollback only apply when the
-    // detail editor is not focused.
-    if results.detail.focused && results.detail_open && results.list.edit.editing {
+    // Normal/Insert/Visual + Esc mode ladder), mirroring the original dbm's
+    // `handle_results_detail_section_key`. This applies whether or not a
+    // whole-result edit session is active: an editing key auto-starts the
+    // session (see `ResultsMessage::DetailEditorKey`). Ctrl+S / Ctrl+U are the
+    // single-cell Save / Discard here — the table's Commit / Rollback only
+    // apply when the detail editor is not focused.
+    if results.detail.focused && results.detail_open {
         return results_detail_editor_key(key, tab_id, results);
     }
 
@@ -321,15 +323,12 @@ fn results_key(
     }
 
     match key.code {
-        // Enter: open / focus the detail pane. In an edit session it loads the
-        // selected cell into the detail cell editor (focus); otherwise it toggles
-        // the read-only inspect detail like before.
+        // Enter: open (if needed) and focus the detail cell editor on the
+        // selected cell — regardless of whether an edit session is active
+        // (mirroring the original dbm's `open_results_cell_detail`). Browsing
+        // keys work right away; the first editing key starts the session.
         KeyCode::Enter if key.modifiers.is_empty() => {
-            if results.list.edit.editing {
-                Some(sql_results(SqlResultsMessage::FocusDetail, tab_id))
-            } else {
-                Some(sql_results(SqlResultsMessage::ToggleDetail, tab_id))
-            }
+            Some(sql_results(SqlResultsMessage::FocusDetail, tab_id))
         }
         // Toggle edit mode.
         KeyCode::Char('i') if key.modifiers.is_empty() => Some(sql_results(
@@ -586,14 +585,16 @@ fn results_key(
     }
 }
 
-/// Keys while the detail cell editor is focused (whole-edit session on, detail
-/// open and `detail.focused`). Mirrors the original dbm's
-/// `handle_results_detail_section_key`:
+/// Keys while the detail cell editor is focused (detail open and
+/// `detail.focused`; the whole-result edit session may or may not be active).
+/// Mirrors the original dbm's `handle_results_detail_section_key`:
 ///   * Ctrl+S = save the draft to the cell, Ctrl+U = discard it (never the
 ///     table-wide Commit / Rollback, which only run while the table has focus);
 ///   * Esc lowers Insert/Visual to Normal first, then leaves the editor back to
 ///     the table;
-///   * every other accepted key feeds the edtui editor.
+///   * every other accepted key feeds the edtui editor. When no edit session is
+///     active yet, an editing key auto-starts it in the results update (see
+///     `ResultsMessage::DetailEditorKey`), so `i`/`a`/`o` just work.
 fn results_detail_editor_key(
     key: KeyEvent,
     tab_id: usize,
@@ -1407,16 +1408,20 @@ mod tests {
     }
 
     #[test]
-    fn results_key_enter_not_editing_still_toggles_detail() {
+    fn results_key_enter_without_edit_session_focuses_detail_editor() {
+        // Outside an edit session Enter still opens + focuses the detail cell
+        // editor (mirroring the original dbm's `open_results_cell_detail`);
+        // browsing keys work right away and the first editing key auto-starts
+        // the edit session. It never toggles only the read-only preview.
         let state = app_state_with_tab();
         let results = &state.sql.sql_tab.tabs[0].results;
         let msg = results_key(key(KeyCode::Enter, KeyModifiers::NONE), 0, results)
-            .expect("enter outside an edit session toggles the inspect detail");
+            .expect("enter outside an edit session must focus the detail editor");
         assert_eq!(
             extract_tab_msg(msg),
             SqlTabMessage::Results {
                 tab_id: 0,
-                msg: SqlResultsMsg::Message(SqlResultsMessage::ToggleDetail),
+                msg: SqlResultsMsg::Message(SqlResultsMessage::FocusDetail),
             }
         );
     }

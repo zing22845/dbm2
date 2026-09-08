@@ -10,6 +10,25 @@ use super::list::msg::ListMsg;
 use super::msg::ResultsMessage;
 use super::state::ResultsState;
 
+/// Whether `key` is an *editing* key for the detail editor: one that would
+/// change the buffer text or switch it into Insert mode. Probed on a scratch
+/// clone (editor *and* handler) so the live editor is untouched. Decides when a
+/// focused detail that has no active edit session must auto-start one before
+/// the key is applied.
+fn detail_key_would_edit(
+    key: &crossterm::event::KeyEvent,
+    host: &super::detail::state::DetailEditor,
+) -> bool {
+    if !crate::common::editor::accepts_key_event(key) {
+        return false;
+    }
+    let mut probe = host.clone();
+    let before = crate::common::editor::editor_text(&probe.editor);
+    probe.handler.on_key_event(*key, &mut probe.editor);
+    crate::common::editor::editor_text(&probe.editor) != before
+        || probe.editor.mode == edtui::EditorMode::Insert
+}
+
 pub fn update(
     msg: ResultsMessage,
     mut state: ResultsState,
@@ -68,15 +87,16 @@ pub fn update(
             }
             (state, intents, effects, true)
         }
-        // —— Detail cell editor focus (whole-edit session only) ——
-        // Enter (edit session active): open the detail pane if needed and focus
-        // the embedded editor on the selected cell, loading its value as the
-        // draft baseline.
+        // —— Detail cell editor focus ——
+        // Enter (or a single click on the open detail pane) opens the detail
+        // (if needed) and focuses the embedded editor on the selected cell,
+        // loading its value as the draft baseline. This works outside a
+        // whole-result edit session too (mirroring the original dbm's
+        // `open_results_cell_detail`): motion keys / Visual selection / copy
+        // keep working in Normal mode, and the first *editing* key auto-starts
+        // the edit session (see `DetailEditorKey`).
         ResultsMessage::FocusDetail => {
-            if !state.list.edit.editing
-                || state.detail.focused
-                || state.list.edit.deleted.contains(&state.list.row)
-            {
+            if state.detail.focused || state.list.edit.deleted.contains(&state.list.row) {
                 return (state, intents, effects, false);
             }
             let Some(value) = state.list.selected_cell() else {
@@ -178,7 +198,28 @@ pub fn update(
         }
         // A key routed to the focused detail cell editor. It falls through to
         // the detail update (which refuses it when no editor is focused).
+        // When the whole-result edit session is not yet active, an *editing*
+        // key (one that would change the buffer text or enter Insert) auto-starts
+        // it first — mirroring the original dbm's `enter_edit_mode` from inside
+        // the detail section. Pure navigation keys (motion, Visual selection,
+        // copy) never start a session and keep working in Normal/Visual mode.
         ResultsMessage::DetailEditorKey(key) => {
+            if state.detail.focused && !state.list.edit.editing && state.detail.editor.is_some() {
+                let host = state.detail.editor.as_ref().expect("editor checked above");
+                if detail_key_would_edit(&key, host) {
+                    route_to_list(
+                        super::list::msg::ListMessage::EnterEdit,
+                        &mut state,
+                        &mut effects,
+                    );
+                    if !state.list.edit.editing {
+                        // The result is not editable (no edit target / blocked):
+                        // ignore the editing key and keep the editor in Normal
+                        // mode, so the detail remains a read-only viewer.
+                        return (state, intents, effects, true);
+                    }
+                }
+            }
             let key_msg = super::detail::msg::DetailMessage::KeyEvent {
                 key,
                 tracked_caps_lock: false,
@@ -467,8 +508,9 @@ mod tests {
         assert!(dirty);
     }
 
-    /// A results state with an active edit session and one editable row.
-    fn editing_state() -> ResultsState {
+    /// A results state with one *editable* row, but **no** active edit session
+    /// yet (editability resolved, editing off).
+    fn editable_state() -> ResultsState {
         let mut state = ResultsState::default();
         state.list.result = Some(sample_result());
         state.list.row = 0;
@@ -481,6 +523,12 @@ mod tests {
                 columns: vec!["id".into()],
             },
         );
+        state
+    }
+
+    /// A results state with an active edit session and one editable row.
+    fn editing_state() -> ResultsState {
+        let mut state = editable_state();
         state.list.enter_edit();
         state
     }
@@ -496,16 +544,16 @@ mod tests {
     }
 
     #[test]
-    fn focus_detail_requires_edit_session_and_loads_selected_cell() {
-        // Edit session off: no-op.
+    fn focus_detail_requires_a_cell_and_loads_editor_without_edit_session() {
+        // No result → nothing to focus (no-op).
         let state = ResultsState::default();
         let (s, _i, _e, dirty) = update(ResultsMessage::FocusDetail, state);
         assert!(!dirty);
         assert!(!s.detail.focused);
 
-        // Edit session on: opens the detail (if closed) and focuses a draft
-        // editor seeded with the selected cell.
-        let (s, _i, _e, dirty) = update(ResultsMessage::FocusDetail, editing_state());
+        // With a result but NO edit session: Enter still opens + focuses the
+        // editor on the selected cell (original dbm's `open_results_cell_detail`).
+        let (s, _i, _e, dirty) = update(ResultsMessage::FocusDetail, editable_state());
         assert!(dirty);
         assert!(s.detail_open, "FocusDetail must open the detail pane");
         assert!(s.detail.focused);
@@ -513,8 +561,110 @@ mod tests {
             s.detail.editor.is_some(),
             "a focused detail must hold an editor"
         );
+        assert!(
+            !s.list.edit.editing,
+            "focusing alone must NOT start an edit session"
+        );
         assert_eq!(s.detail.baseline, "1");
         assert_eq!(s.detail.draft, "1");
+
+        // In an active edit session it behaves the same.
+        let (s, _i, _e, dirty) = update(ResultsMessage::FocusDetail, editing_state());
+        assert!(dirty);
+        assert!(s.detail.focused);
+        assert!(s.list.edit.editing);
+        assert_eq!(s.detail.draft, "1");
+    }
+
+    #[test]
+    fn editing_key_in_focused_detail_without_session_auto_starts_edit() {
+        // Enter (focus) on an editable result with NO session, then an editing
+        // key (`i`) must auto-start the whole-result edit session before the
+        // key is applied — mirroring the original dbm's `enter_edit_mode`.
+        let (s, _i, _e, _d) = update(ResultsMessage::FocusDetail, editable_state());
+        assert!(!s.list.edit.editing);
+
+        let (s2, _i, _e, dirty) = update(ResultsMessage::DetailEditorKey(press('i')), s);
+        assert!(dirty);
+        assert!(
+            s2.list.edit.editing,
+            "`i` in a focused detail must auto-start the edit session"
+        );
+        assert!(
+            s2.detail
+                .editor
+                .as_ref()
+                .is_some_and(|h| { h.editor.mode == edtui::EditorMode::Insert }),
+            "after `i` the editor must be in Insert mode"
+        );
+        assert!(!s2.detail.dirty, "`i` alone must not dirty the draft");
+
+        // A deletion key (`x`) auto-starts the session too and edits right away.
+        let (s3, _i, _e, _d) = update(ResultsMessage::FocusDetail, editable_state());
+        let (s4, _i, _e, dirty) = update(ResultsMessage::DetailEditorKey(press('x')), s3);
+        assert!(dirty);
+        assert!(s4.list.edit.editing, "`x` must auto-start the edit session");
+        assert!(
+            s4.detail.dirty,
+            "`x` must actually delete the char under the cursor"
+        );
+    }
+
+    #[test]
+    fn nav_key_in_focused_detail_without_session_stays_normal() {
+        // Motion keys keep working without ever opening an edit session, so the
+        // focused detail is a full vi viewer/copy surface until an editing key.
+        let mut sample = sample_result();
+        sample.rows = vec![vec!["hello".into()]];
+        let mut state = ResultsState::default();
+        state.list.result = Some(sample);
+        state.list.row = 0;
+        state.list.col = 0;
+        let (s, _i, _e, _d) = update(ResultsMessage::FocusDetail, state);
+        // Park the caret at the start so the `l` motion visibly moves it.
+        let mut s = s;
+        {
+            let host = s.detail.editor.as_mut().expect("focused editor");
+            host.editor.cursor = edtui::Index2::new(0, 0);
+        }
+        let (s2, _i, _e, dirty) = update(ResultsMessage::DetailEditorKey(press('l')), s);
+        assert!(dirty, "a motion key repaints the moved caret");
+        assert!(
+            !s2.list.edit.editing,
+            "motion keys must NOT open an edit session"
+        );
+        assert!(
+            s2.detail.editor.as_ref().is_some_and(|h| {
+                h.editor.mode == edtui::EditorMode::Normal && h.editor.cursor.col > 0
+            }),
+            "the caret must have moved within Normal mode"
+        );
+    }
+
+    #[test]
+    fn editing_key_ignored_when_result_not_editable() {
+        // A result with no edit target (e.g. a join / aggregate): focusing the
+        // detail works for reading, but an editing key is refused and the
+        // editor stays in Normal with the buffer untouched.
+        let mut state = ResultsState::default();
+        state.list.result = Some(sample_result());
+        state.list.row = 0;
+        state.list.col = 0;
+        let (s, _i, _e, _d) = update(ResultsMessage::FocusDetail, state);
+        assert!(s.detail.focused);
+        assert!(!s.list.edit.editing);
+
+        let (s2, _i, _e, dirty) = update(ResultsMessage::DetailEditorKey(press('i')), s);
+        assert!(dirty, "the refused key still repaints (defensive)");
+        assert!(!s2.list.edit.editing);
+        assert!(
+            s2.detail
+                .editor
+                .as_ref()
+                .is_some_and(|h| { h.editor.mode == edtui::EditorMode::Normal }),
+            "editor must stay Normal when the result cannot be edited"
+        );
+        assert_eq!(s2.detail.draft, "1", "buffer must be untouched");
     }
 
     /// Focus the detail editor, place it in Insert at end-of-line, then type
