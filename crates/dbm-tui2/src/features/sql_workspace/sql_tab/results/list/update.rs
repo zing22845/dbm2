@@ -280,8 +280,16 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
             true
         }
         ListMessage::EnterEdit => {
-            state.enter_edit();
-            true
+            // Entering an edit session re-snapshots the rows and wipes any
+            // pending dirty cells/deleted/new rows. Guard against re-entry so
+            // an already-active session (repeat `i`, or clicking the Edit
+            // toolbar button) can never silently drop edits.
+            if state.edit.editing {
+                false
+            } else {
+                state.enter_edit();
+                true
+            }
         }
         ListMessage::ExitEdit => {
             state.exit_edit();

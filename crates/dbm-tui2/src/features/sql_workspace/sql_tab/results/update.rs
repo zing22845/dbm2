@@ -849,6 +849,31 @@ mod tests {
     }
 
     #[test]
+    fn re_enter_edit_keeps_existing_edits() {
+        // A second EnterEdit (repeat `i` / toolbar click) while a session is
+        // already active must NOT re-snapshot and wipe the pending edits.
+        let mut state = editable_state();
+        state.list.enter_edit();
+        state.list.edit.apply_cell(0, 0, "changed".into());
+        assert!(state.list.edit.is_dirty());
+        let snapshot_len = state.list.edit.snapshots.len();
+
+        let (s, _i, _e, dirty) = update(ResultsMessage::EnterEdit, state);
+        assert!(!dirty, "re-entering an active session changes nothing");
+        assert!(s.list.edit.editing, "the session must stay active");
+        assert!(
+            s.list.edit.is_dirty(),
+            "the pending edit must survive re-entry"
+        );
+        assert_eq!(
+            s.list.edit.dirty_cells.get(&(0, 0)).map(String::as_str),
+            Some("changed"),
+            "the edited cell value must be preserved"
+        );
+        assert_eq!(s.list.edit.snapshots.len(), snapshot_len);
+    }
+
+    #[test]
     fn copy_detail_selection_emits_clipboard_effect() {
         // Focus the editor and paint a (1-char) selection over the draft.
         let (mut s, _i, _e, _d) = update(ResultsMessage::FocusDetail, editing_state());

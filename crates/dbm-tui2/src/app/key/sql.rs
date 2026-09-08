@@ -366,11 +366,17 @@ fn results_key(
         KeyCode::Enter if key.modifiers.is_empty() => {
             Some(sql_results(SqlResultsMessage::FocusDetail, tab_id))
         }
-        // Toggle edit mode.
-        KeyCode::Char('i') if key.modifiers.is_empty() => Some(sql_results(
-            SqlResultsMessage::EnterEdit,
-            tab_id,
-        )),
+        // Enter edit mode. Re-pressing `i` while a session is already active is
+        // inert: a second EnterEdit would re-snapshot over the pending edits
+        // and silently wipe them (cell editing happens in the detail editor,
+        // where i/a/o enter Insert).
+        KeyCode::Char('i') if key.modifiers.is_empty() => {
+            if results.list.edit.editing {
+                None
+            } else {
+                Some(sql_results(SqlResultsMessage::EnterEdit, tab_id))
+            }
+        }
         // ESC priority, mirroring the original dbm (Vim-like): clear the search
         // filter first, then exit edit mode, then close the detail, then
         // deselect the current cell. An active `/` search input is handled
@@ -1389,6 +1395,17 @@ mod tests {
                 tab_id: 0,
                 msg: SqlResultsMsg::Message(SqlResultsMessage::EnterEdit),
             }
+        );
+    }
+
+    #[test]
+    fn results_key_i_inert_while_edit_session_already_active() {
+        // Re-pressing `i` inside an active session must not re-snapshot (that
+        // would wipe pending edits) — it is a no-op on the table.
+        let results = editing_results();
+        assert!(
+            results_key(key(KeyCode::Char('i'), KeyModifiers::NONE), 0, &results).is_none(),
+            "i while already editing must not emit a second EnterEdit"
         );
     }
 
