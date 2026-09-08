@@ -58,6 +58,33 @@ fn detail_draft_blocks_list_action(msg: &ResultsMessage) -> bool {
     )
 }
 
+/// Whether an *unsaved edit session* (pending cell changes / deleted rows /
+/// inserts) must block `msg`: the message replaces the current result or exits
+/// the session, which would silently drop those pending edits.
+///
+/// Unlike the detail-draft gate, explicit discard (Rollback) and persist
+/// (Commit / CommitOutcome) are the user's intent and always pass, and row
+/// mutations (AddRow / DupRow / DelRow / DelChord) grow the pending set and
+/// keep working; selection / view-only / detail-local messages never reach
+/// here. Reached only when no dirty focused detail draft is active (the detail
+/// gate above has already returned in that case) — so it covers the table
+/// focus and the "detail focused but draft clean" case alike.
+///
+/// Keep this list in sync with any new result-replacing / session-exiting
+/// action.
+fn list_edits_block_action(msg: &ResultsMessage) -> bool {
+    matches!(
+        msg,
+        ResultsMessage::ExitEdit
+            | ResultsMessage::RunQuery { .. }
+            | ResultsMessage::SetResult { .. }
+            | ResultsMessage::ClearResult
+            | ResultsMessage::PageNav { .. }
+            | ResultsMessage::PageChord { .. }
+            | ResultsMessage::SetRowLimit { .. }
+    )
+}
+
 pub fn update(
     msg: ResultsMessage,
     mut state: ResultsState,
@@ -82,6 +109,17 @@ pub fn update(
     // enforcement point, so new UI around the list cannot bypass the gate.
     if state.detail.focused && state.detail.dirty && detail_draft_blocks_list_action(&msg) {
         state.detail.leave_warning = true;
+        return (state, intents, effects, true);
+    }
+
+    // The same model-level gate for the whole-result edit session: while it
+    // holds unsaved changes, a result-replacing / session-exiting action is
+    // refused here regardless of the delivering channel (keyboard, mouse on a
+    // toolbar/component, or a future input source). The Esc / focus-change
+    // guards in the key layer and the app update are boundary checks; this is
+    // the enforcement point for actions that stay inside Results.
+    if state.list.edit.editing && state.list.edit.is_dirty() && list_edits_block_action(&msg) {
+        state.list.leave_warning = true;
         return (state, intents, effects, true);
     }
 
@@ -934,6 +972,67 @@ mod tests {
             // Nothing else was cleared away.
             assert!(s.list.edit.editing);
         }
+    }
+
+    #[test]
+    fn dirty_list_session_blocks_result_replacing_actions() {
+        use crate::features::sql_workspace::sql_tab::results::pagination::ResultsPageAction;
+        // A dirty edit session (edited cell) with the detail not focused:
+        // result-replacing / session-exiting actions are refused centrally,
+        // mirroring the detail-draft gate — whether the channel is a keyboard
+        // shortcut, a toolbar click, or a future component.
+        let mut state = editable_state();
+        state.list.enter_edit();
+        state.list.edit.apply_cell(0, 0, "x".into());
+        assert!(state.list.edit.editing && state.list.edit.is_dirty());
+        assert!(
+            !state.detail.focused,
+            "this gate guards the session, not a draft"
+        );
+
+        for msg in [
+            ResultsMessage::ExitEdit,
+            ResultsMessage::ClearResult,
+            ResultsMessage::RunQuery {
+                instance: "i".into(),
+                connection: "c".into(),
+                database: None,
+                schema: "public".into(),
+                sql: "select 1".into(),
+                paginated: false,
+                page: 1,
+                row_limit: 100,
+            },
+            ResultsMessage::SetResult {
+                result: sample_result(),
+                paginated: false,
+            },
+            ResultsMessage::PageNav {
+                action: ResultsPageAction::Next,
+            },
+            ResultsMessage::PageChord { forward: true },
+            ResultsMessage::SetRowLimit { limit: 50 },
+        ] {
+            let (s, _i, _e, dirty) = update(msg, state.clone());
+            assert!(dirty, "the blocked action must repaint");
+            assert!(
+                s.list.edit.editing && s.list.edit.is_dirty(),
+                "pending edits must survive a blocked action"
+            );
+            assert!(
+                s.list.leave_warning,
+                "the blocked action must raise the leave warning"
+            );
+        }
+
+        // Explicit discard is the user's intent and always passes.
+        let (s, _i, _e, dirty) = update(ResultsMessage::Rollback, state);
+        assert!(dirty);
+        assert!(!s.list.edit.is_dirty());
+        assert!(
+            !s.list.leave_warning,
+            "rollback resolves the blocked-leave warning"
+        );
     }
 
     #[test]
