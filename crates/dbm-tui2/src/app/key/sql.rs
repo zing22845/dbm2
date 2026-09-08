@@ -487,6 +487,38 @@ fn results_key(
         )),
         KeyCode::Left => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: -1 }, tab_id)),
         KeyCode::Right => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: 1 }, tab_id)),
+        // Jump to the first / last cell of the current row (`0` / `$`, vim).
+        // They keep the current row and only move the column, mirroring `g`/`G`
+        // absolute jumps (the row itself is clamped by SetSelection).
+        KeyCode::Char('0') if key.modifiers.is_empty() => {
+            let list = &results.list;
+            (list.row_count() > 0).then(|| {
+                sql_results(
+                    SqlResultsMessage::SetSelection {
+                        row: list.row,
+                        col: 0,
+                    },
+                    tab_id,
+                )
+            })
+        }
+        KeyCode::Char('$')
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            let list = &results.list;
+            let cols = list.result.as_ref().map(|r| r.columns.len()).unwrap_or(0);
+            (list.row_count() > 0 && cols > 0).then(|| {
+                sql_results(
+                    SqlResultsMessage::SetSelection {
+                        row: list.row,
+                        col: cols - 1,
+                    },
+                    tab_id,
+                )
+            })
+        }
         // Copy the selected column name (`Ctrl+n`, original dbm binding). With
         // no cell selected the whole column-name list is copied.
         KeyCode::Char('n')
@@ -1547,6 +1579,53 @@ mod tests {
         assert!(
             results_key(key(KeyCode::Char('s'), KeyModifiers::NONE), 0, &clean).is_none(),
             "an unbound key outside editing must not dispatch a cancel"
+        );
+    }
+
+    #[test]
+    fn results_key_zero_and_dollar_jump_to_row_edges() {
+        use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+        use crate::features::sql_workspace::sql_tab::results::state::{
+            QueryResultData, ResultsState,
+        };
+        // A 3-column result with the cursor on row 1.
+        let mut results = ResultsState::default();
+        results.list.result = Some(QueryResultData {
+            columns: (0..3)
+                .map(|i| ColumnInfo {
+                    name: format!("c{i}"),
+                    type_name: "text".into(),
+                    type_display: "text".into(),
+                    comment: None,
+                })
+                .collect(),
+            rows: vec![vec!["1".into(); 3], vec!["2".into(); 3]],
+            rows_affected: None,
+            total_rows: Some(2),
+        });
+        results.list.row = 1;
+        results.list.col = 1;
+
+        // `0` → first cell of the current row (column 0).
+        let msg = results_key(key(KeyCode::Char('0'), KeyModifiers::NONE), 0, &results)
+            .expect("0 must jump to the row's first cell");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::SetSelection { row: 1, col: 0 }),
+            }
+        );
+
+        // `$` (with the Shift modifier terminals report for it) → last cell.
+        let msg = results_key(key(KeyCode::Char('$'), KeyModifiers::SHIFT), 0, &results)
+            .expect("$ must jump to the row's last cell");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::SetSelection { row: 1, col: 2 }),
+            }
         );
     }
 
