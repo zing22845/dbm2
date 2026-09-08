@@ -354,10 +354,51 @@ pub(crate) fn handle_down(
         current_focus = ?state.focus,
         "mouse click pane mapping"
     );
-    if let Some(pane) = target_pane.filter(|z| *z != state.focus) {
+    // A click only ever *acts* inside the pane that owns focus *before* the
+    // press: when it lands on a different top-level pane, its only job is to
+    // move focus there (the shell's FocusChanged handler refuses the move while
+    // a dirty connection form / results session blocks it). The clicked pane's
+    // content actions — explorer node rows, instance/connection rows, header
+    // Discover activation, ... — therefore run only once that pane is already
+    // focused, so a cross-pane click can never bypass the dirty guards. A popup
+    // pane (Discover) keeps acting on its own overlay regardless of where the
+    // click maps; only a structural splitter grab happens on a focus-changing
+    // press.
+    let focus_before = state.focus;
+    if let Some(pane) = target_pane.filter(|z| *z != focus_before) {
         let msg = AppMsg::Shell(crate::app_shell::msg::ShellMsg::FocusChanged { pane });
         let result = process_message_round(effect_runner, action_rx, msg, state);
         *dirty |= result.dirty;
+    }
+    let pane_actions_allowed =
+        matches!(focus_before, Pane::Discover(_)) || target_pane.is_none_or(|p| p == focus_before);
+    if !pane_actions_allowed {
+        if splitter_drag.is_none()
+            && let Some(target) = resolve_splitter_drag(state, size, point.x, point.y)
+        {
+            *splitter_drag = Some(target);
+            use crate::features::sql_workspace::sql_tab::splitter::view::SqlSplitter;
+            let sh = &mut state.splitter_hover;
+            match target {
+                SplitterDrag::App => sh.app_splitter_drag = true,
+                SplitterDrag::Explorer => sh.explorer_splitter_drag = true,
+                SplitterDrag::Discover => sh.discover_splitter_drag = true,
+                SplitterDrag::Sql(_, SqlSplitter::EditorResults) => {
+                    sh.sql_editor_results_drag = true
+                }
+                SplitterDrag::Sql(_, SqlSplitter::EditorHistory) => {
+                    sh.sql_editor_history_drag = true
+                }
+                SplitterDrag::Sql(_, SqlSplitter::HistoryDetail) => {
+                    sh.sql_history_detail_drag = true
+                }
+                SplitterDrag::Sql(_, SqlSplitter::ResultsDetail) => {
+                    sh.sql_results_detail_drag = true
+                }
+            }
+            tracing::debug!(?target, "splitter drag started");
+        }
+        return Ok(());
     }
     press_explorer_content(
         mouse,
@@ -615,6 +656,29 @@ fn press_sql(
             is_double_click,
         )
     {
+        // Sub-pane actions obey the same focus-first rule as the top-level
+        // panes: a click on a sub-pane that is not focused yet only moves focus
+        // there (the sql_tab `Focus` handler enforces the results dirty /
+        // detail-draft gates on the way); the clicked sub-pane's row / toolbar
+        // action waits for a later click, so it cannot bypass those gates.
+        let sub_focus_before = state.sql.sql_tab.active_tab().map(|t| t.focus);
+        if let Some(action_focus) =
+            crate::features::sql_workspace::sql_tab::input::sql_click_action_focus(action)
+            && sub_focus_before != Some(action_focus)
+        {
+            let msg = AppMsg::Sql(crate::features::sql_workspace::msg::SqlMsg::Message(
+                crate::features::sql_workspace::msg::SqlMessage::SqlTab(
+                    crate::features::sql_workspace::sql_tab::msg::SqlTabMsg::Message(
+                        crate::features::sql_workspace::sql_tab::msg::SqlTabMessage::Focus(
+                            action_focus,
+                        ),
+                    ),
+                ),
+            ));
+            let result = process_message_round(effect_runner, action_rx, msg, state);
+            *dirty |= result.dirty;
+            return Ok(());
+        }
         // If the click was on the h_scrollbar, start dragging.
         if let crate::features::sql_workspace::sql_tab::input::SqlClickAction::HistoryHScrollbar {
             track_x,

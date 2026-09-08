@@ -109,6 +109,38 @@ pub enum SqlClickAction {
     ResultsDetailLeaveBlocked,
 }
 
+/// The sub-pane a click action belongs to, when it is a sub-pane action (as
+/// opposed to a whole-tab `ActivateTab` or the focus-agnostic picker close).
+/// Drives the shell's focus-first rule: sub-pane content actions run only once
+/// that sub-pane is already focused, so a single cross-pane click only moves
+/// focus (and its dirty gates decide whether the move is even allowed).
+pub fn sql_click_action_focus(action: SqlClickAction) -> Option<SqlFocus> {
+    use SqlClickAction::*;
+    match action {
+        FocusSubPane(focus) => Some(focus),
+        HistoryApply
+        | HistoryRowClicked { .. }
+        | HistoryHScrollbar { .. }
+        | HistoryVScrollbar { .. } => Some(SqlFocus::History),
+        ResultsCellClicked { .. }
+        | ResultsOpenDetail
+        | ResultsFocusDetail
+        | ResultsHScrollbar { .. }
+        | ResultsVScrollbar { .. }
+        | ResultsColResize { .. }
+        | ResultsPagination { .. }
+        | ResultsToolbar { .. }
+        | ResultsDetailChip { .. }
+        | ResultsDetailLeaveBlocked => Some(SqlFocus::Results),
+        EditorVScrollbar { .. }
+        | ToggleTableCompletion
+        | OpenContextPicker(_)
+        | ContextPickerHit { .. }
+        | ContextPickerColumn(_) => Some(SqlFocus::Editor),
+        ActivateTab(_) | CloseContextPicker => None,
+    }
+}
+
 /// Hit-test a click at `(x, y)` inside the SQL workspace's tab-bar + body
 /// region (`area`). A click on the top tab bar activates that tab; a click in
 /// the body focuses the sub-pane (editor / history / results) under the cursor.
@@ -1416,6 +1448,45 @@ mod tests {
                 Some(SqlClickAction::FocusSubPane(SqlFocus::History))
             ),
             "single click on history row must focus pane, got {action:?}"
+        );
+    }
+
+    #[test]
+    fn sql_click_action_focus_maps_each_action_to_its_pane() {
+        use crate::common::view::action_bar::ResultsAction;
+        use crate::features::sql_workspace::sql_tab::editor::context_picker::state::PickerColumn;
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+        assert_eq!(
+            sql_click_action_focus(SqlClickAction::FocusSubPane(SqlFocus::History)),
+            Some(SqlFocus::History)
+        );
+        assert_eq!(
+            sql_click_action_focus(SqlClickAction::HistoryRowClicked { index: 0 }),
+            Some(SqlFocus::History)
+        );
+        assert_eq!(
+            sql_click_action_focus(SqlClickAction::HistoryApply),
+            Some(SqlFocus::History)
+        );
+        assert_eq!(
+            sql_click_action_focus(SqlClickAction::ResultsCellClicked { row: 0, col: 0 }),
+            Some(SqlFocus::Results)
+        );
+        assert_eq!(
+            sql_click_action_focus(SqlClickAction::ResultsToolbar {
+                action: ResultsAction::Commit,
+            }),
+            Some(SqlFocus::Results)
+        );
+        assert_eq!(
+            sql_click_action_focus(SqlClickAction::OpenContextPicker(PickerColumn::Database)),
+            Some(SqlFocus::Editor)
+        );
+        // Whole-tab / picker-close actions need no sub-pane focus.
+        assert_eq!(sql_click_action_focus(SqlClickAction::ActivateTab(0)), None);
+        assert_eq!(
+            sql_click_action_focus(SqlClickAction::CloseContextPicker),
+            None
         );
     }
 
