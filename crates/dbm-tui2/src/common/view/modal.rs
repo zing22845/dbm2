@@ -412,7 +412,9 @@ fn draw_commit_preview_scrollbar(
         let cell = &mut frame.buffer_mut()[pos];
         if r >= top && r < top + thumb_h {
             cell.set_symbol("█");
-            cell.set_fg(theme.palette().accent);
+            // Idle thumb colour from the palette's dedicated scrollbar slot so
+            // the preview scrollbar tracks the rest of the app.
+            cell.set_fg(theme.palette().scrollbar_inactive);
         }
     }
 }

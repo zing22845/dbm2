@@ -96,6 +96,14 @@ pub struct Palette {
     pub info: Color,
     /// Muted / de-emphasized text (e.g. footer hints, placeholders).
     pub muted: Color,
+    /// Foreground of a scrollbar that is *not* being dragged — aligned with the
+    /// original dbm's idle thumb colour (dark Rgb(118,138,176) / light
+    /// Rgb(96,126,176)). Dedicated slot so tuning scrollbars never bleeds into
+    /// other chrome (muted/accent/etc.); the track keeps its own dim look.
+    pub scrollbar_inactive: Color,
+    /// Foreground of a scrollbar *thumb while it is being dragged* — the
+    /// original dbm's highlight (dark Yellow / light Rgb(28,72,140)).
+    pub scrollbar_active: Color,
 }
 
 impl Palette {
@@ -255,6 +263,9 @@ pub fn default() -> Theme {
             dirty: DIRTY_CHANGE_COLOR,             // orange (matches the detail diff)
             info: Color::Rgb(0x8b, 0xe9, 0xfd),    // cyan
             muted: Color::Rgb(0x62, 0x64, 0x74),
+            // Original dbm scrollbars: idle thumb Rgb(118,138,176), drag = yellow.
+            scrollbar_inactive: Color::Rgb(118, 138, 176),
+            scrollbar_active: Color::Yellow,
         },
         light: Palette {
             fg: FG_RESET, // editor-aligned default
@@ -280,6 +291,10 @@ pub fn default() -> Theme {
             dirty: DIRTY_CHANGE_COLOR,                   // orange (matches the detail diff)
             info: Color::Rgb(0x0e, 0x74, 0x9a),
             muted: Color::Rgb(0x62, 0x74, 0x8f),
+            // Original dbm scrollbars: idle thumb Rgb(96,126,176), drag
+            // Rgb(28,72,140).
+            scrollbar_inactive: Color::Rgb(96, 126, 176),
+            scrollbar_active: Color::Rgb(28, 72, 140),
         },
     }
 }

@@ -16,13 +16,18 @@ pub struct ScrollbarStyle {
     pub thumb: Style,
 }
 
+/// All vertical and horizontal scrollbars share this style, so the palette's
+/// dedicated `scrollbar_inactive` / `scrollbar_active` slots (original dbm's
+/// idle / drag thumb colours) tune every scrollbar from one place. The track
+/// keeps its own dim border-derived colour so an idle thumb still reads as the
+/// brighter bar over it.
 pub fn results_scrollbar_style(palette: &Palette, dragging: bool) -> ScrollbarStyle {
     ScrollbarStyle {
         track: Style::default().fg(palette.border),
         thumb: Style::default().fg(if dragging {
-            palette.accent
+            palette.scrollbar_active
         } else {
-            palette.muted
+            palette.scrollbar_inactive
         }),
     }
 }
@@ -88,10 +93,22 @@ mod tests {
     }
 
     #[test]
-    fn results_scrollbar_style_has_distinct_track_and_thumb() {
+    fn results_scrollbar_style_uses_the_dedicated_palette_slots() {
         let p = palette();
         let idle = results_scrollbar_style(&p, false);
         let drag = results_scrollbar_style(&p, true);
+        // Idle / drag thumbs come from the dedicated scrollbar slots.
+        assert_eq!(idle.thumb.fg, Some(p.scrollbar_inactive));
+        assert_eq!(drag.thumb.fg, Some(p.scrollbar_active));
         assert_ne!(idle.thumb, drag.thumb);
+        // Track keeps its own dim colour (visible idle thumb over the track).
+        assert_ne!(idle.thumb, idle.track);
+        // The inactive slot is a dedicated colour, not muted/accent (the dark
+        // drag yellow legitimately equals accent — that is the original dbm's
+        // exact colour, and scrollbars read their own slot so tuning it never
+        // touches other chrome).
+        assert_ne!(p.scrollbar_inactive, p.muted);
+        assert_ne!(p.scrollbar_inactive, p.accent);
+        assert_ne!(p.scrollbar_inactive, p.scrollbar_active);
     }
 }
