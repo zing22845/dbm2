@@ -202,6 +202,22 @@ impl SqlTabState {
         self.tabs.get_mut(i)
     }
 
+    /// The earliest *future* refresh-cooldown deadline across every tab's
+    /// results list, if any. The run loop uses this to schedule one timed
+    /// repaint for the moment a cooldown expires, so a greyed-out Refresh
+    /// button re-enables (gets its available background back) without waiting
+    /// for another input event. Past deadlines are ignored — an elapsed
+    /// cooldown is already "allowed", and waking on a past instant on every
+    /// loop would spin the event loop.
+    pub fn results_refresh_deadline(&self) -> Option<std::time::Instant> {
+        let now = std::time::Instant::now();
+        self.tabs
+            .iter()
+            .filter_map(|t| t.results.list.refresh_cooldown_until)
+            .filter(|&d| d > now)
+            .min()
+    }
+
     /// The currently active connection `(instance, connection)`, if any.
     pub fn active_connection(&self) -> Option<(&str, &str)> {
         self.active_connection
@@ -558,6 +574,25 @@ mod tests {
         let state = SqlTabState::default();
         assert!(state.tabs.is_empty(), "no tab should be auto-created");
         assert!(state.active_connection.is_none());
+    }
+
+    #[test]
+    fn results_refresh_deadline_is_earliest_future_cooldown() {
+        let mut state = SqlTabState::default();
+        state.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        state.open_connection_tab("inst".into(), "c2".into(), "id2".into(), None, None, None);
+        let soon = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let later = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        state.tabs[0].results.list.refresh_cooldown_until = Some(soon);
+        state.tabs[1].results.list.refresh_cooldown_until = Some(later);
+        assert_eq!(state.results_refresh_deadline(), Some(soon));
+
+        // Past deadlines (already allowed) are ignored, never scheduled.
+        state.tabs[1].results.list.refresh_cooldown_until =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        assert_eq!(state.results_refresh_deadline(), Some(soon));
+        state.tabs[0].results.list.refresh_cooldown_until = None;
+        assert_eq!(state.results_refresh_deadline(), None);
     }
 
     #[test]

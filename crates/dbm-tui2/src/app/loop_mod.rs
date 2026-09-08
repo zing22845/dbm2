@@ -499,10 +499,19 @@ fn next_wake(state: &AppState) -> Option<Instant> {
         .last_real_frame_elapsed()
         .is_some_and(|l| l <= Duration::from_millis(250))
         && (state.perf.fps > 0.0 || state.perf.redundancy_rate > 0.0);
+    // A results Refresh cooldown expiry must trigger one timed repaint, or the
+    // toolbar button stays greyed out (no available background) until some
+    // unrelated input event happens to redraw. Only a *future* deadline counts
+    // (see `results_refresh_deadline`): a past one must not keep the loop
+    // waking instantly, which would spin.
+    let refresh_expiry = state.sql.sql_tab.results_refresh_deadline();
     if scanning || counters_live {
-        Some(now + TICK_RATE)
+        // Periodic wake keeps scan progress / counter decay live; an earlier
+        // cooldown expiry just fires sooner (single-shot, then falls back).
+        let periodic = now + TICK_RATE;
+        Some(refresh_expiry.map_or(periodic, |d| periodic.min(d)))
     } else {
-        None
+        refresh_expiry
     }
 }
 
@@ -573,6 +582,39 @@ mod tests {
         let mut state = crate::app::state::AppState::default();
         state.discover.scanning = true;
         assert!(next_wake(&state).is_some());
+    }
+
+    #[test]
+    fn next_wake_fires_while_a_results_refresh_cooldown_is_pending() {
+        // A refresh just fired and armed its 1s cooldown: the loop must wake
+        // when it expires so the toolbar button repaints as enabled, even with
+        // no further input.
+        let mut state = crate::app::state::AppState::default();
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c".into(),
+            "id".into(),
+            None,
+            None,
+            None,
+        );
+        state.sql.sql_tab.tabs[0]
+            .results
+            .list
+            .refresh_cooldown_until =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+        assert!(
+            next_wake(&state).is_some(),
+            "a pending cooldown must schedule a timed repaint"
+        );
+        // Once it has elapsed (already allowed) nothing is scheduled: the loop
+        // must not wake on a past deadline and spin.
+        state.sql.sql_tab.tabs[0]
+            .results
+            .list
+            .refresh_cooldown_until =
+            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        assert_eq!(next_wake(&state), None);
     }
 
     #[test]
