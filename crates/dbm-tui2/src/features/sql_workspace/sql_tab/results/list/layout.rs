@@ -253,6 +253,14 @@ pub fn compute_viewport_scroll(
             h_scroll = cur_col_left;
         } else if cur_col_left >= view_right {
             h_scroll = cur_col_right.saturating_sub(viewport_w);
+        } else if cur_col_right > view_right {
+            // The selected column's left edge is already inside the viewport but
+            // its right edge extends past it (a trailing column peeking into the
+            // view). Scroll it fully into view, right-aligned. Without this a
+            // cursor on the last column could never reveal the column's
+            // truncated right side: there is no next column to move to, so no
+            // later anchor would ever push the horizontal scrollbar further.
+            h_scroll = cur_col_right.saturating_sub(viewport_w);
         }
         h_scroll = h_scroll.min(max_h_scroll);
     }
@@ -431,5 +439,50 @@ mod tests {
             None,
             "a single row of data: the second row slot is empty"
         );
+    }
+
+    #[test]
+    fn anchor_brings_a_right_peeking_trailing_column_fully_into_view() {
+        // A trailing column whose left edge is already visible but whose right
+        // edge extends past the viewport can never be fully revealed by moving
+        // the cursor further right (there is no next column). The anchor must
+        // pull it right-aligned into view the moment it is selected.
+        let area = Rect::new(0, 0, 20, 12);
+        let mut s = ListState::new();
+        s.result = Some(QueryResultData {
+            columns: vec![ColumnInfo {
+                name: "wide".into(),
+                type_name: "int4".into(),
+                type_display: "int4".into(),
+                comment: None,
+            }],
+            rows: vec![vec!["x".into()]; 60],
+            rows_affected: None,
+            total_rows: Some(60),
+        });
+        s.col_widths = vec![30];
+        s.col = 0;
+        s.h_scroll.set(0);
+        s.scroll_locked.set(false);
+
+        // Column [0, 30) with a viewport narrower than 30: the column peeks in
+        // from the left edge and its right edge is cut off. Selecting it must
+        // scroll so the column's right edge sits at the viewport's right edge.
+        let vs = compute_viewport_scroll(area, &s, 60, &s.col_widths, 30)
+            .expect("a viewport with overflow");
+        let content_w = vs.layout.content_area.width.max(1) as usize;
+        assert!(content_w < 30, "setup: the column must exceed the viewport");
+        assert_eq!(
+            vs.h_scroll,
+            30 - content_w,
+            "a right-peeking trailing column must be scrolled fully into view"
+        );
+
+        // Manual scroll (locked) still honours the user's chosen position.
+        s.scroll_locked.set(true);
+        s.h_scroll.set(0);
+        let vs = compute_viewport_scroll(area, &s, 60, &s.col_widths, 30)
+            .expect("a viewport with overflow");
+        assert_eq!(vs.h_scroll, 0, "scroll_locked keeps the manual position");
     }
 }
