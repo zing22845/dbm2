@@ -23,6 +23,7 @@ use crate::common::components::line_numbers;
 use crate::common::layout::text::footer_height;
 use crate::common::utils::text_width;
 use crate::common::view::hints::draw_footer;
+use crate::common::view::pane_scrollbar::draw_vertical_pane_scrollbar;
 use crate::common::view::theme::Theme;
 
 use super::state::DetailState;
@@ -214,6 +215,21 @@ pub fn detail_chip_hit(
     None
 }
 
+/// The detail body's 1-column vertical scrollbar track along its right edge.
+/// Only meaningful while the content overflows the body height (the caller
+/// decides); the bar occupies the column the body content is narrowed by.
+fn detail_v_scrollbar_rect(body: Rect) -> Option<Rect> {
+    if body.width == 0 || body.height == 0 {
+        return None;
+    }
+    Some(Rect {
+        x: body.right().saturating_sub(1),
+        y: body.y,
+        width: 1,
+        height: body.height,
+    })
+}
+
 /// Render the detail sub-pane with its own border, optional action buttons,
 /// body area, and a detail footer.
 ///
@@ -324,23 +340,91 @@ pub fn render(
     // Detail body: the embedded cell editor when focused, otherwise a read-only
     // wrapped preview of the cell value with line numbers. The focused branch
     // hands back the rendered hit region so pointer clicks map onto the draft.
+    //
+    // Both modes can overflow the pane height, so the body owns a vertical
+    // scrollbar of its own: a right-hand track column is reserved (and drawn)
+    // only when the content is taller than the body. Like the SQL editor, the
+    // bar decision is two-pass — first guess the scrollbar to learn the real
+    // wrap width, then recount rows at the narrowed width so the bar's max
+    // matches what the renderer actually produced.
+    let viewport_rows = body_area.height.max(1) as usize;
+    let bar = detail_v_scrollbar_rect(body_area);
     let mouse_hit = if detail.focused
         && let Some(host) = detail.editor.as_ref()
     {
+        let gutter_w = crate::common::editor::editor_line_number_gutter_width(&host.editor);
+        // Pass 1: would the wrapped text overflow at the full width?
+        let probe_wrap = body_area.width.saturating_sub(gutter_w).max(1);
+        let probe_rows = crate::common::editor::editor_display_row_count(&host.editor, probe_wrap);
+        let needs_v = probe_rows > viewport_rows;
+        let content_width = body_area.width.saturating_sub(u16::from(needs_v)).max(1);
+        let wrap_width = content_width.saturating_sub(gutter_w).max(1);
+        let row_count = crate::common::editor::editor_display_row_count(&host.editor, wrap_width);
+        let content = Rect {
+            x: body_area.x,
+            y: body_area.y,
+            width: content_width,
+            height: body_area.height,
+        };
+
         let mut editor = host.editor.clone();
-        crate::common::editor::render_detail_editor(&mut editor, body_area, frame.buffer_mut())
+        let hit =
+            crate::common::editor::render_detail_editor(&mut editor, content, frame.buffer_mut());
+        // Draw the scrollbar after the editor: it reports the viewport edtui
+        // actually rendered with (the value the run loop also syncs back).
+        if needs_v
+            && row_count > viewport_rows
+            && let Some(bar) = bar
+        {
+            let max_scroll = row_count.saturating_sub(viewport_rows);
+            let scroll = crate::common::editor::editor_v_scroll_display(&editor, wrap_width);
+            draw_vertical_pane_scrollbar(
+                frame,
+                bar,
+                scroll.min(max_scroll),
+                viewport_rows,
+                max_scroll,
+                p,
+                false,
+            );
+        }
+        hit
     } else {
-        let viewport = body_area.height as usize;
-        let display_lines = build_detail_lines(body, body_area.width);
+        // Pass 1: does the wrapped preview overflow at the full body width?
+        let probe_total = detail_display_line_count(body, body_area.width);
+        let needs_v = probe_total > viewport_rows;
+        let content_width = body_area.width.saturating_sub(u16::from(needs_v)).max(1);
+        let display_lines = build_detail_lines(body, content_width);
         let lines_total = display_lines.len();
         let mut detail_state = detail.clone();
-        detail_state.clamp_scroll(lines_total, viewport);
+        detail_state.clamp_scroll(lines_total, viewport_rows);
         let visible: Vec<Line> = display_lines
             .into_iter()
             .skip(detail_state.scroll)
-            .take(viewport.max(1))
+            .take(viewport_rows.max(1))
             .collect();
-        frame.render_widget(Paragraph::new(visible), body_area);
+        let content = Rect {
+            x: body_area.x,
+            y: body_area.y,
+            width: content_width,
+            height: body_area.height,
+        };
+        frame.render_widget(Paragraph::new(visible), content);
+        if needs_v
+            && lines_total > viewport_rows
+            && let Some(bar) = bar
+        {
+            let max_scroll = lines_total.saturating_sub(viewport_rows);
+            draw_vertical_pane_scrollbar(
+                frame,
+                bar,
+                detail_state.scroll.min(max_scroll),
+                viewport_rows,
+                max_scroll,
+                p,
+                false,
+            );
+        }
         None
     };
 
@@ -450,5 +534,80 @@ mod tests {
         let (text, warn) = detail_footer(&d);
         assert_eq!(text, "Back: ESC");
         assert!(warn.is_none());
+    }
+
+    #[test]
+    fn detail_v_scrollbar_rect_spans_the_right_edge() {
+        let body = Rect::new(5, 3, 20, 9);
+        let bar = detail_v_scrollbar_rect(body).expect("a non-empty body has a track");
+        assert_eq!(bar.width, 1);
+        assert_eq!(bar.height, body.height);
+        assert_eq!(bar.x, body.right() - 1);
+        assert_eq!(bar.y, body.y);
+        assert_eq!(detail_v_scrollbar_rect(Rect::new(0, 0, 0, 9)), None);
+    }
+
+    #[test]
+    fn overflowing_preview_and_editor_draw_a_vertical_scrollbar() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let theme = crate::common::view::theme::default();
+        let area = Rect::new(0, 0, 40, 16);
+        let body: String = (0..40)
+            .map(|i| format!("row {i:02} of a tall cell value"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let bar_col = area.right().saturating_sub(2); // inner right edge (bar col)
+
+        // Read-only preview overflowing the body height shows the track.
+        let detail = DetailState::default();
+        let mut t1 = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        t1.draw(|f| {
+            let _ = render(
+                f,
+                &theme,
+                area,
+                &detail,
+                body.as_str(),
+                " [id] row 1 ".to_string(),
+                false,
+                true,
+            );
+        })
+        .unwrap();
+        let buf1 = t1.backend().buffer().clone();
+        assert!(
+            (2..area.height.saturating_sub(2)).any(|y| {
+                buf1.cell((bar_col, y))
+                    .is_some_and(|c| c.symbol() == "┊" || c.symbol() == "█")
+            }),
+            "read-only preview overflow must draw its vertical scrollbar"
+        );
+
+        // Focused cell editor overflowing the body height also draws it.
+        let mut focused = DetailState::default();
+        focused.focus_editor(body.as_str());
+        let mut t2 = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        t2.draw(|f| {
+            let _ = render(
+                f,
+                &theme,
+                area,
+                &focused,
+                body.as_str(),
+                " [id] row 1 ".to_string(),
+                false,
+                true,
+            );
+        })
+        .unwrap();
+        let buf2 = t2.backend().buffer().clone();
+        assert!(
+            (2..area.height.saturating_sub(2)).any(|y| {
+                buf2.cell((bar_col, y))
+                    .is_some_and(|c| c.symbol() == "┊" || c.symbol() == "█")
+            }),
+            "focused detail editor overflow must draw its vertical scrollbar"
+        );
     }
 }

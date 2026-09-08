@@ -73,13 +73,31 @@ pub fn update(
     let effects = Vec::new();
     let dirty = match msg {
         DetailMessage::Scroll { delta } => {
-            let before = state.scroll;
-            if delta > 0 {
-                state.scroll = state.scroll.saturating_add(delta as usize);
+            if state.focused
+                && let Some(host) = state.editor.as_mut()
+            {
+                // Focused cell editor: wheel scrolls the embedded editor's
+                // viewport (moves the view, not the text cursor). Locking the
+                // scroll keeps edtui's renderer from snapping the view back to
+                // the cursor; the next key / mouse gesture re-engages
+                // cursor-following. The per-frame render clamps to the real
+                // maximum and the run loop writes that back via
+                // `sync_editor_viewport`, so an out-of-range offset self-heals.
+                let (x, y) = host.editor.viewport_offset();
+                let new_y = (y as i32).saturating_add(delta).max(0) as usize;
+                host.editor.set_viewport_offset(x, new_y);
+                host.editor.set_scroll_locked(true);
+                new_y != y
             } else {
-                state.scroll = state.scroll.saturating_sub(delta.unsigned_abs() as usize);
+                // Read-only preview: scroll the wrapped body by display rows.
+                let before = state.scroll;
+                if delta > 0 {
+                    state.scroll = state.scroll.saturating_add(delta as usize);
+                } else {
+                    state.scroll = state.scroll.saturating_sub(delta.unsigned_abs() as usize);
+                }
+                state.scroll != before
             }
-            state.scroll != before
         }
         DetailMessage::SetDraft { text } => {
             state.draft = text.clone();
@@ -324,5 +342,50 @@ mod tests {
         s.unfocus();
         assert!(!s.sync_editor_viewport(3));
         assert!(s.editor.is_none());
+    }
+
+    #[test]
+    fn scroll_targets_the_focused_editor_viewport() {
+        let lines: String = (0..12)
+            .map(|i| format!("line {i:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let s = focused_state(&lines);
+        assert_eq!(s.editor.as_ref().unwrap().editor.viewport_offset().1, 0);
+
+        // Wheel down scrolls the editor's viewport (never the list).
+        let (s2, _i, _e, dirty) = update(DetailMessage::Scroll { delta: 4 }, s);
+        assert!(dirty);
+        assert_eq!(
+            s2.editor.as_ref().unwrap().editor.viewport_offset().1,
+            4,
+            "a focused editor scroll must move its viewport"
+        );
+        let (s3, _i, _e, dirty) = update(DetailMessage::Scroll { delta: -1 }, s2);
+        assert!(dirty);
+        assert_eq!(s3.editor.as_ref().unwrap().editor.viewport_offset().1, 3);
+
+        // Scrolling back up to the top is a real change once…
+        let (s4, _i, _e, dirty) = update(DetailMessage::Scroll { delta: -100 }, s3);
+        assert!(dirty);
+        assert_eq!(s4.editor.as_ref().unwrap().editor.viewport_offset().1, 0);
+        // …and further up is a no-op (no repaint).
+        let (s5, _i, _e, dirty) = update(DetailMessage::Scroll { delta: -100 }, s4);
+        assert!(!dirty);
+        assert_eq!(s5.editor.as_ref().unwrap().editor.viewport_offset().1, 0);
+    }
+
+    #[test]
+    fn scroll_scrolls_the_read_only_preview_body() {
+        let s = DetailState::default();
+        assert_eq!(s.scroll, 0);
+        let (s2, _i, _e, dirty) = update(DetailMessage::Scroll { delta: 3 }, s);
+        assert!(dirty);
+        assert_eq!(s2.scroll, 3);
+        let (s3, _i, _e, _d) = update(DetailMessage::Scroll { delta: -1 }, s2);
+        assert_eq!(s3.scroll, 2);
+        // Bottom / top edges are clamped by the update + render clamp.
+        let (s4, _i, _e, _d) = update(DetailMessage::Scroll { delta: -100 }, s3);
+        assert_eq!(s4.scroll, 0);
     }
 }

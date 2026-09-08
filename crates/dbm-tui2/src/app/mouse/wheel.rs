@@ -525,30 +525,75 @@ pub(crate) fn handle_wheel_sql(
                 let result = process_message_round(effect_runner, action_rx, msg, state);
                 *dirty |= result.dirty;
             } else if layout.results.contains(point) {
-                // Scroll wheel on the results pane: move
-                // the cell selection up/down. The view
-                // auto-adjusts v_scroll to keep cursor visible.
                 use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
                 use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
                 use crate::features::sql_workspace::sql_tab::results::msg::{
                     ResultsMessage, ResultsMsg,
                 };
-                // Shift+wheel scrolls the grid sideways;
-                // a bare wheel moves the cell selection.
-                let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
-                    SqlTabMessage::Results {
-                        tab_id: tab_idx,
-                        msg: ResultsMsg::Message(if horizontal {
-                            ResultsMessage::ScrollHScroll {
-                                delta: dir * WHEEL_H_STEP,
-                            }
-                        } else {
-                            ResultsMessage::MoveSelection { dr: dir, dc: 0 }
-                        }),
-                    },
-                ))));
-                let result = process_message_round(effect_runner, action_rx, msg, state);
-                *dirty |= result.dirty;
+
+                // Resolve the detail sub-pane rect the same way the click layer
+                // does (results Block inner minus borders, then the shared
+                // compute_results_layout), so a wheel over the detail body
+                // scrolls the *detail* (its wrapped cell / focused editor)
+                // instead of the list selection.
+                let results_inner = ratatui::layout::Rect {
+                    x: layout.results.x.saturating_add(1),
+                    y: layout.results.y.saturating_add(1),
+                    width: layout.results.width.saturating_sub(2),
+                    height: layout.results.height.saturating_sub(2),
+                };
+                let results_layout =
+                    crate::features::sql_workspace::sql_tab::results::layout::compute_results_layout(
+                        results_inner,
+                        tab.results.detail_open,
+                        tab.results.splitter.detail_pane_width,
+                        tab.results.list.row_count(),
+                        tab.results.list.search.text_input_active(),
+                        &tab.results.list.executed_sql_display(),
+                        tab.results.list_leave_blocked(),
+                        tab.results.show_next_modified_hint(),
+                    );
+                let over_detail = tab.results.detail_open
+                    && !horizontal
+                    && results_layout
+                        .detail
+                        .is_some_and(|area| area.contains(point));
+                if over_detail {
+                    // A bare vertical wheel over the detail body scrolls it by
+                    // display rows: the read-only preview moves its own scroll,
+                    // and a focused cell editor scrolls the embedded editor's
+                    // viewport (never the list's selection / scrollbar).
+                    use crate::features::sql_workspace::sql_tab::results::detail::msg::{
+                        DetailMessage, DetailMsg,
+                    };
+                    let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                        SqlTabMessage::Results {
+                            tab_id: tab_idx,
+                            msg: ResultsMsg::Message(ResultsMessage::Detail(DetailMsg::Message(
+                                DetailMessage::Scroll { delta: dir * 3 },
+                            ))),
+                        },
+                    ))));
+                    let result = process_message_round(effect_runner, action_rx, msg, state);
+                    *dirty |= result.dirty;
+                } else {
+                    // Shift+wheel scrolls the grid sideways;
+                    // a bare wheel moves the cell selection.
+                    let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                        SqlTabMessage::Results {
+                            tab_id: tab_idx,
+                            msg: ResultsMsg::Message(if horizontal {
+                                ResultsMessage::ScrollHScroll {
+                                    delta: dir * WHEEL_H_STEP,
+                                }
+                            } else {
+                                ResultsMessage::MoveSelection { dr: dir, dc: 0 }
+                            }),
+                        },
+                    ))));
+                    let result = process_message_round(effect_runner, action_rx, msg, state);
+                    *dirty |= result.dirty;
+                }
             }
         }
     }
