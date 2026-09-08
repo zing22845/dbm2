@@ -29,6 +29,35 @@ fn detail_key_would_edit(
         || probe.editor.mode == edtui::EditorMode::Insert
 }
 
+/// Whether a *focused, unsaved* detail draft must block `msg`: the message is a
+/// whole-list action that re-snapshots / exits / commits / rolls back the edit
+/// session, runs or replaces the query, pages or resets the selection — i.e.
+/// anything that could drop or invalidate the in-progress draft.
+///
+/// Keep this list in sync with any new list-level action that mutates rows or
+/// replaces the result; view-only or detail-local messages must NOT be listed
+/// here (they keep working while the draft is dirty).
+fn detail_draft_blocks_list_action(msg: &ResultsMessage) -> bool {
+    matches!(
+        msg,
+        ResultsMessage::EnterEdit
+            | ResultsMessage::ExitEdit
+            | ResultsMessage::Rollback
+            | ResultsMessage::AddRow
+            | ResultsMessage::DupRow
+            | ResultsMessage::DelRow
+            | ResultsMessage::DelChord
+            | ResultsMessage::Commit
+            | ResultsMessage::RunQuery { .. }
+            | ResultsMessage::SetResult { .. }
+            | ResultsMessage::ClearResult
+            | ResultsMessage::ResetSelection
+            | ResultsMessage::PageNav { .. }
+            | ResultsMessage::PageChord { .. }
+            | ResultsMessage::SetRowLimit { .. }
+    )
+}
+
 pub fn update(
     msg: ResultsMessage,
     mut state: ResultsState,
@@ -43,6 +72,17 @@ pub fn update(
         && !matches!(&msg, ResultsMessage::SyncViewport { .. })
     {
         state.list.del_chord_at = None;
+    }
+
+    // One model-level dirty gate for the focused detail draft: list-level
+    // actions that could drop or invalidate the draft are refused here, no
+    // matter which channel delivered them (keyboard, a mouse click on a new
+    // toolbar/component, or a future input source). The input parser's
+    // "outside the detail pane" click guard is only a UX layer; this is the
+    // enforcement point, so new UI around the list cannot bypass the gate.
+    if state.detail.focused && state.detail.dirty && detail_draft_blocks_list_action(&msg) {
+        state.detail.leave_warning = true;
+        return (state, intents, effects, true);
     }
 
     // Resolve the actual sub-feature message and target.
@@ -841,14 +881,59 @@ mod tests {
 
     #[test]
     fn exit_edit_clears_detail_editor_focus() {
+        // A clean detail (no draft changes) exits the session normally.
         let s = focus_and_type(editing_state(), "9");
-        assert!(s.detail.focused);
-        let (s3, _i, _e, dirty) = update(ResultsMessage::ExitEdit, s);
+        // ...but first prove a *dirty* draft blocks the session exit: the whole
+        // list-level ExitEdit is refused at the model layer (leave warning).
+        assert!(s.detail.focused && s.detail.dirty);
+        let (blocked, _i, _e, dirty) = update(ResultsMessage::ExitEdit, s);
+        assert!(dirty, "the blocked exit still repaints the warning");
+        assert!(blocked.list.edit.editing, "dirty draft must block ExitEdit");
+        assert!(blocked.detail.focused);
+        assert!(blocked.detail.leave_warning);
+
+        // Discard the draft, then ExitEdit clears the session as before.
+        let (clean, _i, _e, _d) = update(ResultsMessage::DiscardDetailCell, blocked);
+        assert!(!clean.detail.dirty);
+        let (s3, _i, _e, dirty) = update(ResultsMessage::ExitEdit, clean);
         assert!(dirty);
         assert!(!s3.list.edit.editing);
         assert!(!s3.detail.focused);
         assert!(s3.detail.editor.is_none());
         assert!(!s3.detail.dirty);
+    }
+
+    #[test]
+    fn dirty_focused_draft_blocks_whole_list_actions() {
+        // Rollback / RunQuery / ClearResult / ResetSelection while the focused
+        // detail has an unsaved draft must be refused centrally — the same gate
+        // the input layer drives for clicks, enforced here for any source.
+        let dirty = focus_and_type(editing_state(), "9");
+        for msg in [
+            ResultsMessage::Rollback,
+            ResultsMessage::RunQuery {
+                instance: "i".into(),
+                connection: "c".into(),
+                database: None,
+                schema: "public".into(),
+                sql: "select 1".into(),
+                paginated: false,
+                page: 1,
+                row_limit: 100,
+            },
+            ResultsMessage::ClearResult,
+            ResultsMessage::ResetSelection,
+        ] {
+            let (s, _i, _e, dirty_flag) = update(msg, dirty.clone());
+            assert!(dirty_flag, "the blocked action must repaint");
+            assert!(
+                s.detail.focused && s.detail.dirty,
+                "the draft must survive a blocked whole-list action"
+            );
+            assert!(s.detail.leave_warning);
+            // Nothing else was cleared away.
+            assert!(s.list.edit.editing);
+        }
     }
 
     #[test]
