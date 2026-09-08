@@ -382,6 +382,37 @@ pub(crate) fn handle_down(
     let pane_actions_allowed =
         matches!(focus_before, Pane::Discover(_)) || target_pane.is_none_or(|p| p == focus_before);
     if !pane_actions_allowed {
+        // A first click from another top-level pane into the SQL workspace aims
+        // the focus at the clicked sub-pane too (editor / history / results),
+        // mirroring the Explorer / InstanceWorkspace `FocusChanged`s which
+        // already carry the child pane. Otherwise the workspace would restore
+        // its previously active sub-pane (e.g. History) and the clicked pane
+        // would need a second click. Content actions still wait for the pane to
+        // be focused (see `press_sql`'s own gate).
+        if target_pane == Some(Pane::SQLWorkspace)
+            && let Some(f) = sql_tab_area_for_hit(size, state)
+                .and_then(|area| {
+                    crate::features::sql_workspace::sql_tab::input::sql_workspace_click(
+                        &state.sql.sql_tab,
+                        area,
+                        mouse.column,
+                        mouse.row,
+                        is_double_click,
+                    )
+                })
+                .and_then(crate::features::sql_workspace::sql_tab::input::sql_click_action_focus)
+            && !state.sql.sql_tab.active_tab().is_some_and(|t| t.focus == f)
+        {
+            let msg = AppMsg::Sql(crate::features::sql_workspace::msg::SqlMsg::Message(
+                crate::features::sql_workspace::msg::SqlMessage::SqlTab(
+                    crate::features::sql_workspace::sql_tab::msg::SqlTabMsg::Message(
+                        crate::features::sql_workspace::sql_tab::msg::SqlTabMessage::Focus(f),
+                    ),
+                ),
+            ));
+            let result = process_message_round(effect_runner, action_rx, msg, state);
+            *dirty |= result.dirty;
+        }
         if splitter_drag.is_none()
             && let Some(target) = resolve_splitter_drag(state, size, point.x, point.y)
         {
