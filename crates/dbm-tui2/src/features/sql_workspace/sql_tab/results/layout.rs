@@ -26,6 +26,7 @@ pub struct ResultsLayout {
 /// split over the whole width (content band + full-width pagination toolbar +
 /// full-width footer), then a horizontal split of the content band into the
 /// list | splitter | detail. See [`ResultsLayout`].
+#[allow(clippy::too_many_arguments)]
 pub fn compute_results_layout(
     inner: Rect,
     detail_open: bool,
@@ -34,6 +35,7 @@ pub fn compute_results_layout(
     search_active: bool,
     sql_status: &str,
     list_leave_blocked: bool,
+    next_modified: bool,
 ) -> ResultsLayout {
     // A blocked leave (dirty edit session) appends its warning under the normal
     // footer instead of replacing it, so the layout reserves the wrapped
@@ -49,6 +51,7 @@ pub fn compute_results_layout(
         search_active,
         sql_status,
         extra_footer_rows,
+        next_modified,
     );
     let (list, splitter, detail) =
         splitter_view::split_inner(content, detail_open, detail_pane_width);

@@ -167,18 +167,23 @@ pub fn sql_pane_footer_text(
 ///
 /// The detail pane's own footer already advertises "Back: ESC" and the global
 /// footer exposes the ["/"] pane-width hint, so neither the close-ESC nor the
-/// detail-width splitter is repeated here.
-pub fn results_pane_footer_text(search_active: bool, status: &str) -> String {
+/// detail-width splitter is repeated here. While an edit session holds pending
+/// changes (and `m` is live) a `Next Modified: m` hint is added.
+pub fn results_pane_footer_text(search_active: bool, status: &str, next_modified: bool) -> String {
     if search_active {
         return pane_search_active_footer(&[]);
     }
-    let base = keys(&[
+    let mut base = keys(&[
         ("Inspect", lit("ENTER")),
         ("Col width", lit(",/.")),
         ("Copy Col Name", hint_ctrl("n")),
         ("Flip", lit("f/b")),
         ("Top/Bottom", lit("g/G")),
     ]);
+    if next_modified {
+        let extra = keys(&[("Next Modified", lit("m"))]);
+        base = join(&[&base, &extra]);
+    }
     if status.is_empty() {
         base
     } else {

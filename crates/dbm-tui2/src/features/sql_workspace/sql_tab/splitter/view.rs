@@ -148,6 +148,7 @@ pub fn sql_tab_splitter_at(
             tab.results.list.search.text_input_active(),
             &tab.results.list.executed_sql_display(),
             tab.results.list_leave_blocked(),
+            tab.results.show_next_modified_hint(),
         ) && hit(r, x, y)
         {
             splitter = Some(SqlSplitter::ResultsDetail);

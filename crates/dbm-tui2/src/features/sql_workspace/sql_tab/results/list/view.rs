@@ -91,8 +91,13 @@ pub fn results_vertical_layout(
     search_active: bool,
     sql_status: &str,
     extra_footer_rows: u16,
+    next_modified: bool,
 ) -> (Rect, Option<Rect>, Rect) {
-    let hint = crate::common::view::hints::results_pane_footer_text(search_active, sql_status);
+    let hint = crate::common::view::hints::results_pane_footer_text(
+        search_active,
+        sql_status,
+        next_modified,
+    );
     let footer_h = footer_height(&hint, inner.width)
         .saturating_add(extra_footer_rows)
         .min(inner.height.saturating_sub(4));

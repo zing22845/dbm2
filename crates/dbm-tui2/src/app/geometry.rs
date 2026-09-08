@@ -318,6 +318,7 @@ pub(crate) fn results_picker_anchor(
             tab.results.list.search.text_input_active(),
             &tab.results.list.executed_sql_display(),
             tab.results.list_leave_blocked(),
+            tab.results.show_next_modified_hint(),
         );
     let list = &tab.results.list;
     let anchor = results_layout

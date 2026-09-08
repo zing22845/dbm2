@@ -196,15 +196,27 @@ mod tests {
     fn results_pane_detail_open_esc_label_changes() {
         // The detail pane's own footer advertises "Back: ESC"; the list footer
         // intentionally drops the duplicated close / deselect / toolbar hints.
-        let open = results_pane_footer_text(false, "");
+        let open = results_pane_footer_text(false, "", false);
         assert!(!open.contains("Close detail: ESC"));
         assert!(!open.contains("Deselect: ESC"));
         assert!(!open.contains("Toolbar: click"));
-        let closed = results_pane_footer_text(false, "");
+        let closed = results_pane_footer_text(false, "", false);
         assert!(!closed.contains("Deselect: ESC"));
         assert!(closed.contains("Col width: ,/."));
-        let open_status = results_pane_footer_text(false, "updated");
+        let open_status = results_pane_footer_text(false, "updated", false);
         assert!(open_status.contains("\nupdated"));
+    }
+
+    #[test]
+    fn results_pane_footer_advertises_next_modified_only_when_live() {
+        let plain = results_pane_footer_text(false, "", false);
+        assert!(!plain.contains("Next Modified: m"));
+        let editing = results_pane_footer_text(false, "", true);
+        assert!(editing.contains("Next Modified: m"));
+        // The status line still follows the hint line.
+        let with_status = results_pane_footer_text(false, "updated", true);
+        assert!(with_status.contains("Next Modified: m"));
+        assert!(with_status.contains("\nupdated"));
     }
 
     #[test]

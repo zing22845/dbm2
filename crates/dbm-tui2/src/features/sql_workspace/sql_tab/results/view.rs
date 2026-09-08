@@ -100,6 +100,7 @@ pub fn render(
         state.list.search.text_input_active(),
         &sql_status,
         state.list_leave_blocked(),
+        state.show_next_modified_hint(),
     );
 
     list_view::render(
@@ -177,7 +178,11 @@ pub fn render(
     // on the table, the interception reason is appended BELOW it (the layout
     // reserved those extra rows) in the warning colour — never replacing the
     // hint.
-    let hint = results_pane_footer_text(state.list.search.text_input_active(), &sql_status);
+    let hint = results_pane_footer_text(
+        state.list.search.text_input_active(),
+        &sql_status,
+        state.show_next_modified_hint(),
+    );
     let hint_h = footer_height(&hint, layout.footer.width).min(layout.footer.height);
     draw_pane_footer(
         frame,

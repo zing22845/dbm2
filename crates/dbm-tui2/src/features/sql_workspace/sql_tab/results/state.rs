@@ -80,6 +80,13 @@ impl ResultsState {
     pub fn list_leave_blocked(&self) -> bool {
         self.list.leave_warning && self.list.edit.editing && self.list.edit.is_dirty()
     }
+
+    /// Whether the list footer should advertise the `m` next-change key: an
+    /// edit session holds pending changes AND the table (not the focused
+    /// detail editor) owns the results focus — exactly when `m` is live.
+    pub fn show_next_modified_hint(&self) -> bool {
+        self.list.edit.editing && self.list.edit.is_dirty() && !self.detail.focused
+    }
 }
 
 #[cfg(test)]
