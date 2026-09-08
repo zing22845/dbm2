@@ -234,6 +234,30 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_l_on_results_with_open_detail_focuses_the_detail_editor() {
+        // Ctrl+nav routes list → detail as a normal workspace sub-pane move.
+        use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+        let mut state = app_state_with_tab();
+        state.focus = Pane::SQLWorkspace;
+        state.sql.sql_tab.tabs[0].focus = SqlFocus::Results;
+        state.sql.sql_tab.tabs[0].results.detail_open = true;
+        let msg = key_to_msg(key(KeyCode::Char('l'), KeyModifiers::CONTROL), &state)
+            .expect("ctrl+l with the detail open must move into the detail editor");
+        assert!(
+            matches!(
+                msg,
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        msg: ResultsMsg::Message(ResultsMessage::FocusDetail),
+                        ..
+                    }
+                ))))
+            ),
+            "expected a results FocusDetail move, got {msg:?}"
+        );
+    }
+
+    #[test]
     fn copy_chord_without_selection_is_not_claimed() {
         // No selection → the global gate must not swallow the chord; it falls
         // through to the focused pane's own key map.

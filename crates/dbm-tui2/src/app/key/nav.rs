@@ -11,6 +11,7 @@ use crate::app_shell::pane::Pane;
 use crate::features::explorer::state::ExplorerPane;
 use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
 use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
 use crate::features::sql_workspace::sql_tab::state::SqlFocus;
 use crate::features::sql_workspace::state::SqlState;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -172,6 +173,12 @@ fn focus_explorer(sub: crate::app_shell::nav::ExplorerPane) -> AppMsg {
 /// - history → left: editor; history → down: results;
 /// - results → up: the previous editor/history pane (`upper_pane`).
 ///
+/// The results detail cell editor is treated as the Results list's right-hand
+/// neighbour (mirroring the original dbm's zone nav): while the detail pane is
+/// open, results → right moves focus into the detail editor, and the focused
+/// editor → left returns to the list — the same chords already used to switch
+/// between every other pane, on top of the Enter / Esc model.
+///
 /// Returns `None` when the move would leave the workspace (e.g. editor → left,
 /// which goes to the explorer; results/history → up/left boundaries).
 pub(super) fn switch_subpane(
@@ -181,17 +188,33 @@ pub(super) fn switch_subpane(
     use crate::app_shell::nav::PaneDir;
     use crate::features::sql_workspace::sql_tab::state::SqlFocus;
 
-    let tab = sql
-        .sql_tab
-        .active_tab
-        .and_then(|i| sql.sql_tab.tabs.get(i))?;
+    let tab_id = sql.sql_tab.active_tab?;
+    let tab = sql.sql_tab.tabs.get(tab_id)?;
+
+    if tab.focus == SqlFocus::Results {
+        match (dir, tab.results.detail_open, tab.results.detail.focused) {
+            // List → detail (the detail pane sits to the right of the list).
+            (PaneDir::Right, true, false) => {
+                return Some(results_detail_msg(tab_id, ResultsMessage::FocusDetail));
+            }
+            // Detail → list. An unsaved draft blocks the leave (the results
+            // update shows the save/discard footer instead).
+            (PaneDir::Left, _, true) => {
+                return Some(results_detail_msg(tab_id, ResultsMessage::UnfocusDetail));
+            }
+            _ => {}
+        }
+    }
+
     let focus = match (tab.focus, dir) {
         (SqlFocus::Editor, PaneDir::Right) => SqlFocus::History,
         (SqlFocus::Editor, PaneDir::Down) => SqlFocus::Results,
         (SqlFocus::History, PaneDir::Left) => SqlFocus::Editor,
         (SqlFocus::History, PaneDir::Down) => SqlFocus::Results,
         // Up from results returns to the pane that was active before entering
-        // results (editor or history), matching the original dbm.
+        // results (editor or history), matching the original dbm. Leaving while
+        // the detail editor is focused is handled by the `SqlTabMessage::Focus`
+        // gate (clean drafts unfocus, dirty ones block the move).
         (SqlFocus::Results, PaneDir::Up) => {
             if tab.upper_pane == SqlFocus::History {
                 SqlFocus::History
@@ -203,6 +226,17 @@ pub(super) fn switch_subpane(
     };
     Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
         SqlTabMsg::Message(SqlTabMessage::Focus(focus)),
+    ))))
+}
+
+/// Build an app message that routes a results-level message (detail focus
+/// moves) to the active tab's results feature.
+fn results_detail_msg(tab_id: usize, msg: ResultsMessage) -> AppMsg {
+    AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+        SqlTabMessage::Results {
+            tab_id,
+            msg: ResultsMsg::Message(msg),
+        },
     ))))
 }
 
@@ -331,6 +365,61 @@ mod tests {
         let msg = switch_subpane(crate::app_shell::nav::PaneDir::Up, &sql)
             .expect("results up should return to editor");
         assert_eq!(extract_tab_msg(msg), SqlTabMessage::Focus(SqlFocus::Editor));
+    }
+
+    /// Pull the results-level message out of an `AppMsg`, if it is one.
+    fn extract_results_msg(msg: AppMsg) -> (usize, ResultsMessage) {
+        match msg {
+            AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Results {
+                    tab_id,
+                    msg: ResultsMsg::Message(m),
+                },
+            )))) => (tab_id, m),
+            other => panic!("expected a results message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ctrl_l_from_results_focuses_the_open_detail_editor() {
+        // With the detail pane open, Results is no longer the workspace's right
+        // edge: Ctrl+l (Right) moves the list focus into the detail editor.
+        let mut sql = state_with_tabs(1);
+        sql.sql_tab.tabs[0].focus = SqlFocus::Results;
+        sql.sql_tab.tabs[0].results.detail_open = true;
+        let (tab_id, msg) = extract_results_msg(
+            switch_subpane(crate::app_shell::nav::PaneDir::Right, &sql)
+                .expect("results right with the detail open must focus the editor"),
+        );
+        assert_eq!(tab_id, 0);
+        assert!(matches!(msg, ResultsMessage::FocusDetail));
+    }
+
+    #[test]
+    fn ctrl_h_from_focused_detail_returns_to_the_list() {
+        // Ctrl+h (Left) from the focused detail cell editor returns to the
+        // results list (the detail stays open as a preview).
+        let mut sql = state_with_tabs(1);
+        sql.sql_tab.tabs[0].focus = SqlFocus::Results;
+        sql.sql_tab.tabs[0].results.detail_open = true;
+        sql.sql_tab.tabs[0].results.detail.focused = true;
+        let (_tab_id, msg) = extract_results_msg(
+            switch_subpane(crate::app_shell::nav::PaneDir::Left, &sql)
+                .expect("detail left must return to the list"),
+        );
+        assert!(matches!(msg, ResultsMessage::UnfocusDetail));
+    }
+
+    #[test]
+    fn ctrl_l_from_results_without_detail_open_does_not_move() {
+        // No open detail → Results has no right neighbour in the workspace, so
+        // the move falls through (shell-level switching gets a shot).
+        let mut sql = state_with_tabs(1);
+        sql.sql_tab.tabs[0].focus = SqlFocus::Results;
+        assert!(
+            switch_subpane(crate::app_shell::nav::PaneDir::Right, &sql).is_none(),
+            "results right without an open detail must not move within the workspace"
+        );
     }
 
     #[test]
