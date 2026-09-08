@@ -230,6 +230,167 @@ fn detail_v_scrollbar_rect(body: Rect) -> Option<Rect> {
     })
 }
 
+/// Interior layout of the detail pane (border-inset inner area, the optional
+/// Save/Discard action row and the reserved footer rows). Computed once and
+/// shared by the renderer and the pointer layer so the scrollbar hit region
+/// always matches what was drawn.
+#[derive(Debug, Clone, Copy)]
+pub struct DetailPaneLayout {
+    pub inner: Rect,
+    pub body_area: Rect,
+    pub footer_area: Rect,
+    pub action_area: Option<Rect>,
+    /// Reserved footer rows (normal hint + optional leave-warning rows).
+    pub footer_h: u16,
+    /// Rows occupied by the normal footer hint alone.
+    pub hint_h: u16,
+    /// Rows reserved for the Save/Discard chip row (>= 1, even when hidden).
+    pub action_h: u16,
+}
+
+/// Resolve the detail pane's body/action/footer geometry — the single source
+/// shared by [`render`] and [`detail_v_scrollbar_hit`]. Mirrors the layout the
+/// pane has always drawn: footer (with optional leave-warning rows) at the
+/// bottom, the Save/Discard chips on top while editing a dirty focused draft,
+/// and the scrollable body between them.
+pub fn detail_pane_layout(area: Rect, detail: &DetailState, edit_active: bool) -> DetailPaneLayout {
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    let has_action_btns = edit_active && detail.dirty && detail.focused;
+    let (hint, leave_warn) = detail_footer(detail);
+    let hint_h = footer_height(hint, inner.width);
+    let warn_h = leave_warn.map_or(0, |w| footer_height(w, inner.width));
+    let footer_h = (hint_h + warn_h).min(inner.height.saturating_sub(2));
+    let action_h = if has_action_btns {
+        detail_chip_rows(inner.width as usize)
+    } else {
+        1
+    };
+    let (body_area, footer_area, action_area) = if has_action_btns {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(action_h),
+                Constraint::Min(0),
+                Constraint::Length(footer_h),
+            ])
+            .split(inner);
+        (chunks[1], chunks[2], Some(chunks[0]))
+    } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(footer_h)])
+            .split(inner);
+        (chunks[0], chunks[1], None)
+    };
+    DetailPaneLayout {
+        inner,
+        body_area,
+        footer_area,
+        action_area,
+        footer_h,
+        hint_h,
+        action_h,
+    }
+}
+
+/// Geometry of the detail body's vertical scrollbar when its content (the
+/// wrapped read-only preview or the focused cell editor) overflows the body.
+/// `None` means the content fits and no scrollbar is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DetailScrollbar {
+    /// The 1-column track rect along the body's right edge.
+    pub track: Rect,
+    /// Width the body content is drawn at (body width minus the track column).
+    pub content_width: u16,
+    /// Maximum scroll offset (rows over the viewport).
+    pub max_scroll: usize,
+    /// Rows visible in the body viewport.
+    pub viewport_rows: usize,
+}
+
+/// Whether the body content overflows `body_area` and, if so, its scrollbar
+/// geometry. Two-pass, like the SQL editor: probe the wrap row count at the
+/// full width, then recount at the narrowed width so the bar's max matches the
+/// renderer exactly.
+pub fn detail_scrollbar(
+    body_area: Rect,
+    detail: &DetailState,
+    body: &str,
+) -> Option<DetailScrollbar> {
+    if body_area.width == 0 || body_area.height == 0 {
+        return None;
+    }
+    let viewport_rows = body_area.height.max(1) as usize;
+    let track = detail_v_scrollbar_rect(body_area)?;
+    let overflow = if detail.focused
+        && let Some(host) = detail.editor.as_ref()
+    {
+        let gutter_w = crate::common::editor::editor_line_number_gutter_width(&host.editor);
+        let probe_wrap = body_area.width.saturating_sub(gutter_w).max(1);
+        let rows = crate::common::editor::editor_display_row_count(&host.editor, probe_wrap);
+        rows > viewport_rows
+    } else {
+        detail_display_line_count(body, body_area.width) > viewport_rows
+    };
+    if !overflow {
+        return None;
+    }
+    let content_width = body_area.width.saturating_sub(1).max(1);
+    let row_count = if detail.focused
+        && let Some(host) = detail.editor.as_ref()
+    {
+        let gutter_w = crate::common::editor::editor_line_number_gutter_width(&host.editor);
+        let wrap_width = content_width.saturating_sub(gutter_w).max(1);
+        crate::common::editor::editor_display_row_count(&host.editor, wrap_width)
+    } else {
+        detail_display_line_count(body, content_width)
+    };
+    let max_scroll = row_count.saturating_sub(viewport_rows);
+    if max_scroll == 0 {
+        return None;
+    }
+    Some(DetailScrollbar {
+        track,
+        content_width,
+        max_scroll,
+        viewport_rows,
+    })
+}
+
+/// Hit-test `(x, y)` against the detail body's vertical scrollbar. Returns the
+/// geometry the drag plumbing needs (track start/length + max scroll) when the
+/// pointer is on a visible track; `None` when there is no scrollbar or the
+/// pointer is elsewhere.
+pub fn detail_v_scrollbar_hit(
+    area: Rect,
+    detail: &DetailState,
+    body: &str,
+    edit_active: bool,
+    x: u16,
+    y: u16,
+) -> Option<DetailScrollbarHit> {
+    let pane = detail_pane_layout(area, detail, edit_active);
+    let sb = detail_scrollbar(pane.body_area, detail, body)?;
+    if !crate::common::layout::pane_scrollbar::point_in_bar(sb.track, x, y) {
+        return None;
+    }
+    Some(DetailScrollbarHit {
+        track_start: sb.track.y,
+        track_len: sb.track.height as usize,
+        max_scroll: sb.max_scroll,
+        viewport_height: sb.viewport_rows,
+    })
+}
+
+/// A vertical-scrollbar press/hit result handed to the mouse layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DetailScrollbarHit {
+    pub track_start: u16,
+    pub track_len: usize,
+    pub max_scroll: usize,
+    pub viewport_height: usize,
+}
+
 /// Render the detail sub-pane with its own border, optional action buttons,
 /// body area, and a detail footer.
 ///
@@ -246,6 +407,7 @@ pub fn render(
     title: String,
     edit_active: bool,
     focused: bool,
+    scroll_dragging: bool,
 ) -> Option<crate::common::editor::EditorMouseHitArea> {
     if area.width == 0 || area.height == 0 {
         return None;
@@ -271,46 +433,25 @@ pub fn render(
         .title(Line::from(Span::styled(title_text, title_style)))
         .borders(Borders::ALL)
         .border_style(border_style);
-    let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let has_action_btns = edit_active && detail.dirty && detail.focused;
     let (hint, leave_warn) = detail_footer(detail);
-    // The footer keeps the normal hint and, when a leave was blocked by an
-    // unsaved draft, appends the interception reason below it (extra rows are
-    // reserved so the body shrinks instead of the two overlapping).
-    let hint_h = footer_height(hint, inner.width);
-    let warn_h = leave_warn.map_or(0, |w| footer_height(w, inner.width));
-    let footer_h = (hint_h + warn_h).min(inner.height.saturating_sub(2));
 
     // Reserve a *dynamic* number of rows for the Save/Discard chips: they wrap
     // to as many rows as the detail width needs, so they are never clipped.
     // The chips reuse the list toolbar's available-button chrome (the header
     // Discover look) so an enabled action reads the same everywhere.
     let chip_style = p.available_button_style();
-    let action_h = if has_action_btns {
-        detail_chip_rows(inner.width as usize)
-    } else {
-        1
-    };
 
-    let (body_area, footer_area, action_area) = if has_action_btns {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(action_h),
-                Constraint::Min(0),
-                Constraint::Length(footer_h),
-            ])
-            .split(inner);
-        (chunks[1], chunks[2], Some(chunks[0]))
-    } else {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(footer_h)])
-            .split(inner);
-        (chunks[0], chunks[1], None)
-    };
+    // Body / footer / action-row geometry comes from the single shared layout
+    // (also used by the pointer layer's scrollbar hit-testing) so the two can
+    // never drift apart.
+    let pane = detail_pane_layout(area, detail, edit_active);
+    let body_area = pane.body_area;
+    let footer_area = pane.footer_area;
+    let action_area = pane.action_area;
+    let hint_h = pane.hint_h;
+    let action_h = pane.action_h;
 
     // Detail action chips (only while editing, focused and dirty), placed and
     // drawn with the list toolbar's button chrome.
@@ -342,87 +483,63 @@ pub fn render(
     // hands back the rendered hit region so pointer clicks map onto the draft.
     //
     // Both modes can overflow the pane height, so the body owns a vertical
-    // scrollbar of its own: a right-hand track column is reserved (and drawn)
-    // only when the content is taller than the body. Like the SQL editor, the
-    // bar decision is two-pass — first guess the scrollbar to learn the real
-    // wrap width, then recount rows at the narrowed width so the bar's max
-    // matches what the renderer actually produced.
-    let viewport_rows = body_area.height.max(1) as usize;
-    let bar = detail_v_scrollbar_rect(body_area);
+    // scrollbar of its own. Its geometry comes from the same shared
+    // [`detail_scrollbar`] used by the pointer layer's hit-testing: a
+    // right-hand track column is reserved (and drawn) only when the content is
+    // taller than the body, and the bar's max matches the actual wrapped row
+    // count at the narrowed width.
+    let sb = detail_scrollbar(body_area, detail, body);
+    let content_width = sb.map_or(body_area.width, |s| s.content_width);
+    let content = Rect {
+        x: body_area.x,
+        y: body_area.y,
+        width: content_width,
+        height: body_area.height,
+    };
     let mouse_hit = if detail.focused
         && let Some(host) = detail.editor.as_ref()
     {
-        let gutter_w = crate::common::editor::editor_line_number_gutter_width(&host.editor);
-        // Pass 1: would the wrapped text overflow at the full width?
-        let probe_wrap = body_area.width.saturating_sub(gutter_w).max(1);
-        let probe_rows = crate::common::editor::editor_display_row_count(&host.editor, probe_wrap);
-        let needs_v = probe_rows > viewport_rows;
-        let content_width = body_area.width.saturating_sub(u16::from(needs_v)).max(1);
-        let wrap_width = content_width.saturating_sub(gutter_w).max(1);
-        let row_count = crate::common::editor::editor_display_row_count(&host.editor, wrap_width);
-        let content = Rect {
-            x: body_area.x,
-            y: body_area.y,
-            width: content_width,
-            height: body_area.height,
-        };
-
         let mut editor = host.editor.clone();
         let hit =
             crate::common::editor::render_detail_editor(&mut editor, content, frame.buffer_mut());
         // Draw the scrollbar after the editor: it reports the viewport edtui
         // actually rendered with (the value the run loop also syncs back).
-        if needs_v
-            && row_count > viewport_rows
-            && let Some(bar) = bar
-        {
-            let max_scroll = row_count.saturating_sub(viewport_rows);
-            let scroll = crate::common::editor::editor_v_scroll_display(&editor, wrap_width);
+        if let Some(sb) = sb {
+            let scroll = crate::common::editor::editor_v_scroll_display(&editor, content_width)
+                .min(sb.max_scroll);
             draw_vertical_pane_scrollbar(
                 frame,
-                bar,
-                scroll.min(max_scroll),
-                viewport_rows,
-                max_scroll,
+                sb.track,
+                scroll,
+                sb.viewport_rows,
+                sb.max_scroll,
                 p,
-                false,
+                scroll_dragging,
             );
         }
         hit
     } else {
-        // Pass 1: does the wrapped preview overflow at the full body width?
-        let probe_total = detail_display_line_count(body, body_area.width);
-        let needs_v = probe_total > viewport_rows;
-        let content_width = body_area.width.saturating_sub(u16::from(needs_v)).max(1);
         let display_lines = build_detail_lines(body, content_width);
-        let lines_total = display_lines.len();
+        let lines_total = display_lines.len().max(1);
+        let viewport_rows = sb.map_or(body_area.height.max(1) as usize, |s| s.viewport_rows);
         let mut detail_state = detail.clone();
         detail_state.clamp_scroll(lines_total, viewport_rows);
+        let skip = if sb.is_some() { detail_state.scroll } else { 0 };
         let visible: Vec<Line> = display_lines
             .into_iter()
-            .skip(detail_state.scroll)
+            .skip(skip)
             .take(viewport_rows.max(1))
             .collect();
-        let content = Rect {
-            x: body_area.x,
-            y: body_area.y,
-            width: content_width,
-            height: body_area.height,
-        };
         frame.render_widget(Paragraph::new(visible), content);
-        if needs_v
-            && lines_total > viewport_rows
-            && let Some(bar) = bar
-        {
-            let max_scroll = lines_total.saturating_sub(viewport_rows);
+        if let Some(sb) = sb {
             draw_vertical_pane_scrollbar(
                 frame,
-                bar,
-                detail_state.scroll.min(max_scroll),
-                viewport_rows,
-                max_scroll,
+                sb.track,
+                detail_state.scroll.min(sb.max_scroll),
+                sb.viewport_rows,
+                sb.max_scroll,
                 p,
-                false,
+                scroll_dragging,
             );
         }
         None
@@ -572,6 +689,7 @@ mod tests {
                 " [id] row 1 ".to_string(),
                 false,
                 true,
+                false,
             );
         })
         .unwrap();
@@ -598,6 +716,7 @@ mod tests {
                 " [id] row 1 ".to_string(),
                 false,
                 true,
+                false,
             );
         })
         .unwrap();
@@ -608,6 +727,33 @@ mod tests {
                     .is_some_and(|c| c.symbol() == "┊" || c.symbol() == "█")
             }),
             "focused detail editor overflow must draw its vertical scrollbar"
+        );
+    }
+
+    #[test]
+    fn detail_v_scrollbar_hit_tracks_the_drawn_bar_only_on_overflow() {
+        let area = Rect::new(0, 0, 40, 16);
+        let body: String = (0..40)
+            .map(|i| format!("row {i:02} of a tall cell value"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let bar_col = area.right().saturating_sub(2);
+        let mid_y = area.y.saturating_add(6);
+
+        // Overflowing preview: the right-edge column is a live track.
+        let detail = DetailState::default();
+        let hit = detail_v_scrollbar_hit(area, &detail, &body, false, bar_col, mid_y)
+            .expect("the overflowing preview's scrollbar must be hit");
+        assert_eq!(hit.track_start, area.y.saturating_add(1));
+        assert!(hit.max_scroll > 0);
+        assert_eq!(hit.viewport_height, hit.track_len);
+        // A point off the track is not a hit.
+        assert!(detail_v_scrollbar_hit(area, &detail, &body, false, bar_col - 4, mid_y).is_none());
+
+        // Content that fits has no scrollbar at all.
+        let short = DetailState::default();
+        assert!(
+            detail_v_scrollbar_hit(area, &short, "one short cell", false, bar_col, mid_y).is_none()
         );
     }
 }

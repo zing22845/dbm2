@@ -6,6 +6,11 @@ use crossterm::event::KeyEvent;
 pub enum DetailMessage {
     /// Scroll the detail body by `delta` display rows.
     Scroll { delta: i32 },
+    /// Set the detail body's scroll position absolutely (0 = top) — issued by
+    /// the detail scrollbar's click-to-jump and drag, mirroring the list's
+    /// `SetVScroll`. Moves the focused editor's viewport or the read-only
+    /// preview's scroll offset depending on which body is showing.
+    SetVScroll { position: usize },
     /// Set the detail draft text (edited cell value).
     SetDraft { text: String },
     /// Load a cell value as the draft baseline.

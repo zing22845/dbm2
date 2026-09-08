@@ -794,6 +794,22 @@ fn press_sql(
                 max_scroll,
             });
         }
+        // If the click was on the results detail v_scrollbar, start dragging.
+        if let crate::features::sql_workspace::sql_tab::input::SqlClickAction::ResultsDetailVScrollbar
+        {
+            track_y,
+            y: _,
+            max_scroll,
+            viewport_height,
+        } = action
+        {
+            state.scrollbar_drag = Some(ScrollbarDrag {
+                which: ActiveScrollbar::ResultsDetailV,
+                track_start: track_y,
+                viewport_len: viewport_height,
+                max_scroll,
+            });
+        }
         // A single click on a results column header
         // splitter begins a column-width resize drag.
         if let crate::features::sql_workspace::sql_tab::input::SqlClickAction::ResultsColResize {

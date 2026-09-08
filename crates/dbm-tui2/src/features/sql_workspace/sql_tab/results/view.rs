@@ -150,6 +150,7 @@ pub fn render(
             title_text,
             edit_editing,
             focused,
+            matches!(active_scrollbar, Some(ActiveScrollbar::ResultsDetailV)),
         );
     }
 

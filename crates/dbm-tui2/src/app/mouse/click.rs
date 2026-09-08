@@ -574,6 +574,42 @@ pub(crate) fn sql_click_msgs(
                 )))),
             ]
         }
+        SqlClickAction::ResultsDetailVScrollbar {
+            track_y,
+            y,
+            max_scroll,
+            viewport_height,
+        } => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::results::detail::msg::{
+                DetailMessage, DetailMsg,
+            };
+            use crate::features::sql_workspace::sql_tab::results::msg::{
+                ResultsMessage, ResultsMsg,
+            };
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            let start = crate::common::layout::pane_scrollbar::scroll_offset_from_track(
+                y,
+                track_y,
+                viewport_height,
+                max_scroll,
+            );
+            vec![
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Focus(SqlFocus::Results),
+                )))),
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        tab_id,
+                        msg: ResultsMsg::Message(ResultsMessage::Detail(DetailMsg::Message(
+                            DetailMessage::SetVScroll { position: start },
+                        ))),
+                    },
+                )))),
+            ]
+        }
         SqlClickAction::ToggleTableCompletion => {
             let Some(tab_id) = tab_id(sql.active_tab) else {
                 return Vec::new();

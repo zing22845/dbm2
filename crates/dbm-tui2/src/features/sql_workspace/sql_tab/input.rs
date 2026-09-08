@@ -80,6 +80,13 @@ pub enum SqlClickAction {
         max_scroll: usize,
         viewport_height: usize,
     },
+    /// Click/drag on the results detail body's vertical scrollbar.
+    ResultsDetailVScrollbar {
+        track_y: u16,
+        y: u16,
+        max_scroll: usize,
+        viewport_height: usize,
+    },
     /// Click the editor header's `· TblCmp:ON/OFF` chip to toggle table-name
     /// completion (equivalent to Alt+Tab in insert mode).
     ToggleTableCompletion,
@@ -127,6 +134,7 @@ pub fn sql_click_action_focus(action: SqlClickAction) -> Option<SqlFocus> {
         | ResultsFocusDetail
         | ResultsHScrollbar { .. }
         | ResultsVScrollbar { .. }
+        | ResultsDetailVScrollbar { .. }
         | ResultsColResize { .. }
         | ResultsPagination { .. }
         | ResultsToolbar { .. }
@@ -408,6 +416,31 @@ pub fn sql_workspace_click(
             if let Some(chip) = detail_chip_hit(detail_area, true, x, y) {
                 return Some(SqlClickAction::ResultsDetailChip { action: chip });
             }
+        }
+
+        // A click on the detail body's own vertical scrollbar begins a
+        // scrollbar drag (mirroring the list). The bar only exists when the
+        // detail content overflows; the geometry comes from the same shared
+        // layout the renderer uses, so hit-testing matches what was drawn.
+        if !is_double_click
+            && tab.results.detail_open
+            && let Some(detail_area) = layout.detail
+            && let Some(hit) =
+                crate::features::sql_workspace::sql_tab::results::detail::view::detail_v_scrollbar_hit(
+                    detail_area,
+                    &tab.results.detail,
+                    &tab.results.list.selected_cell().unwrap_or_default(),
+                    tab.results.list.edit.editing,
+                    x,
+                    y,
+                )
+        {
+            return Some(SqlClickAction::ResultsDetailVScrollbar {
+                track_y: hit.track_start,
+                y,
+                max_scroll: hit.max_scroll,
+                viewport_height: hit.viewport_height,
+            });
         }
 
         // Step 3: clicking an *enabled* Results action-bar button (Refresh /

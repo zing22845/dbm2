@@ -99,6 +99,23 @@ pub fn update(
                 state.scroll != before
             }
         }
+        DetailMessage::SetVScroll { position } => {
+            if state.focused
+                && let Some(host) = state.editor.as_mut()
+            {
+                // Focused editor: the scrollbar position IS the viewport start.
+                // The per-frame render clamps out-of-range values to the real
+                // maximum and the run loop syncs that back.
+                let (x, y) = host.editor.viewport_offset();
+                host.editor.set_viewport_offset(x, position);
+                host.editor.set_scroll_locked(true);
+                position != y
+            } else {
+                let before = state.scroll;
+                state.scroll = position;
+                state.scroll != before
+            }
+        }
         DetailMessage::SetDraft { text } => {
             state.draft = text.clone();
             state.dirty = detail_draft_dirty(&text, &state.baseline);
@@ -373,6 +390,33 @@ mod tests {
         let (s5, _i, _e, dirty) = update(DetailMessage::Scroll { delta: -100 }, s4);
         assert!(!dirty);
         assert_eq!(s5.editor.as_ref().unwrap().editor.viewport_offset().1, 0);
+    }
+
+    #[test]
+    fn set_v_scroll_targets_the_visible_body_absolutely() {
+        // Focused editor: SetVScroll is the scrollbar-drag equivalent of
+        // jumping the viewport start (0 = top).
+        let lines: String = (0..12)
+            .map(|i| format!("line {i:02}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let s = focused_state(&lines);
+        let (s2, _i, _e, dirty) = update(DetailMessage::SetVScroll { position: 7 }, s);
+        assert!(dirty);
+        assert_eq!(s2.editor.as_ref().unwrap().editor.viewport_offset().1, 7);
+        let (s3, _i, _e, dirty) = update(DetailMessage::SetVScroll { position: 0 }, s2);
+        assert!(dirty);
+        assert_eq!(s3.editor.as_ref().unwrap().editor.viewport_offset().1, 0);
+        // Setting the same position again is a no-op.
+        let (_s4, _i, _e, dirty) = update(DetailMessage::SetVScroll { position: 0 }, s3);
+        assert!(!dirty);
+
+        // Read-only preview: the same message sets its own scroll offset.
+        let mut p = DetailState::default();
+        p.load_cell(&lines);
+        let (p2, _i, _e, dirty) = update(DetailMessage::SetVScroll { position: 4 }, p);
+        assert!(dirty);
+        assert_eq!(p2.scroll, 4);
     }
 
     #[test]

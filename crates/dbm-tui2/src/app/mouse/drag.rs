@@ -306,6 +306,37 @@ pub(crate) fn handle_drag(
         }
     }
 
+    // Results detail v_scrollbar drag: the position is the detail body's own
+    // scroll offset (editor viewport or read-only preview). The drag never
+    // touches the list's selection / scrollbar.
+    if let Some(drag) = state.scrollbar_drag
+        && drag.which == ActiveScrollbar::ResultsDetailV
+    {
+        let start = drag.offset_for_pointer(point.x, point.y);
+        if let Some(active_tab) = state.sql.sql_tab.active_tab {
+            use crate::features::sql_workspace::msg::{SqlMessage, SqlMsg};
+            use crate::features::sql_workspace::sql_tab::msg::{SqlTabMessage, SqlTabMsg};
+            use crate::features::sql_workspace::sql_tab::results::detail::msg::{
+                DetailMessage, DetailMsg,
+            };
+            use crate::features::sql_workspace::sql_tab::results::msg::{
+                ResultsMessage, ResultsMsg,
+            };
+            let msg = AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                SqlTabMessage::Results {
+                    tab_id: active_tab,
+                    msg: ResultsMsg::Message(ResultsMessage::Detail(DetailMsg::Message(
+                        DetailMessage::SetVScroll { position: start },
+                    ))),
+                },
+            ))));
+            let result = process_message_round(effect_runner, action_rx, msg, state);
+            *dirty |= result.dirty;
+        } else {
+            state.scrollbar_drag = None;
+        }
+    }
+
     // Results column-width resize drag: convert the mouse x to the target
     // width of the dragged column using the shared list
     // geometry.
