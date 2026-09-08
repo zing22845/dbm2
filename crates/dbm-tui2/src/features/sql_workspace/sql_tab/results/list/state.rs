@@ -18,6 +18,11 @@ use super::search::ResultsSearchMatch;
 pub struct ListState {
     /// The last query result (None when no query has run / it failed).
     pub result: Option<QueryResultData>,
+    /// Wall-clock local time the current result set landed (recorded on every
+    /// `SetResult`: the initial run, pagination page fetches, refreshes). Shown
+    /// in the Results pane title as ` · yyyy-mm-dd HH:MM:SS` to mark when the
+    /// data on screen was produced. `None` while there is no result.
+    pub result_at: Option<std::time::SystemTime>,
     /// The last query failure message.
     pub query_error: Option<String>,
     /// Selected cell (row, col) into `result`.

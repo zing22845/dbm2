@@ -1,6 +1,8 @@
-//! Pure time helpers (no IO, no external crates).
+//! Pure time helpers (no IO).
 
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use chrono::{DateTime, Local};
 
 /// Convert a day count (days since 1970-01-01) to a `(year, month, day)` civil
 /// date using the Howard Hinnant "civil_from_days" algorithm.
@@ -32,6 +34,15 @@ pub fn utc_timestamp() -> String {
     format!("[{y:04}-{mo:02}-{d:02} {h:02}:{m:02}:{s:02}]")
 }
 
+/// `at` formatted as the local wall-clock label `yyyy-mm-dd HH:MM:SS` (no
+/// brackets) — the same shape the instance rows show and what the Results pane
+/// title uses to mark when its data was produced. Timezone is the machine's
+/// local one, resolved via chrono.
+pub fn local_timestamp(at: SystemTime) -> String {
+    let dt: DateTime<Local> = at.into();
+    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -48,5 +59,22 @@ mod tests {
         assert_eq!(&ts[11..12], " ");
         assert_eq!(&ts[14..15], ":");
         assert_eq!(&ts[17..18], ":");
+    }
+
+    #[test]
+    fn local_timestamp_is_digits_and_dashes_without_brackets() {
+        let ts = local_timestamp(SystemTime::now());
+        // `yyyy-mm-dd HH:MM:SS`, 19 chars, no brackets, all numeric fields.
+        assert_eq!(ts.len(), 19, "{ts}");
+        assert!(!ts.starts_with('['));
+        assert!(!ts.ends_with(']'));
+        for i in [0..4, 5..7, 8..10, 11..13, 14..16, 17..19] {
+            assert!(ts[i].chars().all(|c| c.is_ascii_digit()), "{ts}");
+        }
+        assert_eq!(&ts[4..5], "-");
+        assert_eq!(&ts[7..8], "-");
+        assert_eq!(&ts[10..11], " ");
+        assert_eq!(&ts[13..14], ":");
+        assert_eq!(&ts[16..17], ":");
     }
 }

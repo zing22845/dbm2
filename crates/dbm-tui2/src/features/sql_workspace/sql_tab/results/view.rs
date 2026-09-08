@@ -49,8 +49,19 @@ pub fn render(
     }
     let p = theme.palette();
 
+    // The pane title marks when the data on screen was produced with the local
+    // wall-clock time, appended after ` · ` exactly like the SQL editor's
+    // ` · {db} › {schema}` suffix. Stamped when the result set landed; nothing
+    // is shown while no result is loaded.
+    let title_label = match state.list.result_at {
+        Some(at) => format!(
+            " [R] Results · {}",
+            crate::common::utils::time::local_timestamp(at)
+        ),
+        None => " [R] Results".to_string(),
+    };
     let title = pane_search_label_line(
-        " [R] Results",
+        &title_label,
         focused,
         false,
         Style::default().fg(p.muted),

@@ -63,6 +63,10 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
                 true
             };
             state.set_result(result);
+            // Mark when this data was produced: every landed result set (first
+            // run, a pagination page, a refresh) stamps the local wall-clock
+            // time shown in the pane title.
+            state.result_at = Some(std::time::SystemTime::now());
             state.query_error = None;
             state.paginated = paginated;
             if anchor_bottom && row_count > 0 {
@@ -118,6 +122,7 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
         ListMessage::ClearResult => {
             let changed = state.result.is_some();
             state.result = None;
+            state.result_at = None;
             state.col_widths.clear();
             state.query_error = None;
             state.at_last_page = true;
@@ -140,6 +145,7 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
             let changed =
                 state.result.is_some() || state.query_error.as_deref() != Some(message.as_str());
             state.result = None;
+            state.result_at = None;
             state.col_widths.clear();
             state.query_error = Some(message);
             state.at_last_page = true;
@@ -691,6 +697,45 @@ mod tests {
         );
         assert!(state.result.is_some());
         assert!(!state.selected, "a fresh result must be deselected");
+    }
+
+    #[test]
+    fn result_landing_stamps_local_time_and_clears_reset_it() {
+        // A landed result stamps the wall-clock time shown in the pane title.
+        let (state, _e, _d) = update(
+            ListMessage::SetResult {
+                result: sample_result(),
+                paginated: false,
+            },
+            ListState::default(),
+        );
+        let at = state
+            .result_at
+            .expect("a landed result must stamp its time");
+        assert_eq!(
+            crate::common::utils::time::local_timestamp(at).len(),
+            19,
+            "title label must be exactly `yyyy-mm-dd HH:MM:SS`"
+        );
+
+        // Clearing the result (or a query error) removes the timestamp again.
+        let (s, _e, _d) = update(ListMessage::ClearResult, state);
+        assert!(s.result_at.is_none(), "ClearResult must drop the timestamp");
+
+        let (state, _e, _d) = update(
+            ListMessage::SetResult {
+                result: sample_result(),
+                paginated: false,
+            },
+            ListState::default(),
+        );
+        let (s, _e, _d) = update(
+            ListMessage::QueryError {
+                message: "boom".into(),
+            },
+            state,
+        );
+        assert!(s.result_at.is_none(), "QueryError must drop the timestamp");
     }
 
     #[test]
