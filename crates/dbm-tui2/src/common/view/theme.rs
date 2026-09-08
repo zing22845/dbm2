@@ -167,14 +167,18 @@ impl Palette {
     }
 
     /// Style of an *available* (enabled / active) action button: the light
-    /// selection "island" with selection-text foreground — the same look as the
-    /// header's Discover button when it is focused. Shared by the Results
-    /// action bar and the detail Save/Discard chips so every enabled button
-    /// renders identically. Disabled buttons stay at `Style::default()`.
+    /// selection "island" with bold selection-text foreground — the same look
+    /// as the header's Discover button when it is focused and as the original
+    /// dbm's enabled toolbar buttons (`selection_theme.text`, whose foreground
+    /// is the very `SELECTION_FG` this palette's `selection_text` mirrors).
+    /// Shared by the Results action bar and the detail Save/Discard chips so
+    /// every enabled button renders identically. Disabled buttons stay at
+    /// `Style::default()`.
     pub fn available_button_style(&self) -> Style {
         Style::default()
             .fg(self.selection_text)
             .bg(self.selection_bg)
+            .add_modifier(Modifier::BOLD)
     }
 }
 

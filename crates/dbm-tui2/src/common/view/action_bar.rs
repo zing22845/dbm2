@@ -356,6 +356,12 @@ mod tests {
         let enabled = action_button_style(true, p);
         assert_eq!(enabled.bg, Some(p.selection_bg));
         assert_eq!(enabled.fg, Some(p.selection_text));
+        assert!(
+            enabled
+                .add_modifier
+                .contains(ratatui::style::Modifier::BOLD),
+            "enabled chrome must be bold like the original dbm"
+        );
         let disabled = action_button_style(false, p);
         assert_eq!(disabled.bg, None);
     }
