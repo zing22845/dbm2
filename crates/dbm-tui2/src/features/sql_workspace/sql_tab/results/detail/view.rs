@@ -257,10 +257,9 @@ pub fn render(
 
     // Detail footer. Normally the plain "Back: ESC"; while an unsaved draft has
     // blocked a leave attempt the interception reason is shown in the theme's
-    // error colour (the same semantic the connections pane uses for its
-    // dirty-leave notice).
+    // warning colour.
     if hint_warn {
-        let style = Style::default().fg(p.error);
+        let style = Style::default().fg(p.warning);
         let lines: Vec<Line> = hint
             .split('\n')
             .map(|l| Line::from(Span::styled(l.to_string(), style)))
