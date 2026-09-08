@@ -6,7 +6,7 @@
 //! `[list | splitter | detail]`; otherwise the list fills the whole inner area.
 
 use ratatui::Frame;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
@@ -175,7 +175,7 @@ pub fn render(
     let list_leave_blocked =
         state.list.leave_warning && state.list.edit.editing && state.list.edit.is_dirty();
     if list_leave_blocked {
-        let style = Style::default().fg(Color::Red);
+        let style = Style::default().fg(p.error);
         let lines: Vec<Line> = RESULTS_EDIT_LEAVE_WARNING
             .split('\n')
             .map(|l| Line::from(Span::styled(l.to_string(), style)))

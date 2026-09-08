@@ -15,7 +15,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
@@ -256,10 +256,11 @@ pub fn render(
     };
 
     // Detail footer. Normally the plain "Back: ESC"; while an unsaved draft has
-    // blocked a leave attempt the interception reason is shown in the failure
-    // colour the connections pane uses for its dirty-leave notice.
+    // blocked a leave attempt the interception reason is shown in the theme's
+    // error colour (the same semantic the connections pane uses for its
+    // dirty-leave notice).
     if hint_warn {
-        let style = Style::default().fg(Color::Red);
+        let style = Style::default().fg(p.error);
         let lines: Vec<Line> = hint
             .split('\n')
             .map(|l| Line::from(Span::styled(l.to_string(), style)))
@@ -277,6 +278,7 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::style::Color;
 
     fn chip_style() -> Style {
         Style::default().bg(Color::White)
