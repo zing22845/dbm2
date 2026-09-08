@@ -703,6 +703,55 @@ pub(crate) fn sql_click_msgs(
             }
             msgs
         }
+        // Clicking the detail Save / Discard chip acts like its chord.
+        SqlClickAction::ResultsDetailChip { action } => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::results::detail::view::DetailChip;
+            use crate::features::sql_workspace::sql_tab::results::msg::{
+                ResultsMessage, ResultsMsg,
+            };
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            let msg = match action {
+                DetailChip::Save => ResultsMessage::SaveDetailCell,
+                DetailChip::Discard => ResultsMessage::DiscardDetailCell,
+            };
+            vec![
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Focus(SqlFocus::Results),
+                )))),
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        tab_id,
+                        msg: ResultsMsg::Message(msg),
+                    },
+                )))),
+            ]
+        }
+        // A list-level click while the focused detail editor holds an unsaved
+        // draft: refuse the action and surface the leave warning (the results
+        // update keeps the draft and shows the footer reason).
+        SqlClickAction::ResultsDetailLeaveBlocked => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::results::msg::{
+                ResultsMessage, ResultsMsg,
+            };
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            vec![
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Focus(SqlFocus::Results),
+                )))),
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        tab_id,
+                        msg: ResultsMsg::Message(ResultsMessage::UnfocusDetail),
+                    },
+                )))),
+            ]
+        }
         // A column-width resize drag is handled entirely by the shell's mouse
         // Down/Drag/Up handlers (geometry is computed there); no feature
         // message is dispatched for the initiating click itself.

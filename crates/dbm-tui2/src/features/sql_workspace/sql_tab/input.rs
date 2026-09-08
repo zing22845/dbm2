@@ -9,6 +9,7 @@ use ratatui::layout::Rect;
 
 use super::editor::layout as editor_view;
 use super::layout::sql_tab_layout;
+use super::results::detail::view::{DetailChip, detail_chip_hit};
 use super::results::pagination::ResultsPaginationHit;
 use super::session::{TabSession, session_view_key};
 use super::state::{SqlFocus, SqlTabState};
@@ -101,6 +102,11 @@ pub enum SqlClickAction {
     ResultsToolbar {
         action: crate::common::view::action_bar::ResultsAction,
     },
+    /// Click the detail Save / Discard chip while the draft is dirty.
+    ResultsDetailChip { action: DetailChip },
+    /// A list-level click while the focused detail editor holds an unsaved
+    /// draft: the action is refused (leave warning) so the draft is not dropped.
+    ResultsDetailLeaveBlocked,
 }
 
 /// Hit-test a click at `(x, y)` inside the SQL workspace's tab-bar + body
@@ -348,6 +354,27 @@ pub fn sql_workspace_click(
                 tab.results.list.search.text_input_active(),
                 &tab.results.list.executed_sql_display(),
             );
+
+        // A focused detail editor with an unsaved draft owns the interaction:
+        // any list-level click (toolbar button / pagination / cell) is refused
+        // with a leave warning so the draft is never dropped. Clicks on the
+        // detail pane itself keep working — including the Save / Discard chips,
+        // which become clickable while the draft is dirty.
+        // The Save/Discard chips render only inside an active edit session with
+        // a focused, dirty draft — the same condition gates both the chip clicks
+        // and the list-click block.
+        let detail_edit_unsaved = tab.results.detail_open
+            && tab.results.list.edit.editing
+            && tab.results.detail.focused
+            && tab.results.detail.dirty;
+        if detail_edit_unsaved && let Some(detail_area) = layout.detail {
+            if !contains(detail_area, x, y) {
+                return Some(SqlClickAction::ResultsDetailLeaveBlocked);
+            }
+            if let Some(chip) = detail_chip_hit(detail_area, true, x, y) {
+                return Some(SqlClickAction::ResultsDetailChip { action: chip });
+            }
+        }
 
         // Step 3: clicking an *enabled* Results action-bar button (Refresh /
         // Edit / Inst / Dup / Del / Commit / Rollback) acts on it. Disabled

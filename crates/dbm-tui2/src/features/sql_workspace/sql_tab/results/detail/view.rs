@@ -121,33 +121,99 @@ const DISCARD_CHIP: &str = " [C-u] Discard ";
 /// Gap (in columns) between two chips on the same line.
 const CHIP_GAP: usize = 1;
 
-/// Greedily wrap the Save/Discard chips into lines at most `width` columns
-/// wide; each chip fits whole on one line and chips that no longer fit start a
-/// new line. Returns the wrapped lines, whose count is the *dynamic* height the
-/// action row needs (so a narrow detail never clips the buttons). `chip_style`
-/// is the per-chip chrome (list toolbar buttons use a selection background).
-fn wrap_action_chips(width: usize, chip_style: Style) -> Vec<Line<'static>> {
-    let labels = [SAVE_CHIP, DISCARD_CHIP];
-    let mut out = Vec::new();
-    let mut line = Line::default();
+/// Which detail action chip (Save / Discard) was clicked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetailChip {
+    Save,
+    Discard,
+}
+
+impl DetailChip {
+    pub fn label(self) -> &'static str {
+        match self {
+            DetailChip::Save => SAVE_CHIP,
+            DetailChip::Discard => DISCARD_CHIP,
+        }
+    }
+}
+
+/// A placed Save/Discard chip: its row and column offset inside the detail
+/// pane's inner area (border already subtracted).
+#[derive(Debug, Clone, Copy)]
+pub struct DetailChipPlace {
+    pub chip: DetailChip,
+    pub row: u16,
+    pub x: u16,
+    pub width: u16,
+}
+
+/// Greedily place the Save/Discard chips into rows of at most `width` columns;
+/// each chip fits whole on one row and chips that no longer fit start a new
+/// row. The same placements drive rendering and the pointer hit-test, so a
+/// click always hits the painted chip.
+pub fn place_detail_chips(width: usize) -> Vec<DetailChipPlace> {
+    let labels = [
+        (DetailChip::Save, SAVE_CHIP),
+        (DetailChip::Discard, DISCARD_CHIP),
+    ];
+    let mut out = Vec::with_capacity(labels.len());
+    let mut row = 0u16;
     let mut used = 0usize;
-    for label in labels.iter() {
+    for (chip, label) in labels {
         let w = label.chars().count();
-        if used > 0 && used + CHIP_GAP + w > width {
-            out.push(std::mem::take(&mut line));
+        if used > 0 && used + CHIP_GAP + w > width.max(1) {
+            row = row.saturating_add(1);
             used = 0;
         }
-        if used > 0 {
-            line.push_span(Span::raw(" "));
-            used += CHIP_GAP;
-        }
-        line.push_span(Span::styled(*label, chip_style));
-        used += w;
-    }
-    if !line.spans.is_empty() {
-        out.push(line);
+        let x = if used > 0 { used + CHIP_GAP } else { used };
+        out.push(DetailChipPlace {
+            chip,
+            row,
+            x: x as u16,
+            width: w as u16,
+        });
+        used = x + w;
     }
     out
+}
+
+/// The number of rows the placed chips occupy (at least 1).
+pub fn detail_chip_rows(width: usize) -> u16 {
+    place_detail_chips(width)
+        .iter()
+        .map(|p| p.row)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+/// Hit-test `(x, y)` against the visible Save/Discard chips. The chips are only
+/// shown (and therefore clickable) while the draft is dirty, focused and inside
+/// an edit session; `chip_visible` is exactly that condition.
+pub fn detail_chip_hit(
+    detail_area: Rect,
+    chip_visible: bool,
+    x: u16,
+    y: u16,
+) -> Option<DetailChip> {
+    if !chip_visible || detail_area.width < 3 || detail_area.height < 2 {
+        return None;
+    }
+    let inner_x = detail_area.x.saturating_add(1);
+    let inner_top = detail_area.y.saturating_add(1);
+    let places = place_detail_chips(detail_area.width.saturating_sub(2) as usize);
+    for place in places {
+        let rect = Rect {
+            x: inner_x.saturating_add(place.x),
+            y: inner_top.saturating_add(place.row),
+            width: place.width,
+            height: 1,
+        };
+        if x >= rect.x && x < rect.x.saturating_add(rect.width) && y == rect.y {
+            return Some(place.chip);
+        }
+    }
+    None
 }
 
 /// Render the detail sub-pane with its own border, optional action buttons,
@@ -199,14 +265,13 @@ pub fn render(
     let footer_h = footer_height(&hint, inner.width).min(3);
 
     // Reserve a *dynamic* number of rows for the Save/Discard chips: they wrap
-    // to as many lines as the detail width needs, so they are never clipped.
+    // to as many rows as the detail width needs, so they are never clipped.
     let chip_style = Style::default().bg(p.selection);
-    let action_lines = if has_action_btns {
-        wrap_action_chips(inner.width as usize, chip_style)
+    let action_h = if has_action_btns {
+        detail_chip_rows(inner.width as usize)
     } else {
-        Vec::new()
+        1
     };
-    let action_h = action_lines.len().max(1) as u16;
 
     let (body_area, footer_area, action_area) = if has_action_btns {
         let chunks = Layout::default()
@@ -226,10 +291,29 @@ pub fn render(
         (chunks[0], chunks[1], None)
     };
 
-    // Detail action chips (only while editing, focused and dirty), wrapped and
+    // Detail action chips (only while editing, focused and dirty), placed and
     // drawn with the list toolbar's button chrome.
     if let Some(area) = action_area {
-        frame.render_widget(Paragraph::new(action_lines), area);
+        for place in place_detail_chips(area.width as usize) {
+            if place.row >= action_h || place.width == 0 {
+                continue;
+            }
+            let left = area.x.saturating_add(place.x);
+            let width = (area.right() - left).min(place.width);
+            if width == 0 {
+                continue;
+            }
+            let visible: String = place.chip.label().chars().take(width as usize).collect();
+            frame.render_widget(
+                Paragraph::new(visible).style(chip_style),
+                Rect {
+                    x: left,
+                    y: area.y.saturating_add(place.row),
+                    width,
+                    height: 1,
+                },
+            );
+        }
     }
 
     // Detail body: the embedded cell editor when focused, otherwise a read-only
@@ -277,18 +361,6 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::style::Color;
-
-    fn chip_style() -> Style {
-        Style::default().bg(Color::White)
-    }
-
-    fn line_text(line: &Line) -> String {
-        line.spans
-            .iter()
-            .map(|s| s.content.as_ref())
-            .collect::<String>()
-    }
 
     #[test]
     fn detail_chip_labels_use_the_list_shortcuts() {
@@ -297,22 +369,43 @@ mod tests {
     }
 
     #[test]
-    fn chips_stay_on_one_line_when_wide_enough() {
-        let lines = wrap_action_chips(200, chip_style());
-        assert_eq!(lines.len(), 1, "wide detail keeps both chips on one line");
-        let text = line_text(&lines[0]);
-        assert!(text.contains("[C-s] Save"));
-        assert!(text.contains("[C-u] Discard"));
+    fn chips_stay_on_one_row_when_wide_enough() {
+        let places = place_detail_chips(200);
+        assert_eq!(places.len(), 2, "both chips are always placed");
+        assert_eq!(detail_chip_rows(200), 1, "wide detail keeps one row");
+        assert!(places.iter().all(|p| p.row == 0));
     }
 
     #[test]
     fn chips_wrap_when_the_detail_is_narrow() {
-        // Wide enough for the Save chip only → Discard wraps to its own line,
-        // so the action row needs a dynamic two-row height.
-        let lines = wrap_action_chips(SAVE_CHIP.chars().count(), chip_style());
-        assert_eq!(lines.len(), 2, "narrow detail must wrap the chips");
-        assert!(line_text(&lines[0]).contains("[C-s] Save"));
-        assert!(line_text(&lines[1]).contains("[C-u] Discard"));
+        // Wide enough for the Save chip only → Discard wraps onto its own row.
+        let width = SAVE_CHIP.chars().count();
+        let places = place_detail_chips(width);
+        assert_eq!(detail_chip_rows(width), 2, "narrow detail must wrap");
+        assert_eq!(places[0].row, 0);
+        assert_eq!(places[0].chip, DetailChip::Save);
+        assert_eq!(places[1].row, 1);
+        assert_eq!(places[1].chip, DetailChip::Discard);
+    }
+
+    #[test]
+    fn chip_hit_tests_the_visible_chip_rects() {
+        // Wide pane: both chips on the single action row (area includes the
+        // 1-col borders, so chips start at x+1/y+1).
+        let area = Rect::new(0, 0, 60, 3);
+        assert_eq!(
+            detail_chip_hit(area, true, 2, 1),
+            Some(DetailChip::Save),
+            "the first chip's text area maps to Save"
+        );
+        let discard_x = 1 + place_detail_chips(58)[1].x;
+        assert_eq!(
+            detail_chip_hit(area, true, discard_x + 1, 1),
+            Some(DetailChip::Discard)
+        );
+        // The chips are only hit while visible.
+        assert_eq!(detail_chip_hit(area, false, 2, 1), None);
+        assert_eq!(detail_chip_hit(area, true, 2, 2), None, "outside chip row");
     }
 
     #[test]

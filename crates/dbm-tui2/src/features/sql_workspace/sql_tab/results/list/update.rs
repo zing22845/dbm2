@@ -12,6 +12,12 @@ use super::state::ListState;
 
 pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<ResultsEffect>, bool) {
     let mut effects = Vec::new();
+    // An armed `dd` chord must be broken by anything in between except another
+    // `d` and the per-frame viewport sync (which is not a user action): typing
+    // or moving between the two presses must not still trigger the delete.
+    if !matches!(&msg, ListMessage::DelChord) && !matches!(&msg, ListMessage::SyncViewport { .. }) {
+        state.del_chord_at = None;
+    }
     let dirty = match msg {
         ListMessage::SetResult { result, paginated } => {
             let mut result = result;
