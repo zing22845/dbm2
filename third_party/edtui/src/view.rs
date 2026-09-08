@@ -405,10 +405,20 @@ impl Widget for EditorView<'_, '_> {
                     );
                     let wrap_row = pos.y.saturating_sub(content_area.top()) as usize;
                     if wrap_row >= start_seg {
-                        cursor_position = Some(Position::new(
-                            pos.x,
-                            content_area.top() + (wrap_row - start_seg) as u16,
-                        ));
+                        // Only record the cursor when it sits inside the wrap
+                        // segments of this line that actually fit in the
+                        // viewport. A single line taller than the pane (scrolled
+                        // mid-line, cursor near its end) can otherwise report a
+                        // row beyond the content rect — the block cursor would
+                        // be styled / the hardware caret placed outside the
+                        // editor pane. Out-of-viewport here simply means the
+                        // cursor is hidden (see the scroll_locked branch below).
+                        let rel_row = wrap_row - start_seg;
+                        let visible_rows = total_segs.saturating_sub(start_seg);
+                        if rel_row < visible_rows.min(content_area.height as usize) {
+                            cursor_position =
+                                Some(Position::new(pos.x, content_area.top() + rel_row as u16));
+                        }
                     }
                 }
 
