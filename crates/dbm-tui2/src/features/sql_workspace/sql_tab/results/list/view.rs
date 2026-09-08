@@ -542,8 +542,7 @@ fn render_table(
 
         // Draw each cell.
         for col in 0..num_cols {
-            let Some(tv) = results_col_text_view(col, col_widths, table_area.width, h_scroll)
-            else {
+            let Some(tv) = results_col_text_view(col, col_widths, col_viewport_w, h_scroll) else {
                 continue;
             };
             if tv.text_w == 0 {
