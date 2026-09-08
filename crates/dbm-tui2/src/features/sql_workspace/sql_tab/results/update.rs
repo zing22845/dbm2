@@ -48,6 +48,7 @@ fn detail_draft_blocks_list_action(msg: &ResultsMessage) -> bool {
             | ResultsMessage::DelRow
             | ResultsMessage::DelChord
             | ResultsMessage::Commit
+            | ResultsMessage::Refresh
             | ResultsMessage::RunQuery { .. }
             | ResultsMessage::SetResult { .. }
             | ResultsMessage::ClearResult
@@ -76,6 +77,7 @@ fn list_edits_block_action(msg: &ResultsMessage) -> bool {
     matches!(
         msg,
         ResultsMessage::ExitEdit
+            | ResultsMessage::Refresh
             | ResultsMessage::RunQuery { .. }
             | ResultsMessage::SetResult { .. }
             | ResultsMessage::ClearResult
@@ -334,6 +336,30 @@ pub fn update(
             intents.extend(i.into_iter().map(ResultsIntent::Detail));
             effects.extend(e.into_iter().map(ResultsEffect::Detail));
             (state, intents, effects, d)
+        }
+        ResultsMessage::Refresh => {
+            // Re-run the last query (`Ctrl+r` / toolbar Refresh). Refreshes are
+            // rate limited to one per second (the original dbm's
+            // `MIN_ACTION_INTERVAL`) to stop rapid repeated refreshes: the
+            // gate refuses while cooling down, and firing here arms the next
+            // cooldown window (the toolbar greys out meanwhile).
+            if !state.list.refresh_allowed() {
+                return (state, intents, effects, false);
+            }
+            state.list.mark_refresh_started();
+            let list = &state.list;
+            let run = super::list::msg::ListMessage::RunQuery {
+                instance: list.last_instance.clone(),
+                connection: list.last_connection.clone(),
+                database: list.last_database.clone(),
+                schema: list.last_schema.clone(),
+                sql: list.last_sql.clone(),
+                paginated: list.paginated,
+                page: list.page,
+                row_limit: list.row_limit,
+            };
+            let dirty = route_to_list(run, &mut state, &mut effects);
+            (state, intents, effects, dirty)
         }
         other => {
             // While the detail cell editor is focused, a selection move (from a
@@ -647,6 +673,39 @@ mod tests {
         let (s3, _i3, _e3, dirty3) = update(ResultsMessage::DelChord, s2);
         assert!(!dirty3, "d s d must not delete");
         assert!(s3.list.edit.deleted.is_empty());
+    }
+
+    #[test]
+    fn refresh_is_cooldown_gated_and_reruns_last_query() {
+        let mut state = ResultsState::default();
+        state.list.last_sql = "select 1".into();
+        state.list.last_instance = "i".into();
+        state.list.last_connection = "c".into();
+        state.list.row_limit = 100;
+        assert!(state.list.refresh_allowed());
+
+        let (s, _i, effects, dirty) = update(ResultsMessage::Refresh, state);
+        assert!(dirty, "a first refresh must fire");
+        assert!(
+            s.list.refresh_cooldown_until.is_some(),
+            "a fired refresh arms the 1s cooldown"
+        );
+        assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                crate::features::sql_workspace::sql_tab::results::effect::ResultsEffect::RunQuery {
+                    sql,
+                    ..
+                } if sql == "select 1"
+            )),
+            "refresh must re-run the last query, got: {effects:?}"
+        );
+
+        // A second refresh inside the cooldown window is refused.
+        let (s2, _i2, effects2, dirty2) = update(ResultsMessage::Refresh, s);
+        assert!(!dirty2, "a refresh during the cooldown must be a no-op");
+        assert!(effects2.is_empty());
+        assert!(s2.list.refresh_cooldown_until.is_some());
     }
 
     #[test]

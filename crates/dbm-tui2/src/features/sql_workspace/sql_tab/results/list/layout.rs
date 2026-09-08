@@ -39,7 +39,8 @@ pub fn results_toolbar_model(state: &ListState) -> ResultsToolbarModel {
     let edit_active = state.edit.editing;
     let edit_dirty = state.edit.is_dirty();
     ResultsToolbarModel {
-        refresh_enabled: has_result,
+        // Refresh greys out during its 1s cooldown (mirroring the original dbm).
+        refresh_enabled: has_result && state.refresh_allowed(),
         edit_enabled: editable,
         edit_active,
         commit_enabled: edit_active && commit_n > 0,

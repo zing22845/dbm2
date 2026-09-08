@@ -57,6 +57,10 @@ pub struct ListState {
     pub del_chord_at: Option<std::time::Instant>,
     /// A COUNT(*) total-rows request is in flight (`[c]counting…`).
     pub counting: bool,
+    /// When the Refresh action (`[C-r]Refresh` / toolbar) may fire again,
+    /// mirroring the original dbm's 1s refresh cooldown so rapid re-refreshes
+    /// are prevented. `None` means the refresh is not cooling down.
+    pub refresh_cooldown_until: Option<std::time::Instant>,
     /// A page action queued until the in-flight count lands (the original dbm
     /// counts first when a "last page" jump hits an unknown total).
     pub pending_page_after_count: Option<ResultsPageAction>,
@@ -539,6 +543,20 @@ impl ListState {
             .find(|a| *a > cursor)
             .unwrap_or(anchors[0]);
         (target != cursor).then_some(target)
+    }
+
+    /// Whether the Refresh action may fire now: the previous refresh's 1s
+    /// cooldown (mirroring the original dbm's `MIN_ACTION_INTERVAL`) has
+    /// elapsed. Read by the toolbar model and the `Ctrl+r` key gate.
+    pub fn refresh_allowed(&self) -> bool {
+        self.refresh_cooldown_until
+            .is_none_or(|until| std::time::Instant::now() >= until)
+    }
+
+    /// Arm the 1s refresh cooldown. Called when a refresh actually fires.
+    pub fn mark_refresh_started(&mut self) {
+        self.refresh_cooldown_until =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
     }
 }
 

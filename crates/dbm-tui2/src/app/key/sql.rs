@@ -334,25 +334,15 @@ fn results_key(
         return results_detail_editor_key(key, tab_id, results);
     }
 
-    // Refresh re-runs the last query using the stored connection context.
+    // Refresh re-runs the last query using the stored connection context. It
+    // is gated by the same 1s cooldown that greys the toolbar Refresh button
+    // (see `results_toolbar_model`), so rapid repeats do nothing.
     if key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL) {
         let needs = !results.list.last_sql.is_empty()
             && !results.list.last_instance.is_empty()
             && !results.list.last_connection.is_empty();
-        return if needs {
-            Some(sql_results(
-                SqlResultsMessage::RunQuery {
-                    instance: results.list.last_instance.clone(),
-                    connection: results.list.last_connection.clone(),
-                    database: results.list.last_database.clone(),
-                    schema: results.list.last_schema.clone(),
-                    sql: results.list.last_sql.clone(),
-                    paginated: results.list.paginated,
-                    page: results.list.page,
-                    row_limit: results.list.row_limit,
-                },
-                tab_id,
-            ))
+        return if needs && results.list.refresh_allowed() {
+            Some(sql_results(SqlResultsMessage::Refresh, tab_id))
         } else {
             None
         };
@@ -1626,6 +1616,38 @@ mod tests {
                 tab_id: 0,
                 msg: SqlResultsMsg::Message(SqlResultsMessage::SetSelection { row: 1, col: 2 }),
             }
+        );
+    }
+
+    #[test]
+    fn results_key_ctrl_r_refresh_is_cooldown_gated() {
+        use crate::features::sql_workspace::sql_tab::results::state::ResultsState;
+        let mut results = ResultsState::default();
+        results.list.last_sql = "select 1".into();
+        results.list.last_instance = "i".into();
+        results.list.last_connection = "c".into();
+        // With no last query there is nothing to refresh.
+        let empty = ResultsState::default();
+        assert!(
+            results_key(key(KeyCode::Char('r'), KeyModifiers::CONTROL), 0, &empty).is_none(),
+            "ctrl+r without a last query is a no-op"
+        );
+        // With a last query and no cooldown, ctrl+r dispatches the Refresh.
+        let msg = results_key(key(KeyCode::Char('r'), KeyModifiers::CONTROL), 0, &results)
+            .expect("ctrl+r with a last query must refresh");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::Refresh),
+            }
+        );
+        // Inside the 1s cooldown the same key is refused.
+        results.list.refresh_cooldown_until =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
+        assert!(
+            results_key(key(KeyCode::Char('r'), KeyModifiers::CONTROL), 0, &results).is_none(),
+            "ctrl+r during the refresh cooldown must be refused"
         );
     }
 

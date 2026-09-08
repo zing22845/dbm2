@@ -609,21 +609,14 @@ pub(crate) fn sql_click_msgs(
             )))];
             match action {
                 A::Refresh => {
+                    // Refresh re-runs the last query through the dedicated
+                    // message so results::update arms the 1s cooldown.
                     let list = &tab.results.list;
                     if !list.last_sql.is_empty()
                         && !list.last_instance.is_empty()
                         && !list.last_connection.is_empty()
                     {
-                        msgs.push(results_msg(ResultsMessage::RunQuery {
-                            instance: list.last_instance.clone(),
-                            connection: list.last_connection.clone(),
-                            database: list.last_database.clone(),
-                            schema: list.last_schema.clone(),
-                            sql: list.last_sql.clone(),
-                            paginated: list.paginated,
-                            page: list.page,
-                            row_limit: list.row_limit,
-                        }));
+                        msgs.push(results_msg(ResultsMessage::Refresh));
                     }
                 }
                 A::Edit => msgs.push(results_msg(ResultsMessage::EnterEdit)),

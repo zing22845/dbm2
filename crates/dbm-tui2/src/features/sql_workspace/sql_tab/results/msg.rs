@@ -56,6 +56,11 @@ pub enum ResultsMessage {
         page: usize,
         row_limit: usize,
     },
+    /// Re-run the last query — the `[C-r]Refresh` shortcut and toolbar
+    /// Refresh button. Kept distinct from `RunQuery` so the 1s refresh
+    /// cooldown (original dbm's `MIN_ACTION_INTERVAL`) is armed only for
+    /// explicit refreshes; editor runs / paging still go through `RunQuery`.
+    Refresh,
     /// Enter / toggle edit mode.
     EnterEdit,
     /// Exit edit mode.
@@ -202,6 +207,10 @@ impl ResultsMessage {
                 page,
                 row_limit,
             },
+            // Refresh is intercepted by an explicit arm in `results::update`
+            // (it arms the cooldown before running); it never falls through to
+            // a generic list conversion.
+            ResultsMessage::Refresh => unreachable!("Refresh is handled in results::update"),
             ResultsMessage::EnterEdit => ListMessage::EnterEdit,
             ResultsMessage::ExitEdit => ListMessage::ExitEdit,
             ResultsMessage::Rollback => ListMessage::Rollback,
