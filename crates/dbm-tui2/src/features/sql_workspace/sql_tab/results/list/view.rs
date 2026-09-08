@@ -242,14 +242,13 @@ fn draw_match_cell_frame(
 /// anchored inside the viewport, the values are synced back into `state` so
 /// the next frame starts from the correct scroll position (fixes the stale
 /// h_scroll problem where state.h_scroll was never updated from the view).
-/// Foreground color for an edit-session change marker, matching the original
-/// dbm: green for a pending insert, red for a deleted row, and the "modified"
-/// color for a row with changed cells.
+/// Style for an edit-session change marker / border, shared with the detail
+/// draft's dirty highlights: every changed row (`~`/`+`/`-`) uses the theme's
+/// single "unsaved change" orange — the row kind is conveyed by the glyph, not
+/// by a per-kind color.
 fn change_kind_style(p: &crate::common::view::theme::Palette, kind: RowChangeKind) -> Style {
     Style::default().fg(match kind {
-        RowChangeKind::Insert => p.success,
-        RowChangeKind::Delete => p.error,
-        RowChangeKind::Update => p.modified_text,
+        RowChangeKind::Insert | RowChangeKind::Delete | RowChangeKind::Update => p.dirty,
         RowChangeKind::NoChange => p.fg,
     })
 }

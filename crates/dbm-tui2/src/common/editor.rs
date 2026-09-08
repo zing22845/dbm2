@@ -217,9 +217,10 @@ pub fn apply_normal_on_enter(editor: &mut EditorState) {
     editor.selection = None;
 }
 
-/// Orange style for Detail draft chars that differ from baseline.
+/// Style for Detail draft chars that differ from baseline — the shared
+/// "unsaved change" orange, defined once in the theme.
 pub fn detail_dirty_style() -> Style {
-    Style::default().fg(Color::Rgb(255, 140, 0))
+    Style::default().fg(crate::common::view::theme::DIRTY_CHANGE_COLOR)
 }
 
 /// Highlight spans in `current` that differ from `baseline` (line-wise

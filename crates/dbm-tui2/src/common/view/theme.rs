@@ -12,6 +12,12 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
+/// The orange used for *unsaved-change* visuals everywhere: the results list's
+/// dirty row markers/borders (`~`/`+`/`-`) and the results detail draft's
+/// baseline-diff highlights. Both derive from this one constant so a re-color
+/// of "changed but not committed" happens in one place.
+pub const DIRTY_CHANGE_COLOR: Color = Color::Rgb(255, 140, 0);
+
 /// The semantic color slots available to every view.
 ///
 /// Add slots here (e.g. an extra emphasis color) without touching feature
@@ -77,6 +83,10 @@ pub struct Palette {
     /// separate so "unsaved change" reads as its own color against status
     /// colors like `success`/`error`.
     pub modified_text: Color,
+    /// Unsaved-change visuals shared with the results detail: the dirty row
+    /// markers/borders (`~`/`+`/`-`) and the detail draft's baseline-diff
+    /// highlights (the same orange, see [`DIRTY_CHANGE_COLOR`]).
+    pub dirty: Color,
     /// Informational status.
     pub info: Color,
     /// Muted / de-emphasized text (e.g. footer hints, placeholders).
@@ -222,6 +232,7 @@ pub fn default() -> Theme {
             warning: Color::Rgb(0xf1, 0xfa, 0x8c), // yellow
             error: Color::Rgb(0xff, 0x55, 0x55),   // red
             modified_text: Color::Rgb(0xff, 0x8a, 0x8a), // readable red on dark bg
+            dirty: DIRTY_CHANGE_COLOR,             // orange (matches the detail diff)
             info: Color::Rgb(0x8b, 0xe9, 0xfd),    // cyan
             muted: Color::Rgb(0x62, 0x64, 0x74),
         },
@@ -246,6 +257,7 @@ pub fn default() -> Theme {
             warning: Color::Rgb(0xa5, 0x8a, 0x00),
             error: Color::Rgb(0xd3, 0x2f, 0x2f),
             modified_text: Color::Rgb(0xb0, 0x30, 0x30), // readable red on cream bg
+            dirty: DIRTY_CHANGE_COLOR,                   // orange (matches the detail diff)
             info: Color::Rgb(0x0e, 0x74, 0x9a),
             muted: Color::Rgb(0x62, 0x74, 0x8f),
         },
@@ -261,6 +273,14 @@ mod tests {
         let theme = default();
         assert!(theme.is_dark);
         let _ = theme.palette(); // dark palette returned
+    }
+
+    #[test]
+    fn dirty_slot_is_the_shared_unsaved_change_orange() {
+        // The list markers/borders and the detail draft highlights both read
+        // the same semantic dirty slot / constant.
+        let theme = default();
+        assert_eq!(theme.palette().dirty, DIRTY_CHANGE_COLOR);
     }
 
     #[test]
