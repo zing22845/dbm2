@@ -17,7 +17,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::common::components::line_numbers;
 use crate::common::layout::text::footer_height;
@@ -26,9 +26,6 @@ use crate::common::view::hints::draw_footer;
 use crate::common::view::theme::Theme;
 
 use super::state::DetailState;
-
-/// Height of the detail action buttons row (when editing and dirty).
-const DETAIL_ACTION_BTNS_HEIGHT: u16 = 1;
 
 fn wrap_plain_line(line: &str, width: usize) -> Vec<Line<'static>> {
     if width == 0 {
@@ -100,35 +97,57 @@ fn editor_mode_label(detail: &DetailState) -> &'static str {
     }
 }
 
-/// Build the detail footer hint text.
-fn detail_footer_text(detail: &DetailState, edit_active: bool) -> String {
-    if detail.focused {
-        if detail.dirty {
-            " Detail  | Ctrl-S:save  Ctrl-U:discard  Esc:leave".to_string()
-        } else {
-            format!(" Detail  | [{}]  Esc:leave", editor_mode_label(detail))
-        }
-    } else if edit_active {
-        if detail.dirty {
-            " Detail  | Ctrl-S:save  Ctrl-U:discard".to_string()
-        } else {
-            " Detail  | [edit mode]  Esc:leave".to_string()
-        }
+/// Footer hint for the detail pane. Normally just `Back: ESC`. When a leave was
+/// attempted while the draft is dirty (blocked by the save/discard gate — Esc,
+/// a focus move, or closing the detail), it shows the interception reason
+/// instead; the caller renders it in the same failure colour the connections
+/// pane uses for its dirty-leave notice.
+fn detail_footer(detail: &DetailState) -> (String, bool) {
+    if detail.leave_warning && detail.dirty {
+        (
+            super::super::detail_edit::DETAIL_LEAVE_WARNING.to_string(),
+            true,
+        )
     } else {
-        " Detail  | Back: Esc".to_string()
+        ("Back: ESC".to_string(), false)
     }
 }
 
-/// Build the detail action buttons line (Save/Discard when editing and dirty).
-fn detail_action_buttons_line(detail: &DetailState, edit_active: bool) -> Option<Line<'static>> {
-    if !edit_active || !detail.dirty {
-        return None;
+/// The two detail action chips, padded exactly like the list toolbar buttons
+/// (`" [C-s] Save "` / `" [C-u] Discard "`), so the Save/Discard row reads the
+/// same as the Results action bar.
+const SAVE_CHIP: &str = " [C-s] Save ";
+const DISCARD_CHIP: &str = " [C-u] Discard ";
+/// Gap (in columns) between two chips on the same line.
+const CHIP_GAP: usize = 1;
+
+/// Greedily wrap the Save/Discard chips into lines at most `width` columns
+/// wide; each chip fits whole on one line and chips that no longer fit start a
+/// new line. Returns the wrapped lines, whose count is the *dynamic* height the
+/// action row needs (so a narrow detail never clips the buttons). `chip_style`
+/// is the per-chip chrome (list toolbar buttons use a selection background).
+fn wrap_action_chips(width: usize, chip_style: Style) -> Vec<Line<'static>> {
+    let labels = [SAVE_CHIP, DISCARD_CHIP];
+    let mut out = Vec::new();
+    let mut line = Line::default();
+    let mut used = 0usize;
+    for label in labels.iter() {
+        let w = label.chars().count();
+        if used > 0 && used + CHIP_GAP + w > width {
+            out.push(std::mem::take(&mut line));
+            used = 0;
+        }
+        if used > 0 {
+            line.push_span(Span::raw(" "));
+            used += CHIP_GAP;
+        }
+        line.push_span(Span::styled(*label, chip_style));
+        used += w;
     }
-    let p = String::from(" [Ctrl-S] Save   [Ctrl-U] Discard");
-    Some(Line::from(vec![Span::styled(
-        p,
-        Style::default().fg(Color::Yellow),
-    )]))
+    if !line.spans.is_empty() {
+        out.push(line);
+    }
+    out
 }
 
 /// Render the detail sub-pane with its own border, optional action buttons,
@@ -176,38 +195,41 @@ pub fn render(
     frame.render_widget(block, area);
 
     let has_action_btns = edit_active && detail.dirty && detail.focused;
-    let footer_h = footer_height(&detail_footer_text(detail, edit_active), inner.width).min(3);
+    let (hint, hint_warn) = detail_footer(detail);
+    let footer_h = footer_height(&hint, inner.width).min(3);
 
-    let chunks = if has_action_btns {
-        Layout::default()
+    // Reserve a *dynamic* number of rows for the Save/Discard chips: they wrap
+    // to as many lines as the detail width needs, so they are never clipped.
+    let chip_style = Style::default().bg(p.selection);
+    let action_lines = if has_action_btns {
+        wrap_action_chips(inner.width as usize, chip_style)
+    } else {
+        Vec::new()
+    };
+    let action_h = action_lines.len().max(1) as u16;
+
+    let (body_area, footer_area, action_area) = if has_action_btns {
+        let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(DETAIL_ACTION_BTNS_HEIGHT),
+                Constraint::Length(action_h),
                 Constraint::Min(0),
                 Constraint::Length(footer_h),
             ])
-            .split(inner)
+            .split(inner);
+        (chunks[1], chunks[2], Some(chunks[0]))
     } else {
-        Layout::default()
+        let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(footer_h)])
-            .split(inner)
+            .split(inner);
+        (chunks[0], chunks[1], None)
     };
 
-    let body_area = if has_action_btns {
-        chunks[1]
-    } else {
-        chunks[0]
-    };
-    let footer_area = if has_action_btns {
-        chunks[2]
-    } else {
-        chunks[1]
-    };
-
-    // Detail action buttons (only when editing, focused and dirty).
-    if has_action_btns && let Some(line) = detail_action_buttons_line(detail, edit_active) {
-        frame.render_widget(Paragraph::new(line), chunks[0]);
+    // Detail action chips (only while editing, focused and dirty), wrapped and
+    // drawn with the list toolbar's button chrome.
+    if let Some(area) = action_area {
+        frame.render_widget(Paragraph::new(action_lines), area);
     }
 
     // Detail body: the embedded cell editor when focused, otherwise a read-only
@@ -233,8 +255,86 @@ pub fn render(
         None
     };
 
-    // Detail footer.
-    let hint = detail_footer_text(detail, edit_active);
-    draw_footer(frame, theme, footer_area, &hint);
+    // Detail footer. Normally the plain "Back: ESC"; while an unsaved draft has
+    // blocked a leave attempt the interception reason is shown in the failure
+    // colour the connections pane uses for its dirty-leave notice.
+    if hint_warn {
+        let style = Style::default().fg(Color::Red);
+        let lines: Vec<Line> = hint
+            .split('\n')
+            .map(|l| Line::from(Span::styled(l.to_string(), style)))
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }),
+            footer_area,
+        );
+    } else {
+        draw_footer(frame, theme, footer_area, &hint);
+    }
     mouse_hit
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chip_style() -> Style {
+        Style::default().bg(Color::White)
+    }
+
+    fn line_text(line: &Line) -> String {
+        line.spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect::<String>()
+    }
+
+    #[test]
+    fn detail_chip_labels_use_the_list_shortcuts() {
+        assert_eq!(SAVE_CHIP.trim(), "[C-s] Save");
+        assert_eq!(DISCARD_CHIP.trim(), "[C-u] Discard");
+    }
+
+    #[test]
+    fn chips_stay_on_one_line_when_wide_enough() {
+        let lines = wrap_action_chips(200, chip_style());
+        assert_eq!(lines.len(), 1, "wide detail keeps both chips on one line");
+        let text = line_text(&lines[0]);
+        assert!(text.contains("[C-s] Save"));
+        assert!(text.contains("[C-u] Discard"));
+    }
+
+    #[test]
+    fn chips_wrap_when_the_detail_is_narrow() {
+        // Wide enough for the Save chip only → Discard wraps to its own line,
+        // so the action row needs a dynamic two-row height.
+        let lines = wrap_action_chips(SAVE_CHIP.chars().count(), chip_style());
+        assert_eq!(lines.len(), 2, "narrow detail must wrap the chips");
+        assert!(line_text(&lines[0]).contains("[C-s] Save"));
+        assert!(line_text(&lines[1]).contains("[C-u] Discard"));
+    }
+
+    #[test]
+    fn footer_is_back_esc_normally_and_reason_when_leave_blocked() {
+        let mut d = DetailState::default();
+        let (text, warn) = detail_footer(&d);
+        assert_eq!(text, "Back: ESC", "normal footer keeps only Back: ESC");
+        assert!(!warn);
+
+        // A blocked leave (unsaved draft) swaps the footer for the reason.
+        d.dirty = true;
+        d.leave_warning = true;
+        let (text, warn) = detail_footer(&d);
+        assert!(warn);
+        assert_eq!(
+            text,
+            crate::features::sql_workspace::sql_tab::results::detail_edit::DETAIL_LEAVE_WARNING
+        );
+
+        // Once saved/discarded the flag is cleared again → plain footer.
+        d.dirty = false;
+        let (text, warn) = detail_footer(&d);
+        assert_eq!(text, "Back: ESC");
+        assert!(!warn);
+    }
 }

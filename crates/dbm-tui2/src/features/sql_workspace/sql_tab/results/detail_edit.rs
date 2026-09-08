@@ -1,6 +1,7 @@
 //! Results Detail draft Save / leave-gate helpers (pure, unit-tested).
 
-pub const DETAIL_LEAVE_WARNING: &str = "Save or discard (C-u) before leaving Detail";
+pub const DETAIL_LEAVE_WARNING: &str =
+    "Unsaved changes - save (C-s) or discard (C-u) before leaving";
 
 pub fn detail_draft_dirty(editor_text: &str, baseline: &str) -> bool {
     editor_text != baseline

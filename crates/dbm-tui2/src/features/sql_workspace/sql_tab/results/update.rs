@@ -135,6 +135,8 @@ pub fn update(
             state.list.apply_cell_value(row, col, text.clone());
             state.detail.baseline = text;
             state.detail.sync_draft_from_editor();
+            // Saving resolves any blocked-leave state so the footer hint clears.
+            state.detail.leave_warning = false;
             (state, intents, effects, true)
         }
         // Ctrl+U while the detail editor is focused: discard the draft back to
@@ -148,6 +150,8 @@ pub fn update(
                 crate::common::editor::set_editor_text(&mut host.editor, &baseline);
             }
             state.detail.sync_draft_from_editor();
+            // Discarding resolves any blocked-leave state so the footer hint clears.
+            state.detail.leave_warning = false;
             (state, intents, effects, true)
         }
         // Post-commit flow: a successful commit exits edit mode (clearing the
