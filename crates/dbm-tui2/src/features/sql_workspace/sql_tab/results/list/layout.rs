@@ -79,18 +79,21 @@ pub fn action_bar_button_at(
 /// top header lines (`RESULTS_HEADER_CONTENT_HEIGHT`) count, and the pointer
 /// must be within one column of a column's right edge. Used for the splitter
 /// hover indicator and to begin a column-width drag.
-/// Width of the pinned left change-marker gutter: one column while an edit
-/// session is active, otherwise none.
+/// Width of the pinned left gutter column reserved for the edit-session change
+/// markers (`+`/`-`/`~`).
+///
+/// The gutter column is **always** reserved (whether or not an edit session is
+/// active): the markers are only drawn while editing, but the column's width is
+/// permanent. This keeps the whole grid at the same screen x in both modes —
+/// toggling Edit no longer shifts every column right by one, which previously
+/// pushed a right-flush trailing column's `…` out of the viewport and ran the
+/// selected-row background into the vertical scrollbar.
 ///
 /// The renderer applies this as a constant offset when turning a column's
 /// column-space position into a screen x, and every hit-test subtracts it
 /// again — one shared helper so clicks can never drift from the drawn grid.
-pub fn results_gutter_width(state: &ListState) -> u16 {
-    if state.edit.editing {
-        crate::common::view::format::RESULTS_DIRTY_GUTTER_WIDTH
-    } else {
-        0
-    }
+pub fn results_gutter_width(_state: &ListState) -> u16 {
+    crate::common::view::format::RESULTS_DIRTY_GUTTER_WIDTH
 }
 
 pub fn col_resize_hit_at(list_area: Rect, state: &ListState, x: u16, y: u16) -> Option<usize> {
@@ -344,66 +347,53 @@ mod tests {
     }
 
     #[test]
-    fn gutter_only_exists_while_editing() {
-        assert_eq!(results_gutter_width(&state(false)), 0);
-        assert_eq!(
-            results_gutter_width(&state(true)),
-            crate::common::view::format::RESULTS_DIRTY_GUTTER_WIDTH
-        );
+    fn gutter_is_always_reserved_in_both_modes() {
+        let width = crate::common::view::format::RESULTS_DIRTY_GUTTER_WIDTH;
+        assert_eq!(results_gutter_width(&state(false)), width);
+        assert_eq!(results_gutter_width(&state(true)), width);
     }
 
     #[test]
-    fn editing_gutter_shifts_cell_hits_with_the_drawn_grid() {
-        // A click one pixel right of the content start must resolve to column 0
-        // while editing (the first pixel is the change-marker gutter) and to
-        // column 0 one pixel earlier when not editing. Both must agree with the
-        // renderer's offset, or clicks land on the wrong cell. First data row
-        // sits at `content.y + RESULTS_HEADER_HEIGHT` (header included in the
-        // content band). `rel_y` is measured from `content.y`.
+    fn gutter_is_constant_so_editing_never_shifts_the_grid() {
+        // The gutter column is always reserved, so toggling Edit must not move
+        // any column on screen (no more right shift pushing a trailing column's
+        // `…` out of the viewport). Cell hits therefore agree between modes at
+        // exactly the same pixels. First data row sits at
+        // `content.y + RESULTS_HEADER_HEIGHT` (header included in the content
+        // band).
         let area = Rect::new(0, 0, 40, 12);
-        let first_row_y =
-            results_geometry(area, &state(true)).expect("geometry").1.y + RESULTS_HEADER_HEIGHT;
-
         let plain = state(false);
         let editing_state = state(true);
-        let (_t, content_plain, _h) = results_geometry(area, &plain).expect("geometry");
-        let (_t, content_edit, _h) = results_geometry(area, &editing_state).expect("geometry");
+        let (_t, content_plain, _h_plain) = results_geometry(area, &plain).expect("geometry");
+        let (_t, content_edit, _h_edit) = results_geometry(area, &editing_state).expect("geometry");
 
-        // Column 0 occupies [0, 10) in column space. Without the gutter its
-        // first pixel is the content start; with the gutter its first *content*
-        // pixel sits one pixel later (the marker is drawn at the content start).
+        // Identical geometry in both modes — nothing shifts when Edit toggles.
+        assert_eq!(content_plain, content_edit);
+        assert_eq!(_h_plain, _h_edit);
+
+        let first_row_y = content_plain.y + RESULTS_HEADER_HEIGHT;
+        let gutter = results_gutter_width(&plain) as usize;
+
+        // Column 0's first *content* pixel sits one pixel after the content
+        // start (the reserved marker gutter) in BOTH modes...
+        for s in [&plain, &editing_state] {
+            assert_eq!(
+                cell_hit_at(area, s, content_plain.x + gutter as u16, first_row_y),
+                Some((0, 0)),
+                "column 0 must start after the always-reserved gutter"
+            );
+        }
+        // ...and column 1 begins at the same pixel in both modes (no shift).
+        let col1_x = content_plain.x + gutter as u16 + 10;
         assert_eq!(
-            cell_hit_at(area, &plain, content_plain.x, first_row_y),
-            Some((0, 0)),
-            "no gutter: content start is column 0"
-        );
-        // The pixel that is column 0's *last* cell pixel in the plain grid is
-        // still column 0 while editing (the whole grid shifted right by 1), and
-        // the gutter pixel itself maps back to column 0 (1-px tolerance to the
-        // neighbouring cell, as format::results_cell_at_point also does).
-        let last_col0_px = 9;
-        assert_eq!(
-            cell_hit_at(
-                area,
-                &editing_state,
-                content_edit.x + last_col0_px,
-                first_row_y
-            ),
-            Some((0, 0)),
-            "editing: column 0 spans [gutter, gutter+width)"
-        );
-        // 10 plain pixels right of the content start is column 1's first pixel
-        // when NOT editing, but still column 0 (width-1) when editing — proving
-        // the hit test follows the renderer's gutter shift.
-        let x = 10;
-        assert_eq!(
-            cell_hit_at(area, &plain, content_plain.x + x, first_row_y),
-            Some((0, 1))
+            cell_hit_at(area, &plain, col1_x, first_row_y),
+            Some((0, 1)),
+            "plain: pixel 11 is column 1"
         );
         assert_eq!(
-            cell_hit_at(area, &editing_state, content_edit.x + x, first_row_y),
-            Some((0, 0)),
-            "editing shifts the grid so pixel 10 is still inside column 0"
+            cell_hit_at(area, &editing_state, col1_x, first_row_y),
+            Some((0, 1)),
+            "editing must hit column 1 at the same pixel — the grid did not shift"
         );
     }
 

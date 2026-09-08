@@ -511,7 +511,11 @@ pub fn update(msg: ListMessage, mut state: ListState) -> (ListState, Vec<Results
 /// so both clamp against the same bound — the wheel cannot scroll past the
 /// point where the last column's right edge meets the viewport's right edge.
 fn max_h_scroll(state: &ListState) -> usize {
-    let table_w = crate::common::view::format::results_table_width(&state.col_widths) as usize;
+    // The always-reserved gutter takes a column of the visible window, so the
+    // scrollable reach is `columns + gutter - viewport` (the renderer's
+    // compute_viewport_scroll uses the same bound with table_width incl gutter).
+    let table_w = crate::common::view::format::results_table_width(&state.col_widths) as usize
+        + super::layout::results_gutter_width(state) as usize;
     let vp = state.viewport_width.get() as usize;
     table_w.saturating_sub(vp)
 }
