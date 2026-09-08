@@ -203,6 +203,7 @@ mod tests {
         let closed = results_pane_footer_text(false, "", false);
         assert!(!closed.contains("Deselect: ESC"));
         assert!(closed.contains("Col width: ,/."));
+        assert!(closed.contains("First/Last: 0/$"));
         let open_status = results_pane_footer_text(false, "updated", false);
         assert!(open_status.contains("\nupdated"));
     }

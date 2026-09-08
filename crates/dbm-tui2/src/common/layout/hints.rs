@@ -179,6 +179,7 @@ pub fn results_pane_footer_text(search_active: bool, status: &str, next_modified
         ("Copy Col Name", hint_ctrl("n")),
         ("Flip", lit("f/b")),
         ("Top/Bottom", lit("g/G")),
+        ("First/Last", lit("0/$")),
     ]);
     if next_modified {
         let extra = keys(&[("Next Modified", lit("m"))]);
