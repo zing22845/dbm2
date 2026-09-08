@@ -105,8 +105,15 @@ pub fn commit_preview_layout(area: Rect, statements: &[String]) -> Option<Commit
     }
     let n = statements.len();
     let gutter_w = ((n.max(1).to_string().len() + 1) as u16).max(2);
+    // The popup never exceeds the discover modal's footprint (75% x 75% of the
+    // workspace), so the commit preview can never be bigger than discover.
+    let cap_w = area.width.saturating_mul(75) / 100;
+    let cap_h = area.height.saturating_mul(75) / 100;
+    if cap_w < 20 || cap_h < 6 {
+        return None;
+    }
     // Borders (2) + pad column (1) eat into the popup width.
-    let max_cols = area.width.saturating_sub(gutter_w.saturating_add(3)).max(1);
+    let max_cols = cap_w.saturating_sub(gutter_w.saturating_add(3)).max(1);
     // Prefer the longest natural statement width, clamped into [min, max].
     let natural = statements
         .iter()
@@ -122,19 +129,18 @@ pub fn commit_preview_layout(area: Rect, statements: &[String]) -> Option<Commit
         .collect();
     let total_rows = rows.iter().map(|r| r.len()).sum::<usize>().max(1);
 
-    // Auto height up to 60% of the workspace body; beyond that the body
-    // scrolls.
-    let max_body = ((area.height as usize * 60) / 100).max(3);
+    // Auto height up to the discover cap; beyond that the body scrolls.
+    let max_body = (cap_h.saturating_sub(4) as usize).max(1);
     let visible_rows = total_rows.min(max_body);
 
     // popup width = borders + gutter + text + pad.
     let mut popup_w = gutter_w.saturating_add(body_cols).saturating_add(3);
-    if popup_w > area.width {
-        popup_w = area.width;
+    if popup_w > cap_w {
+        popup_w = cap_w;
     }
     let mut popup_h = (visible_rows as u16).saturating_add(4);
-    if popup_h > area.height {
-        popup_h = area.height;
+    if popup_h > cap_h {
+        popup_h = cap_h;
     }
     Some(CommitPreviewLayout {
         rect: Rect {
@@ -185,7 +191,7 @@ mod tests {
         assert_eq!(l.max_scroll(), 0);
         assert!(l.rect.height < area.height, "small content: small popup");
 
-        // Enough SQL to overflow the 60%-of-height budget becomes scrollable.
+        // Enough SQL to overflow the discover-height cap becomes scrollable.
         let big: Vec<String> = (0..40)
             .map(|i| format!("UPDATE users SET note = 'row {i} quite long content that wraps'"))
             .collect();
@@ -200,5 +206,8 @@ mod tests {
         assert!(l2.rect.width <= area.width);
         assert!(l2.rect.height <= area.height);
         assert!(l2.rect.height >= 6);
+        // Never bigger than the discover modal (75% x 75% of the workspace).
+        assert!(l2.rect.width <= area.width * 3 / 4);
+        assert!(l2.rect.height <= area.height * 3 / 4);
     }
 }
