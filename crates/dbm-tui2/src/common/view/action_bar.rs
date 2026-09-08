@@ -1,8 +1,9 @@
 //! Results action bar: Refresh / Edit / Inst / Dup / Del / Commit / Rollback.
 //!
 //! Pure model + layout + drawing shared by the Results list. Theme-aware via
-//! the semantic `Palette`: enabled buttons use the `selection` slot and the
-//! active Edit button forces a red foreground.
+//! the semantic `Palette`: enabled buttons use [`Palette::available_button_style`]
+//! (the header Discover look) and the active Edit button forces a red
+//! foreground.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -185,10 +186,12 @@ pub fn layout_action_bar(
         .collect()
 }
 
-/// Enabled/disabled chrome shared with the Results action bar.
+/// Enabled/disabled chrome shared with the Results action bar. Enabled buttons
+/// use the palette's available-button style (the header Discover look); a
+/// disabled button is unstyled.
 pub fn action_button_style(enabled: bool, palette: &Palette) -> Style {
     if enabled {
-        Style::default().bg(palette.selection)
+        palette.available_button_style()
     } else {
         Style::default()
     }
@@ -212,8 +215,9 @@ pub fn draw_action_button_label(
     );
 }
 
-/// Enabled = selection background; disabled = default. Edit mode on keeps the
-/// selection background but forces a red foreground on the Edit button.
+/// Enabled = the palette's available-button background (header Discover look);
+/// disabled = default. Edit mode on keeps that background but forces a red
+/// foreground on the Edit button.
 fn button_style(
     action: ResultsAction,
     enabled: bool,
@@ -223,7 +227,7 @@ fn button_style(
     if !enabled {
         return Style::default();
     }
-    let base = Style::default().bg(palette.selection);
+    let base = palette.available_button_style();
     if matches!(action, ResultsAction::Edit) && edit_active {
         base.fg(Color::Red)
     } else {
@@ -341,6 +345,19 @@ mod tests {
         assert!(!buttons[2].enabled);
         assert!(!buttons[3].enabled);
         assert!(!buttons[4].enabled);
+    }
+
+    #[test]
+    fn enabled_button_matches_the_header_discover_background() {
+        let theme = crate::common::view::theme::default();
+        let p = theme.palette();
+        // Enabled chrome = the Discover available-button look (light selection
+        // island); disabled chrome is unstyled.
+        let enabled = action_button_style(true, p);
+        assert_eq!(enabled.bg, Some(p.selection_bg));
+        assert_eq!(enabled.fg, Some(p.selection_text));
+        let disabled = action_button_style(false, p);
+        assert_eq!(disabled.bg, None);
     }
 
     #[test]

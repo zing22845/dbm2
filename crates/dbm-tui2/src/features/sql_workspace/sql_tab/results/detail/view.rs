@@ -266,7 +266,9 @@ pub fn render(
 
     // Reserve a *dynamic* number of rows for the Save/Discard chips: they wrap
     // to as many rows as the detail width needs, so they are never clipped.
-    let chip_style = Style::default().bg(p.selection);
+    // The chips reuse the list toolbar's available-button chrome (the header
+    // Discover look) so an enabled action reads the same everywhere.
+    let chip_style = p.available_button_style();
     let action_h = if has_action_btns {
         detail_chip_rows(inner.width as usize)
     } else {

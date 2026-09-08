@@ -165,6 +165,17 @@ impl Palette {
             .fg(self.accent)
             .add_modifier(Modifier::BOLD)
     }
+
+    /// Style of an *available* (enabled / active) action button: the light
+    /// selection "island" with selection-text foreground — the same look as the
+    /// header's Discover button when it is focused. Shared by the Results
+    /// action bar and the detail Save/Discard chips so every enabled button
+    /// renders identically. Disabled buttons stay at `Style::default()`.
+    pub fn available_button_style(&self) -> Style {
+        Style::default()
+            .fg(self.selection_text)
+            .bg(self.selection_bg)
+    }
 }
 
 /// A theme: a `dark` and a `light` palette plus the current mode flag.
