@@ -521,15 +521,17 @@ fn render_table(
                     .set_string(table_area.x, y_base, glyph.to_string(), style);
             }
         }
-        // A dirty row's grid borders share the change marker's color (the same
-        // colour as the `~`/`+`/`-` gutter glyph), so the whole edited row reads
-        // as one unit — matching the original dbm's per-row change tint.
-        let row_kind_dirty = gutter_w > 0 && row_kind != RowChangeKind::NoChange;
-        let row_border_style = if row_kind_dirty {
-            change_kind_style(p, row_kind)
+        // Dirty-row border tint in the change marker's colour. An Insert /
+        // Delete row is tinted as a whole; an Update row tints only the cells
+        // that actually changed (cell-level, decided while painting below).
+        let row_tint = if gutter_w > 0 && row_kind != RowChangeKind::NoChange {
+            Some(change_kind_style(p, row_kind))
         } else {
-            grid_style
+            None
         };
+        // Screen spans `(col_x, border_x)` of this row's changed cells, whose
+        // top/bottom border segments get the tint.
+        let mut dirty_cell_spans: Vec<(u16, u16)> = Vec::new();
 
         // Horizontal span (`(left, right)`) of the current-match cell on this
         // row, if any; the row separator below tints this segment as the cell's
@@ -656,7 +658,11 @@ fn render_table(
                 Rect::new(col_x, y_base, tv.text_w, RESULTS_ROW_CONTENT_HEIGHT),
             );
 
-            // Column border for this row.
+            // Column border for this row. It takes the change tint when it
+            // belongs to a changed cell: either this cell or the cell to its
+            // right is dirty (whole row for Insert/Delete, isolated changed
+            // cells for an Update row). The current-match frame repaints its
+            // own accent segment afterwards.
             let col_right = crate::common::view::format::col_x_end(col, col_widths);
             let border_x = table_area
                 .x
@@ -664,11 +670,27 @@ fn render_table(
                 .saturating_add(col_right as u16)
                 .saturating_sub(h_scroll)
                 .saturating_sub(1);
+            if dirty && border_x >= table_area.x && border_x < table_area.x + table_area.width {
+                dirty_cell_spans.push((col_x, border_x));
+            }
+            let right_cell_dirty = dirty
+                || (gutter_w > 0
+                    && col + 1 < num_cols
+                    && (matches!(row_kind, RowChangeKind::Insert | RowChangeKind::Delete)
+                        || crate::features::sql_workspace::sql_tab::results::edit::cell_is_dirty(
+                            &state.edit,
+                            row_idx,
+                            col + 1,
+                        )));
+            let border_style = match row_tint {
+                Some(t) if right_cell_dirty => t,
+                _ => grid_style,
+            };
             if border_x >= table_area.x && border_x < table_area.x + table_area.width {
                 for y in y_base..(y_base + RESULTS_ROW_HEIGHT).min(table_area.bottom()) {
                     frame
                         .buffer_mut()
-                        .set_string(border_x, y, "│", row_border_style);
+                        .set_string(border_x, y, "│", border_style);
                 }
             }
 
@@ -704,9 +726,40 @@ fn render_table(
                         };
                         (c, accent)
                     }
-                    _ => ("─", row_border_style),
+                    _ => ("─", grid_style),
                 };
                 frame.buffer_mut().set_string(x, row_sep_y, glyph, style);
+            }
+        }
+
+        // Paint the changed cells' own top + bottom border segments in the tint
+        // (the shared separator/header line above is repainted only over the
+        // cells that changed). Update rows therefore tint only their changed
+        // cells, while Insert/Delete rows cover the whole line; the current
+        // match's accent frame keeps its span.
+        if let Some(tint) = row_tint {
+            let top_y = y_base.saturating_sub(1);
+            for &(left, right) in &dirty_cell_spans {
+                for (line_y, drawn) in [
+                    (top_y, top_y < table_area.bottom()),
+                    (row_sep_y, row_sep_y < table_area.bottom()),
+                ] {
+                    if !drawn || line_y < table_area.y {
+                        continue;
+                    }
+                    for x in left..right {
+                        if x < table_area.x || x >= table_area.right() {
+                            continue;
+                        }
+                        if let Some((l, r)) = match_bottom_span
+                            && x >= l
+                            && x <= r
+                        {
+                            continue;
+                        }
+                        frame.buffer_mut().set_string(x, line_y, "─", tint);
+                    }
+                }
             }
         }
     }
