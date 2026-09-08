@@ -14,7 +14,7 @@ use ratatui::widgets::Paragraph;
 use crate::common::layout::pane_scrollbar::ActiveScrollbar;
 use crate::common::layout::text::footer_height;
 use crate::common::model::RowChangeKind;
-use crate::common::view::action_bar::{action_bar_width, draw_action_bar};
+use crate::common::view::action_bar::draw_action_bar;
 use crate::common::view::format::{
     RESULTS_HEADER_HEIGHT, RESULTS_ROW_CONTENT_HEIGHT, RESULTS_ROW_HEIGHT, column_type_label,
     results_col_text_view,
@@ -23,7 +23,8 @@ use crate::common::view::theme::Theme;
 
 use super::super::pagination::RESULTS_PAGINATION_BAR_HEIGHT;
 use super::layout::{
-    compute_viewport_scroll, results_geometry, results_list_regions, results_toolbar_model,
+    compute_viewport_scroll, results_action_rows, results_geometry, results_list_regions,
+    results_toolbar_model,
 };
 use super::state::ListState;
 
@@ -58,16 +59,13 @@ pub fn render(
         return;
     };
 
-    let state_h_scroll = state.h_scroll.get();
-
-    // The list region splits into the action bar (top) and the table body.
-    let (action_bar_area, table_body) = results_list_regions(list_area);
-
+    // The list region splits into the action bar (top; buttons wrap onto extra
+    // rows when the pane is narrow) and the table body.
     let model = results_toolbar_model(state);
-    let bar_scroll_max = action_bar_width(&model).saturating_sub(action_bar_area.width);
-    let bar_scroll = state_h_scroll.min(bar_scroll_max as usize) as u16;
+    let action_rows = results_action_rows(list_area, state);
+    let (action_bar_area, table_body) = results_list_regions(list_area, action_rows);
 
-    draw_action_bar(frame, action_bar_area, &model, bar_scroll, p);
+    draw_action_bar(frame, action_bar_area, &model, 0, p);
     render_table(
         frame,
         theme,
@@ -523,6 +521,15 @@ fn render_table(
                     .set_string(table_area.x, y_base, glyph.to_string(), style);
             }
         }
+        // A dirty row's grid borders share the change marker's color (the same
+        // colour as the `~`/`+`/`-` gutter glyph), so the whole edited row reads
+        // as one unit — matching the original dbm's per-row change tint.
+        let row_kind_dirty = gutter_w > 0 && row_kind != RowChangeKind::NoChange;
+        let row_border_style = if row_kind_dirty {
+            change_kind_style(p, row_kind)
+        } else {
+            grid_style
+        };
 
         // Horizontal span (`(left, right)`) of the current-match cell on this
         // row, if any; the row separator below tints this segment as the cell's
@@ -659,7 +666,9 @@ fn render_table(
                 .saturating_sub(1);
             if border_x >= table_area.x && border_x < table_area.x + table_area.width {
                 for y in y_base..(y_base + RESULTS_ROW_HEIGHT).min(table_area.bottom()) {
-                    frame.buffer_mut().set_string(border_x, y, "│", grid_style);
+                    frame
+                        .buffer_mut()
+                        .set_string(border_x, y, "│", row_border_style);
                 }
             }
 
@@ -695,7 +704,7 @@ fn render_table(
                         };
                         (c, accent)
                     }
-                    _ => ("─", grid_style),
+                    _ => ("─", row_border_style),
                 };
                 frame.buffer_mut().set_string(x, row_sep_y, glyph, style);
             }

@@ -71,6 +71,10 @@ pub enum ResultsMessage {
     /// A `d` key press while editing (the original `dd` chord — see
     /// [`ListMessage::DelChord`]).
     DelChord,
+    /// An Esc / focus-leave attempt was made while the edit session has
+    /// unsaved changes: block the leave and surface the reason on the results
+    /// footer instead of silently dropping the edits.
+    EditLeaveAttempt,
     /// Set the detail draft text (edited cell value).
     SetDetailDraft { text: String },
     /// Focus the detail cell editor on the current selection (opens the detail
@@ -227,7 +231,8 @@ impl ResultsMessage {
             | ResultsMessage::DetailEditorKey(_)
             | ResultsMessage::CopyDetailSelection
             | ResultsMessage::ToggleDetail
-            | ResultsMessage::CommitOutcome { .. } => ListMessage::ResetSelection,
+            | ResultsMessage::CommitOutcome { .. }
+            | ResultsMessage::EditLeaveAttempt => ListMessage::ResetSelection,
             ResultsMessage::List(_) | ResultsMessage::Detail(_) => {
                 panic!("into_list_message called on already-routed message")
             }

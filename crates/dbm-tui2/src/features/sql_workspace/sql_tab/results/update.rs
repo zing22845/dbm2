@@ -154,6 +154,19 @@ pub fn update(
             state.detail.leave_warning = false;
             (state, intents, effects, true)
         }
+        // Esc / focus-leave attempted while the edit session has unsaved
+        // changes (dirty cells / deleted rows / pending inserts): block the
+        // leave and surface the reason on the results footer instead of
+        // silently dropping the edits (mirroring the detail draft's
+        // save/discard gate). A clean session never sends this.
+        ResultsMessage::EditLeaveAttempt => {
+            if state.list.edit.editing && state.list.edit.is_dirty() {
+                state.list.leave_warning = true;
+                (state, intents, effects, true)
+            } else {
+                (state, intents, effects, false)
+            }
+        }
         // Post-commit flow: a successful commit exits edit mode (clearing the
         // snapshots / detail draft) and re-runs the last query so the committed
         // rows refresh on screen, mirroring the original dbm's
@@ -317,6 +330,11 @@ fn route_to_list(
             );
             state.detail = ds2;
         }
+    }
+    // Rolling back, exiting the session, or replacing the result resolves the
+    // blocked-leave warning.
+    if is_exit_edit || is_rollback || resets_detail_scroll {
+        state.list.leave_warning = false;
     }
     if is_move || resets_detail_scroll {
         state.detail.scroll = 0;
@@ -794,6 +812,40 @@ mod tests {
         assert!(!s3.detail.focused);
         assert!(s3.detail.editor.is_none());
         assert!(!s3.detail.dirty);
+    }
+
+    #[test]
+    fn esc_leave_attempt_warns_on_dirty_and_rollback_clears_it() {
+        // A dirty edit session (a modified cell) blocks the Esc exit.
+        let mut state = editable_state();
+        state.list.enter_edit();
+        state.list.edit.apply_cell(0, 0, "x".into());
+        assert!(state.list.edit.is_dirty());
+
+        let (s, _i, _e, dirty) = update(ResultsMessage::EditLeaveAttempt, state);
+        assert!(dirty);
+        assert!(s.list.leave_warning, "blocked leave must raise the warning");
+        assert!(s.list.edit.editing, "the session must survive");
+
+        // Rolling back resolves the edits and clears the warning.
+        let (s2, _i, _e, dirty) = update(ResultsMessage::Rollback, s);
+        assert!(dirty);
+        assert!(!s2.list.edit.is_dirty());
+        assert!(
+            !s2.list.leave_warning,
+            "rollback must clear the blocked-leave warning"
+        );
+    }
+
+    #[test]
+    fn esc_leave_attempt_noop_on_clean_session() {
+        // A clean session has nothing to lose; the block must not fire.
+        let mut state = editable_state();
+        state.list.enter_edit();
+        assert!(!state.list.edit.is_dirty());
+        let (s, _i, _e, dirty) = update(ResultsMessage::EditLeaveAttempt, state);
+        assert!(!dirty);
+        assert!(!s.list.leave_warning);
     }
 
     #[test]

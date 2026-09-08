@@ -96,6 +96,10 @@ pub struct ListState {
     /// suppressed so scrollbar drags / manual scrolls are not overridden.
     /// Cleared on any cursor-movement message.
     pub scroll_locked: Cell<bool>,
+    /// Whether a leave attempt was blocked by unsaved edits (a dirty edit
+    /// session). Cleared when the edits are rolled back / committed or the
+    /// session exits, and drives the red footer warning.
+    pub leave_warning: bool,
 }
 
 impl ListState {

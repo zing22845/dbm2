@@ -4,22 +4,26 @@
 use super::state::ListState;
 use crate::common::layout::pane_scrollbar::{PaneScrollLayout, pane_scroll_layout};
 use crate::common::view::action_bar::{
-    RESULTS_ACTION_BAR_HEIGHT, ResultsAction, ResultsToolbarModel, action_bar_width,
-    layout_action_bar,
+    ResultsAction, ResultsToolbarModel, action_bar_height, layout_action_bar,
 };
 use crate::common::view::format::{RESULTS_HEADER_HEIGHT, RESULTS_ROW_HEIGHT};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
+/// How many rows the Results action bar needs for `list_area`'s width: buttons
+/// wrap onto extra rows instead of scrolling when the pane is narrow. Single
+/// source of truth for both the renderer and the hit-test paths.
+pub fn results_action_rows(list_area: Rect, state: &ListState) -> u16 {
+    let model = results_toolbar_model(state);
+    action_bar_height(&model, list_area.width)
+}
+
 /// Split a list region (the content band narrowed to the list side) vertically
-/// into the action bar (top) and the table body. Single source of truth used by
-/// both the renderer and the hit-test paths.
-pub fn results_list_regions(list_area: Rect) -> (Rect, Rect) {
+/// into the action bar (top, [`results_action_rows`] tall) and the table body.
+/// Single source of truth used by both the renderer and the hit-test paths.
+pub fn results_list_regions(list_area: Rect, action_rows: u16) -> (Rect, Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(RESULTS_ACTION_BAR_HEIGHT),
-            Constraint::Min(0),
-        ])
+        .constraints([Constraint::Length(action_rows.max(1)), Constraint::Min(0)])
         .split(list_area);
     (chunks[0], chunks[1])
 }
@@ -55,14 +59,13 @@ pub fn action_bar_button_at(
     x: u16,
     y: u16,
 ) -> Option<ResultsAction> {
-    let (bar_area, _) = results_list_regions(list_area);
+    let rows = results_action_rows(list_area, state);
+    let (bar_area, _) = results_list_regions(list_area, rows);
     if bar_area.width == 0 || !contains(bar_area, x, y) {
         return None;
     }
     let model = results_toolbar_model(state);
-    let bar_scroll_max = action_bar_width(&model).saturating_sub(bar_area.width);
-    let bar_scroll = (state.h_scroll.get() as u16).min(bar_scroll_max);
-    for (action, rect, enabled) in layout_action_bar(bar_area, &model, bar_scroll) {
+    for (action, rect, enabled) in layout_action_bar(bar_area, &model, 0) {
         if enabled && contains(rect, x, y) {
             return Some(action);
         }
@@ -120,7 +123,7 @@ pub fn cell_hit_at(list_area: Rect, state: &ListState, x: u16, y: u16) -> Option
     let col_widths = &state.col_widths;
 
     // Use the single source of truth for the list geometry.
-    let (_, table_area) = results_list_regions(list_area);
+    let (_, table_area) = results_list_regions(list_area, results_action_rows(list_area, state));
 
     let row_count = result.rows.len();
     let table_width = crate::common::view::format::results_table_width(col_widths);
@@ -184,7 +187,7 @@ pub(super) fn results_geometry(list_area: Rect, state: &ListState) -> Option<(Re
         return None;
     }
     let col_widths = &state.col_widths;
-    let (_, table_area) = results_list_regions(list_area);
+    let (_, table_area) = results_list_regions(list_area, results_action_rows(list_area, state));
     let table_width = crate::common::view::format::results_table_width(col_widths)
         .saturating_add(results_gutter_width(state));
     let vs = compute_viewport_scroll(

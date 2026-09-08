@@ -279,6 +279,42 @@ pub(super) fn sql_results(msg: SqlResultsMessage, tab_id: usize) -> AppMsg {
 
 /// Results sub-pane keys: navigation, editing, and toolbar actions.
 ///
+/// Move the results row selection by one (`down` true/false), crossing into the
+/// next/previous SQL page at the edges. Shared by `j`/`k` and the arrows.
+fn results_row_nav(
+    list: &crate::features::sql_workspace::sql_tab::results::list::state::ListState,
+    tab_id: usize,
+    down: bool,
+) -> Option<AppMsg> {
+    if down {
+        if list.row_count() > 0 && list.row + 1 >= list.row_count() && list.can_go_next_page() {
+            Some(sql_results(
+                SqlResultsMessage::PageNav {
+                    action: ResultsPageAction::Next,
+                },
+                tab_id,
+            ))
+        } else {
+            Some(sql_results(
+                SqlResultsMessage::MoveSelection { dr: 1, dc: 0 },
+                tab_id,
+            ))
+        }
+    } else if list.row == 0 && list.can_go_prev_page() {
+        Some(sql_results(
+            SqlResultsMessage::PageNav {
+                action: ResultsPageAction::Prev,
+            },
+            tab_id,
+        ))
+    } else {
+        Some(sql_results(
+            SqlResultsMessage::MoveSelection { dr: -1, dc: 0 },
+            tab_id,
+        ))
+    }
+}
+
 /// Runs only when the active tab's sub-pane focus is `Results`, so keys here do
 /// not collide with the editor's. Produces `ResultsMessage`s (or modal messages
 /// via the returned `AppMsg`) and never mutates state directly.
@@ -343,7 +379,13 @@ fn results_key(
             if results.list.search.has_filter() {
                 Some(sql_results(SqlResultsMessage::SearchKey(key), tab_id))
             } else if results.list.edit.editing {
-                Some(sql_results(SqlResultsMessage::ExitEdit, tab_id))
+                // Unsaved edits block the Esc exit (roll back or commit first);
+                // a clean session exits as usual.
+                if results.list.edit.is_dirty() {
+                    Some(sql_results(SqlResultsMessage::EditLeaveAttempt, tab_id))
+                } else {
+                    Some(sql_results(SqlResultsMessage::ExitEdit, tab_id))
+                }
             } else if results.detail_open {
                 Some(sql_results(SqlResultsMessage::ToggleDetail, tab_id))
             } else {
@@ -418,44 +460,22 @@ fn results_key(
             },
             tab_id,
         )),
-        // Cell selection via arrows; on the last/first row of a page they
-        // cross into the next/previous SQL page (mirroring the original dbm's
-        // `move_results_row_selection`).
-        KeyCode::Down => {
-            let list = &results.list;
-            if list.row_count() > 0
-                && list.row + 1 >= list.row_count()
-                && list.can_go_next_page()
-            {
-                Some(sql_results(
-                    SqlResultsMessage::PageNav {
-                        action: ResultsPageAction::Next,
-                    },
-                    tab_id,
-                ))
-            } else {
-                Some(sql_results(
-                    SqlResultsMessage::MoveSelection { dr: 1, dc: 0 },
-                    tab_id,
-                ))
-            }
-        }
-        KeyCode::Up => {
-            let list = &results.list;
-            if list.row == 0 && list.can_go_prev_page() {
-                Some(sql_results(
-                    SqlResultsMessage::PageNav {
-                        action: ResultsPageAction::Prev,
-                    },
-                    tab_id,
-                ))
-            } else {
-                Some(sql_results(
-                    SqlResultsMessage::MoveSelection { dr: -1, dc: 0 },
-                    tab_id,
-                ))
-            }
-        }
+        // Cell selection via hjkl / arrows; on the last/first row of a page
+        // they cross into the next/previous SQL page (mirroring the original
+        // dbm's `move_results_row_selection`).
+        KeyCode::Char('j') if key.modifiers.is_empty() => results_row_nav(&results.list, tab_id, true),
+        KeyCode::Char('k') if key.modifiers.is_empty() => results_row_nav(&results.list, tab_id, false),
+        KeyCode::Down => results_row_nav(&results.list, tab_id, true),
+        KeyCode::Up => results_row_nav(&results.list, tab_id, false),
+        // h/l move the cell selection horizontally, like the original dbm.
+        KeyCode::Char('h') if key.modifiers.is_empty() => Some(sql_results(
+            SqlResultsMessage::MoveSelection { dr: 0, dc: -1 },
+            tab_id,
+        )),
+        KeyCode::Char('l') if key.modifiers.is_empty() => Some(sql_results(
+            SqlResultsMessage::MoveSelection { dr: 0, dc: 1 },
+            tab_id,
+        )),
         KeyCode::Left => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: -1 }, tab_id)),
         KeyCode::Right => Some(sql_results(SqlResultsMessage::MoveSelection { dr: 0, dc: 1 }, tab_id)),
         // Copy the selected column name (`Ctrl+n`, original dbm binding). With
@@ -1496,6 +1516,39 @@ mod tests {
             SqlTabMessage::Results {
                 tab_id: 0,
                 msg: SqlResultsMsg::Message(SqlResultsMessage::UnfocusDetail),
+            }
+        );
+    }
+
+    #[test]
+    fn results_esc_with_clean_edit_session_exits() {
+        let results = editing_results(); // editing on, no changes yet
+        let msg = results_key(key(KeyCode::Esc, KeyModifiers::NONE), 0, &results)
+            .expect("esc with a clean edit session must exit it");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::ExitEdit),
+            }
+        );
+    }
+
+    #[test]
+    fn results_esc_with_unsaved_edits_requests_the_leave_block() {
+        // A dirty edit session must not silently drop its edits on Esc: the key
+        // maps to the leave-attempt block (commit or roll back first).
+        let mut results = editing_results();
+        results.list.edit.enter_edit(&[vec!["1".into()]]);
+        results.list.edit.apply_cell(0, 0, "2".into());
+        assert!(results.list.edit.is_dirty());
+        let msg = results_key(key(KeyCode::Esc, KeyModifiers::NONE), 0, &results)
+            .expect("esc with unsaved edits must emit the leave-attempt block");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::EditLeaveAttempt),
             }
         );
     }

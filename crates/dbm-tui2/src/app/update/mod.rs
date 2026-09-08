@@ -266,6 +266,29 @@ pub(super) fn connection_form_blocks_focus_change(state: &AppState, to: &Pane) -
     !matches!(to, Pane::InstanceWorkspace(IwPane::Connections))
 }
 
+/// True when the active SQL workspace tab's Results list holds unsaved edits
+/// (a dirty edit session) and focus is about to leave the SQL workspace to
+/// another top-level pane — mirroring the connections form's dirty gate. The
+/// results sub-pane moves that stay inside the workspace are gated separately
+/// in the sql_tab `Focus` handler.
+pub(super) fn results_edit_blocks_focus_change(state: &AppState, to: &Pane) -> bool {
+    if matches!(to, Pane::SQLWorkspace) || state.focus != Pane::SQLWorkspace {
+        return false;
+    }
+    let Some(tab) = state
+        .sql
+        .sql_tab
+        .active_tab
+        .and_then(|i| state.sql.sql_tab.tabs.get(i))
+    else {
+        return false;
+    };
+    use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+    tab.focus == SqlFocus::Results
+        && tab.results.list.edit.editing
+        && tab.results.list.edit.is_dirty()
+}
+
 /// Render the "unsaved changes" notice on the connections footer. Used when a
 /// blocked focus switch attempts to leave the form. The caller is responsible
 /// for marking the `UpdateResult` dirty so the new status repaints.
@@ -479,6 +502,18 @@ pub fn update_unchecked(msg: AppMsg, state: &mut AppState) -> UpdateResult {
                     result.dirty = true;
                     return result;
                 }
+                // Likewise, leaving the SQL workspace while its Results list has
+                // unsaved edits is blocked (commit or roll back first); the red
+                // footer warning is driven by the leave_warning flag.
+                if results_edit_blocks_focus_change(state, &pane) {
+                    if let Some(tab_id) = state.sql.sql_tab.active_tab
+                        && let Some(tab) = state.sql.sql_tab.tabs.get_mut(tab_id)
+                    {
+                        tab.results.list.leave_warning = true;
+                    }
+                    result.dirty = true;
+                    return result;
+                }
                 // Route the focus change through the single choke point so the
                 // feature sub-panes stay in lockstep with the shell focus.
                 // Unlike an eager reload on focus, the instance tree is only
@@ -558,6 +593,52 @@ mod tests {
             test_succeeded_at: None,
             test_failed_at: None,
         }
+    }
+
+    /// An app state whose active SQL tab is focused on Results with a dirty
+    /// edit session (one modified cell).
+    fn app_with_dirty_results_edit() -> crate::app::state::AppState {
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+        let mut state = crate::app::state::AppState::default();
+        state.focus = Pane::SQLWorkspace;
+        state.sql.sql_tab.open_connection_tab(
+            "inst".into(),
+            "c1".into(),
+            "id1".into(),
+            None,
+            None,
+            None,
+        );
+        state.sql.sql_tab.tabs[0].focus = SqlFocus::Results;
+        let edit = &mut state.sql.sql_tab.tabs[0].results.list.edit;
+        edit.enter_edit(&[vec!["1".into()]]);
+        edit.apply_cell(0, 0, "x".into());
+        state
+    }
+
+    #[test]
+    fn dirty_results_edit_blocks_leaving_the_sql_workspace() {
+        use crate::app_shell::nav::ExplorerPane;
+        let state = app_with_dirty_results_edit();
+        assert!(
+            results_edit_blocks_focus_change(&state, &Pane::Explorer(ExplorerPane::default())),
+            "dirty results edits must block leaving the SQL workspace"
+        );
+        assert!(
+            !results_edit_blocks_focus_change(&state, &Pane::SQLWorkspace),
+            "the guard never blocks a move that stays on the workspace"
+        );
+    }
+
+    #[test]
+    fn clean_results_edit_does_not_block_leaving_the_workspace() {
+        use crate::app_shell::nav::ExplorerPane;
+        let mut state = app_with_dirty_results_edit();
+        state.sql.sql_tab.tabs[0].results.list.edit.rollback();
+        assert!(
+            !results_edit_blocks_focus_change(&state, &Pane::Explorer(ExplorerPane::default())),
+            "a clean session has nothing to lose"
+        );
     }
 
     #[test]

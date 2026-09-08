@@ -110,43 +110,79 @@ pub fn action_bar_width(model: &ResultsToolbarModel) -> u16 {
     total
 }
 
-/// Lay out action buttons in `area`, offset by `h_scroll` (shared with the results grid).
+/// A button's placed position in the wrapped action bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlacedButton {
+    pub action: ResultsAction,
+    pub enabled: bool,
+    /// Column offset from the action-bar area's left edge.
+    pub x: u16,
+    /// 0-based row inside the action bar (which is [`action_bar_height`] tall).
+    pub row: u16,
+    /// Padded label width in columns.
+    pub width: u16,
+}
+
+/// Greedily lay the action buttons out in `width` columns, wrapping whole
+/// buttons onto a new row whenever one no longer fits — a narrow Results pane
+/// never clips or scrolls the toolbar, it simply uses more rows.
+pub fn place_action_bar(model: &ResultsToolbarModel, width: u16) -> Vec<PlacedButton> {
+    let buttons = action_buttons(model);
+    let mut out = Vec::with_capacity(buttons.len());
+    let mut row = 0u16;
+    let mut used = 0u16;
+    for btn in buttons {
+        let w = padded_label(&btn.label).chars().count() as u16;
+        if used > 0 && used + BTN_GAP + w > width.max(1) {
+            row = row.saturating_add(1);
+            used = 0;
+        }
+        let x = if used > 0 { used + BTN_GAP } else { used };
+        out.push(PlacedButton {
+            action: btn.action,
+            enabled: btn.enabled,
+            x,
+            row,
+            width: w,
+        });
+        used = x + w;
+    }
+    out
+}
+
+/// The number of rows the wrapped action bar occupies at `width` (at least 1).
+pub fn action_bar_height(model: &ResultsToolbarModel, width: u16) -> u16 {
+    place_action_bar(model, width)
+        .iter()
+        .map(|b| b.row)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+/// Map [`place_action_bar`] positions into screen rects inside `area`.
+/// `h_scroll` is accepted for signature compatibility (the wrapped layout is
+/// always fully visible, so it is unused).
 pub fn layout_action_bar(
     area: Rect,
     model: &ResultsToolbarModel,
-    h_scroll: u16,
+    _h_scroll: u16,
 ) -> Vec<(ResultsAction, Rect, bool)> {
-    if area.width == 0 || area.height == 0 {
-        return Vec::new();
-    }
-    let buttons = action_buttons(model);
-    let mut out = Vec::with_capacity(buttons.len());
-    let mut virt_x = area.x as i32 - i32::from(h_scroll);
-    let area_left = i32::from(area.x);
-    let area_right = area_left + i32::from(area.width);
-    for (i, btn) in buttons.iter().enumerate() {
-        let text = padded_label(&btn.label);
-        let w = text.chars().count() as i32;
-        let left = virt_x.max(area_left);
-        let right = (virt_x + w).min(area_right);
-        if right > left {
-            out.push((
-                btn.action,
+    place_action_bar(model, area.width)
+        .into_iter()
+        .map(|b| {
+            (
+                b.action,
                 Rect {
-                    x: left as u16,
-                    y: area.y,
-                    width: (right - left) as u16,
+                    x: area.x.saturating_add(b.x),
+                    y: area.y.saturating_add(b.row),
+                    width: b.width,
                     height: 1,
                 },
-                btn.enabled,
-            ));
-        }
-        virt_x += w;
-        if i + 1 < buttons.len() {
-            virt_x += i32::from(BTN_GAP);
-        }
-    }
-    out
+                b.enabled,
+            )
+        })
+        .collect()
 }
 
 /// Enabled/disabled chrome shared with the Results action bar.
@@ -195,47 +231,46 @@ fn button_style(
     }
 }
 
+/// Draw the action bar, wrapping buttons across [`action_bar_height`] rows.
+/// `area` must be sized with [`action_bar_height`] (the geometry helper
+/// `results_list_regions` does this) so every row has room.
 pub fn draw_action_bar(
     frame: &mut Frame,
     area: Rect,
     model: &ResultsToolbarModel,
-    h_scroll: u16,
+    _h_scroll: u16,
     palette: &Palette,
 ) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    frame.render_widget(Paragraph::new(" "), area);
+    frame.render_widget(ratatui::widgets::Clear, area);
 
     let buttons = action_buttons(model);
-    let mut virt_x = area.x as i32 - i32::from(h_scroll);
-    let area_left = i32::from(area.x);
-    let area_right = area_left + i32::from(area.width);
-
-    for (i, btn) in buttons.iter().enumerate() {
-        let text = padded_label(&btn.label);
-        let w = text.chars().count() as i32;
-        let left = virt_x.max(area_left);
-        let right = (virt_x + w).min(area_right);
-        if right > left {
-            let skip = (left - virt_x) as usize;
-            let take = (right - left) as usize;
-            let visible: String = text.chars().skip(skip).take(take).collect();
-            let style = button_style(btn.action, btn.enabled, model.edit_active, palette);
-            frame.render_widget(
-                Paragraph::new(visible).style(style),
-                Rect {
-                    x: left as u16,
-                    y: area.y,
-                    width: take as u16,
-                    height: 1,
-                },
-            );
+    let places = place_action_bar(model, area.width);
+    for (btn, place) in buttons.iter().zip(&places) {
+        if place.row >= area.height || place.width == 0 {
+            continue;
         }
-        virt_x += w;
-        if i + 1 < buttons.len() {
-            virt_x += i32::from(BTN_GAP);
+        let left = area.x.saturating_add(place.x);
+        let right = area.right().min(left.saturating_add(place.width));
+        if right <= left {
+            continue;
         }
+        let visible: String = padded_label(&btn.label)
+            .chars()
+            .take((right - left) as usize)
+            .collect();
+        let style = button_style(btn.action, btn.enabled, model.edit_active, palette);
+        frame.render_widget(
+            Paragraph::new(visible).style(style),
+            Rect {
+                x: left,
+                y: area.y.saturating_add(place.row),
+                width: right - left,
+                height: 1,
+            },
+        );
     }
 }
 
@@ -306,5 +341,43 @@ mod tests {
         assert!(!buttons[2].enabled);
         assert!(!buttons[3].enabled);
         assert!(!buttons[4].enabled);
+    }
+
+    #[test]
+    fn action_bar_wraps_onto_more_rows_when_narrow() {
+        let model = sample_model();
+        assert_eq!(
+            action_bar_height(&model, 500),
+            1,
+            "a wide pane keeps the whole bar on one row"
+        );
+        let narrow_rows = action_bar_height(&model, 15);
+        assert!(
+            narrow_rows > 1,
+            "a narrow pane must wrap buttons onto extra rows"
+        );
+        // Every button is still placed, and its row fits inside the reserved
+        // height.
+        let places = place_action_bar(&model, 15);
+        assert_eq!(places.len(), action_buttons(&model).len());
+        assert!(
+            places.iter().all(|b| b.row < narrow_rows),
+            "placed rows must fit the computed bar height"
+        );
+    }
+
+    #[test]
+    fn wrapped_layout_maps_to_rows_inside_the_area() {
+        let model = sample_model();
+        let height = action_bar_height(&model, 15);
+        let area = Rect::new(2, 3, 15, height);
+        let placed = layout_action_bar(area, &model, 0);
+        assert!(!placed.is_empty());
+        assert!(
+            placed.iter().all(|(_, r, _)| {
+                r.y >= area.y && r.y < area.y + area.height && r.x < area.right()
+            }),
+            "wrapped button rects must live inside the action-bar area"
+        );
     }
 }

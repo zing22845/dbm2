@@ -377,6 +377,10 @@ pub fn sql_workspace_click(
             let table_area =
                 crate::features::sql_workspace::sql_tab::results::list::layout::results_list_regions(
                     layout.list,
+                    crate::features::sql_workspace::sql_tab::results::list::layout::results_action_rows(
+                        layout.list,
+                        &tab.results.list,
+                    ),
                 )
                 .1;
 

@@ -30,20 +30,27 @@ pub(super) fn apply(msg: SqlTabMessage, state: &mut SqlTabState, out: &mut SqlTa
         }
         SqlTabMessage::Focus(focus) => {
             if let Some(tab) = state.active_tab.and_then(|i| state.tabs.get_mut(i)) {
-                // Leaving Results while its detail cell editor holds keyboard
-                // focus is gated like an Esc leave: a clean draft quietly drops
-                // the editor, while an unsaved draft blocks the move so the
-                // edit is never lost (the footer keeps the save/discard hint).
-                if focus != SqlFocus::Results
-                    && tab.focus == SqlFocus::Results
-                    && tab.results.detail.focused
-                {
-                    if tab.results.detail.dirty {
-                        tab.results.detail.leave_warning = true;
+                // Leaving Results while it holds unsaved edits is gated like an
+                // Esc leave: unsaved changes block the move so nothing is
+                // dropped, and a clean detail editor quietly drops its focus.
+                if focus != SqlFocus::Results && tab.focus == SqlFocus::Results {
+                    let detail_blocks = tab.results.detail.focused && tab.results.detail.dirty;
+                    let list_blocks =
+                        tab.results.list.edit.editing && tab.results.list.edit.is_dirty();
+                    if detail_blocks || list_blocks {
+                        if detail_blocks {
+                            tab.results.detail.leave_warning = true;
+                        }
+                        if list_blocks {
+                            tab.results.list.leave_warning = true;
+                        }
                         out.dirty = true;
                         return;
                     }
-                    tab.results.detail.unfocus();
+                    if tab.results.detail.focused {
+                        tab.results.detail.unfocus();
+                    }
+                    tab.results.list.leave_warning = false;
                 }
                 let mut changed = tab.focus != focus;
                 // Track the sub-pane that was active before entering Results, so
@@ -388,5 +395,35 @@ mod tests {
             s2.tabs[0].results.detail.leave_warning,
             "the blocked leave must surface the save/discard warning"
         );
+    }
+
+    #[test]
+    fn focus_away_from_results_blocked_by_dirty_edit_session() {
+        use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+        let mut s = SqlTabState::default();
+        s.open_connection_tab("inst".into(), "c1".into(), "id1".into(), None, None, None);
+        let (mut s, _i, _e, _d) = update(SqlTabMessage::Focus(SqlFocus::Results), s);
+        // A dirty edit session on the list (a modified cell).
+        s.tabs[0].results.list.edit.enter_edit(&[vec!["1".into()]]);
+        s.tabs[0].results.list.edit.apply_cell(0, 0, "x".into());
+        assert!(s.tabs[0].results.list.edit.is_dirty());
+
+        let (mut s2, _i, _e, dirty) = update(SqlTabMessage::Focus(SqlFocus::Editor), s);
+        assert!(dirty, "the blocked move still repaints the leave warning");
+        assert_eq!(
+            s2.tabs[0].focus,
+            SqlFocus::Results,
+            "unsaved list edits must keep focus on Results"
+        );
+        assert!(
+            s2.tabs[0].results.list.leave_warning,
+            "the blocked leave must raise the list footer warning"
+        );
+
+        // Once clean (rollback) the same move is allowed.
+        s2.tabs[0].results.list.edit.rollback();
+        assert!(!s2.tabs[0].results.list.edit.is_dirty());
+        let (s3, _i, _e, _d) = update(SqlTabMessage::Focus(SqlFocus::Editor), s2);
+        assert_eq!(s3.tabs[0].focus, SqlFocus::Editor);
     }
 }

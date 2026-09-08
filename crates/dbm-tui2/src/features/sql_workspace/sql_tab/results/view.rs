@@ -6,8 +6,9 @@
 //! `[list | splitter | detail]`; otherwise the list fills the whole inner area.
 
 use ratatui::Frame;
-use ratatui::style::Style;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
 use crate::common::layout::pane_scrollbar::ActiveScrollbar;
@@ -20,6 +21,12 @@ use super::list::view as list_view;
 use super::pagination::{layout_pagination_bar, pagination_toolbar_line};
 use super::splitter::view as splitter_view;
 use super::state::ResultsState;
+
+/// Footer notice shown when a leave was blocked by unsaved edits in the list's
+/// edit session (commit or roll back first). Drawn in the failure colour, like
+/// the detail draft's and the connections form's dirty-leave notices.
+pub const RESULTS_EDIT_LEAVE_WARNING: &str =
+    "Unsaved edits — commit (C-s) or roll back (C-u) before leaving";
 
 /// Render the Results feature. The single outer Block + title wraps the
 /// entire `area` (both list and, when `detail_open`, the detail preview).
@@ -162,8 +169,24 @@ pub fn render(
         frame.render_widget(Paragraph::new(toolbar), bar.bar_rect);
     }
 
-    // Full-width list footer (spans both the table and the detail).
-    let hint = results_pane_footer_text(state.list.search.text_input_active(), &sql_status);
-    draw_pane_footer(frame, theme, layout.footer, &hint);
+    // Full-width list footer (spans both the table and the detail). While a
+    // blocked leave left unsaved edits on the table, the footer shows the
+    // interception reason in the failure colour (connections / detail style).
+    let list_leave_blocked =
+        state.list.leave_warning && state.list.edit.editing && state.list.edit.is_dirty();
+    if list_leave_blocked {
+        let style = Style::default().fg(Color::Red);
+        let lines: Vec<Line> = RESULTS_EDIT_LEAVE_WARNING
+            .split('\n')
+            .map(|l| Line::from(Span::styled(l.to_string(), style)))
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines).wrap(Wrap { trim: false }),
+            layout.footer,
+        );
+    } else {
+        let hint = results_pane_footer_text(state.list.search.text_input_active(), &sql_status);
+        draw_pane_footer(frame, theme, layout.footer, &hint);
+    }
     detail_hit
 }
