@@ -73,6 +73,20 @@ pub enum ResultsMessage {
     DelChord,
     /// Set the detail draft text (edited cell value).
     SetDetailDraft { text: String },
+    /// Focus the detail cell editor on the current selection (opens the detail
+    /// pane if needed). Requires an active whole-result edit session; the
+    /// current cell value is loaded as the draft baseline.
+    FocusDetail,
+    /// Leave the detail cell editor back to the table view. Blocked while the
+    /// draft is dirty (the footer shows the save/discard hint instead).
+    UnfocusDetail,
+    /// Save the detail draft to the selected cell (`dirty_cells` + live row),
+    /// then treat the draft as clean. The detail editor stays focused.
+    SaveDetailCell,
+    /// Discard the current detail draft back to the cell's baseline.
+    DiscardDetailCell,
+    /// Forward a key into the focused detail cell editor.
+    DetailEditorKey(KeyEvent),
     /// Apply a new rows-per-page limit.
     SetRowLimit { limit: usize },
     /// Jump to a page.
@@ -202,6 +216,11 @@ impl ResultsMessage {
                 ListMessage::AdjustColWidthTo { col, width }
             }
             ResultsMessage::SetDetailDraft { .. }
+            | ResultsMessage::FocusDetail
+            | ResultsMessage::UnfocusDetail
+            | ResultsMessage::SaveDetailCell
+            | ResultsMessage::DiscardDetailCell
+            | ResultsMessage::DetailEditorKey(_)
             | ResultsMessage::ToggleDetail
             | ResultsMessage::CommitOutcome { .. } => ListMessage::ResetSelection,
             ResultsMessage::List(_) | ResultsMessage::Detail(_) => {

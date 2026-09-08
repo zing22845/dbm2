@@ -1,5 +1,13 @@
-//! Results detail sub-module rendering: read-only cell body preview with
-//! optional action buttons (Save/Discard when editing) and a detail footer.
+//! Results detail sub-module rendering.
+//!
+//! Two modes:
+//!  * **Read-only preview** (default): shows the selected cell's value with
+//!    line numbers, following the table selection. Used while the whole-result
+//!    edit session is off, or while it is on but the detail editor is not
+//!    focused.
+//!  * **Cell editor** (`detail.focused`): embeds the edtui editor over the
+//!    draft (with baseline-diff highlights). Save / Discard action row and
+//!    footer appear while the draft is dirty.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -15,7 +23,7 @@ use crate::common::view::theme::Theme;
 
 use super::state::DetailState;
 
-/// Height of the detail action buttons row (when editing).
+/// Height of the detail action buttons row (when editing and dirty).
 const DETAIL_ACTION_BTNS_HEIGHT: u16 = 1;
 
 fn wrap_plain_line(line: &str, width: usize) -> Vec<Line<'static>> {
@@ -75,26 +83,44 @@ fn build_detail_lines(body: &str, text_width: u16) -> Vec<Line<'static>> {
     out
 }
 
-/// Build the detail footer hint text.
-fn detail_footer_text(detail: &DetailState, edit_active: bool) -> String {
-    if edit_active {
-        if detail.dirty {
-            " Detail  | Ctrl-S:save  Ctrl-D:discard  Esc:leave"
-        } else {
-            " Detail  | [edit mode]  Esc:leave"
-        }
-    } else {
-        " Detail  | Back: Esc"
+/// The active editor mode label, when the detail editor is focused.
+fn editor_mode_label(detail: &DetailState) -> &'static str {
+    let Some(mode) = detail.editor.as_ref().map(|h| h.editor.mode) else {
+        return "EDIT";
+    };
+    match mode {
+        edtui::EditorMode::Insert => "INSERT",
+        edtui::EditorMode::Visual => "VISUAL",
+        edtui::EditorMode::Search => "SEARCH",
+        edtui::EditorMode::Normal => "NORMAL",
     }
-    .to_string()
 }
 
-/// Build the detail action buttons line (Save/Discard when editing).
+/// Build the detail footer hint text.
+fn detail_footer_text(detail: &DetailState, edit_active: bool) -> String {
+    if detail.focused {
+        if detail.dirty {
+            " Detail  | Ctrl-S:save  Ctrl-U:discard  Esc:leave".to_string()
+        } else {
+            format!(" Detail  | [{}]  Esc:leave", editor_mode_label(detail))
+        }
+    } else if edit_active {
+        if detail.dirty {
+            " Detail  | Ctrl-S:save  Ctrl-U:discard".to_string()
+        } else {
+            " Detail  | [edit mode]  Esc:leave".to_string()
+        }
+    } else {
+        " Detail  | Back: Esc".to_string()
+    }
+}
+
+/// Build the detail action buttons line (Save/Discard when editing and dirty).
 fn detail_action_buttons_line(detail: &DetailState, edit_active: bool) -> Option<Line<'static>> {
     if !edit_active || !detail.dirty {
         return None;
     }
-    let p = String::from(" [Ctrl-S] Save   [Ctrl-D] Discard");
+    let p = String::from(" [Ctrl-S] Save   [Ctrl-U] Discard");
     Some(Line::from(vec![Span::styled(
         p,
         Style::default().fg(Color::Yellow),
@@ -102,7 +128,7 @@ fn detail_action_buttons_line(detail: &DetailState, edit_active: bool) -> Option
 }
 
 /// Render the detail sub-pane with its own border, optional action buttons,
-/// body area with scroll, and a detail footer.
+/// body area, and a detail footer.
 ///
 /// `edit_active` is passed from the parent (list state) since edit mode is
 /// owned by the list sub-feature.
@@ -127,7 +153,13 @@ pub fn render(
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .split(area);
 
-    // Title line inside the outer Results block — no own border.
+    // Title line inside the outer Results block — no own border. The focused
+    // editor appends its mode so the user can tell Insert/Normal apart.
+    let title = if detail.focused {
+        format!("{title}  [{}]", editor_mode_label(detail))
+    } else {
+        title
+    };
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             title,
@@ -138,7 +170,7 @@ pub fn render(
 
     let inner = chunks[1];
 
-    let has_action_btns = edit_active && detail.dirty;
+    let has_action_btns = edit_active && detail.dirty && detail.focused;
     let footer_h = footer_height(&detail_footer_text(detail, edit_active), inner.width).min(3);
 
     let chunks = if has_action_btns {
@@ -168,23 +200,31 @@ pub fn render(
         chunks[1]
     };
 
-    // Detail action buttons (only when editing and dirty).
+    // Detail action buttons (only when editing, focused and dirty).
     if has_action_btns && let Some(line) = detail_action_buttons_line(detail, edit_active) {
         frame.render_widget(Paragraph::new(line), chunks[0]);
     }
 
-    // Detail body.
-    let viewport = body_area.height as usize;
-    let display_lines = build_detail_lines(body, body_area.width);
-    let lines_total = display_lines.len();
-    let mut detail_state = detail.clone();
-    detail_state.clamp_scroll(lines_total, viewport);
-    let visible: Vec<Line> = display_lines
-        .into_iter()
-        .skip(detail_state.scroll)
-        .take(viewport.max(1))
-        .collect();
-    frame.render_widget(Paragraph::new(visible), body_area);
+    // Detail body: the embedded cell editor when focused, otherwise a read-only
+    // wrapped preview of the cell value with line numbers.
+    if detail.focused
+        && let Some(host) = detail.editor.as_ref()
+    {
+        let mut editor = host.editor.clone();
+        crate::common::editor::render_detail_editor(&mut editor, body_area, frame.buffer_mut());
+    } else {
+        let viewport = body_area.height as usize;
+        let display_lines = build_detail_lines(body, body_area.width);
+        let lines_total = display_lines.len();
+        let mut detail_state = detail.clone();
+        detail_state.clamp_scroll(lines_total, viewport);
+        let visible: Vec<Line> = display_lines
+            .into_iter()
+            .skip(detail_state.scroll)
+            .take(viewport.max(1))
+            .collect();
+        frame.render_widget(Paragraph::new(visible), body_area);
+    }
 
     // Detail footer.
     let hint = detail_footer_text(detail, edit_active);

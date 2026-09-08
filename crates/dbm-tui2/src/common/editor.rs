@@ -217,6 +217,114 @@ pub fn apply_normal_on_enter(editor: &mut EditorState) {
     editor.selection = None;
 }
 
+/// Orange style for Detail draft chars that differ from baseline.
+pub fn detail_dirty_style() -> Style {
+    Style::default().fg(Color::Rgb(255, 140, 0))
+}
+
+/// Highlight spans in `current` that differ from `baseline` (line-wise
+/// prefix/suffix). Ported verbatim from the original dbm so the Detail draft
+/// diff markers look identical.
+pub fn detail_dirty_highlights(baseline: &str, current: &str) -> Vec<edtui::Highlight> {
+    use edtui::{Highlight, Index2};
+    if current == baseline {
+        return Vec::new();
+    }
+    let style = detail_dirty_style();
+    let base_lines: Vec<&str> = baseline.split('\n').collect();
+    let cur_lines: Vec<&str> = current.split('\n').collect();
+    let mut out = Vec::new();
+    for (row, cur) in cur_lines.iter().enumerate() {
+        let base = base_lines.get(row).copied().unwrap_or("");
+        if *cur == base {
+            continue;
+        }
+        if cur.is_empty() {
+            continue;
+        }
+        let cur_chars: Vec<char> = cur.chars().collect();
+        let base_chars: Vec<char> = base.chars().collect();
+        let mut prefix = 0usize;
+        while prefix < cur_chars.len()
+            && prefix < base_chars.len()
+            && cur_chars[prefix] == base_chars[prefix]
+        {
+            prefix += 1;
+        }
+        let mut suffix = 0usize;
+        while suffix < cur_chars.len().saturating_sub(prefix)
+            && suffix < base_chars.len().saturating_sub(prefix)
+            && cur_chars[cur_chars.len() - 1 - suffix] == base_chars[base_chars.len() - 1 - suffix]
+        {
+            suffix += 1;
+        }
+        let start = prefix;
+        let end = cur_chars.len().saturating_sub(suffix);
+        if start < end {
+            out.push(Highlight::new(
+                Index2::new(row, start),
+                Index2::new(row, end.saturating_sub(1)),
+                style,
+            ));
+        } else if cur_chars.len() > base_chars.len() {
+            // Insertion with empty changed middle — highlight trailing new chars.
+            let from = base_chars.len().min(cur_chars.len());
+            if from < cur_chars.len() {
+                out.push(Highlight::new(
+                    Index2::new(row, from),
+                    Index2::new(row, cur_chars.len() - 1),
+                    style,
+                ));
+            }
+        } else if *cur != base {
+            // Full-line fallback.
+            out.push(Highlight::new(
+                Index2::new(row, 0),
+                Index2::new(row, cur_chars.len().saturating_sub(1)),
+                style,
+            ));
+        }
+    }
+    out
+}
+
+/// Refresh the baseline-vs-draft diff highlights on `editor`.
+pub fn refresh_detail_dirty_highlights(editor: &mut EditorState, baseline: &str) {
+    let current = editor_text(editor);
+    editor.set_highlights(detail_dirty_highlights(baseline, &current));
+}
+
+/// Theme for the results Detail cell editor: transparent base (so it blends
+/// into the results pane palette), visible block cursor drawn into the buffer
+/// (the Detail editor has no dedicated hardware-cursor slot), no status line.
+fn detail_editor_theme() -> EditorTheme<'static> {
+    EditorTheme::default()
+        .base(Style::default())
+        .selection_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .line_numbers_style(Style::default().fg(Color::DarkGray))
+        .cursor_style(Style::default().bg(Color::White).fg(Color::Black))
+        .hide_status_line()
+}
+
+/// Render the results Detail cell editor (plain text, no SQL highlight) with
+/// its own block cursor. Unlike the SQL editor there is no hardware-cursor
+/// plumbing here, so edtui paints the caret cell itself.
+pub fn render_detail_editor(
+    editor: &mut EditorState,
+    area: Rect,
+    buf: &mut ratatui::buffer::Buffer,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    Clear.render(area, buf);
+    EditorView::new(editor)
+        .theme(detail_editor_theme())
+        .wrap(true)
+        .line_numbers(LineNumbers::Absolute)
+        .render(area, buf);
+}
+
 /// Strip Ctrl/Alt/Meta/Super/Hyper modifiers, keeping only Shift (and the code).
 fn strip_non_text_modifiers(key: KeyEvent) -> KeyEvent {
     let mut modifiers = key.modifiers;

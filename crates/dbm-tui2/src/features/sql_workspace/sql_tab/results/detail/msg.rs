@@ -1,5 +1,7 @@
 //! Results detail sub-module messages.
 
+use crossterm::event::KeyEvent;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DetailMessage {
     /// Scroll the detail body by `delta` display rows.
@@ -10,6 +12,12 @@ pub enum DetailMessage {
     LoadCell { value: String },
     /// Clear the draft state (on exit edit or rollback).
     ClearDraft,
+    /// Forward a key into the focused cell editor (typing / vim motion / Esc
+    /// mode downgrade). Only consumed while the detail editor is focused.
+    KeyEvent {
+        key: KeyEvent,
+        tracked_caps_lock: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

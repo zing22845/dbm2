@@ -487,6 +487,29 @@ pub(crate) fn sql_click_msgs(
                 )))),
             ]
         }
+        // A click on the detail body while editing focuses the cell editor
+        // (FocusDetail no-ops outside an edit session, so this is safe when the
+        // detail is just the read-only inspect pane).
+        SqlClickAction::ResultsFocusDetail => {
+            let Some(tab_id) = tab_id(sql.active_tab) else {
+                return Vec::new();
+            };
+            use crate::features::sql_workspace::sql_tab::results::msg::{
+                ResultsMessage, ResultsMsg,
+            };
+            use crate::features::sql_workspace::sql_tab::state::SqlFocus;
+            vec![
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Focus(SqlFocus::Results),
+                )))),
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results {
+                        tab_id,
+                        msg: ResultsMsg::Message(ResultsMessage::FocusDetail),
+                    },
+                )))),
+            ]
+        }
         SqlClickAction::ResultsHScrollbar {
             track_x,
             x,

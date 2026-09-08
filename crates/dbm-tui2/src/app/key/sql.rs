@@ -32,6 +32,12 @@ pub(super) fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     let tab = state.sql_tab.active_tab()?;
     let tab_id = tab.session.id;
     let editor = &tab.editor;
+    // The detail cell editor captures everything while focused (whole-edit
+    // session on, detail open): splitter nudges / height adjusts must not steal
+    // `[`/`]`/`+`/`-` which are literal or vim keys there.
+    let results_detail_focused = tab.focus
+        == crate::features::sql_workspace::sql_tab::state::SqlFocus::Results
+        && tab.results.detail.focused;
     tracing::debug!(
         code = ?key.code,
         modifiers = ?key.modifiers,
@@ -137,7 +143,7 @@ pub(super) fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     //                pane is open. With the detail closed the results pane has
     //                no vertical splitter, so `[` / `]` are a no-op (they must
     //                NOT fall through to the history width as they used to).
-    if !key.modifiers.contains(KeyModifiers::CONTROL) {
+    if !key.modifiers.contains(KeyModifiers::CONTROL) && !results_detail_focused {
         let nudge = match key.code {
             KeyCode::Char('[') => {
                 Some(crate::common::layout::splitter::VerticalSplitterNudge::Left)
@@ -168,7 +174,7 @@ pub(super) fn sql_key(key: KeyEvent, state: &SqlState) -> Option<AppMsg> {
     // the currently-focused pane (top editor/history row or bottom results),
     // `-` shrinks it. In the editor's insert mode `+` / `-` are literal input,
     // so the adjust only applies otherwise.
-    if !key.modifiers.contains(KeyModifiers::CONTROL) {
+    if !key.modifiers.contains(KeyModifiers::CONTROL) && !results_detail_focused {
         let editor_insert = tab.focus
             == crate::features::sql_workspace::sql_tab::state::SqlFocus::Editor
             && editor.editor.mode == edtui::EditorMode::Insert;
@@ -281,6 +287,15 @@ fn results_key(
     tab_id: usize,
     results: &crate::features::sql_workspace::sql_tab::results::state::ResultsState,
 ) -> Option<AppMsg> {
+    // While the detail cell editor is focused the keys belong to it (edtui
+    // editing / Esc mode ladder), mirroring the original dbm's
+    // `handle_results_detail_section_key`. Ctrl+S / Ctrl+U are the single-cell
+    // Save / Discard here — the table's Commit / Rollback only apply when the
+    // detail editor is not focused.
+    if results.detail.focused && results.detail_open && results.list.edit.editing {
+        return results_detail_editor_key(key, tab_id, results);
+    }
+
     // Refresh re-runs the last query using the stored connection context.
     if key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL) {
         let needs = !results.list.last_sql.is_empty()
@@ -306,9 +321,15 @@ fn results_key(
     }
 
     match key.code {
-        // Toggle detail inspect mode.
+        // Enter: open / focus the detail pane. In an edit session it loads the
+        // selected cell into the detail cell editor (focus); otherwise it toggles
+        // the read-only inspect detail like before.
         KeyCode::Enter if key.modifiers.is_empty() => {
-            Some(sql_results(SqlResultsMessage::ToggleDetail, tab_id))
+            if results.list.edit.editing {
+                Some(sql_results(SqlResultsMessage::FocusDetail, tab_id))
+            } else {
+                Some(sql_results(SqlResultsMessage::ToggleDetail, tab_id))
+            }
         }
         // Toggle edit mode.
         KeyCode::Char('i') if key.modifiers.is_empty() => Some(sql_results(
@@ -563,6 +584,54 @@ fn results_key(
         }
         _ => None,
     }
+}
+
+/// Keys while the detail cell editor is focused (whole-edit session on, detail
+/// open and `detail.focused`). Mirrors the original dbm's
+/// `handle_results_detail_section_key`:
+///   * Ctrl+S = save the draft to the cell, Ctrl+U = discard it (never the
+///     table-wide Commit / Rollback, which only run while the table has focus);
+///   * Esc lowers Insert/Visual to Normal first, then leaves the editor back to
+///     the table;
+///   * every other accepted key feeds the edtui editor.
+fn results_detail_editor_key(
+    key: KeyEvent,
+    tab_id: usize,
+    results: &crate::features::sql_workspace::sql_tab::results::state::ResultsState,
+) -> Option<AppMsg> {
+    let ctrl_only = key.modifiers.contains(KeyModifiers::CONTROL)
+        && !key
+            .modifiers
+            .intersects(KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::SHIFT);
+    // Single-cell Save / Discard are detail-scoped: never fall through to the
+    // table's Commit / Rollback.
+    if ctrl_only && matches!(key.code, KeyCode::Char('s') | KeyCode::Char('S')) {
+        return Some(sql_results(SqlResultsMessage::SaveDetailCell, tab_id));
+    }
+    if ctrl_only && matches!(key.code, KeyCode::Char('u') | KeyCode::Char('U')) {
+        return Some(sql_results(SqlResultsMessage::DiscardDetailCell, tab_id));
+    }
+    if key.code == KeyCode::Esc && key.modifiers.is_empty() {
+        let mode = results
+            .detail
+            .editor
+            .as_ref()
+            .map(|host| host.editor.mode)
+            .unwrap_or(edtui::EditorMode::Normal);
+        // Esc in Insert/Visual first drops to Normal (stay in the editor); a
+        // Normal-mode Esc leaves the detail editor back to the table.
+        if mode == edtui::EditorMode::Normal {
+            return Some(sql_results(SqlResultsMessage::UnfocusDetail, tab_id));
+        }
+        // Forward the Esc to the editor so edtui switches mode itself.
+        return Some(sql_results(SqlResultsMessage::DetailEditorKey(key), tab_id));
+    }
+    // Everything edtui understands (typing, arrows, Enter, Tab…) routes to the
+    // buffer. Unmapped chords are ignored rather than falling to the table.
+    if crate::common::editor::accepts_key_event(&key) {
+        return Some(sql_results(SqlResultsMessage::DetailEditorKey(key), tab_id));
+    }
+    None
 }
 
 /// Map a viewport flip (`f` / `b`) onto a results message: move the selection
@@ -1310,6 +1379,142 @@ mod tests {
         assert!(
             results_key(key(KeyCode::Char('s'), KeyModifiers::CONTROL), 0, results).is_none(),
             "ctrl+s with no edit session should be a no-op"
+        );
+    }
+
+    /// A results snapshot with the whole-result edit session active.
+    fn editing_results() -> crate::features::sql_workspace::sql_tab::results::state::ResultsState {
+        let mut r =
+            crate::features::sql_workspace::sql_tab::results::state::ResultsState::default();
+        r.list.edit.editing = true;
+        r
+    }
+
+    #[test]
+    fn results_key_enter_editing_focuses_detail_not_toggle() {
+        // In an edit session, Enter focuses the detail cell editor (the draft
+        // + Ctrl+S/U model); it never toggles the read-only inspect pane.
+        let results = editing_results();
+        let msg = results_key(key(KeyCode::Enter, KeyModifiers::NONE), 0, &results)
+            .expect("enter while editing must focus the detail editor");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::FocusDetail),
+            }
+        );
+    }
+
+    #[test]
+    fn results_key_enter_not_editing_still_toggles_detail() {
+        let state = app_state_with_tab();
+        let results = &state.sql.sql_tab.tabs[0].results;
+        let msg = results_key(key(KeyCode::Enter, KeyModifiers::NONE), 0, results)
+            .expect("enter outside an edit session toggles the inspect detail");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::ToggleDetail),
+            }
+        );
+    }
+
+    #[test]
+    fn focused_detail_ctrl_s_saves_cell_not_commits() {
+        // While the detail editor is focused, Ctrl+S is the single-cell Save,
+        // NOT the table-wide commit-preview modal.
+        let mut results = editing_results();
+        results.detail_open = true;
+        results.detail.focused = true;
+        let msg = results_key(key(KeyCode::Char('s'), KeyModifiers::CONTROL), 0, &results)
+            .expect("ctrl+s while the detail editor is focused must save the cell");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::SaveDetailCell),
+            }
+        );
+    }
+
+    #[test]
+    fn focused_detail_ctrl_u_discards_cell_not_rolls_back() {
+        // Ctrl+U in the focused detail editor discards the single-cell draft;
+        // the table-wide Rollback only applies while the detail is not focused.
+        let mut results = editing_results();
+        results.detail_open = true;
+        results.detail.focused = true;
+        let msg = results_key(key(KeyCode::Char('u'), KeyModifiers::CONTROL), 0, &results)
+            .expect("ctrl+u while the detail editor is focused must discard the cell");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::DiscardDetailCell),
+            }
+        );
+    }
+
+    #[test]
+    fn focused_detail_typed_key_routes_to_editor() {
+        let mut results = editing_results();
+        results.detail_open = true;
+        results.detail.focused = true;
+        // A printable key feeds the detail editor (draft), not the table.
+        let msg = results_key(key(KeyCode::Char('x'), KeyModifiers::NONE), 0, &results)
+            .expect("a typed key while focused must route to the editor");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::DetailEditorKey(key(
+                    KeyCode::Char('x'),
+                    KeyModifiers::NONE,
+                ))),
+            }
+        );
+    }
+
+    #[test]
+    fn focused_detail_esc_leaves_when_normal() {
+        // With the detail editor at Normal mode (or no scratch editor yet), Esc
+        // returns to the table (unfocus).
+        let mut results = editing_results();
+        results.detail_open = true;
+        results.detail.focused = true;
+        let msg = results_key(key(KeyCode::Esc, KeyModifiers::NONE), 0, &results)
+            .expect("esc from a normal-mode detail editor must unfocus");
+        assert_eq!(
+            extract_tab_msg(msg),
+            SqlTabMessage::Results {
+                tab_id: 0,
+                msg: SqlResultsMsg::Message(SqlResultsMessage::UnfocusDetail),
+            }
+        );
+    }
+
+    #[test]
+    fn focused_detail_splitter_keys_stay_editor_keys() {
+        // `[` is not a splitter nudge while the detail editor is focused — it
+        // is routed to the cell editor (vim/literal). Splitter handling lives in
+        // sql_key, guarded by `results_detail_focused`.
+        let mut state = state_with_tabs(1);
+        state.sql_tab.tabs[0].focus = SqlFocus::Results;
+        state.sql_tab.tabs[0].results.detail_open = true;
+        state.sql_tab.tabs[0].results.list.edit.editing = true;
+        state.sql_tab.tabs[0].results.detail.focused = true;
+        let msg = sql_key(key(KeyCode::Char('['), KeyModifiers::NONE), &state)
+            .expect("[ while the detail editor is focused must reach the results pane");
+        assert!(
+            matches!(
+                msg,
+                AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(SqlTabMsg::Message(
+                    SqlTabMessage::Results { .. }
+                ))))
+            ),
+            "[ while detail editor focused must route to results, got {msg:?}"
         );
     }
 
