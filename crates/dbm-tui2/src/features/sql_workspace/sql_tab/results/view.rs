@@ -6,12 +6,14 @@
 //! `[list | splitter | detail]`; otherwise the list fills the whole inner area.
 
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::common::components::search::{pane_search_bottom_title_line, pane_search_label_line};
 use crate::common::layout::pane_scrollbar::ActiveScrollbar;
+use crate::common::layout::text::footer_height;
 use crate::common::view::hints::{draw_pane_footer, results_pane_footer_text};
 use crate::common::view::theme::Theme;
 
@@ -97,6 +99,7 @@ pub fn render(
         state.list.row_count(),
         state.list.search.text_input_active(),
         &sql_status,
+        state.list_leave_blocked(),
     );
 
     list_view::render(
@@ -169,12 +172,25 @@ pub fn render(
         frame.render_widget(Paragraph::new(toolbar), bar.bar_rect);
     }
 
-    // Full-width list footer (spans both the table and the detail). While a
-    // blocked leave left unsaved edits on the table, the footer shows the
-    // interception reason in the failure colour (connections / detail style).
-    let list_leave_blocked =
-        state.list.leave_warning && state.list.edit.editing && state.list.edit.is_dirty();
-    if list_leave_blocked {
+    // Full-width list footer (spans both the table and the detail). The normal
+    // hint keeps its rows at the top; while a blocked leave left unsaved edits
+    // on the table, the interception reason is appended BELOW it (the layout
+    // reserved those extra rows) in the warning colour — never replacing the
+    // hint.
+    let hint = results_pane_footer_text(state.list.search.text_input_active(), &sql_status);
+    let hint_h = footer_height(&hint, layout.footer.width).min(layout.footer.height);
+    draw_pane_footer(
+        frame,
+        theme,
+        Rect {
+            x: layout.footer.x,
+            y: layout.footer.y,
+            width: layout.footer.width,
+            height: hint_h,
+        },
+        &hint,
+    );
+    if state.list_leave_blocked() && hint_h < layout.footer.height {
         let style = Style::default().fg(p.warning);
         let lines: Vec<Line> = RESULTS_EDIT_LEAVE_WARNING
             .split('\n')
@@ -182,11 +198,13 @@ pub fn render(
             .collect();
         frame.render_widget(
             Paragraph::new(lines).wrap(Wrap { trim: false }),
-            layout.footer,
+            Rect {
+                x: layout.footer.x,
+                y: layout.footer.y.saturating_add(hint_h),
+                width: layout.footer.width,
+                height: layout.footer.height.saturating_sub(hint_h),
+            },
         );
-    } else {
-        let hint = results_pane_footer_text(state.list.search.text_input_active(), &sql_status);
-        draw_pane_footer(frame, theme, layout.footer, &hint);
     }
     detail_hit
 }

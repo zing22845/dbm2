@@ -385,6 +385,7 @@ pub fn sql_workspace_click(
                 tab.results.list.row_count(),
                 tab.results.list.search.text_input_active(),
                 &tab.results.list.executed_sql_display(),
+                tab.results.list_leave_blocked(),
             );
 
         // A focused detail editor with an unsaved draft owns the interaction:
@@ -588,6 +589,7 @@ pub fn results_list_rect(
         tab.results.list.row_count(),
         tab.results.list.search.text_input_active(),
         &tab.results.list.executed_sql_display(),
+        tab.results.list_leave_blocked(),
     );
     Some(layout.list)
 }

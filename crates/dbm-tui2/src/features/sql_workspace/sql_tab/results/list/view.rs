@@ -90,9 +90,12 @@ pub fn results_vertical_layout(
     row_count: usize,
     search_active: bool,
     sql_status: &str,
+    extra_footer_rows: u16,
 ) -> (Rect, Option<Rect>, Rect) {
     let hint = crate::common::view::hints::results_pane_footer_text(search_active, sql_status);
-    let footer_h = footer_height(&hint, inner.width).min(inner.height.saturating_sub(4));
+    let footer_h = footer_height(&hint, inner.width)
+        .saturating_add(extra_footer_rows)
+        .min(inner.height.saturating_sub(4));
 
     let pagination_h = if row_count > 0 {
         RESULTS_PAGINATION_BAR_HEIGHT

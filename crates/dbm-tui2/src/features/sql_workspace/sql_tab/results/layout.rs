@@ -1,7 +1,10 @@
 //! Results pane geometry.
 
+use crate::common::layout::text::footer_height;
+
 use super::list::view as list_view;
 use super::splitter::view as splitter_view;
+use super::view::RESULTS_EDIT_LEAVE_WARNING;
 use ratatui::layout::Rect;
 
 /// The Results feature's full layout, resolved once so the renderer and every
@@ -30,9 +33,23 @@ pub fn compute_results_layout(
     row_count: usize,
     search_active: bool,
     sql_status: &str,
+    list_leave_blocked: bool,
 ) -> ResultsLayout {
-    let (content, pagination, footer) =
-        list_view::results_vertical_layout(inner, row_count, search_active, sql_status);
+    // A blocked leave (dirty edit session) appends its warning under the normal
+    // footer instead of replacing it, so the layout reserves the wrapped
+    // warning's rows and the content band above shrinks accordingly.
+    let extra_footer_rows = if list_leave_blocked {
+        footer_height(RESULTS_EDIT_LEAVE_WARNING, inner.width)
+    } else {
+        0
+    };
+    let (content, pagination, footer) = list_view::results_vertical_layout(
+        inner,
+        row_count,
+        search_active,
+        sql_status,
+        extra_footer_rows,
+    );
     let (list, splitter, detail) =
         splitter_view::split_inner(content, detail_open, detail_pane_width);
     ResultsLayout {

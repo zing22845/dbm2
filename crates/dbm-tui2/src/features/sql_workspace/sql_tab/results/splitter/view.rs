@@ -57,6 +57,7 @@ pub fn results_detail_splitter(
     row_count: usize,
     search_active: bool,
     sql_status: &str,
+    list_leave_blocked: bool,
 ) -> Option<Rect> {
     if !detail_open {
         return None;
@@ -69,6 +70,7 @@ pub fn results_detail_splitter(
         row_count,
         search_active,
         sql_status,
+        list_leave_blocked,
     );
     layout.splitter
 }
@@ -120,7 +122,7 @@ mod tests {
     #[test]
     fn splitter_rect_uses_block_inner() {
         let outer = Rect::new(0, 3, 120, 20);
-        let splitter = results_detail_splitter(outer, true, 40, 1, false, "").unwrap();
+        let splitter = results_detail_splitter(outer, true, 40, 1, false, "", false).unwrap();
         // outer minus 1-col border → inner starts at x=1, splitter is at x=1+list_w
         // where list_w = 120 - 2 - 1 - 40 = 77, so splitter at x=78
         assert_eq!(splitter.x, 78);

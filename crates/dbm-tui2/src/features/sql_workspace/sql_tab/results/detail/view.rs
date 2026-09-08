@@ -97,20 +97,18 @@ fn editor_mode_label(detail: &DetailState) -> &'static str {
     }
 }
 
-/// Footer hint for the detail pane. Normally just `Back: ESC`. When a leave was
-/// attempted while the draft is dirty (blocked by the save/discard gate — Esc,
-/// a focus move, or closing the detail), it shows the interception reason
-/// instead; the caller renders it in the same failure colour the connections
-/// pane uses for its dirty-leave notice.
-fn detail_footer(detail: &DetailState) -> (String, bool) {
-    if detail.leave_warning && detail.dirty {
-        (
-            super::super::detail_edit::DETAIL_LEAVE_WARNING.to_string(),
-            true,
-        )
+/// Footer hint for the detail pane. The normal `Back: ESC` line always stays
+/// first; when a leave was attempted while the draft is dirty (blocked by the
+/// save/discard gate — Esc, a focus move, or closing the detail) the
+/// interception reason is returned too, and the caller renders it BELOW the
+/// normal footer in the failure colour the connections pane uses.
+fn detail_footer(detail: &DetailState) -> (&'static str, Option<&'static str>) {
+    let warning = if detail.leave_warning && detail.dirty {
+        Some(super::super::detail_edit::DETAIL_LEAVE_WARNING)
     } else {
-        ("Back: ESC".to_string(), false)
-    }
+        None
+    };
+    ("Back: ESC", warning)
 }
 
 /// The two detail action chips, padded exactly like the list toolbar buttons
@@ -261,8 +259,13 @@ pub fn render(
     frame.render_widget(block, area);
 
     let has_action_btns = edit_active && detail.dirty && detail.focused;
-    let (hint, hint_warn) = detail_footer(detail);
-    let footer_h = footer_height(&hint, inner.width).min(3);
+    let (hint, leave_warn) = detail_footer(detail);
+    // The footer keeps the normal hint and, when a leave was blocked by an
+    // unsaved draft, appends the interception reason below it (extra rows are
+    // reserved so the body shrinks instead of the two overlapping).
+    let hint_h = footer_height(hint, inner.width);
+    let warn_h = leave_warn.map_or(0, |w| footer_height(w, inner.width));
+    let footer_h = (hint_h + warn_h).min(inner.height.saturating_sub(2));
 
     // Reserve a *dynamic* number of rows for the Save/Discard chips: they wrap
     // to as many rows as the detail width needs, so they are never clipped.
@@ -341,21 +344,33 @@ pub fn render(
         None
     };
 
-    // Detail footer. Normally the plain "Back: ESC"; while an unsaved draft has
-    // blocked a leave attempt the interception reason is shown in the theme's
-    // warning colour.
-    if hint_warn {
+    // Detail footer. The normal "Back: ESC" hint keeps its rows on top; while
+    // an unsaved draft has blocked a leave attempt the interception reason is
+    // appended below it in the theme's warning colour.
+    let normal_area = Rect {
+        x: footer_area.x,
+        y: footer_area.y,
+        width: footer_area.width,
+        height: hint_h.min(footer_area.height),
+    };
+    draw_footer(frame, theme, normal_area, hint);
+    if let Some(warn_text) = leave_warn
+        && hint_h < footer_area.height
+    {
         let style = Style::default().fg(p.warning);
-        let lines: Vec<Line> = hint
+        let lines: Vec<Line> = warn_text
             .split('\n')
             .map(|l| Line::from(Span::styled(l.to_string(), style)))
             .collect();
         frame.render_widget(
             Paragraph::new(lines).wrap(Wrap { trim: false }),
-            footer_area,
+            Rect {
+                x: footer_area.x,
+                y: footer_area.y.saturating_add(hint_h),
+                width: footer_area.width,
+                height: footer_area.height.saturating_sub(hint_h),
+            },
         );
-    } else {
-        draw_footer(frame, theme, footer_area, &hint);
     }
     mouse_hit
 }
@@ -411,26 +426,29 @@ mod tests {
     }
 
     #[test]
-    fn footer_is_back_esc_normally_and_reason_when_leave_blocked() {
+    fn footer_keeps_back_esc_and_appends_the_reason_when_leave_blocked() {
         let mut d = DetailState::default();
         let (text, warn) = detail_footer(&d);
-        assert_eq!(text, "Back: ESC", "normal footer keeps only Back: ESC");
-        assert!(!warn);
+        assert_eq!(text, "Back: ESC");
+        assert!(warn.is_none(), "clean detail has no leave warning");
 
-        // A blocked leave (unsaved draft) swaps the footer for the reason.
+        // A blocked leave (unsaved draft) keeps "Back: ESC" and appends the
+        // interception reason below it — the normal footer is never replaced.
         d.dirty = true;
         d.leave_warning = true;
         let (text, warn) = detail_footer(&d);
-        assert!(warn);
+        assert_eq!(text, "Back: ESC", "the normal hint must survive");
         assert_eq!(
-            text,
-            crate::features::sql_workspace::sql_tab::results::detail_edit::DETAIL_LEAVE_WARNING
+            warn,
+            Some(
+                crate::features::sql_workspace::sql_tab::results::detail_edit::DETAIL_LEAVE_WARNING
+            )
         );
 
         // Once saved/discarded the flag is cleared again → plain footer.
         d.dirty = false;
         let (text, warn) = detail_footer(&d);
         assert_eq!(text, "Back: ESC");
-        assert!(!warn);
+        assert!(warn.is_none());
     }
 }

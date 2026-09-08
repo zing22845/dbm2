@@ -71,6 +71,15 @@ impl ResultsState {
             self.open_detail();
         }
     }
+
+    /// Whether the full-width list footer must show the blocked-leave warning
+    /// (a dirty edit session whose Esc / focus / result-replacing move was
+    /// refused). The layout reserves the warning's rows below the normal footer
+    /// hint; render and mouse hit-testing both derive it from this predicate so
+    /// the geometry never drifts.
+    pub fn list_leave_blocked(&self) -> bool {
+        self.list.leave_warning && self.list.edit.editing && self.list.edit.is_dirty()
+    }
 }
 
 #[cfg(test)]
