@@ -308,12 +308,10 @@ fn render_table(
     let row_count = result.rows.len();
     let num_cols = result.columns.len();
 
-    // The pinned left gutter column is always reserved (its change markers
-    // `~`/`+`/`-` are only drawn while an edit session is active). Keeping the
-    // offset constant means toggling Edit never shifts the columns, so a
-    // right-flush trailing column's truncated `…` and the selection background
-    // stay exactly where they were. It is a constant offset applied at the
-    // *screen x* layer, so `h_scroll` keeps its pure column-space meaning.
+    // While an edit session is active the table gains a pinned left gutter
+    // column holding each row's change marker (`~`/`+`/`-`), matching the
+    // original dbm. It is a constant offset applied at the *screen x* layer, so
+    // `h_scroll` keeps its pure column-space meaning.
     let gutter_w = super::layout::results_gutter_width(state);
 
     // Compute actual table content width to detect horizontal overflow.
