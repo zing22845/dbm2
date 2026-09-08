@@ -82,6 +82,15 @@ impl SqlTab {
     pub fn set_history_pane_width(&mut self, width: u16) {
         self.splitter.set_history_pane_width(width);
     }
+
+    /// Whether this tab carries unsaved results edits — an active whole-result
+    /// edit session with pending changes (dirty cells / deleted rows / inserts)
+    /// or a detail draft that differs from its cell baseline. Surfaced as a
+    /// dirty marker on this tab's title in the tab bar.
+    pub fn results_unsaved_edits(&self) -> bool {
+        (self.results.list.edit.editing && self.results.list.edit.is_dirty())
+            || self.results.detail.dirty
+    }
 }
 
 /// State for the `sql_tab` parent feature: multiple tabs, one active.

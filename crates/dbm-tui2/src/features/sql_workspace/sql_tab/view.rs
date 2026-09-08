@@ -14,7 +14,7 @@ use super::history::view as history_view;
 use super::layout::sql_tab_layout;
 use super::results::view as results_view;
 use super::session::{TabSession, session_view_key};
-use super::state::{SqlFocus, SqlTabState};
+use super::state::{SqlFocus, SqlTab, SqlTabState};
 
 /// Render the `sql_tab` feature: a tab bar plus the active tab's child panes.
 /// The area is already inside the SQL workspace parent pane's border (the outer
@@ -71,11 +71,21 @@ pub fn render(
         ])
         .split(area);
 
-    // Tab bar: only render tabs belonging to the active connection.
+    // Tab bar: only render tabs belonging to the active connection. A tab whose
+    // results hold unsaved edits (pending edit session / unsaved detail draft)
+    // gets a dirty marker on its title, since tab switching stays allowed.
     let visible = state.visible_tab_indices();
     let sessions: Vec<TabSession> = state.tabs.iter().map(|t| t.session.clone()).collect();
     let active_tab_idx = state.active_tab;
-    super::tab::render(frame, theme, chunks[0], &sessions, &visible, active_tab_idx);
+    super::tab::render(
+        frame,
+        theme,
+        chunks[0],
+        &sessions,
+        &visible,
+        active_tab_idx,
+        |i| state.tabs.get(i).is_some_and(SqlTab::results_unsaved_edits),
+    );
 
     let body_area = chunks[1];
     let Some(tab) = state.active_tab() else {

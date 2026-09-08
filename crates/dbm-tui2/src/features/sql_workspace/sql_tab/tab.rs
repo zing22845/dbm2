@@ -11,7 +11,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::common::view::theme::Theme;
+use crate::common::view::theme::{DIRTY_CHANGE_COLOR, Theme};
 
 use super::session::TabSession;
 
@@ -77,7 +77,11 @@ pub fn tab_at(
 /// are in `visible_indices`. Returns clickable rects for each rendered tab.
 ///
 /// `active_global` is the global index of the currently active tab, used to
-/// highlight it in the tab bar.
+/// highlight it in the tab bar. `dirty` reports, per global tab index, whether
+/// that tab holds unsaved results edits (an active edit session with pending
+/// changes or an unsaved detail draft); a dirty tab gets a marker on its title:
+/// the active one fills with the dirty-change orange, an inactive one turns its
+/// text orange.
 pub fn render(
     frame: &mut Frame,
     theme: &Theme,
@@ -85,18 +89,29 @@ pub fn render(
     tabs: &[TabSession],
     visible_indices: &[usize],
     active_global: Option<usize>,
+    dirty: impl Fn(usize) -> bool,
 ) -> Vec<TabRect> {
     let p = theme.palette();
     let rects = tab_rects(area, tabs, visible_indices);
     let mut spans: Vec<Span<'static>> = Vec::new();
     for &global_idx in visible_indices.iter() {
         let active = active_global == Some(global_idx);
+        let has_unsaved = dirty(global_idx);
         let label = tab_title(tabs.get(global_idx).expect("visible index valid"));
-        let style = if active {
+        let style = if active && has_unsaved {
+            // Focused tab with unsaved edits: the whole title fills orange.
+            Style::default()
+                .fg(p.surface)
+                .bg(DIRTY_CHANGE_COLOR)
+                .add_modifier(Modifier::BOLD)
+        } else if active {
             Style::default()
                 .fg(p.surface)
                 .bg(p.accent)
                 .add_modifier(Modifier::BOLD)
+        } else if has_unsaved {
+            // Unfocused tab with unsaved edits: orange text marker.
+            Style::default().fg(DIRTY_CHANGE_COLOR)
         } else {
             Style::default().fg(p.fg)
         };
@@ -140,5 +155,38 @@ mod tests {
         assert_eq!(tab_at(area, &sessions, &visible, 10, 6), None);
         // Click in empty space to the right of both tabs -> none.
         assert_eq!(tab_at(area, &sessions, &visible, 200, 5), None);
+    }
+
+    #[test]
+    fn dirty_tabs_get_orange_title_markers() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        // Tab 0: inactive with unsaved edits -> orange text. Tab 1: the active
+        // tab with unsaved edits -> whole title fills with the dirty orange.
+        let sessions = [session_with_sequence(1), session_with_sequence(2)];
+        let visible = [0usize, 1];
+        let area = Rect::new(0, 0, 30, 1);
+        let theme = crate::common::view::theme::default();
+        let mut terminal = Terminal::new(TestBackend::new(30, 1)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(frame, &theme, area, &sessions, &visible, Some(1), |_| true);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let rects = tab_rects(area, &sessions, &visible);
+        let r0 = &rects[0];
+        let cell0 = &buf[(r0.rect.x, r0.rect.y)];
+        assert_eq!(
+            cell0.fg, DIRTY_CHANGE_COLOR,
+            "inactive dirty tab text must be orange"
+        );
+        assert_eq!(cell0.bg, ratatui::style::Color::Reset);
+        let r1 = &rects[1];
+        let cell1 = &buf[(r1.rect.x, r1.rect.y)];
+        assert_eq!(
+            cell1.bg, DIRTY_CHANGE_COLOR,
+            "active dirty tab title must fill with orange"
+        );
     }
 }
