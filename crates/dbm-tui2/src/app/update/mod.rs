@@ -295,7 +295,9 @@ pub(super) fn results_edit_blocks_focus_change(state: &AppState, to: &Pane) -> b
 pub(super) fn block_focus_message(state: &mut AppState) {
     use crate::features::instance_workspace::connections::state::ConnectionStatusKind;
     state.iw.connections.status = Some(PANE_SWITCH_BLOCKED_MSG.to_string());
-    state.iw.connections.status_kind = ConnectionStatusKind::Failure;
+    // A blocked leave is a warning, not an operation failure (error stays
+    // reserved for failed saves / tests).
+    state.iw.connections.status_kind = ConnectionStatusKind::Blocked;
 }
 
 /// An `AppMsg` that reloads the explorer instance tree from the store.
@@ -695,6 +697,12 @@ mod tests {
         assert_eq!(
             state.iw.connections.status.as_deref(),
             Some(PANE_SWITCH_BLOCKED_MSG)
+        );
+        use crate::features::instance_workspace::connections::state::ConnectionStatusKind;
+        assert_eq!(
+            state.iw.connections.status_kind,
+            ConnectionStatusKind::Blocked,
+            "a blocked leave is a warning, not an operation failure"
         );
     }
     #[test]

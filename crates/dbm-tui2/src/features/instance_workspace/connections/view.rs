@@ -516,10 +516,9 @@ fn render_form(
             if let Some(status) = s.status.as_deref() {
                 let color = match s.status_kind {
                     ConnectionStatusKind::Success => ratatui::style::Color::Green,
-                    // Failure uses the theme's error slot (also used by the
-                    // dirty-leave notices on the results footers) so the
-                    // "blocked by unsaved changes" text is one semantic colour.
                     ConnectionStatusKind::Failure => pp.error,
+                    // Blocked-leave notices are warnings, not operation errors.
+                    ConnectionStatusKind::Blocked => pp.warning,
                     ConnectionStatusKind::Idle => pp.muted,
                 };
                 f.render_widget(

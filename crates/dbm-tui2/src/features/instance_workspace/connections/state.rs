@@ -48,7 +48,8 @@ pub enum FormMode {
 }
 
 /// The kind of status shown on the connections footer, used to color it like
-/// the original dbm (success green, failure red).
+/// the original dbm (success green, failure red) with a dedicated warning tone
+/// for blocked-focus notices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ConnectionStatusKind {
     /// No status (footer shows only the operation hints).
@@ -56,8 +57,11 @@ pub enum ConnectionStatusKind {
     Idle,
     /// A successful action/test (green).
     Success,
-    /// A failed action/test (red).
+    /// A real failure: failed save / failed test (error colour).
     Failure,
+    /// A blocked interaction — an unsaved edit form tried to leave (warning
+    /// colour), not an operation failure.
+    Blocked,
 }
 
 /// The saved field values an edit form started from, used to detect which
