@@ -335,6 +335,15 @@ fn render_table(
     let layout = &vs.layout;
     let table_area = layout.content_area;
 
+    // The marker gutter is pinned at the *screen* left of the table: it
+    // consumes one column of the visible area, so the column-space window must
+    // shrink by the same amount while it is shown. Without this a table whose
+    // columns exactly fill the viewport would paint its rightmost column one
+    // cell past the content area (under the vertical scrollbar) and push its
+    // truncated `…` text out of view. Cell text is truncated against `text_w`
+    // per column, so the narrower window just re-truncates with its own `…`.
+    let col_viewport_w = table_area.width.saturating_sub(gutter_w).max(1);
+
     // Visible content width: when columns don't fill the viewport, avoid
     // rendering empty space beyond the last column (matching original dbm).
     let content_width = table_width.min(table_area.width);
@@ -371,7 +380,7 @@ fn render_table(
         let Some(meta) = result.columns.get(col) else {
             break;
         };
-        let Some(tv) = results_col_text_view(col, col_widths, table_area.width, h_scroll) else {
+        let Some(tv) = results_col_text_view(col, col_widths, col_viewport_w, h_scroll) else {
             continue;
         };
         if tv.text_w == 0 {
