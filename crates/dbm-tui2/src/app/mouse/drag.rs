@@ -37,6 +37,7 @@ pub(crate) fn clear_active_drags(state: &mut AppState) {
     state.splitter_hover.set_dragging_flags([false; 7]);
     state.splitter_hover.results_col_resize_drag = None;
     state.sql_editor_selecting = false;
+    state.results_detail_selecting = false;
 }
 
 /// A held-button drag: follow the pointer for whichever scrollbar or
@@ -56,6 +57,20 @@ pub(crate) fn handle_drag(
     // ignored by edtui itself, freezing the selection (matching the original).
     if state.sql_editor_selecting
         && let Some(msg) = super::editor_gesture::editor_gesture_msg(
+            state,
+            MouseEventKind::Drag(MouseButton::Left),
+            point.x,
+            point.y,
+            false,
+        )
+    {
+        let result = process_message_round(effect_runner, action_rx, msg, state);
+        *dirty |= result.dirty;
+        return Ok(());
+    }
+    // Same for a drag that began on the results detail cell editor's text.
+    if state.results_detail_selecting
+        && let Some(msg) = super::editor_gesture::detail_gesture_msg(
             state,
             MouseEventKind::Drag(MouseButton::Left),
             point.x,
@@ -465,6 +480,19 @@ pub(crate) fn handle_up(
         let result = process_message_round(effect_runner, action_rx, msg, state);
         *dirty |= result.dirty;
     }
+    // Same for the results detail cell editor selection.
+    if state.results_detail_selecting
+        && let Some(msg) = super::editor_gesture::detail_gesture_msg(
+            state,
+            MouseEventKind::Up(MouseButton::Left),
+            mouse.column,
+            mouse.row,
+            false,
+        )
+    {
+        let result = process_message_round(effect_runner, action_rx, msg, state);
+        *dirty |= result.dirty;
+    }
     // One drag slot covers every scrollbar, so releasing
     // the button ends whichever one was active — no need
     // to clear a flag per bar.
@@ -508,6 +536,7 @@ pub(crate) fn handle_up(
     // is false over a bare scrollbar).
     let was_dragging = state.scrollbar_drag.is_some()
         || state.sql_editor_selecting
+        || state.results_detail_selecting
         || state.splitter_hover.results_col_resize_drag.is_some()
         || state.splitter_hover.dragging_flags().iter().any(|&f| f);
     clear_active_drags(state);
@@ -540,6 +569,7 @@ pub(crate) fn handle_moved(
     // `Moved`, so this can never fire mid-drag.
     if state.scrollbar_drag.is_some()
         || state.sql_editor_selecting
+        || state.results_detail_selecting
         || splitter_drag.is_some()
         || state.splitter_hover.results_col_resize_drag.is_some()
         || state.splitter_hover.dragging_flags().iter().any(|&f| f)

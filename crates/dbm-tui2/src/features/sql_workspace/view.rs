@@ -47,6 +47,9 @@ pub fn render(
 ) -> (
     Option<crate::common::editor::EditorHardwareCursor>,
     Option<usize>,
+    // SQL editor hit region.
+    Option<crate::common::editor::EditorMouseHitArea>,
+    // Results detail cell editor hit region.
     Option<crate::common::editor::EditorMouseHitArea>,
 ) {
     let p = theme.palette();
@@ -72,7 +75,7 @@ pub fn render(
             .direction(Direction::Vertical)
             .constraints([Constraint::Min(0), Constraint::Length(footer_h)])
             .split(inner);
-        let (cursor, v_scroll, editor_hit) = sql_tab_view::render(
+        let (cursor, v_scroll, editor_hit, detail_hit) = sql_tab_view::render(
             frame,
             theme,
             chunks[0],
@@ -90,7 +93,7 @@ pub fn render(
             active_scrollbar,
         );
         draw_footer(frame, theme, chunks[1], &hint);
-        (cursor, v_scroll, editor_hit)
+        (cursor, v_scroll, editor_hit, detail_hit)
     } else {
         // Active connection has no visible tab: let sql_tab render its empty
         // state hint over the full area.

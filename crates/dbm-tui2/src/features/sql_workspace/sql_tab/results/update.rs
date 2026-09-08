@@ -159,6 +159,23 @@ pub fn update(
                 (state, intents, effects, false)
             }
         }
+        // Copy the focused detail cell editor's selection (mouse or v-mode) to
+        // the system clipboard. The buffer/mode are untouched, so the selection
+        // stays highlighted for further edits.
+        ResultsMessage::CopyDetailSelection => {
+            let Some(host) = state.detail.editor.as_ref() else {
+                return (state, intents, effects, false);
+            };
+            let Some(selection) = host.editor.selection.as_ref() else {
+                return (state, intents, effects, false);
+            };
+            let text = selection.copy_from(&host.editor.lines).to_string();
+            if text.is_empty() {
+                return (state, intents, effects, false);
+            }
+            effects.push(ResultsEffect::CopySelection { text });
+            (state, intents, effects, true)
+        }
         // A key routed to the focused detail cell editor. It falls through to
         // the detail update (which refuses it when no editor is focused).
         ResultsMessage::DetailEditorKey(key) => {
@@ -623,5 +640,41 @@ mod tests {
         assert!(!s3.detail.focused);
         assert!(s3.detail.editor.is_none());
         assert!(!s3.detail.dirty);
+    }
+
+    #[test]
+    fn copy_detail_selection_emits_clipboard_effect() {
+        // Focus the editor and paint a (1-char) selection over the draft.
+        let (mut s, _i, _e, _d) = update(ResultsMessage::FocusDetail, editing_state());
+        {
+            let host = s.detail.editor.as_mut().expect("focused editor");
+            host.editor.selection = Some(edtui::Selection::new(
+                edtui::Index2::new(0, 0),
+                edtui::Index2::new(0, 0),
+            ));
+        }
+        let (s2, _i, effects, dirty) = update(ResultsMessage::CopyDetailSelection, s);
+        assert!(dirty);
+        assert_eq!(s2.detail.draft, "1", "copy must not touch the draft");
+        let copied: Vec<&ResultsEffect> = effects
+            .iter()
+            .filter(|e| matches!(e, ResultsEffect::CopySelection { .. }))
+            .collect();
+        assert_eq!(copied.len(), 1, "a selection must copy to the clipboard");
+    }
+
+    #[test]
+    fn copy_detail_selection_noop_without_editor_or_selection() {
+        // No edit session → no focused editor → copy is a no-op.
+        let s = ResultsState::default();
+        let (_s2, _i, effects, dirty) = update(ResultsMessage::CopyDetailSelection, s);
+        assert!(!dirty);
+        assert!(effects.is_empty());
+
+        // Focused editor but no selection → no-op too.
+        let (s, _i, _e, _d) = update(ResultsMessage::FocusDetail, editing_state());
+        let (_s2, _i, effects, dirty) = update(ResultsMessage::CopyDetailSelection, s);
+        assert!(!dirty);
+        assert!(effects.is_empty());
     }
 }

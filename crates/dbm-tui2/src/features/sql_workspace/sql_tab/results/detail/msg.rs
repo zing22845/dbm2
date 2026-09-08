@@ -18,6 +18,13 @@ pub enum DetailMessage {
         key: KeyEvent,
         tracked_caps_lock: bool,
     },
+    /// A mouse Down/Drag/Up on the focused cell editor's text, decoded by the
+    /// pointer layer through edtui against a scratch copy (with the rendered
+    /// hit area fed in). `update` just applies cursor/mode/selection — the draft
+    /// text never changes, so a selection can stay highlighted for the copy key.
+    MouseGesture {
+        outcome: super::super::super::editor::mouse::MouseGestureOutcome,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

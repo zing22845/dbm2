@@ -233,6 +233,23 @@ pub(crate) fn action_to_app_msgs(action: Action) -> Vec<AppMsg> {
                     ));
                     copy_column_name = true;
                 }
+                // The results detail cell editor's selection copy: same global
+                // -footer status, no feature message.
+                SqlAction::SqlTab(SqlTabAction::Results {
+                    action: ResultsAction::CopySelection { ok },
+                    ..
+                }) => {
+                    msgs.push(AppMsg::Footer(
+                        crate::features::global_footer::msg::FooterMsg::Message(
+                            crate::features::global_footer::msg::FooterMessage::SetStatus(if *ok {
+                                "Copied to clipboard".to_string()
+                            } else {
+                                "Copy failed".to_string()
+                            }),
+                        ),
+                    ));
+                    editor_copy_selection = true;
+                }
                 // An editor selection copy is surfaced exactly like the
                 // column-name copy: a global-footer status, no feature message.
                 SqlAction::SqlTab(SqlTabAction::Editor {
@@ -461,6 +478,10 @@ fn results_action_to_msg(
         // `action_to_app_msgs`); it never reaches this feature-message path.
         RA::CopyColumnName { .. } => {
             unreachable!("column-name copy is reported by the round footer status")
+        }
+        // Same for the detail cell editor's selection copy.
+        RA::CopySelection { .. } => {
+            unreachable!("detail selection copy is reported by the round footer status")
         }
         // The commit outcome is handled entirely by the round (footer status +
         // post-commit `CommitOutcome` message); it never reaches this route.

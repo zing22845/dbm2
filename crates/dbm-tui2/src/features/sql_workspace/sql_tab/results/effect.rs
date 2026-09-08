@@ -33,6 +33,8 @@ pub enum ResultsAction {
     CountReady { sql: String, total: Option<u64> },
     /// The selected column name was copied to the system clipboard.
     CopyColumnName { ok: bool },
+    /// The results detail cell editor's selection was copied to the clipboard.
+    CopySelection { ok: bool },
     /// The edit batch commit outcome.
     CommitResult { ok: bool, message: String },
     /// The editability of the result was resolved.
@@ -102,6 +104,10 @@ pub enum ResultsEffect {
     },
     /// Copy `text` (the selected column name, or all names) to the clipboard.
     CopyColumnName {
+        text: String,
+    },
+    /// Copy `text` (the detail cell editor's selection) to the clipboard.
+    CopySelection {
         text: String,
     },
     Detail(DetailEffect),
@@ -292,6 +298,10 @@ impl Effect for ResultsEffect {
                 ResultsEffect::CopyColumnName { text } => {
                     let ok = crate::common::service::clipboard::copy_to_system(&text).is_ok();
                     vec![ResultsAction::CopyColumnName { ok }]
+                }
+                ResultsEffect::CopySelection { text } => {
+                    let ok = crate::common::service::clipboard::copy_to_system(&text).is_ok();
+                    vec![ResultsAction::CopySelection { ok }]
                 }
                 ResultsEffect::Detail(_) => Vec::new(),
                 ResultsEffect::List(_) => Vec::new(),

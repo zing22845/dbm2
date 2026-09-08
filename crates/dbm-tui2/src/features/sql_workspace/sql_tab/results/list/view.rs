@@ -13,6 +13,7 @@ use ratatui::widgets::Paragraph;
 
 use crate::common::layout::pane_scrollbar::ActiveScrollbar;
 use crate::common::layout::text::footer_height;
+use crate::common::model::RowChangeKind;
 use crate::common::view::action_bar::{action_bar_width, draw_action_bar};
 use crate::common::view::format::{
     RESULTS_HEADER_HEIGHT, RESULTS_ROW_CONTENT_HEIGHT, RESULTS_ROW_HEIGHT, column_type_label,
@@ -243,6 +244,18 @@ fn draw_match_cell_frame(
 /// anchored inside the viewport, the values are synced back into `state` so
 /// the next frame starts from the correct scroll position (fixes the stale
 /// h_scroll problem where state.h_scroll was never updated from the view).
+/// Foreground color for an edit-session change marker, matching the original
+/// dbm: green for a pending insert, red for a deleted row, and the "modified"
+/// color for a row with changed cells.
+fn change_kind_style(p: &crate::common::view::theme::Palette, kind: RowChangeKind) -> Style {
+    Style::default().fg(match kind {
+        RowChangeKind::Insert => p.success,
+        RowChangeKind::Delete => p.error,
+        RowChangeKind::Update => p.modified_text,
+        RowChangeKind::NoChange => p.fg,
+    })
+}
+
 fn render_table(
     frame: &mut Frame,
     theme: &Theme,
@@ -288,8 +301,19 @@ fn render_table(
     let row_count = result.rows.len();
     let num_cols = result.columns.len();
 
+    // While an edit session is active the table gains a pinned left gutter
+    // column holding each row's change marker (`~`/`+`/`-`), matching the
+    // original dbm. It is a constant offset applied at the *screen x* layer, so
+    // `h_scroll` keeps its pure column-space meaning.
+    let gutter_w = if state.edit.editing {
+        crate::common::view::format::RESULTS_DIRTY_GUTTER_WIDTH
+    } else {
+        0
+    };
+
     // Compute actual table content width to detect horizontal overflow.
-    let table_width = crate::common::view::format::results_table_width(col_widths);
+    let table_width =
+        crate::common::view::format::results_table_width(col_widths).saturating_add(gutter_w);
 
     // ---- SHARED VIEWPORT CALCULATION ----
     // One source of truth: both render and cell_hit_at call this exact
@@ -347,9 +371,11 @@ fn render_table(
             continue;
         }
 
-        // Column's screen x = text_vis_left − h_scroll (matching original dbm).
+        // Column's screen x = gutter + text_vis_left − h_scroll (matching the
+        // original dbm, plus the edit-mode change gutter).
         let col_x = table_area
             .x
+            .saturating_add(gutter_w)
             .saturating_add(
                 crate::common::view::format::col_x_start(col, col_widths) as u16
                     + tv.table_text_skip,
@@ -401,6 +427,7 @@ fn render_table(
         let col_right = crate::common::view::format::col_x_end(col, col_widths);
         let border_x = table_area
             .x
+            .saturating_add(gutter_w)
             .saturating_add(col_right as u16)
             .saturating_sub(h_scroll)
             .saturating_sub(1);
@@ -479,6 +506,24 @@ fn render_table(
             );
         }
 
+        // Edit-session change marker in the pinned left gutter: `~` for a row
+        // with modified cells, `+` for a pending insert, `-` for a deleted row
+        // (matching the original dbm's `gutter_glyph`).
+        let row_kind = crate::features::sql_workspace::sql_tab::results::edit::row_change_kind(
+            &state.edit,
+            row_idx,
+        );
+        if gutter_w > 0 {
+            let glyph =
+                crate::features::sql_workspace::sql_tab::results::edit::gutter_glyph(row_kind);
+            if glyph != ' ' {
+                let style = change_kind_style(p, row_kind);
+                frame
+                    .buffer_mut()
+                    .set_string(table_area.x, y_base, glyph.to_string(), style);
+            }
+        }
+
         // Horizontal span (`(left, right)`) of the current-match cell on this
         // row, if any; the row separator below tints this segment as the cell's
         // bottom border so all four edges are drawn consistently.
@@ -503,6 +548,17 @@ fn render_table(
 
             let is_active = state_col == col && state_selected;
             let cell_selected = row_selected && is_active;
+            // Edit-session tint: a *modified* row only colors the cells that
+            // actually changed (so the diff is readable), while an inserted or
+            // deleted row is tinted as a whole — matching the original dbm.
+            let dirty = gutter_w > 0
+                && (row_kind == RowChangeKind::Insert
+                    || row_kind == RowChangeKind::Delete
+                    || crate::features::sql_workspace::sql_tab::results::edit::cell_is_dirty(
+                        &state.edit,
+                        row_idx,
+                        col,
+                    ));
             let base_style = if cell_selected {
                 Style::default()
                     .fg(p.selection_focus_text)
@@ -510,6 +566,8 @@ fn render_table(
                     .add_modifier(Modifier::BOLD)
             } else if row_selected || is_active {
                 Style::default().fg(p.selection_text).bg(p.selection_bg)
+            } else if dirty {
+                Style::default().fg(change_kind_style(p, row_kind).fg.unwrap_or(p.fg))
             } else {
                 Style::default().fg(p.fg)
             };
@@ -535,6 +593,7 @@ fn render_table(
             };
             let col_x = table_area
                 .x
+                .saturating_add(gutter_w)
                 .saturating_add(
                     crate::common::view::format::col_x_start(col, col_widths) as u16
                         + tv.table_text_skip,
@@ -594,6 +653,7 @@ fn render_table(
             let col_right = crate::common::view::format::col_x_end(col, col_widths);
             let border_x = table_area
                 .x
+                .saturating_add(gutter_w)
                 .saturating_add(col_right as u16)
                 .saturating_sub(h_scroll)
                 .saturating_sub(1);
@@ -685,7 +745,10 @@ pub fn col_width_from_drag_x(list_area: Rect, state: &ListState, col: usize, x: 
         Some(g) => g,
         None => return crate::common::view::format::DEFAULT_RESULTS_COL_WIDTH,
     };
-    let rel_x = x.saturating_sub(content_area.x) as usize + h_scroll;
+    // Subtract the edit gutter: columns start after it, so a drag x maps into
+    // column space only once the pinned marker column is removed.
+    let gutter_w = super::layout::results_gutter_width(state);
+    let rel_x = x.saturating_sub(content_area.x).saturating_sub(gutter_w) as usize + h_scroll;
     let start = crate::common::view::format::col_x_start(col, &state.col_widths);
     rel_x.saturating_sub(start) as u16
 }

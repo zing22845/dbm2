@@ -78,6 +78,14 @@ pub struct AppState {
     /// that proves a previous release was missed.
     pub sql_editor_selecting: bool,
 
+    /// The same rendered hit region for the **results detail cell editor**
+    /// (the second embedded edtui instance, only present while an edit session
+    /// is active and the detail editor is focused). Fed back by the run loop
+    /// alongside [`Self::sql_editor_mouse_area`].
+    pub results_detail_mouse_area: Option<crate::common::editor::EditorMouseHitArea>,
+    /// Whether a held-button drag began on the results detail editor's text.
+    pub results_detail_selecting: bool,
+
     // --- Feature states ---
     pub header: HeaderState,
     pub explorer: ExplorerState,
@@ -244,6 +252,8 @@ impl Default for AppState {
             scrollbar_drag: None,
             sql_editor_mouse_area: None,
             sql_editor_selecting: false,
+            results_detail_mouse_area: None,
+            results_detail_selecting: false,
             theme: crate::common::view::theme::default(),
             header: HeaderState::default(),
             explorer: ExplorerState::default(),

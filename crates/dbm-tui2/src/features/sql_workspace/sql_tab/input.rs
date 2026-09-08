@@ -897,7 +897,12 @@ fn results_v_scrollbar_hit(
     let list = &tab.results.list;
     let result = list.result.as_ref()?;
     let row_count = result.rows.len();
-    let table_width = crate::common::view::format::results_table_width(&list.col_widths);
+    let table_width = crate::common::view::format::results_table_width(&list.col_widths)
+        .saturating_add(
+            crate::features::sql_workspace::sql_tab::results::list::layout::results_gutter_width(
+                list,
+            ),
+        );
 
     if !contains(table_area, x, y) {
         return None;
@@ -951,7 +956,12 @@ fn results_h_scrollbar_hit(
     let list = &tab.results.list;
     let result = list.result.as_ref()?;
     let row_count = result.rows.len();
-    let table_width = crate::common::view::format::results_table_width(&list.col_widths);
+    let table_width = crate::common::view::format::results_table_width(&list.col_widths)
+        .saturating_add(
+            crate::features::sql_workspace::sql_tab::results::list::layout::results_gutter_width(
+                list,
+            ),
+        );
 
     if !contains(table_area, x, y) {
         return None;

@@ -142,9 +142,9 @@ pub fn render(
     title: String,
     edit_active: bool,
     focused: bool,
-) {
+) -> Option<crate::common::editor::EditorMouseHitArea> {
     if area.width == 0 || area.height == 0 {
-        return;
+        return None;
     }
     let p = theme.palette();
 
@@ -206,12 +206,13 @@ pub fn render(
     }
 
     // Detail body: the embedded cell editor when focused, otherwise a read-only
-    // wrapped preview of the cell value with line numbers.
-    if detail.focused
+    // wrapped preview of the cell value with line numbers. The focused branch
+    // hands back the rendered hit region so pointer clicks map onto the draft.
+    let mouse_hit = if detail.focused
         && let Some(host) = detail.editor.as_ref()
     {
         let mut editor = host.editor.clone();
-        crate::common::editor::render_detail_editor(&mut editor, body_area, frame.buffer_mut());
+        crate::common::editor::render_detail_editor(&mut editor, body_area, frame.buffer_mut())
     } else {
         let viewport = body_area.height as usize;
         let display_lines = build_detail_lines(body, body_area.width);
@@ -224,9 +225,11 @@ pub fn render(
             .take(viewport.max(1))
             .collect();
         frame.render_widget(Paragraph::new(visible), body_area);
-    }
+        None
+    };
 
     // Detail footer.
     let hint = detail_footer_text(detail, edit_active);
     draw_footer(frame, theme, footer_area, &hint);
+    mouse_hit
 }

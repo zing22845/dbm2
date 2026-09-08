@@ -75,13 +75,28 @@ pub fn action_bar_button_at(
 /// top header lines (`RESULTS_HEADER_CONTENT_HEIGHT`) count, and the pointer
 /// must be within one column of a column's right edge. Used for the splitter
 /// hover indicator and to begin a column-width drag.
+/// Width of the pinned left change-marker gutter: one column while an edit
+/// session is active, otherwise none.
+///
+/// The renderer applies this as a constant offset when turning a column's
+/// column-space position into a screen x, and every hit-test subtracts it
+/// again — one shared helper so clicks can never drift from the drawn grid.
+pub fn results_gutter_width(state: &ListState) -> u16 {
+    if state.edit.editing {
+        crate::common::view::format::RESULTS_DIRTY_GUTTER_WIDTH
+    } else {
+        0
+    }
+}
+
 pub fn col_resize_hit_at(list_area: Rect, state: &ListState, x: u16, y: u16) -> Option<usize> {
     let (_table_area, content_area, h_scroll) = results_geometry(list_area, state)?;
     if !contains(content_area, x, y) {
         return None;
     }
+    let gutter_w = results_gutter_width(state);
     let rel_y = y.saturating_sub(content_area.y);
-    let rel_x = x.saturating_sub(content_area.x) as usize;
+    let rel_x = x.saturating_sub(content_area.x).saturating_sub(gutter_w) as usize;
     crate::common::view::format::resize_hit_column(rel_x, rel_y, h_scroll as u16, &state.col_widths)
 }
 
@@ -137,8 +152,12 @@ pub fn cell_hit_at(list_area: Rect, state: &ListState, x: u16, y: u16) -> Option
         return None;
     }
 
-    // Hit-test column: x relative to content_area, accounting for h_scroll.
-    let rel_x = x.saturating_sub(vs.layout.content_area.x) as usize;
+    // Hit-test column: x relative to content_area (minus the edit gutter),
+    // accounting for h_scroll.
+    let gutter_w = results_gutter_width(state);
+    let rel_x = x
+        .saturating_sub(vs.layout.content_area.x)
+        .saturating_sub(gutter_w) as usize;
     let col_sx = rel_x.saturating_add(vs.h_scroll);
     for col in 0..result.columns.len() {
         let start = crate::common::view::format::col_x_start(col, col_widths);
@@ -166,7 +185,8 @@ pub(super) fn results_geometry(list_area: Rect, state: &ListState) -> Option<(Re
     }
     let col_widths = &state.col_widths;
     let (_, table_area) = results_list_regions(list_area);
-    let table_width = crate::common::view::format::results_table_width(col_widths);
+    let table_width = crate::common::view::format::results_table_width(col_widths)
+        .saturating_add(results_gutter_width(state));
     let vs = compute_viewport_scroll(
         table_area,
         state,
@@ -220,8 +240,11 @@ pub fn compute_viewport_scroll(
     let mut h_scroll = state.h_scroll.get().min(max_h_scroll);
     if !scroll_locked && viewport_w > 0 && !col_widths.is_empty() {
         let view_right = h_scroll.saturating_add(viewport_w);
-        let cur_col_left = crate::common::view::format::col_x_start(state.col, col_widths);
-        let cur_col_right = crate::common::view::format::col_x_end(state.col, col_widths);
+        // Column positions live in content space, which starts *after* the edit
+        // gutter — so the anchor compares against gutter-shifted edges.
+        let gutter = results_gutter_width(state) as usize;
+        let cur_col_left = gutter + crate::common::view::format::col_x_start(state.col, col_widths);
+        let cur_col_right = gutter + crate::common::view::format::col_x_end(state.col, col_widths);
         if cur_col_right <= h_scroll {
             h_scroll = cur_col_left;
         } else if cur_col_left >= view_right {
@@ -268,4 +291,141 @@ pub struct ViewportScroll {
     pub max_v_scroll: usize,
     /// Maximum valid h_scroll value.
     pub max_h_scroll: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::view::format::{RESULTS_HEADER_HEIGHT, RESULTS_ROW_HEIGHT};
+    use crate::features::sql_workspace::sql_tab::editor::sql_completion::provider::ColumnInfo;
+    use crate::features::sql_workspace::sql_tab::results::state::QueryResultData;
+
+    fn state(editing: bool) -> ListState {
+        let mut s = ListState::new();
+        s.result = Some(QueryResultData {
+            columns: vec![
+                ColumnInfo {
+                    name: "id".into(),
+                    type_name: "int4".into(),
+                    type_display: "int4".into(),
+                    comment: None,
+                },
+                ColumnInfo {
+                    name: "name".into(),
+                    type_name: "text".into(),
+                    type_display: "text".into(),
+                    comment: None,
+                },
+            ],
+            rows: vec![vec!["1".into(), "alice".into()]],
+            rows_affected: None,
+            total_rows: Some(1),
+        });
+        s.col_widths = vec![10, 10];
+        s.selected = true;
+        s.scroll_locked.set(true);
+        s.h_scroll.set(0);
+        if editing {
+            s.edit.editing = true;
+        }
+        s
+    }
+
+    #[test]
+    fn gutter_only_exists_while_editing() {
+        assert_eq!(results_gutter_width(&state(false)), 0);
+        assert_eq!(
+            results_gutter_width(&state(true)),
+            crate::common::view::format::RESULTS_DIRTY_GUTTER_WIDTH
+        );
+    }
+
+    #[test]
+    fn editing_gutter_shifts_cell_hits_with_the_drawn_grid() {
+        // A click one pixel right of the content start must resolve to column 0
+        // while editing (the first pixel is the change-marker gutter) and to
+        // column 0 one pixel earlier when not editing. Both must agree with the
+        // renderer's offset, or clicks land on the wrong cell. First data row
+        // sits at `content.y + RESULTS_HEADER_HEIGHT` (header included in the
+        // content band). `rel_y` is measured from `content.y`.
+        let area = Rect::new(0, 0, 40, 12);
+        let first_row_y =
+            results_geometry(area, &state(true)).expect("geometry").1.y + RESULTS_HEADER_HEIGHT;
+
+        let plain = state(false);
+        let editing_state = state(true);
+        let (_t, content_plain, _h) = results_geometry(area, &plain).expect("geometry");
+        let (_t, content_edit, _h) = results_geometry(area, &editing_state).expect("geometry");
+
+        // Column 0 occupies [0, 10) in column space. Without the gutter its
+        // first pixel is the content start; with the gutter its first *content*
+        // pixel sits one pixel later (the marker is drawn at the content start).
+        assert_eq!(
+            cell_hit_at(area, &plain, content_plain.x, first_row_y),
+            Some((0, 0)),
+            "no gutter: content start is column 0"
+        );
+        // The pixel that is column 0's *last* cell pixel in the plain grid is
+        // still column 0 while editing (the whole grid shifted right by 1), and
+        // the gutter pixel itself maps back to column 0 (1-px tolerance to the
+        // neighbouring cell, as format::results_cell_at_point also does).
+        let last_col0_px = 9;
+        assert_eq!(
+            cell_hit_at(
+                area,
+                &editing_state,
+                content_edit.x + last_col0_px,
+                first_row_y
+            ),
+            Some((0, 0)),
+            "editing: column 0 spans [gutter, gutter+width)"
+        );
+        // 10 plain pixels right of the content start is column 1's first pixel
+        // when NOT editing, but still column 0 (width-1) when editing — proving
+        // the hit test follows the renderer's gutter shift.
+        let x = 10;
+        assert_eq!(
+            cell_hit_at(area, &plain, content_plain.x + x, first_row_y),
+            Some((0, 1))
+        );
+        assert_eq!(
+            cell_hit_at(area, &editing_state, content_edit.x + x, first_row_y),
+            Some((0, 0)),
+            "editing shifts the grid so pixel 10 is still inside column 0"
+        );
+    }
+
+    #[test]
+    fn column_resize_hit_tracks_the_gutter() {
+        let area = Rect::new(0, 0, 40, 12);
+        let s = state(true);
+        let (t, content, _h) = results_geometry(area, &s).expect("geometry");
+        // Column 0's right border, screen x = content.x + gutter + width - 1,
+        // must be found as a resize handle on one of the header lines.
+        let width = s.col_widths[0];
+        let edge = content.x + results_gutter_width(&s) + width;
+        let header_y = content.y; // first header content line (rel_y=0)
+        let _ = t;
+        assert_eq!(col_resize_hit_at(area, &s, edge - 1, header_y), Some(0));
+    }
+
+    #[test]
+    fn row_hit_still_uses_row_height() {
+        let area = Rect::new(0, 0, 40, 12);
+        let s = state(true);
+        let (t, content, _h) = results_geometry(area, &s).expect("geometry");
+        let _ = t;
+        let first_row_y = content.y + RESULTS_HEADER_HEIGHT;
+        // A click one row-height below the first row slot is empty (only one row).
+        assert_eq!(
+            cell_hit_at(
+                area,
+                &s,
+                content.x + results_gutter_width(&s),
+                first_row_y + RESULTS_ROW_HEIGHT,
+            ),
+            None,
+            "a single row of data: the second row slot is empty"
+        );
+    }
 }

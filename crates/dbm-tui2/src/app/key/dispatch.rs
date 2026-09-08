@@ -124,6 +124,23 @@ fn copy_selection_msg(state: &AppState) -> Option<AppMsg> {
             }),
         ))));
     }
+    // No SQL-editor selection: the results detail cell editor may hold one
+    // (mirroring the original dbm, which probes the detail editor second).
+    if tab
+        .results
+        .detail
+        .editor
+        .as_ref()
+        .is_some_and(|host| host.editor.selection.is_some())
+    {
+        use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+        return Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+            SqlTabMsg::Message(SqlTabMessage::Results {
+                tab_id: tab.session.id,
+                msg: ResultsMsg::Message(ResultsMessage::CopyDetailSelection),
+            }),
+        ))));
+    }
     None
 }
 

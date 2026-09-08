@@ -6,6 +6,7 @@ use super::intent::DetailIntent;
 use super::msg::DetailMessage;
 use super::state::DetailState;
 use crate::common::editor;
+use crate::features::sql_workspace::sql_tab::editor::mouse::MouseGestureOutcome;
 
 /// Run `key` against the focused detail editor. Returns `true` when the editor
 /// changed (buffer text, cursor, mode, or selection) and thus needs a repaint.
@@ -46,6 +47,24 @@ fn apply_editor_key(
     changed
 }
 
+/// Apply a decoded mouse gesture (cursor / mode / selection) to the focused
+/// editor. Refused when no editor is focused. The buffer text is untouched, so
+/// this never makes the draft dirty — it only moves the caret / selects text so
+/// the copy key works. Returns `true` (a repaint happened).
+fn apply_mouse_gesture(state: &mut DetailState, outcome: MouseGestureOutcome) -> bool {
+    let Some(host) = state.editor.as_mut() else {
+        return false;
+    };
+    if !state.focused {
+        return false;
+    }
+    host.editor.set_scroll_locked(false);
+    host.editor.cursor = outcome.cursor;
+    host.editor.mode = outcome.mode;
+    host.editor.selection = outcome.selection;
+    true
+}
+
 pub fn update(
     msg: DetailMessage,
     mut state: DetailState,
@@ -79,6 +98,10 @@ pub fn update(
             key,
             tracked_caps_lock,
         } => apply_editor_key(&mut state, key, tracked_caps_lock),
+        // Apply the edtui-produced cursor/mode/selection from a click / drag /
+        // release. The buffer text is untouched, so this can never make the
+        // draft dirty — it only moves the caret or selects text for the copy key.
+        DetailMessage::MouseGesture { outcome } => apply_mouse_gesture(&mut state, outcome),
     };
     (state, intents, effects, dirty)
 }
@@ -227,5 +250,58 @@ mod tests {
         assert_eq!(s2.draft, "xyz");
         assert_eq!(s2.baseline, "xyz");
         assert!(!s2.dirty);
+    }
+
+    #[test]
+    fn mouse_gesture_moves_caret_without_editing_draft() {
+        let s = focused_state("abc");
+        // A click outcome: place the caret at line 0, col 2 (middle of "abc").
+        let outcome = MouseGestureOutcome {
+            cursor: edtui::Index2::new(0, 2),
+            mode: edtui::EditorMode::Normal,
+            selection: None,
+        };
+        let (s2, _i, _e, dirty) = update(DetailMessage::MouseGesture { outcome }, s);
+        assert!(dirty, "a caret move must repaint");
+        assert_eq!(
+            s2.editor.as_ref().unwrap().editor.cursor,
+            edtui::Index2::new(0, 2)
+        );
+        assert!(!s2.dirty, "mouse gestures never edit the buffer");
+        assert_eq!(s2.draft, "abc");
+    }
+
+    #[test]
+    fn mouse_gesture_selection_keeps_draft_text() {
+        let mut s = focused_state("select_me");
+        s.dirty = true; // keep the dirty diff markers on the buffer
+        let outcome = MouseGestureOutcome {
+            cursor: edtui::Index2::new(0, 9),
+            mode: edtui::EditorMode::Normal,
+            selection: Some(edtui::Selection::new(
+                edtui::Index2::new(0, 0),
+                edtui::Index2::new(0, 9),
+            )),
+        };
+        let (s2, _i, _e, dirty) = update(DetailMessage::MouseGesture { outcome }, s);
+        assert!(dirty);
+        assert!(
+            s2.editor.as_ref().unwrap().editor.selection.is_some(),
+            "selection must be applied for the copy key"
+        );
+        assert_eq!(s2.draft, "select_me", "gestures never alter the draft");
+    }
+
+    #[test]
+    fn mouse_gesture_ignored_when_not_focused() {
+        let s = DetailState::default();
+        let outcome = MouseGestureOutcome {
+            cursor: edtui::Index2::new(0, 0),
+            mode: edtui::EditorMode::Normal,
+            selection: None,
+        };
+        let (s2, _i, _e, dirty) = update(DetailMessage::MouseGesture { outcome }, s);
+        assert!(!dirty);
+        assert!(s2.editor.is_none());
     }
 }

@@ -715,9 +715,36 @@ fn press_sql(
         if text_click {
             state.sql_editor_selecting = true;
         }
+        // The same for the results detail cell editor: once it holds focus, a
+        // press on its text begins mouse selection there (click to place the
+        // caret, drag to select, double-click to select the word). The hit
+        // region only exists while that editor is actually focused.
+        let detail_text_click = matches!(
+            action,
+            crate::features::sql_workspace::sql_tab::input::SqlClickAction::FocusSubPane(
+                crate::features::sql_workspace::sql_tab::state::SqlFocus::Results
+            )
+        ) && state.focus == Pane::SQLWorkspace
+            && state
+                .results_detail_mouse_area
+                .is_some_and(|area| area.contains(Position::new(mouse.column, mouse.row)));
+        if detail_text_click {
+            state.results_detail_selecting = true;
+        }
         let mut msgs = sql_click_msgs(&state.sql.sql_tab, action);
         if text_click
             && let Some(msg) = super::editor_gesture::editor_gesture_msg(
+                state,
+                MouseEventKind::Down(MouseButton::Left),
+                mouse.column,
+                mouse.row,
+                is_double_click,
+            )
+        {
+            msgs.push(msg);
+        }
+        if detail_text_click
+            && let Some(msg) = super::editor_gesture::detail_gesture_msg(
                 state,
                 MouseEventKind::Down(MouseButton::Left),
                 mouse.column,

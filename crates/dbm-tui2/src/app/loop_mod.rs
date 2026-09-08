@@ -208,13 +208,15 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             let history_v_scroll_out = std::cell::RefCell::new(None);
             let results_scroll_out = std::cell::RefCell::new(None);
             let editor_mouse_hit = std::cell::RefCell::new(None);
+            let detail_mouse_hit = std::cell::RefCell::new(None);
             terminal.draw(|frame| {
-                let (c, t, h, r, e) = render(frame, &state);
+                let (c, t, h, r, e, d) = render(frame, &state);
                 *editor_cursor.borrow_mut() = c;
                 *targets_layout.borrow_mut() = t;
                 *history_v_scroll_out.borrow_mut() = h;
                 *results_scroll_out.borrow_mut() = r;
                 *editor_mouse_hit.borrow_mut() = e;
+                *detail_mouse_hit.borrow_mut() = d;
             })?;
             let cursor = editor_cursor.into_inner();
             let cursor_pos = cursor.as_ref().map(|c| c.position);
@@ -223,6 +225,9 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
             // viewport) so pointer handlers map clicks onto the buffer exactly
             // as the drawn frame did. Only the render knows the true text area.
             state.sql_editor_mouse_area = editor_mouse_hit.into_inner();
+            // Same for the results detail cell editor (second embedded edtui):
+            // only present while an edit session is active and it has focus.
+            state.results_detail_mouse_area = detail_mouse_hit.into_inner();
             // Feed back the computed targets layout (scroll offset, viewport)
             // to the state so update handlers can clamp scroll correctly.
             if let Some(info) = targets_layout.into_inner() {
@@ -374,6 +379,7 @@ pub async fn run_event_loop() -> anyhow::Result<()> {
                     // color). Clear every in-progress drag here so the UI resets.
                     let was_dragging = state.scrollbar_drag.is_some()
                         || state.sql_editor_selecting
+        || state.results_detail_selecting
                         || mouse_interaction.splitter_drag.is_some()
                         || state.splitter_hover.results_col_resize_drag.is_some()
                         || state.splitter_hover.dragging_flags().iter().any(|&f| f);

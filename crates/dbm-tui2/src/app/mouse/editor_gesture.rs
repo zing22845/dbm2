@@ -57,3 +57,38 @@ pub(super) fn editor_gesture_msg(
         }),
     ))))
 }
+
+/// Decode a Down/Drag/Up gesture on the active tab's **results detail cell
+/// editor** (the second embedded edtui instance, live only while an edit
+/// session is active and the editor has focus) and return the message that
+/// applies it.
+///
+/// Same mechanics as [`editor_gesture_msg`] — edtui runs against a scratch copy
+/// positioned with the rendered hit region — but the outcome travels as a
+/// `DetailMessage::MouseGesture`, and `None` is returned when no detail editor
+/// is focused (or before the first draw fed back its hit region).
+pub(super) fn detail_gesture_msg(
+    state: &AppState,
+    kind: MouseEventKind,
+    x: u16,
+    y: u16,
+    double_click: bool,
+) -> Option<AppMsg> {
+    use crate::features::sql_workspace::sql_tab::results::detail::msg::{DetailMessage, DetailMsg};
+    use crate::features::sql_workspace::sql_tab::results::msg::{ResultsMessage, ResultsMsg};
+
+    let tab = state.sql.sql_tab.active_tab()?;
+    let host = tab.results.detail.editor.as_ref()?;
+    let hit = state.results_detail_mouse_area?;
+    let event = mouse_event(kind, x, y);
+    let outcome = mouse::apply_mouse_event(&host.handler, &host.editor, &event, hit, double_click);
+    let tab_id = tab.session.id;
+    Some(AppMsg::Sql(SqlMsg::Message(SqlMessage::SqlTab(
+        SqlTabMsg::Message(SqlTabMessage::Results {
+            tab_id,
+            msg: ResultsMsg::Message(ResultsMessage::Detail(DetailMsg::Message(
+                DetailMessage::MouseGesture { outcome },
+            ))),
+        }),
+    ))))
+}

@@ -65,6 +65,7 @@ pub(crate) fn handle_mouse_event(
     if matches!(mouse.kind, MouseEventKind::Down(_))
         && (state.scrollbar_drag.is_some()
             || state.sql_editor_selecting
+            || state.results_detail_selecting
             || splitter_drag.is_some()
             || state.splitter_hover.results_col_resize_drag.is_some()
             || state.splitter_hover.dragging_flags().iter().any(|&f| f))
@@ -72,6 +73,7 @@ pub(crate) fn handle_mouse_event(
         splitter_drag = None;
         state.scrollbar_drag = None;
         state.sql_editor_selecting = false;
+        state.results_detail_selecting = false;
         state.splitter_hover.set_dragging_flags([false; 7]);
         state.splitter_hover.results_col_resize_drag = None;
         dirty = true;

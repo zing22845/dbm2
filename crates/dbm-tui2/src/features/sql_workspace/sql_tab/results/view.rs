@@ -34,9 +34,9 @@ pub fn render(
     splitter_drag: bool,
     col_resize: Option<usize>,
     active_scrollbar: Option<ActiveScrollbar>,
-) {
+) -> Option<crate::common::editor::EditorMouseHitArea> {
     if area.width == 0 || area.height == 0 {
-        return;
+        return None;
     }
     let p = theme.palette();
 
@@ -107,7 +107,9 @@ pub fn render(
     }
 
     // The detail preview sits inside the content band, so its bottom aligns
-    // with the table's last row (both stop where the toolbar begins).
+    // with the table's last row (both stop where the toolbar begins). A focused
+    // cell editor hands back its hit region so clicks map onto the draft.
+    let mut detail_hit: Option<crate::common::editor::EditorMouseHitArea> = None;
     if let (Some(detail_area), true) = (layout.detail, state.detail_open) {
         let body = state.list.selected_cell().unwrap_or_default();
         let col_name = state.list.selected_column_name().unwrap_or("").to_string();
@@ -117,7 +119,7 @@ pub fn render(
             state.list.row + 1
         );
         let edit_editing = state.list.edit.editing;
-        detail_view::render(
+        detail_hit = detail_view::render(
             frame,
             theme,
             detail_area,
@@ -163,4 +165,5 @@ pub fn render(
     // Full-width list footer (spans both the table and the detail).
     let hint = results_pane_footer_text(state.list.search.text_input_active(), &sql_status);
     draw_pane_footer(frame, theme, layout.footer, &hint);
+    detail_hit
 }

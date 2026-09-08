@@ -44,6 +44,9 @@ pub fn render(
 ) -> (
     Option<crate::common::editor::EditorHardwareCursor>,
     Option<usize>,
+    // The SQL editor's rendered hit region.
+    Option<crate::common::editor::EditorMouseHitArea>,
+    // The results detail cell editor's hit region (only while focused).
     Option<crate::common::editor::EditorMouseHitArea>,
 ) {
     // No tab open for the active connection: show an empty-state hint and no
@@ -57,7 +60,7 @@ pub fn render(
         );
         let para = Paragraph::new(Span::styled(hint, Style::default().fg(p.muted)));
         frame.render_widget(para, area);
-        return (None, None, None);
+        return (None, None, None, None);
     }
 
     let chunks = Layout::default()
@@ -78,7 +81,7 @@ pub fn render(
     let Some(tab) = state.active_tab() else {
         // No open tab for the active connection: render an empty placeholder.
         frame.render_widget(Block::default().title("No open SQL tab"), body_area);
-        return (None, None, None);
+        return (None, None, None, None);
     };
 
     // Layout mirrors the original dbm `sql_tab_layout` (ui.rs §11): editor +
@@ -106,7 +109,7 @@ pub fn render(
             results_col_resize,
             active_scrollbar,
         );
-        return (None, None, None);
+        return (None, None, None, None);
     }
 
     let (instance, connection) = session_view_key(&tab.session);
@@ -264,7 +267,7 @@ pub fn render(
         )
     };
 
-    results_view::render(
+    let detail_mouse_area = results_view::render(
         frame,
         theme,
         layout.results,
@@ -296,7 +299,12 @@ pub fn render(
     );
 
     let hw_cursor = if editor_focused { cursor } else { None };
-    (hw_cursor, history_v_scroll, editor_mouse_area)
+    (
+        hw_cursor,
+        history_v_scroll,
+        editor_mouse_area,
+        detail_mouse_area,
+    )
 }
 
 #[cfg(test)]

@@ -309,13 +309,18 @@ fn detail_editor_theme() -> EditorTheme<'static> {
 /// Render the results Detail cell editor (plain text, no SQL highlight) with
 /// its own block cursor. Unlike the SQL editor there is no hardware-cursor
 /// plumbing here, so edtui paints the caret cell itself.
+///
+/// Returns the rendered mouse hit region like [`render_editor`] does: the text
+/// area is `area` minus the line-number gutter, and `viewport_y` is the offset
+/// the rendered copy actually drew with (its auto-scroll may have nudged it).
+/// The run loop feeds it back so pointer clicks map onto the draft buffer.
 pub fn render_detail_editor(
     editor: &mut EditorState,
     area: Rect,
     buf: &mut ratatui::buffer::Buffer,
-) {
+) -> Option<EditorMouseHitArea> {
     if area.width == 0 || area.height == 0 {
-        return;
+        return None;
     }
     Clear.render(area, buf);
     EditorView::new(editor)
@@ -323,6 +328,17 @@ pub fn render_detail_editor(
         .wrap(true)
         .line_numbers(LineNumbers::Absolute)
         .render(area, buf);
+    let gutter_w = editor_line_number_gutter_width(editor);
+    let (_, rendered_viewport_y) = editor.viewport_offset();
+    Some(EditorMouseHitArea {
+        text_area: Rect {
+            x: area.x.saturating_add(gutter_w),
+            y: area.y,
+            width: area.width.saturating_sub(gutter_w),
+            height: area.height,
+        },
+        viewport_y: rendered_viewport_y,
+    })
 }
 
 /// Strip Ctrl/Alt/Meta/Super/Hyper modifiers, keeping only Shift (and the code).

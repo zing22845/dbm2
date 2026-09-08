@@ -87,6 +87,10 @@ pub enum ResultsMessage {
     DiscardDetailCell,
     /// Forward a key into the focused detail cell editor.
     DetailEditorKey(KeyEvent),
+    /// Copy the focused detail cell editor's selection to the clipboard (the
+    /// platform copy chord, mirroring the original dbm's `copy_active_selection`
+    /// which probes the SQL editor first, then the results detail editor).
+    CopyDetailSelection,
     /// Apply a new rows-per-page limit.
     SetRowLimit { limit: usize },
     /// Jump to a page.
@@ -221,6 +225,7 @@ impl ResultsMessage {
             | ResultsMessage::SaveDetailCell
             | ResultsMessage::DiscardDetailCell
             | ResultsMessage::DetailEditorKey(_)
+            | ResultsMessage::CopyDetailSelection
             | ResultsMessage::ToggleDetail
             | ResultsMessage::CommitOutcome { .. } => ListMessage::ResetSelection,
             ResultsMessage::List(_) | ResultsMessage::Detail(_) => {

@@ -31,6 +31,9 @@ pub fn render(
     Option<crate::features::discover::targets::view::TargetsLayoutInfo>,
     Option<usize>,
     Option<usize>,
+    // SQL editor hit region.
+    Option<crate::common::editor::EditorMouseHitArea>,
+    // Results detail cell editor hit region.
     Option<crate::common::editor::EditorMouseHitArea>,
 ) {
     // The footer height is dynamic: one line of hints plus the (wrapped) status
@@ -98,7 +101,7 @@ pub fn render(
     // the instance workspace to the SQL workspace. With no active workspace we
     // still show the SQL workspace (its empty-state hint) — the "connection
     // zone" the original dbm keeps visible after the last tab closes.
-    let (editor_cursor, history_v_scroll, editor_mouse_hit) =
+    let (editor_cursor, history_v_scroll, editor_mouse_hit, detail_mouse_hit) =
         if state.explorer.instances.active_is_instance() {
             iw_view::render(
                 frame,
@@ -108,7 +111,7 @@ pub fn render(
                 workspace_focused,
                 active_scrollbar,
             );
-            (None, None, None)
+            (None, None, None, None)
         } else {
             sql_view::render(
                 frame,
@@ -171,6 +174,7 @@ pub fn render(
             history_v_scroll,
             results_scroll_out,
             None,
+            None,
         );
     }
     // The discover overlay's inline-edit caret wins over the editor caret
@@ -181,6 +185,7 @@ pub fn render(
         history_v_scroll,
         results_scroll_out,
         editor_mouse_hit,
+        detail_mouse_hit,
     )
 }
 
