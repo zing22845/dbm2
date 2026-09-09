@@ -281,9 +281,7 @@ pub fn sql_workspace_click(
     // the shrunk editor and the widened history zone must be hit-tested so a
     // click on the detail keeps focus in History instead of falling to the
     // editor. Mirror the same geometry the renderer uses.
-    let editor_hit;
-    let history_hit;
-    if detail_visible {
+    let (editor_hit, history_hit) = if detail_visible {
         let zone_x = super::history::splitter::layout::history_zone_x(
             body,
             &layout,
@@ -305,12 +303,13 @@ pub fn sql_workspace_click(
             layout.editor.height,
         );
         let history_zone = Rect::new(zone_x, layout.history.y, zone_w, layout.history.height);
-        editor_hit = contains(shrunk_editor, x, y);
-        history_hit = contains(history_zone, x, y);
+        (contains(shrunk_editor, x, y), contains(history_zone, x, y))
     } else {
-        editor_hit = contains(layout.editor, x, y);
-        history_hit = contains(layout.history, x, y);
-    }
+        (
+            contains(layout.editor, x, y),
+            contains(layout.history, x, y),
+        )
+    };
 
     // Double-click inside the history pane applies the selected entry to the editor
     // (same as pressing Enter).
