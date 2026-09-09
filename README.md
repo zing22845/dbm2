@@ -1,11 +1,11 @@
 # dbm2
 
-dbM2 is an integrated **database lifecycle management** tool for the terminal:
+dbm2 is an integrated **database lifecycle management** tool for the terminal:
 database discovery, instance lifecycle management, connection & data
 management, and — on the roadmap — backup & recovery, monitoring and more,
 across multiple database engines. It ships as a fast TUI (`dbm i`) plus a
 scriptable CLI, built on ratatui/crossterm with a strict TEA (The Elm
-Architecture) design. dbM2 is a from-scratch rewrite of its predecessor dbm by
+Architecture) design. dbm2 is a from-scratch rewrite of its predecessor dbm by
 the same author.
 
 > **Alpha** — this 0.1.0 release realizes only the first slice of the vision
@@ -159,7 +159,7 @@ stored in plaintext; secrets are zeroized in memory after use.
 
 ## Architecture
 
-dbM2 follows **TEA**: `input → msg → update → view`, with a single state
+dbm2 follows **TEA**: `input → msg → update → view`, with a single state
 transition point and pure rendering. The application layer is a central message
 router around an `AppState`; business features live under
 `dbm-tui2/src/features/` (explorer, discover, instance workspace, sql
@@ -198,5 +198,5 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution guidelines.
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE). The vendored
-`third_party/edtui` retains its own MIT license. dbM2 is a rewrite of its
+`third_party/edtui` retains its own MIT license. dbm2 is a rewrite of its
 predecessor dbm — both Apache-2.0, same author.

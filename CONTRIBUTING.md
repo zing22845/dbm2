@@ -1,4 +1,4 @@
-# Contributing to dbM2
+# Contributing to dbm2
 
 Thanks for your interest. This document covers how to build, test, and submit
 changes. For questions or proposals, open an issue first so we can align before
@@ -19,7 +19,7 @@ cargo test --workspace
 
 ## Architecture notes — read before changing code
 
-dbM2 follows a strict **TEA (The Elm Architecture)** split, and the codebase
+dbm2 follows a strict **TEA (The Elm Architecture)** split, and the codebase
 enforces it. Please read [`docs/tea-architecture-principles.md`](docs/tea-architecture-principles.md)
 first; the short version:
 
