@@ -4,6 +4,8 @@ description = "DBM terminal UI - TEA architecture with nested features and a cen
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+readme.workspace = true
 rust-version.workspace = true
 
 [lib]

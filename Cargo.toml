@@ -16,6 +16,8 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 rust-version = "1.88"
+repository = "https://github.com/zing22845/dbm2"
+readme = "README.md"
 
 [workspace.dependencies]
 anyhow = "1"
