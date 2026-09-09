@@ -1,0 +1,12 @@
+# cargo audit configuration, read from the repo root on every CI audit run.
+#
+# RUSTSEC-2026-0235 (rkyv <0.8.17: insufficient archive validation can cause
+# out-of-bounds reads in archives containing Rc/Arc) is ignored because rkyv
+# exists in Cargo.lock only as an *unused optional* dependency of rust_decimal:
+# the `rkyv` feature is enabled nowhere in this workspace (rust_decimal is used
+# with `db-tokio-postgres`/`serde`/`std`), and rkyv is never compiled. cargo
+# still records the optional crate in the lock file, which cargo audit scans
+# statically. Re-evaluate this ignore if `rust_decimal/rkyv` is ever enabled.
+
+[advisories]
+ignore = ["RUSTSEC-2026-0235"]
