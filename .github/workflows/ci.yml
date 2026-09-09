@@ -56,5 +56,8 @@ jobs:
         with:
           tool: cargo-audit
       - name: Run cargo audit
-        run: cargo audit
+        # rkyv advisory: unused optional dep (see audit.toml for rationale);
+        # pass --ignore explicitly so the job is green regardless of whether
+        # audit.toml gets discovered from the checkout.
+        run: cargo audit --ignore RUSTSEC-2026-0235
 
