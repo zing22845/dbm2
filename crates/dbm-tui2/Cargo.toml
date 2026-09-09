@@ -1,6 +1,6 @@
 [package]
 name = "dbm-tui2"
-description = "DBM terminal UI - TEA architecture with nested features and a central message router (skeleton)"
+description = "DBM terminal UI - TEA architecture with nested features and a central message router"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
