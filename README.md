@@ -1,9 +1,9 @@
-# dbM2
+# dbm2
 
 An interactive **PostgreSQL database manager for the terminal**: a fast TUI
 (`dbm i`) backed by a scriptable CLI, built on ratatui/crossterm with a strict
-TEA (The Elm Architecture) design. dbM2 is a from-scratch rewrite of
-[dbm](https://github.com/zing22845/dbm) by the same author.
+TEA (The Elm Architecture) design. dbM2 is a from-scratch rewrite of its
+predecessor dbm by the same author.
 
 > **Work in progress** — pre-1.0. Expect rough edges and breaking changes.
 
@@ -158,9 +158,10 @@ cargo test --workspace
 CI runs these on every push/PR — format and clippy on Linux, the test suite on
 macOS, Linux and Windows.
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution guidelines.
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE). The vendored
 `third_party/edtui` retains its own MIT license. dbM2 is a rewrite of its
-predecessor [dbm](https://github.com/zing22845/dbm) — both Apache-2.0, same
-author.
+predecessor dbm — both Apache-2.0, same author.
