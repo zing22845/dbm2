@@ -1,11 +1,30 @@
 # dbm2
 
-An interactive **PostgreSQL database manager for the terminal**: a fast TUI
-(`dbm i`) backed by a scriptable CLI, built on ratatui/crossterm with a strict
-TEA (The Elm Architecture) design. dbM2 is a from-scratch rewrite of its
-predecessor dbm by the same author.
+dbM2 is an integrated **database lifecycle management** tool for the terminal:
+database discovery, instance lifecycle management, connection & data
+management, and — on the roadmap — backup & recovery, monitoring and more,
+across multiple database engines. It ships as a fast TUI (`dbm i`) plus a
+scriptable CLI, built on ratatui/crossterm with a strict TEA (The Elm
+Architecture) design. dbM2 is a from-scratch rewrite of its predecessor dbm by
+the same author.
 
-> **Work in progress** — pre-1.0. Expect rough edges and breaking changes.
+> **Alpha** — this 0.1.0 release realizes only the first slice of the vision
+> (the PostgreSQL foundation: discovery, instance & connection management, SQL
+> data management). Expect rough edges, breaking changes and a rapidly evolving
+> feature set.
+
+## Status & scope
+
+**Currently implemented (all PostgreSQL):** local instance discovery and
+registration, per-instance connections with live prechecks, a terminal SQL
+workspace (vim-native editor, results grid with row editing, SQL history) and
+matching CLI commands. The architecture deliberately isolates engines behind
+the `dbm-discovery` / `dbm-driver-*` crates so more engines and lifecycle
+capabilities can be added without reshaping the TUI.
+
+**Planned next:** additional database engines, lifecycle operations
+(start/stop/restart, upgrade, failover), backup & recovery, export, and
+monitoring & parameter management — see [Roadmap](#roadmap).
 
 ## Highlights
 
@@ -71,6 +90,22 @@ platform shortcuts (`Cmd+C/V` on macOS, `Ctrl+C/V` elsewhere), toggle dark/light
 themes, and quit with `Ctrl+D`. Opened tabs, editor buffers, tree expansion and
 layout are persisted per session and restored on the next launch. A footer
 perf readout (`fps` + wasted-redraw ratio) is always visible.
+
+## Roadmap
+
+The long-term goal is full-lifecycle management across database engines:
+
+- **More engines** — generalize the discovery/driver crates beyond PostgreSQL
+  (MySQL, SQLite, …).
+- **Instance lifecycle** — deploy, start/stop/restart, upgrade, primary/replica
+  switch, and parameter management.
+- **Backup & recovery** — schedule and run backups, restores, and point-in-time
+  recovery.
+- **Data management** — export/import, richer data editors, and monitoring
+  metrics.
+
+Roadmap items are tracked as GitHub issues; priorities reflect community
+demand.
 
 ## CLI
 

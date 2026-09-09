@@ -6,8 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-dbM2 is a from-scratch rewrite of its predecessor `dbm`. This first public
-release is the TEA-architecture terminal client for PostgreSQL.
+dbM2 is a from-scratch rewrite of its predecessor `dbm`. This **alpha** public
+release is the PostgreSQL foundation of a database lifecycle management
+platform: discovery, instance & connection management, and terminal data
+management.
 
 ### Added
 
