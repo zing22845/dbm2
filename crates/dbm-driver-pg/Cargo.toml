@@ -17,6 +17,7 @@ tokio-postgres-rustls = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
 rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
 tokio = { workspace = true }
 url = { workspace = true }
 webpki-roots = { workspace = true }

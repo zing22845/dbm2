@@ -189,9 +189,15 @@ when connecting:
 - `prefer` (the default) tries TLS and transparently falls back to plaintext
   when the server does not support it.
 - `disable` connects without TLS.
-- `require` / `verify-ca` / `verify-full` require TLS; the server certificate is
-  always verified against the bundled Mozilla root set (`webpki-roots`), so a
-  self-signed server certificate is currently rejected on these modes.
+- `require` requires TLS but does **not** verify the server certificate, matching
+  libpq — this is what makes self-signed servers connectable.
+- `verify-ca` / `verify-full` require TLS and verify the certificate against the
+  bundled Mozilla roots plus any extra anchors given in `DBM_SSLROOTCERT` (a PEM
+  file). Both check the hostname. To verify a private-CA server:
+
+  ```sh
+  DBM_SSLROOTCERT=/etc/ssl/certs/my-ca.pem dbm i
+  ```
 
 TLS is provided by `rustls` (ring backend), keeping static musl binaries free of
 OpenSSL and system certificate-store dependencies.

@@ -29,11 +29,11 @@ impl PostgresPool {
         let mut pg_config = connect_url
             .parse::<tokio_postgres::Config>()
             .map_err(|e| DbmError::InvalidUrl(e.to_string()))?;
-        pg_config.ssl_mode(ssl_mode);
+        pg_config.ssl_mode(ssl_mode.tokio_ssl_mode());
 
         let manager = Manager::from_config(
             pg_config,
-            crate::tls::connector(),
+            crate::tls::connector(ssl_mode)?,
             ManagerConfig {
                 recycling_method: RecyclingMethod::Fast,
             },

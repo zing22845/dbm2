@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `DBM_SSLROOTCERT` — path to a PEM file whose certificates are trusted in
+  addition to the bundled Mozilla roots, for private-CA / self-signed servers
+  under the verifying sslmodes.
+
+### Changed
+
+- `sslmode=require` now matches libpq: TLS is required but the server
+  certificate is **not** verified. Previously it was verified, which made
+  self-signed servers (e.g. Ubuntu's default `ssl-cert-snakeoil`) fail with a
+  handshake error. `verify-ca` / `verify-full` still verify the certificate.
+
 ## [0.1.0-alpha.2] - 2026-09-10
 
 ### Added
