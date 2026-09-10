@@ -4,12 +4,12 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0-alpha.1] - 2026-09-10
 
-dbm2 is a from-scratch rewrite of its predecessor `dbm`. This **alpha** public
-release is the PostgreSQL foundation of a database lifecycle management
-platform: discovery, instance & connection management, and terminal data
-management.
+First tagged preview of dbm2, a from-scratch rewrite of its predecessor `dbm`.
+This **alpha** release is the PostgreSQL foundation of a database lifecycle
+management platform: discovery, instance & connection management, and terminal
+data management.
 
 ### Added
 

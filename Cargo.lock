@@ -696,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "dbm-cli"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -713,7 +713,7 @@ dependencies = [
 
 [[package]]
 name = "dbm-core"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "async-trait",
  "serde",
@@ -724,7 +724,7 @@ dependencies = [
 
 [[package]]
 name = "dbm-discovery"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "dbm-core",
  "regex",
@@ -738,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "dbm-driver-pg"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "dbm-store"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "aes-gcm",
  "dbm-core",
@@ -774,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "dbm-tui2"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "arboard",
