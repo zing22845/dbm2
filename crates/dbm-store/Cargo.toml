@@ -13,7 +13,7 @@ aes-gcm = "0.10"
 dbm-core = { workspace = true }
 dbm-discovery = { workspace = true }
 rand = "0.9"
-rusqlite = { version = "0.33", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
