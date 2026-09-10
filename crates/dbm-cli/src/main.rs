@@ -154,7 +154,7 @@ enum InstanceConnectionCommands {
         #[arg(long, env = "DBM_PASSWORD")]
         password: Option<String>,
         /// SSL mode: disable | allow | prefer | require | verify-ca | verify-full
-        #[arg(long, default_value = "prefer")]
+        #[arg(long, default_value = "disable")]
         ssl_mode: String,
     },
     /// Add a connection (runs precheck before save)
@@ -170,7 +170,7 @@ enum InstanceConnectionCommands {
         #[arg(long, env = "DBM_PASSWORD")]
         password: Option<String>,
         /// SSL mode: disable | allow | prefer | require | verify-ca | verify-full
-        #[arg(long, default_value = "prefer")]
+        #[arg(long, default_value = "disable")]
         ssl_mode: String,
     },
     /// Remove a connection from an instance

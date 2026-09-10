@@ -51,6 +51,9 @@ pub enum ConnectionsMessage {
     TestSelected,
     /// Move the form field cursor.
     FormField(FormField),
+    /// Cycle the form's `sslmode` by `delta` steps (the selector field's
+    /// ←/→ or h/l).
+    CycleSslMode(i32),
     /// A mouse click on a form field line: a single click selects the field,
     /// a double click enters insert mode on it (matching the original dbm's
     /// form field click handling). `is_double` is computed by the app loop's

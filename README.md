@@ -184,11 +184,13 @@ stored in plaintext; secrets are zeroized in memory after use.
 
 Each connection carries a libpq-style `sslmode` (`disable`, `allow`, `prefer`,
 `require`, `verify-ca`, `verify-full`), stored with the connection and honored
-when connecting:
+when connecting. New connections default to **`disable`** (TLS off) — change it
+in the connection form's `ssl` field (cycle with `←`/`→` or `h`/`l`) or with
+`dbm instance connection add --ssl-mode <mode>`.
 
-- `prefer` (the default) tries TLS and transparently falls back to plaintext
-  when the server does not support it.
 - `disable` connects without TLS.
+- `prefer` tries TLS and transparently falls back to plaintext when the server
+  does not support it.
 - `require` requires TLS but does **not** verify the server certificate, matching
   libpq — this is what makes self-signed servers connectable.
 - `verify-ca` / `verify-full` require TLS and verify the certificate against the

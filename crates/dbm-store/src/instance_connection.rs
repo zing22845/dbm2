@@ -318,7 +318,7 @@ impl super::Store {
         let ssl_mode = input
             .ssl_mode
             .clone()
-            .unwrap_or_else(|| "prefer".to_string());
+            .unwrap_or_else(|| "disable".to_string());
 
         self.sqlite().execute(
             "INSERT INTO instance_connections (

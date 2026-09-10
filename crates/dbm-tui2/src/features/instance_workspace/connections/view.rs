@@ -345,7 +345,7 @@ pub fn form_popup_rect(area: Rect) -> Rect {
 }
 
 /// Map a mouse position (in the pane's `area`) to the connection form field
-/// under it. The form draws its 4 field lines top-aligned inside the popup's
+/// under it. The form draws its 5 field lines top-aligned inside the popup's
 /// inner area (just below the top border), so the clicked field index is the
 /// row offset from that first line. Returns `None` for clicks outside the
 /// popup or on a non-field row (top border, footer, status).
@@ -365,6 +365,7 @@ pub fn form_field_at(area: Rect, x: u16, y: u16) -> Option<FormField> {
         1 => Some(FormField::Username),
         2 => Some(FormField::Database),
         3 => Some(FormField::Password),
+        4 => Some(FormField::SslMode),
         _ => None,
     }
 }
@@ -468,12 +469,17 @@ fn render_form(
                 FormField::Password,
                 &field_value(FormField::Password, &password_display),
             ),
+            line(
+                "ssl",
+                FormField::SslMode,
+                &field_value(FormField::SslMode, &form.ssl_mode),
+            ),
         ]
     };
     let footer_text = match form.mode {
         FormMode::Insert => "Keep: ENTER  Revert: ESC".to_string(),
         FormMode::Normal => {
-            "Edit: i  Clear+Edit: dd  Test: t  Save: ENTER  Cancel: ESC".to_string()
+            "Edit: i  Clear+Edit: dd  Test: t  SSL: ←/→  Save: ENTER  Cancel: ESC".to_string()
         }
     };
 
@@ -654,10 +660,14 @@ mod tests {
             form_field_at(area, popup.x + 1, top + 3),
             Some(FormField::Password)
         );
+        assert_eq!(
+            form_field_at(area, popup.x + 1, top + 4),
+            Some(FormField::SslMode)
+        );
         // The top border row and the footer/status rows below the fields are
         // not fields.
         assert_eq!(form_field_at(area, popup.x + 1, popup.y), None);
-        assert_eq!(form_field_at(area, popup.x + 1, top + 4), None);
+        assert_eq!(form_field_at(area, popup.x + 1, top + 5), None);
         // Clicks outside the popup (off its left edge / above it) are None.
         assert_eq!(form_field_at(area, popup.x.saturating_sub(1), top), None);
         assert_eq!(

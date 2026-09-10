@@ -12,7 +12,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::app_shell::nav::IwPane;
 
 use super::connections::msg::{ConnectionsMessage, ConnectionsMsg};
-use super::connections::state::FormMode;
+use super::connections::state::{FormField, FormMode};
 use super::msg::IwMessage;
 use super::overview::msg::{OverviewMessage, OverviewMsg};
 use super::state::IwState;
@@ -147,6 +147,13 @@ fn iw_form_key(key: KeyEvent, state: &IwState) -> Option<IwInput> {
             KeyCode::Char('i') | KeyCode::Char('I') => ConnectionsMessage::BeginFieldInsert,
             KeyCode::Up | KeyCode::Char('k') => ConnectionsMessage::FormField(form.field.prev()),
             KeyCode::Down | KeyCode::Char('j') => ConnectionsMessage::FormField(form.field.next()),
+            // On the sslmode chooser, ←/→ (or h/l) cycle its value.
+            KeyCode::Left | KeyCode::Char('h') if form.field == FormField::SslMode => {
+                ConnectionsMessage::CycleSslMode(-1)
+            }
+            KeyCode::Right | KeyCode::Char('l') if form.field == FormField::SslMode => {
+                ConnectionsMessage::CycleSslMode(1)
+            }
             KeyCode::Enter => ConnectionsMessage::CommitForm,
             KeyCode::Esc => ConnectionsMessage::CancelForm,
             // Test the form's current values against the database, at most once
@@ -379,5 +386,39 @@ mod tests {
                 ConnectionsMsg::Message(ConnectionsMessage::ClearFieldAndInsert)
             )))
         ));
+    }
+
+    #[test]
+    fn form_ssl_selector_cycles_with_arrows_and_h_l() {
+        let mut s = state_with(IwPane::Connections, "inst");
+        s.connections.form = Some(super::super::connections::state::ConnectionForm {
+            field: super::super::connections::state::FormField::SslMode,
+            mode: FormMode::Normal,
+            ..Default::default()
+        });
+        assert!(matches!(
+            key_to_msg(key(KeyCode::Right), IwPane::Connections, &s),
+            Some(IwInput::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::CycleSslMode(1))
+            )))
+        ));
+        assert!(matches!(
+            key_to_msg(key(KeyCode::Char('h')), IwPane::Connections, &s),
+            Some(IwInput::Message(IwMessage::Connections(
+                ConnectionsMsg::Message(ConnectionsMessage::CycleSslMode(-1))
+            )))
+        ));
+    }
+
+    #[test]
+    fn form_text_field_ignores_h_l() {
+        let mut s = state_with(IwPane::Connections, "inst");
+        s.connections.form = Some(super::super::connections::state::ConnectionForm {
+            field: super::super::connections::state::FormField::Name,
+            mode: FormMode::Normal,
+            ..Default::default()
+        });
+        assert!(key_to_msg(key(KeyCode::Char('h')), IwPane::Connections, &s).is_none());
+        assert!(key_to_msg(key(KeyCode::Right), IwPane::Connections, &s).is_none());
     }
 }

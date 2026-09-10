@@ -5,7 +5,7 @@ use dbm_store::NewInstanceConnection;
 use super::effect::ConnectionsEffect;
 use super::intent::ConnectionsIntent;
 use super::msg::ConnectionsMessage;
-use super::state::{ConnectionStatusKind, ConnectionsState, FormMode};
+use super::state::{ConnectionStatusKind, ConnectionsState, FormField, FormMode};
 
 /// Update the connections panel state. Pure by-value transition.
 ///
@@ -155,7 +155,7 @@ pub fn update(
                 } else {
                     Some(form.password.clone())
                 },
-                ssl_mode: None,
+                ssl_mode: Some(form.ssl_mode.clone()),
                 env_label: None,
             };
             let instance_name = state.instance_name.clone();
@@ -249,7 +249,7 @@ pub fn update(
                 } else {
                     Some(form.password.clone())
                 },
-                ssl_mode: None,
+                ssl_mode: Some(form.ssl_mode.clone()),
                 env_label: None,
             };
             // When editing an existing connection and the password field is
@@ -318,6 +318,19 @@ pub fn update(
                 } else {
                     false
                 }
+            } else {
+                false
+            }
+        }
+        ConnectionsMessage::CycleSslMode(delta) => {
+            // The sslmode selector is a chooser: it only cycles in normal mode
+            // while the cursor sits on it.
+            let active = state
+                .form
+                .as_ref()
+                .is_some_and(|f| f.mode == FormMode::Normal && f.field == FormField::SslMode);
+            if active {
+                state.form.as_mut().is_some_and(|f| f.cycle_ssl_mode(delta))
             } else {
                 false
             }
@@ -1016,5 +1029,48 @@ mod tests {
         let (s, _i, _e, _) = update(ConnectionsMessage::CancelForm, std::mem::take(&mut s));
         assert!(s.form.is_none());
         assert!(s.status.is_none(), "closing the form clears test status");
+    }
+
+    #[test]
+    fn commit_form_passes_the_selected_ssl_mode() {
+        let mut s = ConnectionsState::default();
+        s.instance_name = "inst".into();
+        s.form = Some(ConnectionForm {
+            name: "conn".into(),
+            ssl_mode: "require".into(),
+            ..Default::default()
+        });
+        let (_s, _i, effects, _dirty) =
+            update(ConnectionsMessage::CommitForm, std::mem::take(&mut s));
+        match effects.first() {
+            Some(ConnectionsEffect::AddConnection { connection, .. }) => {
+                assert_eq!(connection.ssl_mode.as_deref(), Some("require"));
+            }
+            _ => panic!("expected an AddConnection effect"),
+        }
+    }
+
+    #[test]
+    fn cycle_ssl_mode_only_applies_on_the_selector_field() {
+        let mut s = ConnectionsState::default();
+        s.form = Some(ConnectionForm {
+            field: FormField::SslMode,
+            ssl_mode: "disable".into(),
+            ..Default::default()
+        });
+        let (s, _i, _e, dirty) =
+            update(ConnectionsMessage::CycleSslMode(1), std::mem::take(&mut s));
+        assert!(dirty);
+        assert_eq!(s.form.unwrap().ssl_mode, "prefer");
+
+        let mut s = ConnectionsState::default();
+        s.form = Some(ConnectionForm {
+            field: FormField::Name,
+            ..Default::default()
+        });
+        let (s, _i, _e, dirty) =
+            update(ConnectionsMessage::CycleSslMode(1), std::mem::take(&mut s));
+        assert!(!dirty, "cycling is ignored on text fields");
+        assert_eq!(s.form.unwrap().ssl_mode, "disable");
     }
 }

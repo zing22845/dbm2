@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `DBM_SSLROOTCERT` — path to a PEM file whose certificates are trusted in
   addition to the bundled Mozilla roots, for private-CA / self-signed servers
   under the verifying sslmodes.
+- The connection add/edit form now has an `ssl` selector (`←`/`→` or `h`/`l`
+  cycles `disable` → `prefer` → `require` → `verify-ca` → `verify-full`).
+
+### Changed
+
+- New connections default to `sslmode=disable` (TLS off) in the form, in the
+  CLI `add`/`test` defaults and in the store.
 
 ### Changed
 

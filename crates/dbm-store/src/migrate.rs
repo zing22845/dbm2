@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS instance_connections (
     database_name TEXT NOT NULL,
     password_nonce BLOB,
     password_enc BLOB,
-    ssl_mode TEXT NOT NULL DEFAULT 'prefer',
+    ssl_mode TEXT NOT NULL DEFAULT 'disable',
     env_label TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),

@@ -2,6 +2,12 @@
 
 use dbm_store::InstanceConnection;
 
+/// SSL modes offered by the connection form, in cycle order.
+pub const SSL_MODES: [&str; 5] = ["disable", "prefer", "require", "verify-ca", "verify-full"];
+
+/// Default `sslmode` for new connections: TLS off.
+pub const DEFAULT_SSL_MODE: &str = "disable";
+
 /// The form field currently being edited.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FormField {
@@ -10,6 +16,8 @@ pub enum FormField {
     Username,
     Database,
     Password,
+    /// The `sslmode` selector — a value chooser, not a text field.
+    SslMode,
 }
 
 impl FormField {
@@ -19,17 +27,19 @@ impl FormField {
             FormField::Name => FormField::Username,
             FormField::Username => FormField::Database,
             FormField::Database => FormField::Password,
-            FormField::Password => FormField::Name,
+            FormField::Password => FormField::SslMode,
+            FormField::SslMode => FormField::Name,
         }
     }
 
     /// The previous field in the form (wrapping), in display order.
     pub fn prev(self) -> Self {
         match self {
-            FormField::Name => FormField::Password,
+            FormField::Name => FormField::SslMode,
             FormField::Username => FormField::Name,
             FormField::Database => FormField::Username,
             FormField::Password => FormField::Database,
+            FormField::SslMode => FormField::Password,
         }
     }
 }
@@ -72,15 +82,19 @@ pub struct ConnectionFormBaseline {
     pub name: String,
     pub username: String,
     pub database: String,
+    pub ssl_mode: String,
 }
 
 /// A connection add/edit form in progress.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ConnectionForm {
     pub name: String,
     pub username: String,
     pub database: String,
     pub password: String,
+    /// libpq-style `sslmode` chosen in the form; new connections start at
+    /// [`DEFAULT_SSL_MODE`] (TLS off).
+    pub ssl_mode: String,
     /// When editing, the original connection name (used to look up on save).
     pub edit_original_name: Option<String>,
     /// The saved field values when an edit began, used to detect unsaved
@@ -111,6 +125,7 @@ impl ConnectionForm {
             || self.username.trim() != base.username.trim()
             || self.database.trim() != base.database.trim()
             || !self.password.is_empty()
+            || self.ssl_mode != base.ssl_mode
     }
 
     /// Whether a specific field of an edit form differs from its baseline.
@@ -124,6 +139,41 @@ impl ConnectionForm {
             FormField::Username => self.username.trim() != base.username.trim(),
             FormField::Database => self.database.trim() != base.database.trim(),
             FormField::Password => !self.password.is_empty(),
+            FormField::SslMode => self.ssl_mode != base.ssl_mode,
+        }
+    }
+
+    /// Cycle the form's `sslmode` by `delta` steps within [`SSL_MODES`],
+    /// wrapping around. Returns whether the value changed.
+    pub fn cycle_ssl_mode(&mut self, delta: i32) -> bool {
+        let len = SSL_MODES.len() as i32;
+        let index = SSL_MODES
+            .iter()
+            .position(|mode| mode.eq_ignore_ascii_case(self.ssl_mode.trim()))
+            .map(|i| i as i32)
+            .unwrap_or(0);
+        let next = ((index + delta) % len + len) % len;
+        let value = SSL_MODES[next as usize].to_string();
+        let changed = self.ssl_mode != value;
+        self.ssl_mode = value;
+        changed
+    }
+}
+
+impl Default for ConnectionForm {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            username: String::new(),
+            database: String::new(),
+            password: String::new(),
+            ssl_mode: DEFAULT_SSL_MODE.to_string(),
+            edit_original_name: None,
+            edit_baseline: None,
+            field: FormField::default(),
+            mode: FormMode::default(),
+            insert_field_snapshot: None,
+            pending_d_at: None,
         }
     }
 }
@@ -195,16 +245,23 @@ impl ConnectionsState {
         let Some(conn) = self.connections.get(idx) else {
             return false;
         };
+        let ssl_mode = if conn.ssl_mode.trim().is_empty() {
+            DEFAULT_SSL_MODE.to_string()
+        } else {
+            conn.ssl_mode.clone()
+        };
         self.form = Some(ConnectionForm {
             name: conn.name.clone(),
             username: conn.username.clone(),
             database: conn.database.clone(),
             password: String::new(), // passwords are not stored; a blank keeps the old
+            ssl_mode: ssl_mode.clone(),
             edit_original_name: Some(conn.name.clone()),
             edit_baseline: Some(ConnectionFormBaseline {
                 name: conn.name.clone(),
                 username: conn.username.clone(),
                 database: conn.database.clone(),
+                ssl_mode,
             }),
             field: FormField::Name,
             ..ConnectionForm::default()
@@ -224,6 +281,11 @@ impl ConnectionsState {
             return false;
         };
         if form.mode == FormMode::Insert {
+            return false;
+        }
+        // The sslmode field is a value chooser, not editable text; this also
+        // covers mouse double-clicks, which funnel through here.
+        if form.field == FormField::SslMode {
             return false;
         }
         form.insert_field_snapshot = Some(form.field_value().to_string());
@@ -290,6 +352,9 @@ impl ConnectionsState {
         let Some(form) = &mut self.form else {
             return false;
         };
+        if form.field == FormField::SslMode {
+            return false;
+        }
         form.insert_field_snapshot = Some(form.field_value().to_string());
         form.set_field_value("");
         form.mode = FormMode::Insert;
@@ -315,6 +380,7 @@ impl ConnectionForm {
             FormField::Username => &self.username,
             FormField::Database => &self.database,
             FormField::Password => &self.password,
+            FormField::SslMode => &self.ssl_mode,
         }
     }
 
@@ -325,6 +391,7 @@ impl ConnectionForm {
             FormField::Username => &mut self.username,
             FormField::Database => &mut self.database,
             FormField::Password => &mut self.password,
+            FormField::SslMode => &mut self.ssl_mode,
         }
     }
 
@@ -335,6 +402,64 @@ impl ConnectionForm {
             FormField::Username => self.username = value.into(),
             FormField::Database => self.database = value.into(),
             FormField::Password => self.password = value.into(),
+            FormField::SslMode => self.ssl_mode = value.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_forms_default_to_ssl_disabled() {
+        assert_eq!(ConnectionForm::default().ssl_mode, DEFAULT_SSL_MODE);
+        let mut state = ConnectionsState::default();
+        state.begin_add();
+        assert_eq!(state.form.unwrap().ssl_mode, "disable");
+    }
+
+    #[test]
+    fn cycle_ssl_mode_wraps_in_both_directions() {
+        let mut form = ConnectionForm::default();
+        assert!(form.cycle_ssl_mode(1));
+        assert_eq!(form.ssl_mode, "prefer");
+        form.ssl_mode = "verify-full".into();
+        assert!(form.cycle_ssl_mode(1));
+        assert_eq!(form.ssl_mode, "disable");
+        assert!(form.cycle_ssl_mode(-1));
+        assert_eq!(form.ssl_mode, "verify-full");
+    }
+
+    #[test]
+    fn ssl_mode_counts_towards_edit_dirty() {
+        let mut form = ConnectionForm {
+            name: "n".into(),
+            username: "u".into(),
+            database: "d".into(),
+            edit_baseline: Some(ConnectionFormBaseline {
+                name: "n".into(),
+                username: "u".into(),
+                database: "d".into(),
+                ssl_mode: "disable".into(),
+            }),
+            ..ConnectionForm::default()
+        };
+        assert!(!form.is_edit_dirty());
+        form.ssl_mode = "require".into();
+        assert!(form.is_edit_dirty());
+        assert!(form.is_field_modified(FormField::SslMode));
+    }
+
+    #[test]
+    fn selector_field_is_not_text_editable() {
+        let mut state = ConnectionsState::default();
+        state.form = Some(ConnectionForm {
+            field: FormField::SslMode,
+            ..ConnectionForm::default()
+        });
+        assert!(!state.begin_field_insert());
+        assert!(!state.clear_field_and_insert());
+        assert_eq!(state.form.unwrap().mode, FormMode::Normal);
     }
 }
