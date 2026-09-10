@@ -138,6 +138,21 @@ dbm i   # pick the connection in the tree and start typing SQL
 
 ## Installation
 
+### Prebuilt static binaries
+
+Linux musl builds are published as release artifacts — statically linked, with
+no libc or OpenSSL runtime dependency:
+
+```text
+dbm-<version>-x86_64-unknown-linux-musl.tar.gz
+dbm-<version>-aarch64-unknown-linux-musl.tar.gz
+```
+
+Each archive contains the `dbm` binary plus `README.md`/`LICENSE`, and ships
+with a `.sha256` checksum.
+
+### Build from source
+
 Build from source (Rust `stable`, MSRV 1.88):
 
 ```sh
@@ -156,6 +171,22 @@ with `--data-dir` or `DBM_DATA_DIR`):
 
 Passwords are encrypted with AES-256-GCM (random nonce per record) and never
 stored in plaintext; secrets are zeroized in memory after use.
+
+## Connections & TLS
+
+Each connection carries a libpq-style `sslmode` (`disable`, `allow`, `prefer`,
+`require`, `verify-ca`, `verify-full`), stored with the connection and honored
+when connecting:
+
+- `prefer` (the default) tries TLS and transparently falls back to plaintext
+  when the server does not support it.
+- `disable` connects without TLS.
+- `require` / `verify-ca` / `verify-full` require TLS; the server certificate is
+  always verified against the bundled Mozilla root set (`webpki-roots`), so a
+  self-signed server certificate is currently rejected on these modes.
+
+TLS is provided by `rustls` (ring backend), keeping static musl binaries free of
+OpenSSL and system certificate-store dependencies.
 
 ## Architecture
 

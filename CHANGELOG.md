@@ -29,6 +29,12 @@ management.
 - **CLI**: unified `dbm` binary — `interact|i`, `ping`, `query`, `tables`,
   `discover scan|list`, `instance list|precheck|register|unregister`,
   `instance connection list|test|add|remove|update`.
+- **TLS**: rustls-based TLS driven by the per-connection libpq `sslmode`
+  (`disable`/`allow`/`prefer`/`require`/`verify-ca`/`verify-full`); `prefer`
+  falls back to plaintext when the server has no TLS, `require`+ verify the
+  server certificate against bundled Mozilla roots.
+- **Static Linux builds**: release workflow produces `x86_64-unknown-linux-musl`
+  and `aarch64-unknown-linux-musl` binaries (no libc/OpenSSL dependency).
 - **Security**: credentials encrypted at rest (AES-256-GCM, local `master.key`,
   data dir `0700`), secrets zeroized after use.
 - **Session restore**: tabs, buffers, tree expansion and layout persisted to the
