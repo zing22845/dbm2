@@ -150,8 +150,14 @@ dbm-<version>-x86_64-pc-windows-msvc.tar.gz       # Windows (64-bit)
 ```
 
 Each archive contains the `dbm` binary plus `README.md`/`LICENSE` and ships
-with a `.sha256` checksum. The macOS and Windows binaries are not code-signed
-yet, so the OS may warn on first launch.
+with a `.sha256` checksum.
+
+> **Unsigned binaries** — the macOS and Windows builds are not code-signed yet,
+> so the OS warns on first launch. To allow them:
+>
+> - **macOS**: right-click the `dbm` binary and choose *Open* (or run
+>   `xattr -d com.apple.quarantine ./dbm`)
+> - **Windows**: on the SmartScreen prompt choose *More info* → *Run anyway*
 
 ### Build from source
 
