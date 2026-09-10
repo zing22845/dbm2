@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-alpha.2] - 2026-09-10
+
+### Added
+
+- **macOS (Apple Silicon) and Windows (x64) builds** — release artifacts now
+  cover four targets: static Linux musl (`x86_64`/`aarch64-unknown-linux-musl`),
+  `aarch64-apple-darwin`, and `x86_64-pc-windows-msvc`. macOS and Windows
+  binaries are not code-signed yet, so the OS may warn on first launch.
+
+### Changed
+
+- The release workflow uses the current (non-deprecated) artifact actions.
+
 ## [0.1.0-alpha.1] - 2026-09-10
 
 First tagged preview of dbm2, a from-scratch rewrite of its predecessor `dbm`.
@@ -33,10 +46,9 @@ data management.
   (`disable`/`allow`/`prefer`/`require`/`verify-ca`/`verify-full`); `prefer`
   falls back to plaintext when the server has no TLS, `require`+ verify the
   server certificate against bundled Mozilla roots.
-- **Prebuilt binaries**: the release workflow produces static Linux
-  (`x86_64`/`aarch64-unknown-linux-musl`, no libc/OpenSSL dependency), macOS
-  (`aarch64-apple-darwin`) and Windows (`x86_64-pc-windows-msvc`) archives with
-  `.sha256` checksums.
+- **Static Linux builds**: the release workflow produces static Linux
+  (`x86_64`/`aarch64-unknown-linux-musl`, no libc/OpenSSL dependency) archives
+  with `.sha256` checksums.
 - **Security**: credentials encrypted at rest (AES-256-GCM, local `master.key`,
   data dir `0700`), secrets zeroized after use.
 - **Session restore**: tabs, buffers, tree expansion and layout persisted to the

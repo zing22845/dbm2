@@ -8,10 +8,10 @@ scriptable CLI, built on ratatui/crossterm with a strict TEA (The Elm
 Architecture) design. dbm2 is a from-scratch rewrite of its predecessor dbm by
 the same author.
 
-> **Alpha** — this 0.1.0 release realizes only the first slice of the vision
-> (the PostgreSQL foundation: discovery, instance & connection management, SQL
-> data management). Expect rough edges, breaking changes and a rapidly evolving
-> feature set.
+> **Alpha** — this `0.1.0-alpha` release realizes only the first slice of the
+> vision (the PostgreSQL foundation: discovery, instance & connection
+> management, SQL data management). Expect rough edges, breaking changes and a
+> rapidly evolving feature set.
 
 ## Status & scope
 
