@@ -13,9 +13,13 @@ async-trait = { workspace = true }
 dbm-core = { workspace = true }
 deadpool-postgres = { workspace = true }
 tokio-postgres = { workspace = true }
+tokio-postgres-rustls = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
+rustls = { workspace = true }
 tokio = { workspace = true }
+url = { workspace = true }
+webpki-roots = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

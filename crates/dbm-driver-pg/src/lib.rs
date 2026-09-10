@@ -7,6 +7,7 @@ mod error;
 mod ident;
 mod pagination;
 mod pool;
+mod tls;
 
 pub use driver::PostgresDriver;
 pub use error::{FormattedPostgresError, dbm_error_from_postgres, format_postgres_error};

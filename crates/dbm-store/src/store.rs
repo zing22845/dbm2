@@ -58,6 +58,7 @@ pub fn build_database_url_from_parts(
     username: &str,
     database: &str,
     password: Option<&str>,
+    ssl_mode: Option<&str>,
 ) -> StoreResult<String> {
     use url::Url;
 
@@ -67,6 +68,10 @@ pub fn build_database_url_from_parts(
     if let Some(password) = password {
         url.set_password(Some(password))
             .map_err(|_| StoreError::Other("failed to set password in URL".into()))?;
+    }
+
+    if let Some(mode) = ssl_mode.map(str::trim).filter(|mode| !mode.is_empty()) {
+        url.query_pairs_mut().append_pair("sslmode", mode);
     }
 
     Ok(url.to_string())

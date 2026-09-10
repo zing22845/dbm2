@@ -2,7 +2,6 @@ use dbm_core::{ConnectOpts, DbmError, QueryResult, Result};
 use deadpool_postgres::{
     BuildError, GenericClient, Manager, ManagerConfig, Pool, PoolError, RecyclingMethod,
 };
-use tokio_postgres::NoTls;
 
 use crate::format_postgres_error;
 use crate::ident::quote_ident;
@@ -24,14 +23,17 @@ impl Clone for PostgresPool {
 impl PostgresPool {
     pub fn new(opts: &ConnectOpts) -> Result<Self> {
         let parsed = opts.parse()?;
-        let pg_config = parsed
-            .url
+        // tokio-postgres rejects `verify-full`-style sslmode values, so map the
+        // URL parameter ourselves and hand the mode to the config explicitly.
+        let (connect_url, ssl_mode) = crate::tls::split_ssl_mode(&parsed.url)?;
+        let mut pg_config = connect_url
             .parse::<tokio_postgres::Config>()
             .map_err(|e| DbmError::InvalidUrl(e.to_string()))?;
+        pg_config.ssl_mode(ssl_mode);
 
         let manager = Manager::from_config(
             pg_config,
-            NoTls,
+            crate::tls::connector(),
             ManagerConfig {
                 recycling_method: RecyclingMethod::Fast,
             },

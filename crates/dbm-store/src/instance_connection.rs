@@ -180,6 +180,7 @@ impl super::Store {
             &conn.username,
             database,
             password.as_deref(),
+            Some(conn.ssl_mode.as_str()),
         )
     }
 
@@ -554,6 +555,7 @@ where
             &input.username,
             &input.database,
             input.password.as_deref(),
+            input.ssl_mode.as_deref(),
         ) {
             Ok(url) => match ping_database_url(&url, ping_fn) {
                 Ok(v) => {

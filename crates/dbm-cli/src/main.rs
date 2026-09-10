@@ -153,6 +153,9 @@ enum InstanceConnectionCommands {
         database: String,
         #[arg(long, env = "DBM_PASSWORD")]
         password: Option<String>,
+        /// SSL mode: disable | allow | prefer | require | verify-ca | verify-full
+        #[arg(long, default_value = "prefer")]
+        ssl_mode: String,
     },
     /// Add a connection (runs precheck before save)
     Add {
@@ -166,6 +169,9 @@ enum InstanceConnectionCommands {
         database: String,
         #[arg(long, env = "DBM_PASSWORD")]
         password: Option<String>,
+        /// SSL mode: disable | allow | prefer | require | verify-ca | verify-full
+        #[arg(long, default_value = "prefer")]
+        ssl_mode: String,
     },
     /// Remove a connection from an instance
     Remove {
@@ -521,8 +527,9 @@ fn cmd_instance_connection(
             user,
             database,
             password,
+            ssl_mode,
         } => {
-            let input = new_connection_input(name, user, database, password);
+            let input = new_connection_input(name, user, database, password, ssl_mode);
             let precheck = store.test_instance_connection(&instance, &input, ping_url)?;
             println!(
                 "{}",
@@ -540,8 +547,9 @@ fn cmd_instance_connection(
             user,
             database,
             password,
+            ssl_mode,
         } => {
-            let input = new_connection_input(name, user, database, password);
+            let input = new_connection_input(name, user, database, password, ssl_mode);
             let conn = store.add_instance_connection(&instance, input, ping_url)?;
             let inst = store.get_managed_instance_by_name(&instance)?;
             println!(
@@ -614,13 +622,14 @@ fn new_connection_input(
     user: String,
     database: String,
     password: Option<String>,
+    ssl_mode: String,
 ) -> NewInstanceConnection {
     NewInstanceConnection {
         name,
         username: user,
         database,
         password,
-        ssl_mode: None,
+        ssl_mode: Some(ssl_mode),
         env_label: None,
     }
 }
