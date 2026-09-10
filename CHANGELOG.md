@@ -33,8 +33,10 @@ data management.
   (`disable`/`allow`/`prefer`/`require`/`verify-ca`/`verify-full`); `prefer`
   falls back to plaintext when the server has no TLS, `require`+ verify the
   server certificate against bundled Mozilla roots.
-- **Static Linux builds**: release workflow produces `x86_64-unknown-linux-musl`
-  and `aarch64-unknown-linux-musl` binaries (no libc/OpenSSL dependency).
+- **Prebuilt binaries**: the release workflow produces static Linux
+  (`x86_64`/`aarch64-unknown-linux-musl`, no libc/OpenSSL dependency), macOS
+  (`aarch64-apple-darwin`) and Windows (`x86_64-pc-windows-msvc`) archives with
+  `.sha256` checksums.
 - **Security**: credentials encrypted at rest (AES-256-GCM, local `master.key`,
   data dir `0700`), secrets zeroized after use.
 - **Session restore**: tabs, buffers, tree expansion and layout persisted to the

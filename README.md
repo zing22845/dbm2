@@ -138,18 +138,20 @@ dbm i   # pick the connection in the tree and start typing SQL
 
 ## Installation
 
-### Prebuilt static binaries
+### Prebuilt binaries
 
-Linux musl builds are published as release artifacts — statically linked, with
-no libc or OpenSSL runtime dependency:
+Release artifacts are published for:
 
 ```text
-dbm-<version>-x86_64-unknown-linux-musl.tar.gz
-dbm-<version>-aarch64-unknown-linux-musl.tar.gz
+dbm-<version>-x86_64-unknown-linux-musl.tar.gz    # static, no libc/OpenSSL dependency
+dbm-<version>-aarch64-unknown-linux-musl.tar.gz   # static
+dbm-<version>-aarch64-apple-darwin.tar.gz         # macOS (Apple Silicon)
+dbm-<version>-x86_64-pc-windows-msvc.tar.gz       # Windows (64-bit)
 ```
 
-Each archive contains the `dbm` binary plus `README.md`/`LICENSE`, and ships
-with a `.sha256` checksum.
+Each archive contains the `dbm` binary plus `README.md`/`LICENSE` and ships
+with a `.sha256` checksum. The macOS and Windows binaries are not code-signed
+yet, so the OS may warn on first launch.
 
 ### Build from source
 
