@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0-alpha.3] - 2026-09-11
 
 ### Added
 
@@ -18,13 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - New connections default to `sslmode=disable` (TLS off) in the form, in the
   CLI `add`/`test` defaults and in the store.
-
-### Changed
-
 - `sslmode=require` now matches libpq: TLS is required but the server
   certificate is **not** verified. Previously it was verified, which made
   self-signed servers (e.g. Ubuntu's default `ssl-cert-snakeoil`) fail with a
   handshake error. `verify-ca` / `verify-full` still verify the certificate.
+
+### Fixed
+
+- Editing a connection's `ssl` mode had no effect: the update patch dropped the
+  selected mode, and the edit form's connection test pinged with the stored
+  mode. Both paths now honor the selected `sslmode`.
 
 ## [0.1.0-alpha.2] - 2026-09-10
 
