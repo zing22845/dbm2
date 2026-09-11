@@ -1073,4 +1073,23 @@ mod tests {
         assert!(!dirty, "cycling is ignored on text fields");
         assert_eq!(s.form.unwrap().ssl_mode, "disable");
     }
+
+    #[test]
+    fn test_form_passes_the_selected_ssl_mode() {
+        let mut s = ConnectionsState::default();
+        s.instance_name = "inst".into();
+        s.form = Some(ConnectionForm {
+            name: "conn".into(),
+            ssl_mode: "verify-full".into(),
+            ..Default::default()
+        });
+        let (_s, _i, effects, _dirty) =
+            update(ConnectionsMessage::TestForm, std::mem::take(&mut s));
+        match effects.first() {
+            Some(ConnectionsEffect::TestFormConnection { connection, .. }) => {
+                assert_eq!(connection.ssl_mode.as_deref(), Some("verify-full"));
+            }
+            _ => panic!("expected a TestFormConnection effect"),
+        }
+    }
 }

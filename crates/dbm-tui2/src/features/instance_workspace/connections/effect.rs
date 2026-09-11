@@ -131,17 +131,7 @@ impl Effect for ConnectionsEffect {
                     original_name,
                     connection,
                 } => {
-                    let patch = UpdateInstanceConnection {
-                        name: Some(connection.name),
-                        username: Some(connection.username),
-                        database: Some(connection.database),
-                        password: match connection.password {
-                            Some(p) if !p.is_empty() => Some(Some(p)),
-                            _ => None, // blank password keeps the old one
-                        },
-                        ssl_mode: None,
-                        env_label: None,
-                    };
+                    let patch = edit_connection_patch(connection);
                     let ping = services.connection_test_ping();
                     let result = tokio::task::spawn_blocking(move || {
                         store
@@ -306,5 +296,59 @@ impl Effect for ConnectionsEffect {
                 }
             }
         })
+    }
+}
+
+/// Build the update patch for an edited connection.
+///
+/// Every field the form carries is patched — `ssl_mode` included, which must be
+/// forwarded or an edit would silently keep the stored mode — while a blank
+/// password keeps the stored one.
+fn edit_connection_patch(connection: NewInstanceConnection) -> UpdateInstanceConnection {
+    UpdateInstanceConnection {
+        name: Some(connection.name),
+        username: Some(connection.username),
+        database: Some(connection.database),
+        password: match connection.password {
+            Some(p) if !p.is_empty() => Some(Some(p)),
+            _ => None,
+        },
+        ssl_mode: connection.ssl_mode,
+        env_label: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edit_patch_forwards_the_selected_ssl_mode() {
+        let patch = edit_connection_patch(NewInstanceConnection {
+            name: "conn".into(),
+            username: "u".into(),
+            database: "postgres".into(),
+            password: None,
+            ssl_mode: Some("verify-full".into()),
+            env_label: None,
+        });
+        assert_eq!(patch.ssl_mode.as_deref(), Some("verify-full"));
+        assert_eq!(patch.name.as_deref(), Some("conn"));
+        // A blank password must keep the stored one.
+        assert!(patch.password.is_none());
+    }
+
+    #[test]
+    fn edit_patch_carries_password_but_keeps_an_absent_ssl_mode() {
+        let patch = edit_connection_patch(NewInstanceConnection {
+            name: "conn".into(),
+            username: "u".into(),
+            database: "postgres".into(),
+            password: Some("secret".into()),
+            ssl_mode: None,
+            env_label: None,
+        });
+        assert_eq!(patch.password, Some(Some("secret".to_string())));
+        assert!(patch.ssl_mode.is_none());
     }
 }

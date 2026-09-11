@@ -257,6 +257,9 @@ impl super::Store {
         saved.name = input.name.clone();
         saved.username = input.username.clone();
         saved.database = input.database.clone();
+        // The form's sslmode has to be exercised too: without this an edit form
+        // would silently test against the stored mode instead of the edited one.
+        saved.ssl_mode = input.ssl_mode.clone();
         self.test_instance_connection(instance_name, &saved, ping_fn)
     }
 
@@ -728,6 +731,49 @@ mod tests {
         assert_eq!(input.password.as_deref(), Some("test"));
         assert_eq!(input.ssl_mode.as_deref(), Some("prefer"));
         assert_eq!(input.env_label.as_deref(), Some("dev"));
+    }
+
+    #[test]
+    fn edited_form_test_uses_the_form_ssl_mode() {
+        let store = super::super::Store::open_in_memory().unwrap();
+        store
+            .sqlite()
+            .execute_batch(
+                "INSERT INTO managed_instances (id, fingerprint, name, engine, host, port, registered_at)
+                 VALUES ('inst_t', 'fp', 'pg', 'postgres', '127.0.0.1', 5432, datetime('now'));
+                 INSERT INTO instance_connections (
+                    id, instance_id, name, username, database_name, ssl_mode
+                 ) VALUES ('ic_t', 'inst_t', 'admin', 'u', 'postgres', 'disable');",
+            )
+            .unwrap();
+
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let sink = captured.clone();
+        let precheck = store
+            .test_edited_instance_connection(
+                "pg",
+                "admin",
+                &NewInstanceConnection {
+                    name: "admin".into(),
+                    username: "u".into(),
+                    database: "postgres".into(),
+                    password: None,
+                    ssl_mode: Some("require".into()),
+                    env_label: None,
+                },
+                move |url| {
+                    *sink.lock().unwrap() = url.to_string();
+                    async { Ok("PostgreSQL 16".to_string()) }
+                },
+            )
+            .unwrap();
+
+        assert!(precheck.ok);
+        let url = captured.lock().unwrap().clone();
+        assert!(
+            url.contains("sslmode=require"),
+            "unexpected ping url: {url}"
+        );
     }
 
     #[test]
