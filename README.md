@@ -13,6 +13,21 @@ the same author.
 > management, SQL data management). Expect rough edges, breaking changes and a
 > rapidly evolving feature set.
 
+## Demo
+
+![dbm2 demo: opening a connection, running a query, browsing the results](demos/demo.gif)
+
+The GIF is produced from this repository. With a local PostgreSQL running:
+
+```bash
+cargo build --release -p dbm-cli
+./demos/setup.sh      # creates a demo database and a pre-seeded store
+./demos/record.sh     # records demos/demo.gif (asciinema + agg)
+```
+
+[`demos/`](demos/) holds the dataset (`demo.sql`), the keyboard driver
+(`record.sh`, plus an equivalent VHS tape in `demo.tape`) and the setup script.
+
 ## Status & scope
 
 **Currently implemented (all PostgreSQL):** local instance discovery and
