@@ -30,7 +30,27 @@ Enter
 Sleep 14s
 Show
 
-# --- 1. explorer: expand the instance, open its connection ---
+# --- 1. discovery: open the Discover modal, tweak the scan target, scan, close ---
+Enter
+Sleep 2.5s
+Ctrl+j
+Sleep 1s
+Type "j"
+Sleep 600ms
+Type "l"
+Sleep 600ms
+Type "i"
+Sleep 1s
+Escape
+Sleep 800ms
+Type "s"
+Sleep 6s
+Escape
+Sleep 800ms
+Type "y"
+Sleep 1.5s
+
+# --- 2. explorer: expand the instance, open its connection ---
 Sleep 1.5s
 Type "I"
 Sleep 500ms

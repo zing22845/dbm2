@@ -37,24 +37,34 @@ pause() { sleep "${1:-0.5}"; }
 # ---- drive the demo (keyboard only) ----
 (
     pause 4
-    # 1. explorer: expand the instance, open its connection
+    # 1. discovery: open the Discover modal, tweak the scan target, scan, close
+    send Enter;     pause 2.5
+    send C-j;       pause 1
+    type_text "j";  pause 0.6
+    type_text "l";  pause 0.6
+    type_text "i";  pause 1
+    send Escape;    pause 0.8
+    type_text "s";  pause 6
+    send Escape;    pause 0.8
+    type_text "y";  pause 1.5
+    # 2. explorer: expand the instance, open its connection
     type_text "I";  pause 0.6
     type_text "l";  pause 1.2
     type_text "j";  pause 0.4
     send Enter;     pause 2.5
-    # 2. SQL workspace: type a query and run it (Alt+Enter)
+    # 3. SQL workspace: type a query and run it (Alt+Enter)
     type_text "i";  pause 0.5
     type_text "SELECT id, status, qty, total, placed_at FROM orders ORDER BY placed_at DESC LIMIT 50;"
     pause 0.8
     send -H 1b 0d              # ESC + CR = Alt+Enter (run query)
     pause 3
-    # 3. results grid: scroll, jump, count rows
+    # 4. results grid: scroll, jump, count rows
     send C-j;       pause 1.2
     type_text "j"; type_text "j"; type_text "j"; pause 1
     type_text "G";  pause 1.2
     type_text "g";  pause 1
     type_text "c";  pause 2
-    # 4. leave
+    # 5. leave
     send C-d;       pause 1
 ) &
 driver=$!
