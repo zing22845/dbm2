@@ -37,34 +37,39 @@ pause() { sleep "${1:-0.5}"; }
 # ---- drive the demo (keyboard only) ----
 (
     pause 4
-    # 1. discovery: open the Discover modal, tweak the scan target, scan, close
-    send Enter;     pause 2.5
-    send C-j;       pause 1
-    type_text "j";  pause 0.6
-    type_text "l";  pause 0.6
-    type_text "i";  pause 1
-    send Escape;    pause 0.8
-    type_text "s";  pause 6
-    send Escape;    pause 0.8
+    # 1. discovery: scan, select the candidate, force-register it, close
+    send Enter;     pause 2.5   # Discover (its focus starts on the results list)
+    type_text "s";  pause 8     # scan
+    send Space;     pause 1     # tick the discovered instance
+    type_text "R";  pause 4     # force-register it
+    send Escape;    pause 1
     type_text "y";  pause 1.5
-    # 2. explorer: expand the instance, open its connection
+    # 2. add the connection from the tree
+    type_text "I";  pause 0.6
+    type_text "a";  pause 2
+    type_text "i";  type_text "demo"; send Enter; pause 1
+    send j; send j; pause 0.5
+    type_text "dd"; pause 0.8
+    type_text "dbm_demo"; send Enter; pause 1
+    send Enter;     pause 5     # save (runs the live precheck)
+    # 3. expand the instance and open the connection
     type_text "I";  pause 0.6
     type_text "l";  pause 1.2
     type_text "j";  pause 0.4
-    send Enter;     pause 2.5
-    # 3. SQL workspace: type a query and run it (Alt+Enter)
+    send Enter;     pause 3
+    # 4. SQL workspace: type a query and run it (Alt+Enter)
     type_text "i";  pause 0.5
     type_text "SELECT id, status, qty, total, placed_at FROM orders ORDER BY placed_at DESC LIMIT 50;"
     pause 0.8
     send -H 1b 0d              # ESC + CR = Alt+Enter (run query)
     pause 3
-    # 4. results grid: scroll, jump, count rows
+    # 5. results grid: scroll, jump, count rows
     send C-j;       pause 1.2
     type_text "j"; type_text "j"; type_text "j"; pause 1
     type_text "G";  pause 1.2
     type_text "g";  pause 1
     type_text "c";  pause 2
-    # 5. leave
+    # 6. leave
     send C-d;       pause 1
 ) &
 driver=$!

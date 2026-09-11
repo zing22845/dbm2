@@ -30,29 +30,44 @@ Enter
 Sleep 14s
 Show
 
-# --- 1. discovery: open the Discover modal, tweak the scan target, scan, close ---
+# --- 1. discovery: scan, select the candidate, force-register it, close ---
 Enter
 Sleep 2.5s
-Ctrl+j
-Sleep 1s
-Type "j"
-Sleep 600ms
-Type "l"
-Sleep 600ms
-Type "i"
-Sleep 1s
-Escape
-Sleep 800ms
 Type "s"
-Sleep 6s
+Sleep 8s
+Space
+Sleep 1s
+Type "R"
+Sleep 4s
 Escape
-Sleep 800ms
+Sleep 1s
 Type "y"
 Sleep 1.5s
 
-# --- 2. explorer: expand the instance, open its connection ---
-Sleep 1.5s
+# --- 2. add the connection from the tree ---
 Type "I"
+Sleep 600ms
+Type "a"
+Sleep 2s
+Type "i"
+Type "demo"
+Enter
+Sleep 1s
+Down
+Down
+Sleep 500ms
+Type "dd"
+Sleep 800ms
+Type "dbm_demo"
+Enter
+Sleep 1s
+Enter
+Sleep 5s
+
+# --- 3. explorer: expand the instance, open its connection ---
+Type "I"
+Sleep 600ms
+Type "l"
 Sleep 500ms
 Type "l"
 Sleep 1.2s
